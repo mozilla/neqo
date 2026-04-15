@@ -65,6 +65,13 @@ class Cfg:
     runs: int
     workspace: Path
     perf_opt: str
+    server_set: str = "bench/server"
+    client_set: str = "bench/client"
+
+
+def _tag(cmd: str) -> str:
+    """Return a short process tag suitable for pkill from a command string."""
+    return Path(cmd.split()[0]).name[:15]
 
 
 def is_significant(s1: list[float], s2: list[float]) -> bool:
@@ -124,7 +131,7 @@ def setup(cfg):
 
 def verify(cfg, tmp, client, server_cmd, client_cmd):
     """Run single transfer to verify it works."""
-    tag = Path(server_cmd.split()[0]).name[:15]
+    tag = _tag(server_cmd)
     os.chdir(tmp / "out")
     proc = subprocess.Popen(
         shlex.split(f"{cfg.workspace}/{server_cmd}"),
@@ -144,25 +151,31 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
                 stderr=subprocess.DEVNULL,
             )
     finally:
-        sh(["pkill", tag])
+        sh(["pkill", "-u", str(os.getuid()), tag])
         proc.wait()
     os.chdir(cfg.workspace)
     out = tmp / "out" / str(cfg.size)
     return out.exists() and out.stat().st_size >= cfg.size
 
 
+def _sudo_nice_env() -> list[str]:
+    """Prefix for elevated-priority subprocesses: sudo resets env, so restore
+    the vars that neqo binaries need to find NSS libraries and certificates."""
+    env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "NSS_DB_PATH") if k in os.environ}
+    env_args = [f"{k}={v}" for k, v in env_vars.items()]
+    return ["sudo", "nice", "-n", "-20"] + (["env"] + env_args if env_args else [])
+
+
 def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
     """Run hyperfine benchmark."""
-    tag = shlex.quote(Path(scmd.split()[0]).name[:15])
+    tag = shlex.quote(_tag(scmd))
     ws = shlex.quote(str(cfg.workspace))
     out_dir.mkdir(exist_ok=True)
     cmd = [
-        "nice",
-        "-n",
-        "-20",
+        *_sudo_nice_env(),
         "setarch",
         "--addr-no-randomize",
-        "hyperfine",
+        shutil.which("hyperfine") or "hyperfine",
         "--command-name",
         name,
         "--time-unit",
@@ -176,51 +189,39 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--min-runs",
         str(cfg.runs),
         "--prepare",
-        f"{ws}/{scmd} & echo $! >> /cpusets/cpu2/tasks; sleep 0.2",
+        f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2",
         "--conclude",
         f"pkill {tag}",
     ]
     if md:
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
-    cmd.append(f"echo $$ >> /cpusets/cpu3/tasks; {ws}/{ccmd}")
-    subprocess.run(cmd, check=True)
+    cmd.append(f"echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {ws}/{ccmd}")
+    sh(cmd, check=True)
 
 
 def perf(cfg, scmd, ccmd, name):
     """Run perf profiling with 20x larger file."""
-    tag, ws = Path(scmd.split()[0]).name[:15], cfg.workspace
+    tag, ws = _tag(scmd), cfg.workspace
     ccmd = ccmd.replace(str(cfg.size), str(cfg.size * 20))
-    base = [
-        "nice",
-        "-n",
-        "-20",
-        "setarch",
-        "--addr-no-randomize",
-        "cset",
-        "proc",
-        "--set=cpu{}",
-        "--exec",
-        "perf",
-        "--",
-    ] + shlex.split(cfg.perf_opt)
-    server_cmd = (
-        [arg.format(2) for arg in base]
-        + ["-o", f"{ws}/{name}.server.perf"]
-        + shlex.split(f"{ws}/{scmd}")
-    )
+
+    def perf_cmd(cset, out, exe):
+        return (
+            [*_sudo_nice_env(), "setarch", "--addr-no-randomize",
+             "cset", "proc", f"--set={cset}", "--exec", "perf", "--"]
+            + shlex.split(cfg.perf_opt)
+            + ["-o", f"{ws}/{out}"]
+            + shlex.split(f"{ws}/{exe}")
+        )
+
     proc = subprocess.Popen(
-        server_cmd,
+        perf_cmd(cfg.server_set, f"{name}.server.perf", scmd),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     time.sleep(0.2)
-    client_cmd = (
-        [arg.format(3) for arg in base]
-        + ["-o", f"{ws}/{name}.client.perf"]
-        + shlex.split(f"{ws}/{ccmd}")
-    )
+    client_cmd = perf_cmd(cfg.client_set, f"{name}.client.perf", ccmd)
     sh(client_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    sh(["pkill", tag])
+    sh(["sudo", "pkill", tag])
     proc.wait()
 
 
@@ -278,6 +279,10 @@ def process(cfg, name, bold):
 
 def run(cfg, tmp):
     """Run all comparisons."""
+
+    def fmt(t):
+        return t.format(host=cfg.host, port=cfg.port, size=cfg.size, tmp=tmp)
+
     steps = []
     for server, scfg in IMPLS.items():
         for client, ccfg in IMPLS.items():
@@ -315,11 +320,6 @@ def run(cfg, tmp):
                 cf = ccfg.interop_flag if server == "neqo" else ""
                 sf = scfg.interop_flag if client == "neqo" else ""
 
-                def fmt(t):
-                    return t.format(
-                        host=cfg.host, port=cfg.port, size=cfg.size, tmp=tmp
-                    )
-
                 scmd, ext = mangle(fmt(scfg.server_cmd), cc, pacing, cf, "")
                 ccmd_d, _ = mangle(fmt(ccfg.client_cmd), cc, pacing, sf, ccfg.disk_flag)
                 ccmd, _ = mangle(fmt(ccfg.client_cmd), cc, pacing, sf, "")
@@ -356,8 +356,14 @@ def main():
     p.add_argument("--runs", type=int, default=100)
     p.add_argument("--workspace", type=Path, default=Path.cwd())
     p.add_argument("--perf-opt", default="record -F2999 --call-graph fp -g")
+    p.add_argument("--server-set", default="bench/server", help="cset name for the server CPU")
+    p.add_argument("--client-set", default="bench/client", help="cset name for the client CPU")
     a = p.parse_args()
-    cfg = Cfg(a.host, a.port, a.size, a.runs, a.workspace, a.perf_opt)
+    cfg = Cfg(
+        host=a.host, port=a.port, size=a.size, runs=a.runs,
+        workspace=a.workspace, perf_opt=a.perf_opt,
+        server_set=a.server_set, client_set=a.client_set,
+    )
 
     for d in ("binaries", "hyperfine", "hyperfine-baseline"):
         (cfg.workspace / d).mkdir(exist_ok=True)

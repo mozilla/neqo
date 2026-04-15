@@ -1,37 +1,39 @@
 name: CPU tuning for benchmarks
-description: Configure CPU for consistent benchmark performance (disable turbo boost, SMT, set performance governor)
+description: Configure CPU for consistent benchmark performance (disable turbo boost, SMT, set performance governor, isolate CPUs with cset)
 
 inputs:
-  select-cpus:
-    description: Whether to select physical CPUs for pinning (outputs server-cpu and client-cpu)
-    default: "false"
+  mode:
+    description: "'prepare' to tune and isolate CPUs, 'restore' to undo all changes"
+    default: prepare
+  mtu:
+    description: MTU to set on the loopback interface during prepare (restored to original on restore)
+    default: ""
 
 outputs:
   server-cpu:
-    description: CPU number to pin server to (only set if select-cpus is true)
-    value: ${{ steps.select-cpus.outputs.server-cpu }}
+    description: CPU number selected for the server
+    value: ${{ steps.prepare.outputs.server-cpu }}
   client-cpu:
-    description: CPU number to pin client to (only set if select-cpus is true)
-    value: ${{ steps.select-cpus.outputs.client-cpu }}
+    description: CPU number selected for the client
+    value: ${{ steps.prepare.outputs.client-cpu }}
+  bench-set:
+    description: cset name containing all bench CPUs
+    value: ${{ steps.prepare.outputs.bench-set }}
+  server-set:
+    description: cset name containing the server CPU
+    value: ${{ steps.prepare.outputs.server-set }}
+  client-set:
+    description: cset name containing the client CPU
+    value: ${{ steps.prepare.outputs.client-set }}
 
 runs:
   using: composite
   steps:
-    - name: Show CPU information
-      shell: bash
-      run: |
-        lscpu || echo "::warning::lscpu not available"
-        cat /sys/devices/system/cpu/online || echo "::warning::Failed to read online CPUs"
-        echo "CPU max frequencies (to identify big/little cores)"
-        for f in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
-          if [ -f "$f" ]; then
-            cpu=$(echo "$f" | grep -o 'cpu[0-9]*')
-            freq=$(cat "$f")
-            echo "$cpu: $freq kHz"
-          fi
-        done
-
-    - name: Apply CPU tuning
+    - name: Configure machine
+      id: prepare
+      env:
+        MODE: ${{ inputs.mode }}
+        MTU: ${{ inputs.mtu }}
       shell: bash
       run: |
         tune_sysfs() {
@@ -52,57 +54,189 @@ runs:
             echo "::warning::$desc: failed to set $desired (current: $current)"
           fi
         }
+        destroy_csets() {
+          # Destroy children before parents, ignore errors for non-existent sets
+          for set in bench/server bench/client bench system; do
+            sudo cset set --destroy "$set" 2>/dev/null || true
+          done
+        }
 
-        for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-          tune_sysfs "$gov" "performance" "CPU governor ($gov)"
-        done
-        tune_sysfs /sys/devices/system/cpu/smt/control "off" "SMT" "^(off|forceoff|notsupported|notimplemented)$"
-        for boost in /sys/devices/system/cpu/cpufreq/policy*/boost; do
-          tune_sysfs "$boost" "0" "Boost ($boost)"
-        done
-
-    - name: Select CPUs for pinning
-      id: select-cpus
-      if: inputs.select-cpus == 'true'
-      shell: bash
-      run: |
-        # Find physical cores by looking at core_id. Cores with the same core_id are SMT siblings.
-        # We want two different physical cores for server and client.
-        declare -A core_to_cpu
-        for cpu_path in /sys/devices/system/cpu/cpu[0-9]*; do
-          cpu=$(basename "$cpu_path")
-          cpu_num=${cpu#cpu}
-          core_id_file="$cpu_path/topology/core_id"
-          if [ -f "$core_id_file" ]; then
-            core_id=$(cat "$core_id_file")
-            # Only keep the first CPU for each physical core
-            if [ -z "${core_to_cpu[$core_id]}" ]; then
-              core_to_cpu[$core_id]=$cpu_num
-            fi
-          fi
-        done
-        # Get list of unique physical cores
-        mapfile -t physical_cpus < <(printf '%s\n' "${core_to_cpu[@]}")
-        echo "Physical core CPU mapping: ${core_to_cpu[*]}"
-        echo "Available physical cores (first CPU of each): ${physical_cpus[*]}"
-
-        # Select two different physical cores, preferring higher-numbered ones
-        # (to avoid interference with system processes typically on CPU 0)
-        mapfile -t sorted < <(printf '%s\n' "${physical_cpus[@]}" | sort -rn)
-        if [ ${#sorted[@]} -ge 2 ]; then
-          SERVER_CPU=${sorted[0]}
-          CLIENT_CPU=${sorted[1]}
-        elif [ ${#sorted[@]} -eq 1 ]; then
-          SERVER_CPU=${sorted[0]}
-          CLIENT_CPU=${sorted[0]}
-          echo "::warning::Only one physical core available, server and client will share CPU $SERVER_CPU"
-        else
-          SERVER_CPU=0
-          CLIENT_CPU=1
-          echo "::warning::Could not determine physical cores, using CPUs 0 and 1"
+        if [[ "$MODE" != 'prepare' && "$MODE" != 'restore' ]]; then
+          echo "::error::Unknown mode: '$MODE' (expected 'prepare' or 'restore')"
+          exit 1
         fi
-        echo "Selected SERVER_CPU=$SERVER_CPU, CLIENT_CPU=$CLIENT_CPU"
-        {
-          echo "server-cpu=$SERVER_CPU"
-          echo "client-cpu=$CLIENT_CPU"
-        } >> "$GITHUB_OUTPUT"
+
+        if [[ "$MODE" == 'prepare' ]]; then
+
+          # Show CPU info
+          lscpu || echo "::warning::lscpu not available"
+          cat /sys/devices/system/cpu/online || echo "::warning::Failed to read online CPUs"
+          echo "CPU max frequencies (to identify big/little cores)"
+          for f in /sys/devices/system/cpu/cpu*/cpufreq/cpuinfo_max_freq; do
+            [ -f "$f" ] || continue
+            cpu=${f%/cpufreq/*}
+            echo "${cpu##*/}: $(< "$f") kHz"
+          done
+
+          # Apply tuning
+          for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            tune_sysfs "$gov" "performance" "CPU governor ($gov)"
+          done
+          tune_sysfs /sys/devices/system/cpu/smt/control "off" "SMT" "^(off|forceoff|notsupported|notimplemented)$"
+          for boost in /sys/devices/system/cpu/cpufreq/policy*/boost; do
+            tune_sysfs "$boost" "0" "Boost ($boost)"
+          done
+          tune_sysfs /sys/devices/system/cpu/intel_pstate/no_turbo "1" "Intel P-state turbo"
+          [ -f /proc/sys/kernel/perf_event_paranoid ] && cp /proc/sys/kernel/perf_event_paranoid /tmp/cpu-tuning-perf-paranoid
+          tune_sysfs /proc/sys/kernel/perf_event_paranoid "-1" "perf_event_paranoid"
+
+          if [ -n "$MTU" ]; then
+            cp /sys/class/net/lo/mtu /tmp/cpu-tuning-mtu-orig
+            sudo ip link set dev lo mtu "$MTU"
+          fi
+
+          # Find physical cores by looking at core_id. Cores with the same core_id are SMT siblings.
+          # We want two different physical cores for server and client.
+          declare -A core_to_cpu
+          for cpu_path in /sys/devices/system/cpu/cpu[0-9]*; do
+            core_id_file="$cpu_path/topology/core_id"
+            if [ -f "$core_id_file" ]; then
+              core_id=$(< "$core_id_file")
+              # Only keep the first CPU for each physical core
+              if [ -z "${core_to_cpu[$core_id]}" ]; then
+                core_to_cpu[$core_id]=${cpu_path##*cpu}
+              fi
+            fi
+          done
+          mapfile -t physical_cpus < <(printf '%s\n' "${core_to_cpu[@]}")
+          echo "Physical core CPU mapping: ${core_to_cpu[*]}"
+          echo "Available physical cores (first CPU of each): ${physical_cpus[*]}"
+
+          # Select two different physical cores, preferring higher-numbered ones
+          # (to avoid interference with system processes typically on CPU 0)
+          mapfile -t sorted < <(printf '%s\n' "${physical_cpus[@]}" | sort -rn)
+          if [ ${#sorted[@]} -ge 2 ]; then
+            SERVER_CPU=${sorted[0]}
+            CLIENT_CPU=${sorted[1]}
+          elif [ ${#sorted[@]} -eq 1 ]; then
+            SERVER_CPU=${sorted[0]}
+            CLIENT_CPU=${sorted[0]}
+            echo "::warning::Only one physical core available, server and client will share CPU $SERVER_CPU"
+          else
+            SERVER_CPU=0
+            CLIENT_CPU=1
+            echo "::warning::Could not determine physical cores, using CPUs 0 and 1"
+          fi
+          echo "Selected SERVER_CPU=$SERVER_CPU, CLIENT_CPU=$CLIENT_CPU"
+
+          # Offline SMT siblings of the selected bench CPUs.
+          # Each CPU's thread_siblings_list includes itself and its hyperthreads.
+          OFFLINED=()
+          declare -A _seen_offlined=()
+          for bench_cpu in "$SERVER_CPU" "$CLIENT_CPU"; do
+            siblings_file="/sys/devices/system/cpu/cpu${bench_cpu}/topology/thread_siblings_list"
+            if [ -f "$siblings_file" ]; then
+              # Parse comma/range list (e.g. "2,6" or "2-3")
+              while IFS=, read -ra parts; do
+                for part in "${parts[@]}"; do
+                  if [[ "$part" == *-* ]]; then
+                    start=${part%-*}
+                    end=${part#*-}
+                    for ((i=start; i<=end; i++)); do
+                      if [ "$i" -ne "$bench_cpu" ] && [ -z "${_seen_offlined[$i]+x}" ]; then
+                        _seen_offlined[$i]=1
+                        OFFLINED+=("$i")
+                      fi
+                    done
+                  else
+                    if [ "$part" -ne "$bench_cpu" ] && [ -z "${_seen_offlined[$part]+x}" ]; then
+                      _seen_offlined[$part]=1
+                      OFFLINED+=("$part")
+                    fi
+                  fi
+                done
+              done < "$siblings_file"
+            fi
+          done
+
+          if [ ${#OFFLINED[@]} -gt 0 ]; then
+            echo "Offlining SMT siblings: ${OFFLINED[*]}"
+            for cpu in "${OFFLINED[@]}"; do
+              tune_sysfs "/sys/devices/system/cpu/cpu${cpu}/online" "0" "offline cpu${cpu}"
+            done
+            printf '%s\n' "${OFFLINED[@]}" > /tmp/cpu-tuning-offlined
+          fi
+
+          # Create cset CPU sets for isolation.
+          ALL_ONLINE=$(< /sys/devices/system/cpu/online)
+          echo "Online CPUs after offlining: $ALL_ONLINE"
+
+          # Exclude bench CPUs from the system set so tasks in 'system'
+          # cannot be scheduled on bench CPUs.
+          _system_cpus=()
+          for _part in ${ALL_ONLINE//,/ }; do
+            if [[ "$_part" == *-* ]]; then
+              for ((_i=${_part%-*}; _i<=${_part#*-}; _i++)); do
+                [[ "$_i" != "$SERVER_CPU" && "$_i" != "$CLIENT_CPU" ]] && _system_cpus+=("$_i")
+              done
+            else
+              [[ "$_part" != "$SERVER_CPU" && "$_part" != "$CLIENT_CPU" ]] && _system_cpus+=("$_part")
+            fi
+          done
+          SYSTEM_CPUS=$(IFS=,; echo "${_system_cpus[*]}")
+          echo "System CPUs (excluding bench): $SYSTEM_CPUS"
+          if [ -z "$SYSTEM_CPUS" ]; then
+            echo "::error::No system CPUs remain after excluding bench CPUs (bench=$SERVER_CPU,$CLIENT_CPU online=$ALL_ONLINE)"
+            exit 1
+          fi
+
+          destroy_csets  # clean up any leftover sets from a previous run
+
+          # system and bench are exclusive siblings with non-overlapping CPUs.
+          # server and client are non-exclusive children of bench, subdividing it.
+          sudo cset set --cpu="$SYSTEM_CPUS" --set=system
+          sudo cset set --cpu="$SERVER_CPU,$CLIENT_CPU" --set=bench --cpu_exclusive
+          sudo cset set --cpu="$SERVER_CPU" --set=bench/server
+          sudo cset set --cpu="$CLIENT_CPU" --set=bench/client
+
+          # Move all tasks (including kthreads) to the system set
+          sudo cset proc --move --fromset=root --toset=system --threads --kthread --force || true
+
+          {
+            echo "server-cpu=$SERVER_CPU"
+            echo "client-cpu=$CLIENT_CPU"
+            echo "bench-set=bench"
+            echo "server-set=bench/server"
+            echo "client-set=bench/client"
+          } >> "$GITHUB_OUTPUT"
+
+        else  # restore
+
+          destroy_csets
+
+          if [ -f /tmp/cpu-tuning-offlined ]; then
+            while IFS= read -r cpu; do
+              tune_sysfs "/sys/devices/system/cpu/cpu${cpu}/online" 1 "re-online cpu${cpu}"
+            done < /tmp/cpu-tuning-offlined
+            rm -f /tmp/cpu-tuning-offlined
+          fi
+
+          tune_sysfs /sys/devices/system/cpu/intel_pstate/no_turbo 0 "Intel turbo"
+          for boost in /sys/devices/system/cpu/cpufreq/policy*/boost; do
+            tune_sysfs "$boost" 1 "Boost ($boost)"
+          done
+          for gov in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+            tune_sysfs "$gov" powersave "CPU governor ($gov)"
+          done
+          tune_sysfs /sys/devices/system/cpu/smt/control on "SMT"
+          if [ -f /tmp/cpu-tuning-perf-paranoid ]; then
+            tune_sysfs /proc/sys/kernel/perf_event_paranoid "$(< /tmp/cpu-tuning-perf-paranoid)" "perf_event_paranoid"
+            rm -f /tmp/cpu-tuning-perf-paranoid
+          fi
+
+          if [ -f /tmp/cpu-tuning-mtu-orig ]; then
+            sudo ip link set dev lo mtu "$(< /tmp/cpu-tuning-mtu-orig)"
+            rm -f /tmp/cpu-tuning-mtu-orig
+          fi
+
+        fi  # mode
