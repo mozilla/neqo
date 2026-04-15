@@ -151,7 +151,7 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
                 stderr=subprocess.DEVNULL,
             )
     finally:
-        sh(["pkill", tag])
+        sh(["pkill", "-u", str(os.getuid()), tag])
         proc.wait()
     os.chdir(cfg.workspace)
     out = tmp / "out" / str(cfg.size)
