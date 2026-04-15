@@ -113,6 +113,8 @@ jobs:
           shopt -s extglob nullglob
 
           cd neqo
+          # Fix any root-owned files left by a previous run before removing them
+          sudo chown -R "$(id -u)" target/criterion 2>/dev/null || true
           rm -rf target/criterion
           # Run the baseline builds first, to establish a baseline.
           for BENCH in ../dist/neqo-baseline/!(neqo-client|neqo-server); do
