@@ -185,3 +185,4 @@ runs:
       with:
         name: bindings-${{ inputs.platform }}
         path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
+        if-no-files-found: error

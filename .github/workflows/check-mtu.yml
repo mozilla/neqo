@@ -135,10 +135,20 @@ jobs:
 
       - name: Check for binding changes
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          MISSING=0
           for p in freebsd linux macos netbsd openbsd solaris; do
-            [ -d "artifacts/bindings-$p" ] || echo "::warning::Missing bindings artifact for $p — upstream job may have failed."
+            if [ ! -d "artifacts/bindings-$p" ]; then
+              echo "::warning::Missing bindings artifact for $p — upstream job may have failed."
+              MISSING=1
+            fi
           done
+          if [ "$MISSING" = 1 ] && [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "::error::Some platform artifacts are missing. Check upstream job failures."
+            exit 1
+          fi
           CHANGED=""
           for dir in artifacts/bindings-*; do
             [ -d "$dir" ] || continue
@@ -187,6 +197,7 @@ jobs:
         if: steps.check.outputs.changed == 'true' && github.event_name == 'pull_request'
         run: |
           echo "::error::Generated bindings differ from committed versions."
-          echo "To fix, regenerate the bindings locally using the commands in the 'generate-bindings' job"
-          echo "in .github/workflows/check-mtu.yml, then commit the updated files under mtu/src/bindings/."
+          echo "For Linux/macOS, regenerate locally using the 'generate-bindings' job commands in .github/workflows/check-mtu.yml."
+          echo "For BSD/Solaris platforms, bindings are generated inside VMs by the 'check-vm' jobs and cannot easily be regenerated locally."
+          echo "Push to this PR and the 'check-bindings' job on main will auto-create an update PR with the regenerated bindings."
           exit 1
