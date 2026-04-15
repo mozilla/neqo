@@ -129,6 +129,8 @@ jobs:
             # shellcheck disable=SC2086
             bench_exec perf -- $PERF_OPT -o "../${NAME%%-*}.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
           done
+          # perf files are root-owned (bench_exec runs as root via sudo nice); fix for post-processing
+          sudo chown "$(id -u)" ../*.perf
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
