@@ -11,6 +11,9 @@ inputs:
   codecov-token:
     description: "Codecov token, if Codecov upload is desired."
     default: ""
+  bindgen-args:
+    description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
+    default: ""
 
 runs:
   using: composite
@@ -21,18 +24,19 @@ runs:
         WD: ${{ inputs.working-directory }}
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
+        BINDGEN_ARGS: ${{ inputs.bindgen-args }}
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
           set -ex
           pwd
           case "$PLATFORM" in
-            freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf
+            freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y update && pkgin -y install curl clang nss pkgconf
+            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y update && pkgin -y install curl clang nss pkgconf rust-bindgen
                         ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
                         ;;
@@ -56,6 +60,7 @@ runs:
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
                         export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+                        export PATH="\$HOME/.cargo/bin:\$PATH"
                         ;;
             *)          sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
                         . "\$HOME/.cargo/env"
@@ -73,6 +78,22 @@ runs:
             *)          [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on this platform
                         ;;
           esac
+          # Embed at script-generation time; single quotes protect | from shell interpretation.
+          BINDGEN_ARGS='$BINDGEN_ARGS'
+          # Generate bindings first if requested (before build, so we can bootstrap)
+          if [ -n "$BINDGEN_ARGS" ]; then
+            # Solaris doesn't have a system package for bindgen
+            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
+            echo "$BINDGEN_ARGS" | xargs bindgen src/bindings/bsd.h > "$PLATFORM.rs"
+            # Compare generated bindings with committed bindings.
+            # If different, exit early — there's no point compiling with stale
+            # bindings. The check-bindings job will detect the drift and handle it.
+            if ! diff -q "src/bindings/$PLATFORM.rs" "$PLATFORM.rs" > /dev/null 2>&1; then
+              echo "::warning::Bindings for $PLATFORM differ from committed version"
+              exit 0
+            fi
+          fi
+
           cargo version
           cargo check --locked --all-targets $WORKSPACE \${EXCLUDE:-}
           case "$PLATFORM" in
@@ -107,6 +128,7 @@ runs:
       with:
         usesh: true
         disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -116,6 +138,7 @@ runs:
       with:
         usesh: true
         disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -125,6 +148,7 @@ runs:
       with:
         usesh: true
         disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -135,6 +159,7 @@ runs:
         release: "11.4-gcc"
         usesh: true
         disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
@@ -154,3 +179,10 @@ runs:
         token: ${{ inputs.codecov-token }}
         verbose: true
         flags: ${{ inputs.platform }}
+
+    - if: ${{ always() && inputs.bindgen-args != '' }}
+      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+      with:
+        name: bindings-${{ inputs.platform }}
+        path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
+        if-no-files-found: error

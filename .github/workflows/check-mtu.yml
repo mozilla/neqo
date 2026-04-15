@@ -1,6 +1,12 @@
 name: CI MTU
 on:
   workflow_dispatch:
+  push:
+    branches: ["main"]
+    paths:
+      - "mtu/**"
+      - ".github/workflows/check-mtu.yml"
+      - ".github/actions/check-vm/**"
   pull_request:
 
 concurrency:
@@ -9,6 +15,16 @@ concurrency:
 
 permissions:
   contents: read
+
+env:
+  LINUX_BINDGEN_ARGS: >-
+    --allowlist-type rtattr|rtmsg|ifinfomsg|nlmsghdr
+    --generate-cstr --explicit-padding --with-derive-default
+  # Shared across macOS (generate-bindings) and FreeBSD/NetBSD/OpenBSD/Solaris (check-vm).
+  BSD_BINDGEN_ARGS: >-
+    --allowlist-type rt_msghdr|rt_metrics|if_data
+    --allowlist-item RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP
+    --generate-cstr --explicit-padding --with-derive-default
 
 jobs:
   check-netns:
@@ -25,6 +41,37 @@ jobs:
 
       - name: Run network namespace tests
         run: sudo -E env "PATH=$PATH" cargo test --locked --package mtu --test netns -- --nocapture
+
+  generate-bindings:
+    name: Generate ${{ matrix.os }} bindings
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            runner: ubuntu-24.04
+            header: linux.h
+          - os: macos
+            runner: macos-15
+            header: bsd.h
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Install bindgen-cli
+        run: cargo install bindgen-cli --locked
+      - name: Generate bindings
+        env:
+          OS: ${{ matrix.os }}
+          ARGS: ${{ matrix.os == 'linux' && env.LINUX_BINDGEN_ARGS || env.BSD_BINDGEN_ARGS }}
+          HEADER: ${{ matrix.header }}
+        run: echo "$ARGS" | xargs bindgen "mtu/src/bindings/$HEADER" > "$OS.rs"
+      - name: Upload bindings
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: bindings-${{ matrix.os }}
+          path: ${{ matrix.os }}.rs
 
   check-android:
     name: Check Android
@@ -65,4 +112,92 @@ jobs:
           working-directory: mtu
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
+          bindgen-args: ${{ env.BSD_BINDGEN_ARGS }}
 
+  check-bindings:
+    name: Check bindings
+    needs: [generate-bindings, check-vm]
+    if: always() && !cancelled()
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write # to create PRs for binding updates
+      contents: write # to push branches for binding updates
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
+
+      - name: Download all binding artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: artifacts
+          pattern: bindings-*
+
+      - name: Check for binding changes
+        id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          MISSING=0
+          for p in freebsd linux macos netbsd openbsd solaris; do
+            if [ ! -d "artifacts/bindings-$p" ]; then
+              echo "::warning::Missing bindings artifact for $p — upstream job may have failed."
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" = 1 ] && [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "::error::Some platform artifacts are missing. Check upstream job failures."
+            exit 1
+          fi
+          CHANGED=""
+          for dir in artifacts/bindings-*; do
+            [ -d "$dir" ] || continue
+            PLATFORM="${dir#artifacts/bindings-}"
+            FILE="$dir/$PLATFORM.rs"
+            [ -f "$FILE" ] || continue
+
+            if ! diff -q "mtu/src/bindings/$PLATFORM.rs" "$FILE" > /dev/null 2>&1; then
+              echo "Bindings for $PLATFORM differ:"
+              diff "mtu/src/bindings/$PLATFORM.rs" "$FILE" || true
+              cp "$FILE" "mtu/src/bindings/$PLATFORM.rs"
+              CHANGED="$CHANGED $PLATFORM"
+            fi
+          done
+
+          if [ -z "$CHANGED" ]; then
+            echo "No binding changes detected."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "platforms=$CHANGED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create PR for binding updates
+        if: steps.check.outputs.changed == 'true' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          PLATFORMS: ${{ steps.check.outputs.platforms }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="chore/update-mtu-bindings"
+          MESSAGE=$(printf 'chore: Update MTU bindings\n\nAutomated update of platform-specific bindings generated by bindgen.\n\nUpdated platforms:%s' "$PLATFORMS")
+          git checkout -b "$BRANCH"
+          git add mtu/src/bindings
+          git commit -m "$MESSAGE"
+          # Skip creating a new PR if one already exists; force-push updates the branch.
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          git push --force --set-upstream origin "$BRANCH"
+          if [ -z "$EXISTING" ]; then
+            gh pr create --fill-verbose
+          fi
+
+      - name: Fail if bindings changed on PR
+        if: steps.check.outputs.changed == 'true' && github.event_name == 'pull_request'
+        run: |
+          echo "::error::Generated bindings differ from committed versions."
+          echo "For Linux/macOS, regenerate locally using the 'generate-bindings' job commands in .github/workflows/check-mtu.yml."
+          echo "For BSD/Solaris platforms, bindings are generated inside VMs by the 'check-vm' jobs and cannot easily be regenerated locally."
+          echo "Push to this PR and the 'check-bindings' job on main will auto-create an update PR with the regenerated bindings."
+          exit 1
