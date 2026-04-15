@@ -199,6 +199,8 @@ jobs:
             --perf-opt "$PERF_OPT" \
             --server-set "$SERVER_SET" \
             --client-set "$CLIENT_SET"
+          # perfcompare.py runs under sudo nice, so output files are root-owned; fix for post-processing
+          sudo chown -R "$(id -u)" ./*.perf hyperfine hyperfine-baseline 2>/dev/null || true
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine

@@ -202,13 +202,6 @@ runs:
           # Move all tasks (including kthreads) to the system set
           sudo cset proc --move --fromset=root --toset=system --threads --kthread --force || true
 
-          # Allow the current user's group to use the bench cpusets
-          BENCH_GID=$(id -g)
-          for set in bench bench/server bench/client; do
-            sudo chown root:"$BENCH_GID" "/cpusets/$set/tasks" 2>/dev/null || true
-            sudo chmod g+rw "/cpusets/$set/tasks" 2>/dev/null || true
-          done
-
           {
             echo "server-cpu=$SERVER_CPU"
             echo "client-cpu=$CLIENT_CPU"

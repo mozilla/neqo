@@ -129,7 +129,7 @@ jobs:
           for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
             NAME=$(basename "$BENCH")
             # shellcheck disable=SC2086
-            bench_exec perf -- $PERF_OPT -o "../${NAME%%-*}.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+            bench_exec perf -- $PERF_OPT -o "../$NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
           done
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../*.perf

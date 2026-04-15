@@ -189,13 +189,13 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--min-runs",
         str(cfg.runs),
         "--prepare",
-        f"{ws}/{scmd} & echo $! >> /cpusets/{cfg.server_set}/tasks; sleep 0.2",
+        f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2",
         "--conclude",
         f"pkill {tag}",
     ]
     if md:
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
-    cmd.append(f"echo $$ >> /cpusets/{cfg.client_set}/tasks; {ws}/{ccmd}")
+    cmd.append(f"echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {ws}/{ccmd}")
     sh(cmd, check=True)
 
 
