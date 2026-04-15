@@ -78,12 +78,14 @@ runs:
             *)          [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on this platform
                         ;;
           esac
+          # Embed at script-generation time; single quotes protect | from shell interpretation.
+          BINDGEN_ARGS='$BINDGEN_ARGS'
           # Generate bindings first if requested (before build, so we can bootstrap)
-          if [ -n "\$BINDGEN_ARGS" ]; then
+          if [ -n "$BINDGEN_ARGS" ]; then
             # Solaris doesn't have a system package for bindgen
             [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
             # shellcheck disable=SC2086
-            bindgen \$BINDGEN_ARGS src/bindings/bsd.h > "$PLATFORM.rs"
+            bindgen $BINDGEN_ARGS src/bindings/bsd.h > "$PLATFORM.rs"
             # Compare generated bindings with committed bindings.
             # If different, exit early — there's no point compiling with stale
             # bindings. The check-bindings job will detect the drift and handle it.
@@ -120,7 +122,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD BINDGEN_ARGS" >> "$GITHUB_OUTPUT"
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@4807432c7cab1c3f97688665332c0b932062d31f # v1.4.3
