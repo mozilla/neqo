@@ -11,9 +11,9 @@ inputs:
   codecov-token:
     description: "Codecov token, if Codecov upload is desired."
     default: ""
-  generate-bindings:
-    description: "Generate and output bindgen bindings for BSD platforms."
-    default: "false"
+  bindgen-args:
+    description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
+    default: ""
 
 runs:
   using: composite
@@ -24,7 +24,7 @@ runs:
         WD: ${{ inputs.working-directory }}
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
-        GENERATE_BINDINGS: ${{ inputs.generate-bindings }}
+        BINDGEN_ARGS: ${{ inputs.bindgen-args }}
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
@@ -79,15 +79,14 @@ runs:
                         ;;
           esac
           # Generate bindings first if requested (before build, so we can bootstrap)
-          if [ "$GENERATE_BINDINGS" = "true" ]; then
+          if [ -n "$BINDGEN_ARGS" ]; then
             # Solaris doesn't have a system package for bindgen
             [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
-            bindgen --allowlist-type 'rt_msghdr|rt_metrics|if_data' \
-                    --allowlist-item 'RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP' \
-                    --generate-cstr --explicit-padding --with-derive-default \
-                    src/bindings/bsd.h > "$PLATFORM.rs"
-            # Compare generated bindings with committed bindings
-            # If different, exit early with success to trigger copyback
+            # shellcheck disable=SC2086
+            bindgen $BINDGEN_ARGS src/bindings/bsd.h > "$PLATFORM.rs"
+            # Compare generated bindings with committed bindings.
+            # If different, exit early — there's no point compiling with stale
+            # bindings. The check-bindings job will detect the drift and handle it.
             if ! diff -q "src/bindings/$PLATFORM.rs" "$PLATFORM.rs" > /dev/null 2>&1; then
               echo "::warning::Bindings for $PLATFORM differ from committed version"
               touch bindings-changed
@@ -122,7 +121,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD GENERATE_BINDINGS" >> "$GITHUB_OUTPUT"
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD BINDGEN_ARGS" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@4807432c7cab1c3f97688665332c0b932062d31f # v1.4.3
@@ -181,7 +180,7 @@ runs:
         verbose: true
         flags: ${{ inputs.platform }}
 
-    - if: ${{ always() && inputs.generate-bindings == 'true' }}
+    - if: ${{ always() && inputs.bindgen-args != '' }}
       uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
       with:
         name: bindings-${{ inputs.platform }}
