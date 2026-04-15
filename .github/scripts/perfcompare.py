@@ -204,25 +204,24 @@ def perf(cfg, scmd, ccmd, name):
     tag, ws = _tag(scmd), cfg.workspace
     ccmd = ccmd.replace(str(cfg.size), str(cfg.size * 20))
 
-    def perf_cmd(out, exe):
-        # Run as the current user (not root): perf record works because the
-        # action sets perf_event_paranoid=-1, and pkill can signal user processes.
+    def perf_cmd(cset, out, exe):
         return (
-            ["setarch", "--addr-no-randomize", "perf", "--"]
+            [*_sudo_nice_env(), "setarch", "--addr-no-randomize",
+             "cset", "proc", f"--set={cset}", "--exec", "perf", "--"]
             + shlex.split(cfg.perf_opt)
             + ["-o", f"{ws}/{out}"]
             + shlex.split(f"{ws}/{exe}")
         )
 
     proc = subprocess.Popen(
-        perf_cmd(f"{name}.server.perf", scmd),
+        perf_cmd(cfg.server_set, f"{name}.server.perf", scmd),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     time.sleep(0.2)
-    client_cmd = perf_cmd(f"{name}.client.perf", ccmd)
+    client_cmd = perf_cmd(cfg.client_set, f"{name}.client.perf", ccmd)
     sh(client_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    sh(["pkill", tag])
+    sh(["sudo", "pkill", tag])
     proc.wait()
 
 
