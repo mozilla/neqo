@@ -84,8 +84,7 @@ runs:
           if [ -n "$BINDGEN_ARGS" ]; then
             # Solaris doesn't have a system package for bindgen
             [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
-            # shellcheck disable=SC2086
-            bindgen $BINDGEN_ARGS src/bindings/bsd.h > "$PLATFORM.rs"
+            echo "$BINDGEN_ARGS" | xargs bindgen src/bindings/bsd.h > "$PLATFORM.rs"
             # Compare generated bindings with committed bindings.
             # If different, exit early — there's no point compiling with stale
             # bindings. The check-bindings job will detect the drift and handle it.

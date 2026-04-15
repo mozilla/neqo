@@ -66,9 +66,7 @@ jobs:
           OS: ${{ matrix.os }}
           ARGS: ${{ matrix.os == 'linux' && env.LINUX_BINDGEN_ARGS || env.BSD_BINDGEN_ARGS }}
           HEADER: ${{ matrix.header }}
-        run: |
-          # shellcheck disable=SC2086
-          bindgen $ARGS "mtu/src/bindings/$HEADER" > "$OS.rs"
+        run: echo "$ARGS" | xargs bindgen "mtu/src/bindings/$HEADER" > "$OS.rs"
       - name: Upload bindings
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
