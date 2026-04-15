@@ -20,7 +20,7 @@ fn since_start() -> Duration {
 
 /// Initialize the logging system with optional level filtering.
 ///
-/// This function sets up the env_logger with a custom format that includes
+/// This function sets up the `env_logger` with a custom format that includes
 /// elapsed time since initialization. It can be called multiple times safely.
 pub fn init(level_filter: Option<log::LevelFilter>) {
     static INIT_ONCE: Once = Once::new();
