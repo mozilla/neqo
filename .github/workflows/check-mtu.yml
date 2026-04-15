@@ -138,6 +138,9 @@ jobs:
       - name: Check for binding changes
         id: check
         run: |
+          for p in freebsd linux macos netbsd openbsd solaris; do
+            [ -d "artifacts/bindings-$p" ] || echo "::warning::Missing bindings artifact for $p — upstream job may have failed."
+          done
           CHANGED=""
           for dir in artifacts/bindings-*; do
             [ -d "$dir" ] || continue
@@ -171,7 +174,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           # Skip creating a new PR if one already exists for a binding update.
-          EXISTING=$(gh pr list --search "chore: Update MTU bindings" --state open --json number --jq '.[0].number // empty')
+          EXISTING=$(gh pr list --head "chore-update-mtu-bindings-" --state open --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             echo "Existing binding-update PR #$EXISTING already open; skipping."
             exit 0

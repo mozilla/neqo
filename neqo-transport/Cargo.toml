@@ -47,7 +47,6 @@ build-fuzzing-corpus = [
 ]
 disable-encryption = ["neqo-crypto/disable-encryption"]
 draft-29 = []
-gecko = ["mtu/gecko"]
 
 [package.metadata.cargo-machete]
 ignored = ["criterion"]

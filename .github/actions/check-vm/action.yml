@@ -79,17 +79,16 @@ runs:
                         ;;
           esac
           # Generate bindings first if requested (before build, so we can bootstrap)
-          if [ -n "$BINDGEN_ARGS" ]; then
+          if [ -n "\$BINDGEN_ARGS" ]; then
             # Solaris doesn't have a system package for bindgen
             [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
             # shellcheck disable=SC2086
-            bindgen $BINDGEN_ARGS src/bindings/bsd.h > "$PLATFORM.rs"
+            bindgen \$BINDGEN_ARGS src/bindings/bsd.h > "$PLATFORM.rs"
             # Compare generated bindings with committed bindings.
             # If different, exit early — there's no point compiling with stale
             # bindings. The check-bindings job will detect the drift and handle it.
             if ! diff -q "src/bindings/$PLATFORM.rs" "$PLATFORM.rs" > /dev/null 2>&1; then
               echo "::warning::Bindings for $PLATFORM differ from committed version"
-              touch bindings-changed
               exit 0
             fi
           fi
