@@ -211,6 +211,8 @@ pub struct ClassicCongestionController<S, T> {
     /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
     ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
+    /// Whether to recover from spurious congestion events by restoring prior state.
+    spurious_recovery: bool,
 }
 
 impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
@@ -593,7 +595,12 @@ where
     S: SlowStart,
     T: WindowAdjustment,
 {
-    pub fn new(slow_start: S, congestion_control: T, pmtud: Pmtud) -> Self {
+    pub fn new(
+        slow_start: S,
+        congestion_control: T,
+        pmtud: Pmtud,
+        spurious_recovery: bool,
+    ) -> Self {
         let mtu = pmtud.plpmtu();
         Self {
             slow_start,
@@ -605,6 +612,7 @@ where
             pmtud,
             current: State::new(mtu),
             stored: None,
+            spurious_recovery,
         }
     }
 
@@ -718,6 +726,12 @@ where
     }
 
     fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {
+        if !self.spurious_recovery {
+            cc_stats.congestion_events.spurious += 1;
+            qinfo!("[{self}] Spurious cong event detected -> recovery disabled;");
+            return;
+        }
+
         let Some(stored) = self.stored.take() else {
             qdebug!(
                 "[{self}] Spurious cong event -> ABORT, no stored params to restore available."
@@ -859,7 +873,7 @@ where
             return false;
         }
 
-        if congestion_trigger != Ecn {
+        if congestion_trigger != Ecn && self.spurious_recovery {
             self.stored = Some(self.current.clone());
             self.congestion_control.save_undo_state();
         }
