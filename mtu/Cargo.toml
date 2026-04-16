@@ -3,14 +3,14 @@ name = "mtu"
 authors.workspace = true
 homepage.workspace = true
 repository.workspace = true
-version = "0.4.0"
+version = "0.4.1"
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+license = "MIT OR Apache-2.0"
 description = "Obtain the local network interface MTU towards a given IP address."
 keywords = ["mozilla", "interface", "mtu"]
-categories.workspace = true
-readme.workspace = true
+categories = ["network-programming"]
+readme = "README.md"
 
 [lints]
 workspace = true
@@ -39,9 +39,9 @@ ignored = ["cfg_aliases"]
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
+path = "src/lib.rs"
 
 [[bin]]
 name = "mtu-lookup"
 path = "src/bin/mtu-lookup.rs"
 bench = false
-

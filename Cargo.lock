@@ -761,7 +761,7 @@ checksum = "903970ae2f248d7275214cf8f387f8ba0c4ea7e3d87a320e85493db60ce28616"
 
 [[package]]
 name = "mtu"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cfg_aliases",
  "libc",
