@@ -38,7 +38,7 @@ impl PacketSender {
     #[must_use]
     pub fn new(conn_params: &ConnectionParameters, pmtud: Pmtud, now: Instant) -> Self {
         let mtu = pmtud.plpmtu();
-        let spurious_recovery = conn_params.spurious_congestion_recovery_enabled();
+        let spurious_recovery = conn_params.spurious_recovery_enabled();
         Self {
             cc: match (
                 conn_params.get_congestion_control(),

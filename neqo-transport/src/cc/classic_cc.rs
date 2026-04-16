@@ -946,14 +946,14 @@ mod tests {
 
     use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
-        MIN_INITIAL_PACKET_SIZE,
+        MIN_INITIAL_PACKET_SIZE, Pmtud,
         cc::{
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController,
             CongestionTrigger::{self, Ecn, Loss},
             classic_cc::Phase,
             cubic::Cubic,
             new_reno::NewReno,
-            tests::{RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
+            tests::{IP_ADDR, MTU, RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
         },
         packet,
         recovery::{self, sent},
@@ -1721,6 +1721,83 @@ mod tests {
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc_stats.w_max, None);
+    }
+
+    /// Same scenario as `spurious_congestion_event_detection_and_undo` but with recovery disabled.
+    /// Detection still fires and the spurious counter is incremented, but cwnd is not restored and
+    /// the prior state is never saved.
+    #[test]
+    fn spurious_congestion_event_detection_without_recovery() {
+        let mut cc = ClassicCongestionController::new(
+            ClassicSlowStart::default(),
+            Cubic::default(),
+            Pmtud::new(IP_ADDR, MTU),
+            false,
+        );
+        let now = now();
+        let mut cc_stats = CongestionControlStats::default();
+
+        // 1. Send packets (1, 2) --> `SlowStart`
+        let pkt1 = sent::make_packet(1, now, 1000);
+        let pkt2 = sent::make_packet(2, now, 1000);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_packet_sent(&pkt2, now);
+        assert_eq!(cc.current.phase, Phase::SlowStart);
+
+        // 2. Lose packets (1, 2) --> `RecoveryStart`, reduced cwnd, but no state saved
+        let mut lost_pkt1 = pkt1.clone();
+        let mut lost_pkt2 = pkt2.clone();
+        lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
+        lost_pkt2.declare_lost(now, sent::LossTrigger::TimeThreshold);
+        cc.on_packets_lost(
+            Some(now),
+            None,
+            PTO,
+            &[lost_pkt1, lost_pkt2],
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc.current.phase, Phase::RecoveryStart);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
+        let cwnd_after_loss = cc.cwnd();
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert!(cc.stored.is_none());
+
+        // 3. Send packet (3) --> `Recovery`
+        let pkt3 = sent::make_packet(3, now, 1000);
+        cc.on_packet_sent(&pkt3, now);
+        assert_eq!(cc.current.phase, Phase::Recovery);
+
+        // 4. Ack packet (3) --> `CongestionAvoidance`
+        cc.on_packets_acked(
+            &[pkt3],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
+
+        // 5. Ack packet (1) --> not all lost packets recovered yet
+        cc.on_packets_acked(
+            &[pkt1],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc_stats.congestion_events.spurious, 0);
+
+        // 6. Ack packet (2) --> spurious event detected, counter incremented, but NO recovery
+        //    because pref is turned off
+        cc.on_packets_acked(
+            &[pkt2],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc_stats.congestion_events.spurious, 1);
+        assert_eq!(cc.cwnd(), cwnd_after_loss);
+        assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
     }
 
     /// This tests a scenario where spurious detection happens late, after cwnd has recovered and
