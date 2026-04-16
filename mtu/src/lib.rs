@@ -45,7 +45,7 @@
 //! # Contributing
 //!
 //! We're happy to receive PRs that improve this crate. Please take a look at our [community
-//! guidelines](CODE_OF_CONDUCT.md) beforehand.
+//! guidelines](https://github.com/mozilla/neqo/blob/main/CODE_OF_CONDUCT.md) beforehand.
 
 use std::{
     io::{Error, ErrorKind, Result},

@@ -1,7 +1,7 @@
-[![Coverage Status](https://codecov.io/gh/mozilla/mtu/branch/main/graph/badge.svg)](https://codecov.io/gh/mozilla/mtu)
-[![Average time to resolve an issue](https://isitmaintained.com/badge/resolution/mozilla/mtu.svg)](https://isitmaintained.com/project/mozilla/mtu "Average time to resolve an issue")
-[![Percentage of issues still open](https://isitmaintained.com/badge/open/mozilla/mtu.svg)](https://isitmaintained.com/project/mozilla/mtu "Percentage of issues still open")
-![Maintenance](https://img.shields.io/badge/maintenance-activly--developed-brightgreen.svg)
+[![Coverage Status](https://codecov.io/gh/mozilla/neqo/branch/main/graph/badge.svg)](https://codecov.io/gh/mozilla/neqo)
+[![Average time to resolve an issue](https://isitmaintained.com/badge/resolution/mozilla/neqo.svg)](https://isitmaintained.com/project/mozilla/neqo "Average time to resolve an issue")
+[![Percentage of issues still open](https://isitmaintained.com/badge/open/mozilla/neqo.svg)](https://isitmaintained.com/project/mozilla/neqo "Percentage of issues still open")
+![Maintenance](https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg)
 
 # mtu
 
@@ -43,6 +43,6 @@ The returned interface name is obtained from the operating system.
 ## Contributing
 
 We're happy to receive PRs that improve this crate. Please take a look at our [community
-guidelines](CODE_OF_CONDUCT.md) beforehand.
+guidelines](https://github.com/mozilla/neqo/blob/main/CODE_OF_CONDUCT.md) beforehand.
 
 License: MIT OR Apache-2.0
