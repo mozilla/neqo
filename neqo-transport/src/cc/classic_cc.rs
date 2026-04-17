@@ -726,12 +726,6 @@ where
     }
 
     fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {
-        if !self.spurious_recovery {
-            cc_stats.congestion_events.spurious += 1;
-            qinfo!("[{self}] Spurious cong event detected -> recovery disabled;");
-            return;
-        }
-
         let Some(stored) = self.stored.take() else {
             qdebug!(
                 "[{self}] Spurious cong event -> ABORT, no stored params to restore available."
@@ -739,17 +733,24 @@ where
             return;
         };
 
+        // The stat is recorded for all cases below.
+        cc_stats.congestion_events.spurious += 1;
+
         if stored.congestion_window <= self.current.congestion_window {
             qinfo!(
                 "[{self}] Spurious cong event -> IGNORED because stored.cwnd {} < self.cwnd {};",
                 stored.congestion_window,
                 self.current.congestion_window
             );
-            cc_stats.congestion_events.spurious += 1;
             return;
         }
-        self.congestion_control.restore_undo_state(cc_stats);
 
+        if !self.spurious_recovery {
+            qinfo!("[{self}] Spurious cong event detected -> recovery disabled;");
+            return;
+        }
+
+        self.congestion_control.restore_undo_state(cc_stats);
         qdebug!(
             "Spurious cong event: recovering cc params from {} to {stored}",
             self.current
@@ -762,7 +763,6 @@ where
             cc_stats.slow_start_exit_reason = None;
         }
         qinfo!("[{self}] Spurious cong event -> RESTORED;");
-        cc_stats.congestion_events.spurious += 1;
     }
 
     fn detect_persistent_congestion<'a>(
@@ -873,7 +873,7 @@ where
             return false;
         }
 
-        if congestion_trigger != Ecn && self.spurious_recovery {
+        if congestion_trigger != Ecn {
             self.stored = Some(self.current.clone());
             self.congestion_control.save_undo_state();
         }
@@ -1724,10 +1724,10 @@ mod tests {
     }
 
     /// Same scenario as `spurious_congestion_event_detection_and_undo` but with recovery disabled.
-    /// Detection still fires and the spurious counter is incremented, but cwnd is not restored and
-    /// the prior state is never saved.
+    /// Detection still fires and the spurious counter is incremented, but cc parameters are not
+    /// restored.
     #[test]
-    fn spurious_congestion_event_detection_without_recovery() {
+    fn spurious_congestion_event_detection_recovery_disabled() {
         let mut cc = ClassicCongestionController::new(
             ClassicSlowStart::default(),
             Cubic::default(),
@@ -1761,7 +1761,6 @@ mod tests {
         assert_eq!(cc_stats.congestion_events.loss, 1);
         let cwnd_after_loss = cc.cwnd();
         assert!(cc_stats.slow_start_exit_cwnd.is_some());
-        assert!(cc.stored.is_none());
 
         // 3. Send packet (3) --> `Recovery`
         let pkt3 = sent::make_packet(3, now, 1000);
@@ -1787,7 +1786,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events.spurious, 0);
 
         // 6. Ack packet (2) --> spurious event detected, counter incremented, but NO recovery
-        //    because pref is turned off
+        //    because pref is turned off. Assert that nothing is reset.
         cc.on_packets_acked(
             &[pkt2],
             &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
@@ -1798,6 +1797,8 @@ mod tests {
         assert_eq!(cc.cwnd(), cwnd_after_loss);
         assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
         assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert!(cc_stats.slow_start_exit_reason.is_some());
+        assert!(cc_stats.w_max.is_some());
     }
 
     /// This tests a scenario where spurious detection happens late, after cwnd has recovered and
