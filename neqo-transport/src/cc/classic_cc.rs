@@ -1744,7 +1744,7 @@ mod tests {
         cc.on_packet_sent(&pkt2, now);
         assert_eq!(cc.current.phase, Phase::SlowStart);
 
-        // 2. Lose packets (1, 2) --> `RecoveryStart`, reduced cwnd, but no state saved
+        // 2. Lose packets (1, 2) --> `RecoveryStart` and reduced cwnd
         let mut lost_pkt1 = pkt1.clone();
         let mut lost_pkt2 = pkt2.clone();
         lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
