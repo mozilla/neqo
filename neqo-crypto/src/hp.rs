@@ -13,10 +13,10 @@ use std::{
 };
 
 #[cfg(feature = "awslc")]
-use aws_lc_rs::aead::quic::{HeaderProtectionKey, AES_128, AES_256, CHACHA20};
+use aws_lc_rs::aead::quic::{AES_128, AES_256, CHACHA20, HeaderProtectionKey};
 
 #[cfg(not(feature = "awslc"))]
-use crate::p11::{PK11_CreateContextBySymKey, PK11_GetBlockSize, CKA_ENCRYPT, CK_ATTRIBUTE_TYPE};
+use crate::p11::{CK_ATTRIBUTE_TYPE, CKA_ENCRYPT, PK11_CreateContextBySymKey, PK11_GetBlockSize};
 use crate::{
     constants::{
         Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,

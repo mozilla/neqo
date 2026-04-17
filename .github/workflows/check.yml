@@ -92,18 +92,21 @@ jobs:
           version-file: neqo-crypto/min_version.txt
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install llvm (Linux)
+      - name: Install clang (Linux)
         shell: bash
-        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' && inputs.target == '' }}
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-          version=20
-          sudo apt-get install -y --no-install-recommends libclang-dev libclang-rt-dev clang-${version}
-          sudo update-alternatives --install /usr/bin/clang++ clang++ /usr/bin/clang++-${version} 100
-          sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-${version} 100
-          sudo update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-${version} 100
+          # Add the LLVM apt repo if clang-20 isn't available (e.g., ubuntu-22.04)
+          if ! apt-cache show clang-20 >/dev/null 2>&1; then
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc >/dev/null
+            . /etc/os-release
+            echo "deb http://apt.llvm.org/${VERSION_CODENAME}/ llvm-toolchain-${VERSION_CODENAME}-20 main" | sudo tee /etc/apt/sources.list.d/llvm-20.list
+            sudo apt-get update
+          fi
+          sudo apt-get install -y --no-install-recommends clang-20 libclang-rt-20-dev
 
       - name: Check
         run: |
@@ -125,7 +128,7 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            CC=clang cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
+            CC=$(command -v clang-20 || echo clang) cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
           else
             if [ -n "$CAREFUL" ]; then
               TRIPLE="--target $(rustc --print host-tuple)"

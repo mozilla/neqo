@@ -18,17 +18,17 @@ use std::{
 };
 
 use aws_lc_rs::aead::{
-    Aad, LessSafeKey, Nonce, UnboundKey, AES_128_GCM, AES_256_GCM, CHACHA20_POLY1305, NONCE_LEN,
+    AES_128_GCM, AES_256_GCM, Aad, CHACHA20_POLY1305, LessSafeKey, NONCE_LEN, Nonce, UnboundKey,
 };
 
 use crate::{
     constants::{
-        Cipher, Version, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
-        TLS_CHACHA20_POLY1305_SHA256,
+        Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
+        Version,
     },
-    err::{sec::SEC_ERROR_BAD_DATA, Error, Res},
+    err::{Error, Res, sec::SEC_ERROR_BAD_DATA},
     hp::SSL_HkdfExpandLabelWithMech,
-    p11::{PK11SymKey, SymKey, CKM_HKDF_DERIVE, CK_MECHANISM_TYPE},
+    p11::{CK_MECHANISM_TYPE, CKM_HKDF_DERIVE, PK11SymKey, SymKey},
 };
 
 /// Size of the AEAD authentication tag.
@@ -87,7 +87,7 @@ impl crate::aead::Aead for AwsLcAead {
                     c_uint::try_from(label_bytes.len())?,
                     mech,
                     key_size,
-                    &mut secret_ptr,
+                    &raw mut secret_ptr,
                 )
             }?;
             SymKey::from_ptr(secret_ptr)?
@@ -108,7 +108,7 @@ impl crate::aead::Aead for AwsLcAead {
                     c_uint::try_from(label_bytes.len())?,
                     mech,
                     c_uint::try_from(NONCE_SIZE)?,
-                    &mut secret_ptr,
+                    &raw mut secret_ptr,
                 )
             }?;
             SymKey::from_ptr(secret_ptr)?
@@ -166,12 +166,7 @@ impl crate::aead::Aead for AwsLcAead {
         Ok(&output[..input.len() + TAG_SIZE])
     }
 
-    fn encrypt_in_place<'a>(
-        &self,
-        count: u64,
-        aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    fn encrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < TAG_SIZE {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -189,7 +184,7 @@ impl crate::aead::Aead for AwsLcAead {
         // Append the tag.
         data[plaintext_len..].copy_from_slice(tag.as_ref());
 
-        Ok(data)
+        Ok(data.len())
     }
 
     fn decrypt<'a>(
@@ -218,12 +213,7 @@ impl crate::aead::Aead for AwsLcAead {
         Ok(plaintext)
     }
 
-    fn decrypt_in_place<'a>(
-        &self,
-        count: u64,
-        aad: &[u8],
-        data: &'a mut [u8],
-    ) -> Res<&'a mut [u8]> {
+    fn decrypt_in_place(&self, count: u64, aad: &[u8], data: &mut [u8]) -> Res<usize> {
         if data.len() < TAG_SIZE {
             return Err(Error::from(SEC_ERROR_BAD_DATA));
         }
@@ -237,7 +227,7 @@ impl crate::aead::Aead for AwsLcAead {
             .open_in_place(nonce, aad, data)
             .map_err(|_| Error::from(SEC_ERROR_BAD_DATA))?;
 
-        Ok(plaintext)
+        Ok(plaintext.len())
     }
 }
 
