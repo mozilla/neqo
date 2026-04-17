@@ -211,6 +211,8 @@ pub struct ClassicCongestionController<S, T> {
     /// - [`Self::bytes_in_flight`] is not stored because if it was to be restored it might get
     ///   out-of-sync with the actual number of bytes-in-flight on the path.
     stored: Option<State>,
+    /// Whether to recover from spurious congestion events by restoring prior state.
+    spurious_recovery: bool,
 }
 
 impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
@@ -593,7 +595,12 @@ where
     S: SlowStart,
     T: WindowAdjustment,
 {
-    pub fn new(slow_start: S, congestion_control: T, pmtud: Pmtud) -> Self {
+    pub fn new(
+        slow_start: S,
+        congestion_control: T,
+        pmtud: Pmtud,
+        spurious_recovery: bool,
+    ) -> Self {
         let mtu = pmtud.plpmtu();
         Self {
             slow_start,
@@ -605,6 +612,7 @@ where
             pmtud,
             current: State::new(mtu),
             stored: None,
+            spurious_recovery,
         }
     }
 
@@ -725,17 +733,24 @@ where
             return;
         };
 
+        // The stat is recorded for all cases below.
+        cc_stats.congestion_events.spurious += 1;
+
         if stored.congestion_window <= self.current.congestion_window {
             qinfo!(
                 "[{self}] Spurious cong event -> IGNORED because stored.cwnd {} < self.cwnd {};",
                 stored.congestion_window,
                 self.current.congestion_window
             );
-            cc_stats.congestion_events.spurious += 1;
             return;
         }
-        self.congestion_control.restore_undo_state(cc_stats);
 
+        if !self.spurious_recovery {
+            qinfo!("[{self}] Spurious cong event detected -> recovery disabled;");
+            return;
+        }
+
+        self.congestion_control.restore_undo_state(cc_stats);
         qdebug!(
             "Spurious cong event: recovering cc params from {} to {stored}",
             self.current
@@ -748,7 +763,6 @@ where
             cc_stats.slow_start_exit_reason = None;
         }
         qinfo!("[{self}] Spurious cong event -> RESTORED;");
-        cc_stats.congestion_events.spurious += 1;
     }
 
     fn detect_persistent_congestion<'a>(
@@ -932,14 +946,14 @@ mod tests {
 
     use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
     use crate::{
-        MIN_INITIAL_PACKET_SIZE,
+        MIN_INITIAL_PACKET_SIZE, Pmtud,
         cc::{
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController,
             CongestionTrigger::{self, Ecn, Loss},
             classic_cc::Phase,
             cubic::Cubic,
             new_reno::NewReno,
-            tests::{RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
+            tests::{IP_ADDR, MTU, RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
         },
         packet,
         recovery::{self, sent},
@@ -1707,6 +1721,84 @@ mod tests {
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
         assert_eq!(cc_stats.w_max, None);
+    }
+
+    /// Same scenario as `spurious_congestion_event_detection_and_undo` but with recovery disabled.
+    /// Detection still fires and the spurious counter is incremented, but cc parameters are not
+    /// restored.
+    #[test]
+    fn spurious_congestion_event_detection_recovery_disabled() {
+        let mut cc = ClassicCongestionController::new(
+            ClassicSlowStart::default(),
+            Cubic::default(),
+            Pmtud::new(IP_ADDR, MTU),
+            false,
+        );
+        let now = now();
+        let mut cc_stats = CongestionControlStats::default();
+
+        // 1. Send packets (1, 2) --> `SlowStart`
+        let pkt1 = sent::make_packet(1, now, 1000);
+        let pkt2 = sent::make_packet(2, now, 1000);
+        cc.on_packet_sent(&pkt1, now);
+        cc.on_packet_sent(&pkt2, now);
+        assert_eq!(cc.current.phase, Phase::SlowStart);
+
+        // 2. Lose packets (1, 2) --> `RecoveryStart` and reduced cwnd
+        let mut lost_pkt1 = pkt1.clone();
+        let mut lost_pkt2 = pkt2.clone();
+        lost_pkt1.declare_lost(now, sent::LossTrigger::TimeThreshold);
+        lost_pkt2.declare_lost(now, sent::LossTrigger::TimeThreshold);
+        cc.on_packets_lost(
+            Some(now),
+            None,
+            PTO,
+            &[lost_pkt1, lost_pkt2],
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc.current.phase, Phase::RecoveryStart);
+        assert_eq!(cc_stats.congestion_events.loss, 1);
+        let cwnd_after_loss = cc.cwnd();
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
+
+        // 3. Send packet (3) --> `Recovery`
+        let pkt3 = sent::make_packet(3, now, 1000);
+        cc.on_packet_sent(&pkt3, now);
+        assert_eq!(cc.current.phase, Phase::Recovery);
+
+        // 4. Ack packet (3) --> `CongestionAvoidance`
+        cc.on_packets_acked(
+            &[pkt3],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
+
+        // 5. Ack packet (1) --> not all lost packets recovered yet
+        cc.on_packets_acked(
+            &[pkt1],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc_stats.congestion_events.spurious, 0);
+
+        // 6. Ack packet (2) --> spurious event detected, counter incremented, but NO recovery
+        //    because pref is turned off. Assert that nothing is reset.
+        cc.on_packets_acked(
+            &[pkt2],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now,
+            &mut cc_stats,
+        );
+        assert_eq!(cc_stats.congestion_events.spurious, 1);
+        assert_eq!(cc.cwnd(), cwnd_after_loss);
+        assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
+        assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert!(cc_stats.slow_start_exit_reason.is_some());
+        assert!(cc_stats.w_max.is_some());
     }
 
     /// This tests a scenario where spurious detection happens late, after cwnd has recovered and

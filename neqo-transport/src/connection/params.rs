@@ -154,6 +154,9 @@ pub struct ConnectionParameters {
     randomize_first_pn: bool,
     /// Whether to send the SCONE transport parameter.
     scone: bool,
+    /// Whether to recover from spurious congestion events by restoring prior Congestion Controller
+    /// state. Detection and metrics are always active regardless of this setting.
+    spurious_recovery: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -189,6 +192,7 @@ impl Default for ConnectionParameters {
             mlkem: true,
             randomize_first_pn: true,
             scone: false,
+            spurious_recovery: true,
         }
     }
 }
@@ -528,6 +532,17 @@ impl ConnectionParameters {
         self
     }
 
+    #[must_use]
+    pub const fn spurious_recovery_enabled(&self) -> bool {
+        self.spurious_recovery
+    }
+
+    #[must_use]
+    pub const fn spurious_recovery(mut self, spurious_recovery: bool) -> Self {
+        self.spurious_recovery = spurious_recovery;
+        self
+    }
+
     /// # Errors
     /// When a connection ID cannot be obtained.
     /// # Panics
@@ -636,5 +651,16 @@ mod tests {
         // Default is false; verify builder can toggle it.
         assert!(!ConnectionParameters::default().scone_enabled());
         assert!(ConnectionParameters::default().scone(true).scone_enabled());
+    }
+
+    #[test]
+    fn spurious_recovery_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().spurious_recovery_enabled());
+        assert!(
+            !ConnectionParameters::default()
+                .spurious_recovery(false)
+                .spurious_recovery_enabled()
+        );
     }
 }

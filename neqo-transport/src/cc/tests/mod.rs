@@ -31,6 +31,7 @@ pub fn make_cc_newreno() -> ClassicCongestionController<ClassicSlowStart, NewRen
         ClassicSlowStart::default(),
         NewReno::default(),
         Pmtud::new(IP_ADDR, MTU),
+        true,
     )
 }
 
@@ -40,6 +41,7 @@ pub fn make_cc_cubic() -> ClassicCongestionController<ClassicSlowStart, Cubic> {
         ClassicSlowStart::default(),
         Cubic::default(),
         Pmtud::new(IP_ADDR, MTU),
+        true,
     )
 }
 
@@ -49,5 +51,6 @@ pub fn make_cc_hystart(paced: bool) -> ClassicCongestionController<HyStart, Cubi
         HyStart::new(paced, crate::cc::HyStartCssBaseline::default()),
         Cubic::default(),
         Pmtud::new(IP_ADDR, MTU),
+        true,
     )
 }
