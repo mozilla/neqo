@@ -103,8 +103,19 @@ def mangle(cmd, cc, pacing, flags, disk):
     return re.sub(r"\s+", " ", cmd).strip(), ext
 
 
+def kill_port(port: int) -> None:
+    """Kill any processes (including root-owned) listening on the given UDP/TCP port."""
+    for proto in ("udp", "tcp"):
+        subprocess.run(
+            ["sudo", "fuser", "-k", f"{port}/{proto}"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 def setup(cfg):
     """Create temp dir with cert/key and test files, set MTU."""
+    kill_port(cfg.port)
     tmp = Path(tempfile.mkdtemp())
     (tmp / "out").mkdir()
     sh(
