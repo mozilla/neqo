@@ -33,18 +33,19 @@ use futures::{
     FutureExt as _,
     future::{Either, select, select_all},
 };
-use neqo_common::{Datagram, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, hex, qdebug, qerror, qinfo, qwarn};
 use neqo_crypto::{
-    AntiReplay, Cipher,
+    AntiReplay, Cipher, PrivateKey, PublicKey,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
-    init_db,
+    generate_ech_keys, init_db, random,
 };
-use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version};
+use neqo_http3::Http3Server;
+use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress};
 use neqo_udp::{DatagramIter, RecvBuf};
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now};
+use crate::{SharedArgs, now, send_data::SendData};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -211,11 +212,92 @@ impl Args {
     }
 }
 
-fn qns_read_response(filename: &str) -> Result<Vec<u8>, io::Error> {
-    let path: PathBuf = ["/www", filename.trim_matches(|p| p == '/')]
-        .iter()
-        .collect();
-    fs::read(path)
+/// Abstracts the common configuration methods shared by [`neqo_transport::server::Server`]
+/// and [`Http3Server`], enabling [`configure_server`] to work with both.
+pub(super) trait ServerConfig {
+    fn set_ciphers(&mut self, ciphers: &[Cipher]);
+    fn set_qlog_dir(&mut self, dir: Option<PathBuf>);
+    fn set_validation(&self, v: ValidateAddress);
+    fn enable_ech(&mut self, config: u8, public_name: &str, sk: &PrivateKey, pk: &PublicKey);
+    fn ech_config(&self) -> &[u8];
+}
+
+impl ServerConfig for neqo_transport::server::Server {
+    fn set_ciphers(&mut self, ciphers: &[Cipher]) {
+        self.set_ciphers(ciphers);
+    }
+    fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
+        self.set_qlog_dir(dir);
+    }
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn enable_ech(&mut self, config: u8, public_name: &str, sk: &PrivateKey, pk: &PublicKey) {
+        self.enable_ech(config, public_name, sk, pk)
+            .expect("ECH configuration failed");
+    }
+    fn ech_config(&self) -> &[u8] {
+        self.ech_config()
+    }
+}
+
+impl ServerConfig for Http3Server {
+    fn set_ciphers(&mut self, ciphers: &[Cipher]) {
+        self.set_ciphers(ciphers);
+    }
+    fn set_qlog_dir(&mut self, dir: Option<PathBuf>) {
+        self.set_qlog_dir(dir);
+    }
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn enable_ech(&mut self, config: u8, public_name: &str, sk: &PrivateKey, pk: &PublicKey) {
+        self.enable_ech(config, public_name, sk, pk)
+            .expect("ECH configuration failed");
+    }
+    fn ech_config(&self) -> &[u8] {
+        self.ech_config()
+    }
+}
+
+/// Apply common [`Args`]-driven configuration to any server that implements [`ServerConfig`].
+pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
+    server.set_ciphers(&args.get_ciphers());
+    server.set_qlog_dir(args.shared.qlog_dir.clone());
+    if args.retry {
+        server.set_validation(ValidateAddress::Always);
+    }
+    if args.ech {
+        let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
+        server.enable_ech(random::<1>()[0], "public.example", &sk, &pk);
+        qinfo!("ECHConfigList: {}", hex(server.ech_config()));
+    }
+}
+
+/// Generate a response [`SendData`] for a given request path.
+///
+/// In QNS test mode, reads the corresponding file from `/www/`. Returns `Err`
+/// if the file cannot be read (caller sends a 404) or if the path contains
+/// `..` components.
+/// In non-QNS mode, trims `/` from the path, parses the remainder as a byte
+/// count, and generates that many zero bytes. If parsing fails, sends the
+/// path bytes instead.
+pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendData, ()> {
+    if is_qns_test {
+        if path.split('/').any(|segment| segment == "..") {
+            qerror!("Rejecting path with '..' component: {path}");
+            return Err(());
+        }
+        let file_path: PathBuf = ["/www", path.trim_matches('/')].iter().collect();
+        fs::read(file_path).map(SendData::from).map_err(|e| {
+            qerror!("Failed to read {path}: {e}");
+        })
+    } else {
+        Ok(path
+            .trim_matches('/')
+            .parse::<usize>()
+            .map_or_else(|_| path.into(), SendData::zeroes))
+    }
 }
 
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
@@ -500,5 +582,39 @@ pub fn run(
         );
         let local_addrs = runner.local_addresses();
         Ok((Box::pin(runner.run()), local_addrs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::response_for_path;
+
+    #[test]
+    fn response_for_path_qns_not_found() {
+        // Non-existent file should return Err.
+        let result = response_for_path("/no_such_file_xyz", true);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn response_for_path_non_qns_count() {
+        let data = response_for_path("/1000", false).expect("should succeed");
+        assert_eq!(data.len(), 1000);
+    }
+
+    #[test]
+    fn response_for_path_non_qns_non_numeric_sends_path_bytes() {
+        // Non-numeric path falls back to sending the path bytes themselves.
+        let data = response_for_path("/hello", false).expect("should succeed");
+        assert_eq!(data.len(), "/hello".len());
+    }
+
+    #[test]
+    fn response_for_path_qns_dotdot_rejected() {
+        // Paths with ".." components must be rejected in QNS mode to prevent
+        // directory traversal outside /www/.
+        for path in ["/../etc/passwd", "/foo/../etc/passwd", "/.."] {
+            assert!(response_for_path(path, true).is_err(), "path: {path}");
+        }
     }
 }

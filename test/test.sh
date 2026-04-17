@@ -35,7 +35,7 @@ tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 
 tcpdump_pid=$!
 trap 'kill $tcpdump_pid; rm -rf "$tmp"' EXIT
 
-tmux -CC \
+tmux \
         set-option -g default-shell "$(which bash)" \; \
         new-session "$client; kill -USR2 $tcpdump_pid; touch $tmp/done" \; \
         split-window -h "$server" \; \

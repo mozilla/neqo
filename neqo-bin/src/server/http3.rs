@@ -13,15 +13,15 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, Header, header::HeadersExt as _, hex, qdebug, qerror, qinfo};
-use neqo_crypto::{AntiReplay, generate_ech_keys, random};
+use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
+use neqo_crypto::AntiReplay;
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
-use neqo_transport::{ConnectionIdGenerator, OutputBatch, server::ValidateAddress};
+use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use rustc_hash::FxHashMap as HashMap;
 
-use super::{Args, qns_read_response};
+use super::Args;
 use crate::{
     now,
     send_data::{SendData, SendResult},
@@ -102,18 +102,7 @@ impl HttpServer {
         )
         .expect("We cannot make a server!");
 
-        server.set_ciphers(args.get_ciphers());
-        server.set_qlog_dir(args.shared.qlog_dir.clone());
-        if args.retry {
-            server.set_validation(ValidateAddress::Always);
-        }
-        if args.ech {
-            let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
-            server
-                .enable_ech(random::<1>()[0], "public.example", &sk, &pk)
-                .unwrap();
-            qinfo!("ECHConfigList: {}", hex(server.ech_config()));
-        }
+        super::configure_server(&mut server, args);
         Self {
             server,
             remaining_data: HashMap::default(),
@@ -169,30 +158,31 @@ impl super::HttpServer for HttpServer {
 
                     let response = if self.is_qns_test {
                         let path_str = path.value_utf8().unwrap_or("/");
-                        match qns_read_response(path_str) {
-                            Ok(data) => SendData::from(data),
-                            Err(e) => {
-                                qerror!("Failed to read {path_str}: {e}");
-                                // Stream may be closed; ignore errors.
-                                if stream
-                                    .send_headers(&[Header::new(":status", "404")])
-                                    .is_ok()
-                                {
-                                    _ = stream.stream_close_send(now);
-                                } else {
-                                    _ = stream
-                                        .stream_reset_send(neqo_http3::Error::HttpNone.code());
-                                }
-                                continue;
+                        let Ok(data) = super::response_for_path(path_str, true) else {
+                            // Stream may be closed; ignore errors.
+                            if stream
+                                .send_headers(&[Header::new(":status", "404")])
+                                .is_ok()
+                            {
+                                _ = stream.stream_close_send(now);
+                            } else {
+                                _ = stream.stream_reset_send(neqo_http3::Error::HttpNone.code());
                             }
-                        }
-                    } else if let Ok(path_str) = path.value_utf8() {
-                        path_str
-                            .trim_matches(|p| p == '/')
-                            .parse::<usize>()
-                            .map_or_else(|_| SendData::from(path.value()), SendData::zeroes)
+                            continue;
+                        };
+                        data
                     } else {
-                        SendData::from(path.value())
+                        // Non-QNS: path is a byte count; fall back to raw bytes for
+                        // non-numeric or non-UTF-8 paths.
+                        path.value_utf8()
+                            .ok()
+                            .and_then(|s| {
+                                s.trim_matches('/')
+                                    .parse::<usize>()
+                                    .ok()
+                                    .map(SendData::zeroes)
+                            })
+                            .unwrap_or_else(|| SendData::from(path.value()))
                     };
 
                     self.send_response(&stream, response, now);
