@@ -30,11 +30,11 @@ runs:
       shell: bash
       run: |
         {
-          echo "CACHE_VERSION=v2"
-          echo "MSQUIC_VERSION=v2.5.6"
-          echo "GOOGLE_QUICHE_REF=c52d86fe10442363e4e8c5a66e639187c419d7c0"
+          echo "CACHE_VERSION=v3"
+          echo "MSQUIC_VERSION=v2.5.7"
+          echo "GOOGLE_QUICHE_REF=ba02ee8fc1c0ab27d55f6bbb9e1ac7c9705c3e69"
           echo "CLOUDFLARE_QUICHE_VERSION=0.24.5"
-          echo "S2N_QUIC_VERSION=v1.72.0"
+          echo "S2N_QUIC_VERSION=v1.77.0"
         } >> "$GITHUB_ENV"
 
     - name: Install Rust
@@ -116,7 +116,7 @@ runs:
             if ! command -v bazel &> /dev/null; then
               ARCH=$([[ "$(uname -m)" == "aarch64" ]] && echo "arm64" || echo "amd64")
               sudo curl -fsSL -o /usr/local/bin/bazel \
-                "https://github.com/bazelbuild/bazelisk/releases/download/v1.25.0/bazelisk-linux-$ARCH"
+                "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.1/bazelisk-linux-$ARCH"
               sudo chmod +x /usr/local/bin/bazel
             fi
             git clone --depth 1 https://github.com/google/quiche google-quiche-src
