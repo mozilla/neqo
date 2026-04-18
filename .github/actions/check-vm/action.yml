@@ -36,8 +36,7 @@ runs:
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
                         pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y update && pkgin -y install curl clang nss pkgconf rust-bindgen
-                        ;;
+            netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
                         ;;
             *)          echo "Unsupported OS: $PLATFORM"

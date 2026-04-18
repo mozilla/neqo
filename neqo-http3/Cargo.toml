@@ -43,6 +43,7 @@ bench = [
         "neqo-crypto/bench",
         "neqo-qpack/bench",
         "neqo-transport/bench",
+        "test-fixture/bench",
         "log/release_max_level_info",
 ]
 build-fuzzing-corpus = [

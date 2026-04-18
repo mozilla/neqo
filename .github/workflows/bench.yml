@@ -112,6 +112,9 @@ jobs:
           filter_cset() { grep -v '^cset' || test $? = 1; }
           shopt -s extglob nullglob
 
+          # Kill any stale processes from previous runs that may be holding port 4433.
+          sudo fuser -k 4433/udp 4433/tcp 2>/dev/null || true
+
           cd neqo
           # Fix any root-owned files left by a previous run before removing them
           sudo chown -R "$(id -u)" target/criterion 2>/dev/null || true
@@ -126,10 +129,20 @@ jobs:
             # --baseline-lenient allows us to add new benchmarks in pull requests.
             bench_exec "$BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
           done
+          sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
           for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
-            NAME=$(basename "$BENCH")
-            # shellcheck disable=SC2086
-            bench_exec perf -- $PERF_OPT -o "../$NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+            BIN_NAME=$(basename "$BENCH")
+            VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+            if [ -n "$VARIANTS" ]; then
+              while IFS= read -r VARIANT; do
+                SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
+                # shellcheck disable=SC2086
+                bench_exec perf -- $PERF_OPT -o "../$SAFE_NAME.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
+              done <<< "$VARIANTS"
+            else
+              # shellcheck disable=SC2086
+              bench_exec perf -- $PERF_OPT -o "../$BIN_NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+            fi
           done
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../*.perf
