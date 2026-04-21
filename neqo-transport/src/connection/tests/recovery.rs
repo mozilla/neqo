@@ -9,7 +9,9 @@ use std::time::{Duration, Instant};
 use neqo_common::qdebug;
 use neqo_crypto::AuthenticationStatus;
 use test_fixture::{
-    assertions::{assert_handshake, assert_initial, is_handshake, is_initial},
+    assertions::{
+        assert_contains_handshake, assert_handshake, assert_initial, is_handshake, is_initial,
+    },
     now, split_datagram,
 };
 
@@ -229,15 +231,15 @@ fn pto_handshake_complete() {
 
     now += HALF_RTT;
     let pkt = server.process(pkt, now).dgram();
-    // This is probably a Handshake packet, but it might also contain
-    // extra Initial data at the start.
-    // assert_handshake(pkt.as_ref().unwrap());
+    // This datagram contains a Handshake packet, but it might also have
+    // extra Initial data coalesced at the start.
+    assert_contains_handshake(pkt.as_ref().unwrap());
 
     now += HALF_RTT;
     let pkt = client.process(pkt, now).dgram();
-    // ...and, if the Initial was sent in that last one,
-    // this will acknowledge it.
-    // assert_handshake(pkt.as_ref().unwrap());
+    // ...and, if the Initial was sent in that last one, this will acknowledge
+    // it, so a coalesced Initial may sit in front of the Handshake.
+    assert_contains_handshake(pkt.as_ref().unwrap());
 
     let cb = client.process_output(now).callback();
     // The client now has a single RTT estimate (20ms), so
