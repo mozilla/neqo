@@ -24,7 +24,7 @@ runs:
         cd "$NEQO"
         pkg_dir=$(cargo metadata --format-version=1 -q \
           | jq -r '.packages[]
-                   | select(.name=="nss")
+                   | select(.name=="nss-rs")
                    | .manifest_path
                    | gsub("\\\\"; "/")
                    | sub("/[^/]+$"; "")')
