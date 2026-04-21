@@ -82,12 +82,22 @@ impl PacketSender {
                         spurious_recovery,
                     ))
                 }
-                (CongestionControl::NewReno, SlowStart::Search) => Box::new(
-                    ClassicCongestionController::new(Search::new(), NewReno::default(), pmtud),
-                ),
-                (CongestionControl::Cubic, SlowStart::Search) => Box::new(
-                    ClassicCongestionController::new(Search::new(), Cubic::default(), pmtud),
-                ),
+                (CongestionControl::NewReno, SlowStart::Search) => {
+                    Box::new(ClassicCongestionController::new(
+                        Search::new(),
+                        NewReno::default(),
+                        pmtud,
+                        spurious_recovery,
+                    ))
+                }
+                (CongestionControl::Cubic, SlowStart::Search) => {
+                    Box::new(ClassicCongestionController::new(
+                        Search::new(),
+                        Cubic::default(),
+                        pmtud,
+                        spurious_recovery,
+                    ))
+                }
             },
             pacer: Pacer::new(
                 conn_params.pacing_enabled(),

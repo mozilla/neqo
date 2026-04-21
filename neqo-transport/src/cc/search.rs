@@ -47,24 +47,27 @@ impl Display for Search {
 }
 
 impl Search {
-    /// Numerator of the factor for calculating the window size with the initial RTT (= 3.5).
-    const WINDOW_SIZE_FACTOR_NUM: u32 = 35;
-    /// Denominator of the factor for calculating the window size with the initial RTT (= 3.5).
-    const WINDOW_SIZE_FACTOR_DEN: u32 = 10;
+    /// Factor for calculating the window size with the initial RTT, as an integer
+    /// out of `[Self::SCALE]` (= 3.50).
+    const WINDOW_SIZE_FACTOR: u32 = 350;
     /// Number of bins per window.
     const W: usize = 10;
     /// Additional bins needed to allow lookback by the current RTT for getting previously sent
-    /// bytes, even if the RTT has increased since the initial RTT was used to set values.
+    /// bytes.
+    ///
+    /// A higher value allows for a bigger difference between `curr_idx` and `prev_idx`, which
+    /// allows for bigger RTT inflation before SEARCH stops working.
     const EXTRA_BINS: usize = 15;
-    /// Total number of bins in the circular buffer for acked bytes.
+    /// Total number of bins in the circular buffer for acked bytes. Needs an extra index so the
+    /// buffer can accomodate the whole range of `[x - W, x]`.
     const NUM_ACKED_BINS: usize = Self::W + 1;
     /// Total number of bins in the circular buffer for sent bytes.
     const NUM_SENT_BINS: usize = Self::NUM_ACKED_BINS + Self::EXTRA_BINS;
-    /// Scale factor for integer approximations of fractional values (e.g. `THRESH`).
-    const SCALE: usize = 100;
     /// The upper bound for the permissible normalized difference between previously sent bytes and
-    /// current delivered bytes, as an integer out of `SCALE` (= 0.26).
+    /// current delivered bytes, as an integer out of `[Self::SCALE]` (= 0.26).
     const THRESH: usize = 26;
+    /// Scale factor for integer approximations of fractional values.
+    const SCALE: usize = 100;
 
     /// Creates a new SEARCH slow start instance.
     pub const fn new() -> Self {
@@ -85,9 +88,16 @@ impl Search {
         reason = "casting small constant usize to u32 for use in Duration::div"
     )]
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
+        if initial_rtt == Duration::ZERO {
+            debug_assert!(
+                false,
+                "initial_rtt must be non-zero for correctness and to guard against div by zero"
+            );
+            return;
+        }
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
-        self.bin_duration = initial_rtt * Self::WINDOW_SIZE_FACTOR_NUM
-            / (Self::WINDOW_SIZE_FACTOR_DEN * Self::W as u32);
+        self.bin_duration =
+            initial_rtt * Self::WINDOW_SIZE_FACTOR / (Self::SCALE as u32 * Self::W as u32);
         self.bin_end = Some(now + self.bin_duration);
         self.curr_idx = Some(0);
         self.acked_bins[0] = self.acked_bytes;
@@ -110,11 +120,11 @@ impl Search {
             / self.bin_duration.as_nanos()
             + 1) as usize;
 
-        // Reset if more than a full window of bins was skipped (e.g., app-limited or
+        // Reset if more than a full window of bins was skipped (e.g. after being app-limited or
         // flow-control-limited). The bin data is too stale for meaningful SEARCH detection.
         if passed_bins > Self::W {
             qdebug!(
-                "SEARCH: update_bins: resetting because skipped {passed_bins} bins (limit {})",
+                "SEARCH: update_bins: resetting because we skipped {passed_bins} bins (limit {})",
                 Self::W
             );
             self.reset();
@@ -137,8 +147,10 @@ impl Search {
         self.bin_end = Some(bin_end);
 
         // NOTE: SEARCH suggests bit-shifting the values tracked in bins to keep a smaller memory
-        // footprint. I suggest not taking on this extra complexity unless it can be seen as
-        // impactful in profiles. That logic could potentially be sitting here.
+        // footprint for memory constrained devices at the cost of running some additional
+        // computations roughly once per RTT. I suggest not taking on this extra complexity for a
+        // minor memory saving (255 bytes going from `usize` to `u16` with `EXTRA_BINS = 15`).
+        // That logic could be in this place, if implemented.
 
         self.acked_bins[curr_idx % Self::NUM_ACKED_BINS] = self.acked_bytes;
         self.sent_bins[curr_idx % Self::NUM_SENT_BINS] = self.sent_bytes;
@@ -152,8 +164,8 @@ impl Search {
     }
 
     /// Computes sent bytes between two (previous) bin indices. Interpolates a fraction of each bin
-    /// on the ends to get the accurate value when actual previous timestamp is between two
-    /// bins.
+    /// on the ends to get the accurate value when the actual previous timestamp is between two
+    /// bins. The fraction is an integer out of `[Self::SCALE]`, i.e. a value between `0` and `99`.
     const fn compute_sent(&self, old: usize, new: usize, fraction: usize) -> usize {
         let mut sent = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
             .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
@@ -194,24 +206,29 @@ impl SlowStart for Search {
 
         let curr_idx = self.update_bins(now)?;
 
-        // Compute how many bins fit in the current RTT (integer quotient = floor), and the
-        // fractional remainder scaled to 0..SCALE for interpolation in compute_sent.
+        // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
+        // so `prev_idx` might be too recent by a fraction of a bin. Said fraction is scaled to
+        // `0..[Self::SCALE]` for interpolation in `compute_sent`.
         let rtt_nanos = rtt.as_nanos();
         let bin_nanos = self.bin_duration.as_nanos();
         let bins_last_rtt = (rtt_nanos / bin_nanos) as usize;
         let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
+        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as usize;
+        qdebug!(
+            "SEARCH: on_packets_acked: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}"
+        );
 
-        qdebug!("SEARCH: on_packets_acked: prev_idx {prev_idx} curr_idx {curr_idx}");
         // Early return if we don't have enough data for a SEARCH check.
         if prev_idx <= Self::W || curr_idx - prev_idx >= Self::EXTRA_BINS {
             qdebug!("SEARCH: on_packets_acked: not enough data for SEARCH check");
             return None;
         }
-        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as usize;
 
         let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
         let prev_sent = self.compute_sent(prev_idx - Self::W, prev_idx, fraction);
         qdebug!("SEARCH: on_packets_acked: curr_delv {curr_delv} prev_sent {prev_sent}");
+
+        // Avoid division by zero if we haven't sent anything.
         if prev_sent == 0 {
             return None;
         }
@@ -237,6 +254,8 @@ impl SlowStart for Search {
     }
 
     fn reset(&mut self) {
+        // `curr_idx.is_none()` triggers re-initialization on the next ACK, which overwrites all
+        // other relevant fields with fresh data.
         self.curr_idx = None;
     }
 }
