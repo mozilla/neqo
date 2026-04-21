@@ -185,15 +185,13 @@ impl AddressValidation {
         let peer_addr = Self::encode_aad(peer_address, retry);
         let data = self.self_encrypt.open(peer_addr.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);
-        match dec.decode_uint::<u32>() {
-            Some(d) => {
-                let end = self.start_time + Duration::from_millis(u64::from(d));
-                if end < now {
-                    qtrace!("Expired token: {end:?} vs. {now:?}");
-                    return None;
-                }
+        {
+            let d = dec.decode_uint::<u32>()?;
+            let end = self.start_time + Duration::from_millis(u64::from(d));
+            if end < now {
+                qtrace!("Expired token: {end:?} vs. {now:?}");
+                return None;
             }
-            None => return None,
         }
         Some(ConnectionId::from(dec.decode_remainder()))
     }
