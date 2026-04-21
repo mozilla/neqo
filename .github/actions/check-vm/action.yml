@@ -31,13 +31,14 @@ runs:
           set -ex
           pwd
           case "$PLATFORM" in
-            freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
+            freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli cmake ninja
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss cmake ninja # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
-            solaris)    pkg refresh && pkg install clang-libs nss pkg-config
+            netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja
+                        ;;
+            solaris)    pkg refresh && pkg install clang-libs nss pkg-config cmake ninja
                         ;;
             *)          echo "Unsupported OS: $PLATFORM"
                         exit 1
