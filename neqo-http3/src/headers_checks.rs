@@ -126,8 +126,10 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
             if method_value == Some(b"CONNECT".as_ref()) {
                 let connect_mask = PseudoHeaderState::Method | PseudoHeaderState::Authority;
                 if let Some(protocol) = protocol_value {
-                    // For a webtransport CONNECT, the :scheme field must be set to https.
-                    if protocol == b"webtransport" && scheme_value != Some(b"https".as_ref()) {
+                    // For a WebTransport CONNECT (either draft), :scheme must be https.
+                    if (protocol == b"webtransport" || protocol == b"webtransport-h3")
+                        && scheme_value != Some(b"https".as_ref())
+                    {
                         return Err(Error::InvalidHeader);
                     }
                     // The CONNECT request for with :protocol included must have the scheme,
