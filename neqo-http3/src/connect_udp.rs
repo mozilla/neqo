@@ -199,6 +199,7 @@ impl Handler for Http3Connection {
             target,
             headers,
             extended_connect::ExtendedConnectType::ConnectUdp,
+            "connect-udp",
         )
     }
 
