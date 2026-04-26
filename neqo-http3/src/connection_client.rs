@@ -1559,7 +1559,7 @@ mod tests {
             assert_eq!(
                 dec.decode_vvec().unwrap(),
                 &[
-                    1, 0x40, 0x64, 7, 0x40, 0x64, 0xab, 0x60, 0x37, 0x42, 0x00, 0x80, 0xff, 0xd2,
+                    1, 0x40, 0x64, 7, 0x40, 0x64, 0xac, 0x7c, 0xf0, 0x00, 0x00, 0x80, 0xff, 0xd2,
                     0x77, 0x01, 0x33, 0x01
                 ]
             );
@@ -4394,13 +4394,13 @@ mod tests {
                 HSetting::new(HSettingType::MaxTableCapacity, 100),
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
-                HSetting::new(HSettingType::EnableWebTransport, 1),
+                HSetting::new(HSettingType::EnableWebTransportDraft15, 1),
             ],
             &[
                 HSetting::new(HSettingType::MaxTableCapacity, 100),
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
-                HSetting::new(HSettingType::EnableWebTransport, 0),
+                HSetting::new(HSettingType::EnableWebTransportDraft15, 0),
             ],
             &Http3State::Closing(CloseReason::Application(265)),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,

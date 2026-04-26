@@ -15,12 +15,15 @@ type SettingsType = u64;
 
 /// Increment this version number if a new setting is added and that might
 /// cause 0-RTT to be accepted where shouldn't be.
-const SETTINGS_ZERO_RTT_VERSION: u64 = 1;
+const SETTINGS_ZERO_RTT_VERSION: u64 = 2;
 
 const SETTINGS_MAX_HEADER_LIST_SIZE: SettingsType = 0x6;
 const SETTINGS_QPACK_MAX_TABLE_CAPACITY: SettingsType = 0x1;
 const SETTINGS_QPACK_BLOCKED_STREAMS: SettingsType = 0x7;
-const SETTINGS_ENABLE_WEB_TRANSPORT: SettingsType = 0x2b60_3742;
+// draft-ietf-webtrans-http3-07#section-8.2
+const SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT07: SettingsType = 0xc671_706a;
+// draft-ietf-webtrans-http3-15#section-9.2
+const SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15: SettingsType = 0x2c7c_f000;
 // draft-ietf-masque-h3-datagram-04.
 // We also use this old value because the current web-platform test only supports
 // this value.
@@ -40,7 +43,8 @@ pub enum HSettingType {
     MaxHeaderListSize,
     MaxTableCapacity,
     BlockedStreams,
-    EnableWebTransport,
+    EnableWebTransportDraft07,
+    EnableWebTransportDraft15,
     EnableH3Datagram,
     EnableConnect,
 }
@@ -50,7 +54,8 @@ const fn hsetting_default(setting_type: HSettingType) -> u64 {
         HSettingType::MaxHeaderListSize => 1 << 62,
         HSettingType::MaxTableCapacity
         | HSettingType::BlockedStreams
-        | HSettingType::EnableWebTransport
+        | HSettingType::EnableWebTransportDraft07
+        | HSettingType::EnableWebTransportDraft15
         | HSettingType::EnableH3Datagram
         | HSettingType::EnableConnect => 0,
     }
@@ -112,9 +117,12 @@ impl HSettings {
                         enc_inner.encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS);
                         enc_inner.encode_varint(iter.value);
                     }
-                    HSettingType::EnableWebTransport => {
-                        enc_inner.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT);
+                    HSettingType::EnableWebTransportDraft15 => {
+                        enc_inner.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15);
                         enc_inner.encode_varint(iter.value);
+                    }
+                    HSettingType::EnableWebTransportDraft07 => {
+                        // We never encode draft-07 ourselves; only decode it for compat.
                     }
                     HSettingType::EnableH3Datagram => {
                         if iter.value == 1 {
@@ -164,12 +172,23 @@ impl HSettings {
                 (Some(SETTINGS_QPACK_BLOCKED_STREAMS), Some(value)) => self
                     .settings
                     .push(HSetting::new(HSettingType::BlockedStreams, value)),
-                (Some(SETTINGS_ENABLE_WEB_TRANSPORT), Some(value)) => {
+                (Some(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15), Some(value)) => {
                     if value > 1 {
                         return Err(Error::HttpSettings);
                     }
-                    self.settings
-                        .push(HSetting::new(HSettingType::EnableWebTransport, value));
+                    self.settings.push(HSetting::new(
+                        HSettingType::EnableWebTransportDraft15,
+                        value,
+                    ));
+                }
+                (Some(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT07), Some(value)) => {
+                    // draft-ietf-webtrans-http3-07's SETTINGS_WEBTRANSPORT_MAX_SESSIONS
+                    // is an integer (max concurrent sessions the peer will accept), not
+                    // a boolean: 0 means unsupported, any value > 0 signals support.
+                    self.settings.push(HSetting::new(
+                        HSettingType::EnableWebTransportDraft07,
+                        value,
+                    ));
                 }
                 (Some(SETTINGS_H3_DATAGRAM_DRAFT04), Some(value)) => {
                     if value > 1 {
@@ -233,8 +252,13 @@ impl From<&Http3Parameters> for HSettings {
                     setting_type: HSettingType::BlockedStreams,
                     value: u64::from(conn_param.get_max_blocked_streams()),
                 },
+                // We only ever advertise draft-15 support to peers; draft-07 is
+                // decode-only compatibility for peers that advertise it to us
+                // (see `ExtendedConnectFeature::handle_settings`). A peer that
+                // understands draft-07 only, and not draft-15's setting
+                // identifier, will not see us as WebTransport-capable.
                 HSetting {
-                    setting_type: HSettingType::EnableWebTransport,
+                    setting_type: HSettingType::EnableWebTransportDraft15,
                     value: u64::from(conn_param.webtransport_enabled()),
                 },
                 HSetting {
@@ -272,7 +296,7 @@ impl HttpZeroRttChecker {
             .encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS)
             .encode_varint(settings.get_max_blocked_streams());
         if settings.webtransport_enabled() {
-            enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT)
+            enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15)
                 .encode_varint(true);
         }
         if settings.get_http3_datagram() {
@@ -307,13 +331,15 @@ impl ZeroRttChecker for HttpZeroRttChecker {
             HSettingType::MaxTableCapacity => {
                 self.settings.get_max_table_size_decoder() >= setting.value
             }
-            HSettingType::EnableWebTransport => {
+            HSettingType::EnableWebTransportDraft15 => {
                 if setting.value > 1 {
                     return false;
                 }
                 let value = setting.value == 1;
                 self.settings.webtransport_enabled() || !value
             }
+            // Draft-07 in a 0-RTT token: always accept, we handle both versions.
+            HSettingType::EnableWebTransportDraft07 | HSettingType::MaxHeaderListSize => true,
             HSettingType::EnableH3Datagram => {
                 if setting.value > 1 {
                     return false;
@@ -328,7 +354,6 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                 let value = setting.value == 1;
                 self.settings.connect_enabled() || !value
             }
-            HSettingType::MaxHeaderListSize => true,
         }) {
             ZeroRttCheckResult::Accept
         } else {
@@ -426,6 +451,70 @@ mod tests {
         }
     }
 
+    #[test]
+    fn webtransport_draft15_setting() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15)
+            .encode_varint(1u64);
+        let mut s = HSettings::new(&[]);
+        s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+        assert_eq!(s.get(HSettingType::EnableWebTransportDraft15), 1);
+
+        // Invalid value rejected.
+        let mut enc = Encoder::default();
+        enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15)
+            .encode_varint(2u64);
+        let mut s = HSettings::new(&[]);
+        assert_eq!(
+            s.decode_frame_contents(&mut enc.as_decoder()),
+            Err(Error::HttpSettings)
+        );
+    }
+
+    /// draft-02's `SETTINGS_ENABLE_WEBTRANSPORT` is what neqo advertised before
+    /// draft-15 support landed. Dropping it is deliberate: we now speak draft-15
+    /// and accept draft-07, so a peer that only sends the draft-02 identifier does
+    /// not negotiate WebTransport with us.
+    #[test]
+    fn legacy_draft02_webtransport_setting_is_not_recognised() {
+        const SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT02: SettingsType = 0x2b60_3742;
+
+        let mut enc = Encoder::default();
+        enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT02)
+            .encode_varint(1u64);
+        let mut s = HSettings::new(&[]);
+        s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+
+        assert_eq!(s.get(HSettingType::EnableWebTransportDraft15), 0);
+        assert_eq!(s.get(HSettingType::EnableWebTransportDraft07), 0);
+    }
+
+    #[test]
+    fn webtransport_draft07_setting() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT07)
+            .encode_varint(1u64);
+        let mut s = HSettings::new(&[]);
+        s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+        assert_eq!(s.get(HSettingType::EnableWebTransportDraft07), 1);
+        // Draft-15 not affected.
+        assert_eq!(s.get(HSettingType::EnableWebTransportDraft15), 0);
+    }
+
+    #[test]
+    fn webtransport_draft07_setting_is_a_count_not_a_bool() {
+        // SETTINGS_WEBTRANSPORT_MAX_SESSIONS (draft-ietf-webtrans-http3-07) is a
+        // count of concurrent sessions the peer will accept, not a boolean; a
+        // legitimate peer may advertise any value > 1, and that must not be
+        // rejected as an invalid HTTP/3 setting.
+        let mut enc = Encoder::default();
+        enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT07)
+            .encode_varint(5u64);
+        let mut s = HSettings::new(&[]);
+        s.decode_frame_contents(&mut enc.as_decoder()).unwrap();
+        assert_eq!(s.get(HSettingType::EnableWebTransportDraft07), 5);
+    }
+
     fn make_0rtt_token(settings: &[(u64, u64)]) -> Vec<u8> {
         let mut enc = Encoder::default();
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION);
@@ -474,5 +563,32 @@ mod tests {
 
         // Empty token: fails.
         assert_eq!(checker.check(&[]), ZeroRttCheckResult::Fail);
+    }
+
+    #[test]
+    fn zero_rtt_checker_webtransport() {
+        use nss::{ZeroRttCheckResult, ZeroRttChecker as _};
+
+        use crate::Http3Parameters;
+
+        // Server with WebTransport enabled.
+        let checker = HttpZeroRttChecker::new(Http3Parameters::default().webtransport(true));
+
+        // draft-15 requested and supported: accepted.
+        let token = make_0rtt_token(&[(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15, 1)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
+
+        // draft-07 token is always accepted (both versions are handled).
+        let token = make_0rtt_token(&[(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT07, 1)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
+
+        // Server without WebTransport: a token requesting draft-15=1 is rejected.
+        let checker = HttpZeroRttChecker::new(Http3Parameters::default());
+        let token = make_0rtt_token(&[(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15, 1)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Reject);
+
+        // ...but draft-15=0 (not requesting the feature) is accepted.
+        let token = make_0rtt_token(&[(SETTINGS_ENABLE_WEB_TRANSPORT_DRAFT15, 0)]);
+        assert_eq!(checker.check(&token), ZeroRttCheckResult::Accept);
     }
 }

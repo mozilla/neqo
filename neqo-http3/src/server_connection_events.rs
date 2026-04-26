@@ -157,7 +157,7 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         match headers.find_header(":protocol").map(Header::value) {
-            Some(b"webtransport") => {
+            Some(p) if p == b"webtransport" || p == b"webtransport-h3" => {
                 self.events.push(Http3ServerConnEvent::WebTransport(
                     WebTransportEvent::Session { stream_id, headers },
                 ));

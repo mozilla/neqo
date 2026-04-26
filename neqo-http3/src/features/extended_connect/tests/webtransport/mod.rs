@@ -68,10 +68,10 @@ pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
 }
 
 pub fn assert_wt(headers: &[Header]) {
-    assert!(
-        headers.contains_header(":method", "CONNECT")
-            && headers.contains_header(":protocol", "webtransport")
-    );
+    // Both peers in these tests advertise draft-15, so the request must carry the
+    // draft-15 token; `webtransport` is only correct against a draft-07 peer.
+    assert!(headers.contains_header(":method", "CONNECT"));
+    assert!(headers.contains_header(":protocol", "webtransport-h3"));
 }
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
