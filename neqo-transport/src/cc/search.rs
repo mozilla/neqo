@@ -36,7 +36,7 @@ pub struct Search {
     bin_duration: Duration,
     /// Tracking amount of acked bytes this connection. Is incremented on every ACK.
     acked_bytes: usize,
-    /// Tracking amount of sent bytes this connection. Is incremented each sent packet.
+    /// Tracking amount of sent bytes this connection. Is incremented on every sent packet.
     sent_bytes: usize,
 }
 
@@ -59,14 +59,14 @@ impl Search {
     /// allows for bigger RTT inflation before SEARCH stops working.
     const EXTRA_BINS: usize = 15;
     /// Total number of bins in the circular buffer for acked bytes. Needs an extra index so the
-    /// buffer can accomodate the whole range of `[x - W, x]`.
+    /// buffer can accomodate the whole range of `[i - W, i]`.
     const NUM_ACKED_BINS: usize = Self::W + 1;
     /// Total number of bins in the circular buffer for sent bytes.
     const NUM_SENT_BINS: usize = Self::NUM_ACKED_BINS + Self::EXTRA_BINS;
     /// The upper bound for the permissible normalized difference between previously sent bytes and
     /// current delivered bytes, as an integer out of `[Self::SCALE]` (= 0.26).
     const THRESH: usize = 26;
-    /// Scale factor for integer approximations of fractional values.
+    /// Scale factor for integer approximation of fractional values.
     const SCALE: usize = 100;
 
     /// Creates a new SEARCH slow start instance.
@@ -122,6 +122,14 @@ impl Search {
 
         // Reset if more than a full window of bins was skipped (e.g. after being app-limited or
         // flow-control-limited). The bin data is too stale for meaningful SEARCH detection.
+        //
+        // NOTE: SEARCH draft-09 doesn't implement a reset mechanism for stale data anymore but
+        // makes it optional instead. I think it makes sense, especially because it can also happen
+        // if the sender is app-limited for a longer period of time, in which case both the data in
+        // the bins, as well as the initial RTT value might not be representative anymore due to
+        // path changes.
+        //
+        // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#name-handling-missed-bins-option>
         if passed_bins > Self::W {
             qdebug!(
                 "SEARCH: update_bins: resetting because we skipped {passed_bins} bins (limit {})",
@@ -146,11 +154,11 @@ impl Search {
         self.curr_idx = Some(curr_idx);
         self.bin_end = Some(bin_end);
 
-        // NOTE: SEARCH suggests bit-shifting the values tracked in bins to keep a smaller memory
-        // footprint for memory constrained devices at the cost of running some additional
-        // computations roughly once per RTT. I suggest not taking on this extra complexity for a
-        // minor memory saving (255 bytes going from `usize` to `u16` with `EXTRA_BINS = 15`).
-        // That logic could be in this place, if implemented.
+        // NOTE: SEARCH draft-09 suggests bit-shifting the values tracked in bins to keep a smaller
+        // memory footprint for memory constrained devices at the cost of running some
+        // additional computations roughly once per RTT. I suggest not taking on this extra
+        // complexity for a minor memory saving (255 bytes going from `usize` to `u16` with
+        // `EXTRA_BINS = 15`). That logic could be in this place, if implemented.
 
         self.acked_bins[curr_idx % Self::NUM_ACKED_BINS] = self.acked_bytes;
         self.sent_bins[curr_idx % Self::NUM_SENT_BINS] = self.sent_bytes;
@@ -167,6 +175,9 @@ impl Search {
     /// on the ends to get the accurate value when the actual previous timestamp is between two
     /// bins. The fraction is an integer out of `[Self::SCALE]`, i.e. a value between `0` and `99`.
     const fn compute_sent(&self, old: usize, new: usize, fraction: usize) -> usize {
+        // NOTE: SEARCH draft-09 does forward interpolation here, i.e. `new + 1`/`old + 1`. That is
+        // a mistake in the draft and has been discussed with the SEARCH team. Subtracting
+        // is correct.
         let mut sent = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
             .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
             * fraction;
@@ -196,7 +207,7 @@ impl SlowStart for Search {
             self.initialize(rtt, now);
         }
 
-        // Early return if we haven't passed the current bin.
+        // Early return if we haven't passed the current bin. There is no new data to check.
         if let Some(bin_end) = self.bin_end
             && now <= bin_end
         {
@@ -218,7 +229,11 @@ impl SlowStart for Search {
             "SEARCH: on_packets_acked: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}"
         );
 
-        // Early return if we don't have enough data for a SEARCH check.
+        // Early return if we don't have enough data for a SEARCH check. This could be either
+        // because there isn't enough data to look back by an RTT if we're early in the connection,
+        // or because the difference between `curr_idx` and `prev_idx` is too big because of RTT
+        // inflation. In the later case we don't have data to look back far enough and SEARCH stops
+        // working.
         if prev_idx <= Self::W || curr_idx - prev_idx >= Self::EXTRA_BINS {
             qdebug!("SEARCH: on_packets_acked: not enough data for SEARCH check");
             return None;
@@ -246,6 +261,19 @@ impl SlowStart for Search {
             "SEARCH: on_packets_acked: norm_diff {norm_diff} >= THRESH {} --> exit",
             Self::THRESH
         );
+        // If SEARCH checks run and the normative difference is not beneath the threshold we return
+        // the current congestion window to exit slow start with it at the call site.
+        //
+        // NOTE: SEARCH draft-09 implements a drain-phase to gradually lower the congestion window
+        // towards the approximated empty-buffer BDP. I think that could be counter-intuitive while
+        // using CUBIC in our case, as CUBIC tries to keep the buffers full and ideally we'd land
+        // somewhere in CUBIC's cwnd-range after slow start. The drain-phase as implemented in
+        // draft-09 undershoots CUBIC's cwnd range in my testing.
+        //
+        // For now I recommend just exiting slow start without the drain-phase and capturing the
+        // drain-target in telemetry for further analysis (TODO).
+        //
+        // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#section-3.2-17>
         Some(curr_cwnd)
     }
 
