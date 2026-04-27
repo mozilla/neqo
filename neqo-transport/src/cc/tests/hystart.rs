@@ -489,7 +489,7 @@ fn css_exit_only_with_new_samples() {
 
     // First round with base RTT to set a baseline that we can compare RTT against
     let window_end = HyStart::N_RTT_SAMPLE as u64;
-    hystart.on_packet_sent(window_end, INITIAL_CWND);
+    hystart.on_packet_sent(window_end, MIN_INITIAL_PACKET_SIZE);
 
     assert!(hystart.window_end().is_some_and(|pn| pn == window_end));
 
@@ -509,7 +509,7 @@ fn css_exit_only_with_new_samples() {
 
     // Start second round with a high window end
     let window_end2 = 300;
-    hystart.on_packet_sent(window_end2, INITIAL_CWND);
+    hystart.on_packet_sent(window_end2, MIN_INITIAL_PACKET_SIZE);
 
     // Collect N_RTT_SAMPLE samples with higher RTT to enter CSS
     for _i in 0..HyStart::N_RTT_SAMPLE as u64 {

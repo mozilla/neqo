@@ -59,7 +59,7 @@ impl Search {
     /// allows for bigger RTT inflation before SEARCH stops working.
     const EXTRA_BINS: usize = 15;
     /// Total number of bins in the circular buffer for acked bytes. Needs an extra index so the
-    /// buffer can accomodate the whole range of `[i - W, i]`.
+    /// buffer can accommodate the whole range of `[i - W, i]`.
     const NUM_ACKED_BINS: usize = Self::W + 1;
     /// Total number of bins in the circular buffer for sent bytes.
     const NUM_SENT_BINS: usize = Self::NUM_ACKED_BINS + Self::EXTRA_BINS;
@@ -88,20 +88,20 @@ impl Search {
         reason = "casting small constant usize to u32 for use in Duration::div"
     )]
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
-        if initial_rtt == Duration::ZERO {
-            debug_assert!(
-                false,
-                "initial_rtt must be non-zero for correctness and to guard against div by zero"
-            );
-            return;
-        }
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
         self.bin_duration =
             initial_rtt * Self::WINDOW_SIZE_FACTOR / (Self::SCALE as u32 * Self::W as u32);
+        if self.bin_duration.is_zero() {
+            debug_assert!(
+                false,
+                "bin_duration must be non-zero for correctness and to guard against div by zero -- initial_rtt was zero or too small"
+            );
+            return;
+        }
         self.bin_end = Some(now + self.bin_duration);
-        self.curr_idx = Some(0);
         self.acked_bins[0] = self.acked_bytes;
         self.sent_bins[0] = self.sent_bytes;
+        self.curr_idx = Some(0);
     }
 
     /// Advances bin state when a bin boundary has been crossed.
@@ -116,9 +116,10 @@ impl Search {
         let mut bin_end = self.bin_end?;
 
         // passed_bins = (now - bin_end) / bin_duration + 1 -- integer division floors implicitly
-        let passed_bins = (now.saturating_duration_since(bin_end).as_nanos()
-            / self.bin_duration.as_nanos()
-            + 1) as usize;
+        let passed_bins = usize::try_from(
+            now.saturating_duration_since(bin_end).as_nanos() / self.bin_duration.as_nanos() + 1,
+        )
+        .unwrap_or(usize::MAX);
 
         // Reset if more than a full window of bins was skipped (e.g. after being app-limited or
         // flow-control-limited). The bin data is too stale for meaningful SEARCH detection.
@@ -232,7 +233,7 @@ impl SlowStart for Search {
         // Early return if we don't have enough data for a SEARCH check. This could be either
         // because there isn't enough data to look back by an RTT if we're early in the connection,
         // or because the difference between `curr_idx` and `prev_idx` is too big because of RTT
-        // inflation. In the later case we don't have data to look back far enough and SEARCH stops
+        // inflation. In the latter case we don't have data to look back far enough and SEARCH stops
         // working.
         if prev_idx <= Self::W || curr_idx - prev_idx >= Self::EXTRA_BINS {
             qdebug!("SEARCH: on_packets_acked: not enough data for SEARCH check");
