@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    time::Instant,
+};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -25,14 +28,14 @@ impl Display for ClassicSlowStart {
 }
 
 impl SlowStart for ClassicSlowStart {
-    fn on_packet_sent(&mut self, _sent_pn: packet::Number) {}
-
     fn on_packets_acked(
         &mut self,
         _rtt_est: &RttEstimate,
         _largest_acked: packet::Number,
+        _new_acked_bytes: usize,
         _curr_cwnd: usize,
         _cc_stats: &mut CongestionControlStats,
+        _now: Instant,
     ) -> Option<usize> {
         // Classic slow start does not have any heuristic for exiting slow start. Always
         // returns `None`.
