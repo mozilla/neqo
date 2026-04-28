@@ -181,10 +181,13 @@ impl Search {
         // is correct.
         let mut sent = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
             .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
-            * fraction;
-        sent += (self.sent_bins[new % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
-            * (Self::SCALE - fraction);
+        .saturating_mul(fraction);
+
+        sent = sent.saturating_add(
+            (self.sent_bins[new % Self::NUM_SENT_BINS]
+                .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
+            .saturating_mul(Self::SCALE - fraction),
+        );
         sent / Self::SCALE
     }
 }
