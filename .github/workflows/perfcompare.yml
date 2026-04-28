@@ -42,11 +42,14 @@ jobs:
           persist-credentials: false
           clean: false
 
+      - id: nss-version
+        uses: ./neqo/.github/actions/minimum-version
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
+          nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
   build-msquic:
     name: Build msquic

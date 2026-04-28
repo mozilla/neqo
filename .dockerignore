@@ -5,6 +5,5 @@
 !**/*.rs
 !**/*.h
 !**/*.hpp
-!neqo-crypto/min_version.txt
 !qns
 !Cargo.lock

@@ -14,11 +14,11 @@ use std::{
 };
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
-use neqo_crypto::AntiReplay;
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch};
+use nss::AntiReplay;
 use rustc_hash::FxHashMap as HashMap;
 
 use super::Args;

@@ -6,7 +6,7 @@
 
 #![cfg(feature = "disable-encryption")]
 
-use neqo_crypto::aead_null::AEAD_NULL_TAG;
+use nss::aead::AEAD_NULL_TAG;
 use test_fixture::now;
 
 use super::{connect_force_idle, default_client, default_server};
