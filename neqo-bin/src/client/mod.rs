@@ -401,6 +401,7 @@ trait Client {
         S: AsRef<str> + Display;
     fn is_closed(&self) -> Result<CloseState, CloseReason>;
     fn stats(&self) -> neqo_transport::Stats;
+    fn on_path_unavailable(&mut self, local: SocketAddr, remote: SocketAddr, now: Instant);
 }
 
 struct Runner<'a, H: Handler> {
@@ -494,6 +495,16 @@ impl<'a, H: Handler> Runner<'a, H> {
                                 "`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload"
                             );
                             // Drop the packets and let QUIC handle retransmission.
+                            break;
+                        }
+                        Err(e) if neqo_udp::is_network_error(&e) => {
+                            qdebug!("Send failed with error {e}, path may be unavailable");
+                            self.client.on_path_unavailable(
+                                dgram.source(),
+                                dgram.destination(),
+                                Instant::now(),
+                            );
+                            // The packet was not sent; let QUIC retransmit.
                             break;
                         }
                         e @ Err(_) => return e,
