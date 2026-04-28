@@ -23,7 +23,7 @@ ENV NSS_DIR=/nss \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
-ARG MOZILLA_ACTIONS_REF=main
+ARG MOZILLA_ACTIONS_REF=v1
 RUN --mount=type=secret,id=github_token,required=false \
     TOKEN=$(cat /run/secrets/github_token 2>/dev/null || true); \
     curl -sLf ${TOKEN:+-H "Authorization: Bearer ${TOKEN}"} \
