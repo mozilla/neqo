@@ -1421,6 +1421,22 @@ impl Http3Connection {
         Ok(())
     }
 
+    pub(crate) fn validate_wt_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let wt = self
+            .recv_streams
+            .get(&session_id)
+            .ok_or(Error::InvalidStreamId)?
+            .extended_connect_session()
+            .ok_or(Error::InvalidStreamId)?;
+        if !wt.borrow().is_active() {
+            return Err(Error::InvalidStreamId);
+        }
+        Ok(wt)
+    }
+
     pub(crate) fn webtransport_create_stream_local(
         &mut self,
         conn: &mut Connection,
@@ -1431,15 +1447,7 @@ impl Http3Connection {
     ) -> Res<StreamId> {
         qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
 
-        let wt = self
-            .recv_streams
-            .get(&session_id)
-            .ok_or(Error::InvalidStreamId)?
-            .extended_connect_session()
-            .ok_or(Error::InvalidStreamId)?;
-        if !wt.borrow().is_active() {
-            return Err(Error::InvalidStreamId);
-        }
+        let wt = self.validate_wt_session(session_id)?;
 
         let stream_id = conn
             .stream_create(stream_type)

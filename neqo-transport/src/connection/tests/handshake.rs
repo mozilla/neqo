@@ -1894,3 +1894,60 @@ fn initial_crypto_retransmit_during_handshake_pto() {
         );
     }
 }
+
+#[test]
+fn export_keying_material_basic() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let mut material = vec![0u8; 32];
+    client
+        .export_keying_material(b"EXPORTER-WebTransport", &[], &mut material)
+        .expect("export should succeed after handshake");
+    assert_ne!(material, vec![0u8; 32]);
+}
+
+#[test]
+fn export_keying_material_same_both_sides() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let label = b"EXPORTER-WebTransport";
+    let context = b"session-context";
+
+    let mut client_material = vec![0u8; 32];
+    client
+        .export_keying_material(label, context, &mut client_material)
+        .expect("client export should succeed");
+    let mut server_material = vec![0u8; 32];
+    server
+        .export_keying_material(label, context, &mut server_material)
+        .expect("server export should succeed");
+
+    assert_eq!(
+        client_material, server_material,
+        "client and server must export identical keying material"
+    );
+}
+
+#[test]
+fn export_keying_material_before_handshake() {
+    let client = default_client();
+    let result = client.export_keying_material(b"EXPORTER-WebTransport", &[], &mut [0u8; 32]);
+    assert!(result.is_err());
+}
+
+#[test]
+fn export_keying_material_zero_length() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    assert!(
+        client
+            .export_keying_material(b"EXPORTER-WebTransport", &[], &mut [])
+            .is_err()
+    );
+}
