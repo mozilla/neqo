@@ -29,7 +29,7 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::Certifi
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
     ReceiveOutput, Res,
-    client_events::{Http3ClientEvent, Http3ClientEvents},
+    client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
     frames::HFrame,
@@ -1358,6 +1358,19 @@ impl Http3Client {
             }
             Http3State::Closing(..) | Http3State::Closed(..) => {}
             _ => unreachable!("Should not receive Goaway frame in this state"),
+        }
+
+        // Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY is "a signal to
+        // applications to initiate shutdown for all WebTransport sessions":
+        // https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3
+        //
+        // Emit Draining BEFORE resetting streams, because handle_stream_reset below
+        // removes sessions with IDs >= goaway_stream_id from the stream tables.
+        // Those sessions will also receive a SessionClosed event via the reset path.
+        for session_id in self.base_handler.drain_webtransport_sessions() {
+            self.events.insert(Http3ClientEvent::WebTransport(
+                WebTransportEvent::Draining { session_id },
+            ));
         }
 
         // Issue reset events for streams >= goaway stream id

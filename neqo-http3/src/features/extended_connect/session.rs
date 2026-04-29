@@ -60,6 +60,7 @@ pub(crate) struct Session {
     /// Corresponds to the `:protocol` pseudo-header in the HTTP EXTENDED
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
+    draining: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -119,6 +120,7 @@ impl Session {
             state: State::Negotiating,
             events,
             protocol,
+            draining: false,
         }
     }
 
@@ -148,7 +150,19 @@ impl Session {
             state: State::Active,
             events,
             protocol,
+            draining: false,
         })
+    }
+
+    /// Returns the type of this extended CONNECT session.
+    pub(crate) fn connect_type(&self) -> ExtendedConnectType {
+        self.protocol.connect_type()
+    }
+
+    /// Mark session as draining. Returns `true` if this was the first call
+    /// (i.e. the session was not already draining).
+    pub(crate) fn set_draining(&mut self) -> bool {
+        !std::mem::replace(&mut self.draining, true)
     }
 
     /// # Errors
