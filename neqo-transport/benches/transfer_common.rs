@@ -18,13 +18,13 @@ use test_fixture::{
 };
 
 const DELAY: Duration = Duration::from_millis(10);
-pub const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
+pub(crate) const TRANSFER_AMOUNT: usize = 1 << 22; // 4Mbyte
 
 const FIXED_SEED: &str = "62df6933ba1f543cece01db8f27fb2025529b27f93df39e19f006e1db3b8c843";
 
 /// Creates a ready simulator for benchmarking transfer.
 #[must_use]
-pub fn setup(label: &str, seed: Option<&str>, pacing: bool) -> ReadySimulator {
+pub(crate) fn setup(label: &str, seed: Option<&str>, pacing: bool) -> ReadySimulator {
     let nodes = boxed![
         Node::new_client(
             ConnectionParameters::default()
@@ -58,7 +58,7 @@ pub fn setup(label: &str, seed: Option<&str>, pacing: bool) -> ReadySimulator {
 ///
 /// The closure receives the benchmark group, label, seed, and pacing flag,
 /// allowing each benchmark to define its own measurement approach.
-pub fn benchmark<M>(c: &mut Criterion, mut measure: M)
+pub(crate) fn benchmark<M>(c: &mut Criterion, mut measure: M)
 where
     M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, &str, Option<&str>, bool),
 {
@@ -81,7 +81,7 @@ where
 
 /// Returns the criterion configuration for transfer benchmarks.
 #[must_use]
-pub fn criterion_config() -> Criterion {
+pub(crate) fn criterion_config() -> Criterion {
     Criterion::default()
         .warm_up_time(Duration::from_secs(5))
         .measurement_time(Duration::from_secs(15))

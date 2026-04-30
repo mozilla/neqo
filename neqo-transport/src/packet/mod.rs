@@ -56,6 +56,9 @@ mod retry;
 )]
 pub use metadata::MetaData;
 
+#[cfg(any(fuzzing, feature = "bench"))]
+pub type Number = u64;
+#[cfg(not(any(fuzzing, feature = "bench")))]
 pub(crate) type Number = u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr, Hash)]

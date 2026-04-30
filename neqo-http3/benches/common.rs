@@ -22,7 +22,7 @@ const RTT: Duration = Duration::from_millis(10);
 const BENCHMARK_PARAMS: [(usize, usize); 3] = [(1, 1_000), (1_000, 1), (1_000, 1_000)];
 
 /// Creates a ready simulator for benchmarking HTTP/3 streams.
-pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
+pub(crate) fn setup(streams: usize, data_size: usize) -> ReadySimulator {
     let nodes = boxed![
         Node::default_client(boxed![Requests::new(streams, data_size)]),
         TailDrop::dsl_uplink(),
@@ -38,7 +38,7 @@ pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
 ///
 /// The closure receives the benchmark group and parameters, allowing each
 /// benchmark to define its own measurement approach.
-pub fn benchmark<M>(c: &mut Criterion, mut measure: M)
+pub(crate) fn benchmark<M>(c: &mut Criterion, mut measure: M)
 where
     M: FnMut(&mut BenchmarkGroup<'_, criterion::measurement::WallTime>, usize, usize),
 {

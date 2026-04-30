@@ -212,7 +212,14 @@ impl Packet {
 
 /// A collection for packets that we have sent that haven't been acknowledged.
 #[derive(Debug, Default)]
-pub(crate) struct Packets {
+#[cfg_attr(
+    not(feature = "bench"),
+    expect(
+        unreachable_pub,
+        reason = "exposed via `pub mod sent` under `feature = \"bench\"`"
+    )
+)]
+pub struct Packets {
     /// The collection.
     packets: BTreeMap<u64, Packet>,
 }
@@ -228,7 +235,14 @@ impl Packets {
         self.packets.len()
     }
 
-    pub(crate) fn track(&mut self, packet: Packet) {
+    #[cfg_attr(
+        not(feature = "bench"),
+        expect(
+            unreachable_pub,
+            reason = "exposed via `pub mod sent` under `feature = \"bench\"`"
+        )
+    )]
+    pub fn track(&mut self, packet: Packet) {
         self.packets.insert(packet.pn, packet);
     }
 
@@ -240,7 +254,14 @@ impl Packets {
     /// The values returned will be reversed, so that the most recent packet appears first.
     /// This is because ACK frames arrive with ranges starting from the largest acknowledged
     /// and we want to match that.
-    pub(crate) fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
+    #[cfg_attr(
+        not(feature = "bench"),
+        expect(
+            unreachable_pub,
+            reason = "exposed via `pub mod sent` under `feature = \"bench\"`"
+        )
+    )]
+    pub fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
         R::IntoIter: ExactSizeIterator,
