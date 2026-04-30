@@ -21,7 +21,7 @@ use crate::{
     SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
-        datagram_queue::{DatagramOutcome, WebTransportDatagramQueue},
+        datagram_queue::{DatagramOutcome, DatagramQueue},
         stats::SessionStats,
     },
     frames::HFrame,
@@ -66,7 +66,7 @@ pub(crate) struct Session {
     role: Role,
     /// Outgoing datagrams awaiting handover to the QUIC layer. Shared by every
     /// extended-CONNECT protocol; the queue itself is protocol-agnostic.
-    datagram_queue: WebTransportDatagramQueue,
+    datagram_queue: DatagramQueue,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -128,7 +128,7 @@ impl Session {
             protocol,
             draining: false,
             role,
-            datagram_queue: WebTransportDatagramQueue::new(),
+            datagram_queue: DatagramQueue::new(),
         }
     }
 
@@ -160,7 +160,7 @@ impl Session {
             protocol,
             draining: false,
             role,
-            datagram_queue: WebTransportDatagramQueue::new(),
+            datagram_queue: DatagramQueue::new(),
         })
     }
 

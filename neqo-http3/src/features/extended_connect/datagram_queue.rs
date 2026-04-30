@@ -9,7 +9,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use indexmap::IndexMap;
 use neqo_common::{Bytes, qdebug, qtrace};
 
 pub const DEFAULT_HARD_LIMIT: usize = 1000;
@@ -134,38 +133,9 @@ impl GroupQueue {
         expired
     }
 
-    /// Find the highest `send_order` that has non-expired datagrams.
-    ///
-    /// Removes expired entries encountered during the scan and appends their IDs
-    /// to `expired_ids`. Returns the winning `send_order`, or `None` if the group
-    /// is empty after expiry.
-    fn highest_valid_order(
-        &mut self,
-        now: Instant,
-        max_age: Duration,
-        expired_ids: &mut Vec<Option<u64>>,
-    ) -> Option<i64> {
-        loop {
-            // last key = highest send_order = highest priority
-            let order = *self.by_order.keys().next_back()?;
-            {
-                let Some(queue) = self.by_order.get_mut(&order) else {
-                    unreachable!("key from keys() must exist in same map")
-                };
-                // Expire stale entries at the front of this bucket (FIFO ⟹ front = oldest).
-                while matches!(queue.front(), Some(d) if d.age(now) > max_age) {
-                    let Some(d) = queue.pop_front() else {
-                        unreachable!("front just matched")
-                    };
-                    self.count -= 1;
-                    expired_ids.push(d.id);
-                }
-                if !queue.is_empty() {
-                    return Some(order);
-                }
-            }
-            self.by_order.remove(&order);
-        }
+    /// The highest `send_order` present in this group (i.e. the next to send).
+    fn highest_order(&self) -> Option<i64> {
+        self.by_order.keys().next_back().copied()
     }
 }
 
@@ -176,8 +146,10 @@ impl GroupQueue {
 ///
 /// Datagrams are enqueued with a `send_group_id` and a `send_order`:
 ///
-/// * **Between groups** — groups receive equal bandwidth via round-robin (matching the WebTransport
-///   send-group spec semantics and the behavior of `pq` / `wwruotkk` for streams).
+/// * **Between groups** — groups receive equal bandwidth via round-robin: each round takes at most
+///   one datagram from every non-empty group, in ascending group-ID order. This matches the
+///   WebTransport send-group semantics and is analogous to the fair-share stream send scheduler
+///   used in the `neqo-transport` crate.
 /// * **Within a group** — the datagram with the highest `send_order` is always sent first.
 ///   Equal-order datagrams are served FIFO.
 ///
@@ -189,28 +161,15 @@ impl GroupQueue {
 /// to ensure transmission. In Gecko this happens via
 /// `StreamHasDataToWrite()` → `ForceSend()` → `SendData()` → `ProcessOutput()`.
 #[derive(Debug)]
-pub struct WebTransportDatagramQueue {
-    /// Send groups in insertion order, for stable round-robin scheduling.
-    ///
-    /// The key is a raw `u64` group ID. `0` is used as the sentinel for the
+pub struct DatagramQueue {
+    /// Send groups, keyed by a raw `u64` group ID. `0` is the sentinel for the
     /// null sendGroup (datagrams with no group assigned), and is intentionally
     /// not a valid [`SendGroupId`] value. This differs from the stream
     /// scheduling path, which uses `SendGroupId` directly.
-    groups: IndexMap<u64, GroupQueue>,
-    /// Round-robin cursor: index in `groups` of the first group to serve next
-    /// round.
     ///
-    /// Currently [`Self::drain`] always empties the queue, so every group is
-    /// removed by the end of the call and the cursor position has no effect on
-    /// subsequent calls (new groups start fresh in insertion order). If a
-    /// partial-drain mode is added in the future (e.g. a byte-budget cap so
-    /// that only N bytes are moved to the QUIC layer per call), the cursor
-    /// must be advanced at the end of each [`Self::drain`] call — otherwise
-    /// the first-inserted group would always be served first, violating the
-    /// spec-mandated equal-bandwidth round-robin between send groups. In that
-    /// case, add `test_round_robin_cursor_advances` back to verify cross-call
-    /// fairness under partial drain.
-    rr_next: usize,
+    /// Ordered by group ID so that round-robin is deterministic. A group is
+    /// removed as soon as it becomes empty, so every entry here is non-empty.
+    groups: BTreeMap<u64, GroupQueue>,
     /// Total datagram count across all groups.
     total_count: usize,
     hard_limit: usize,
@@ -218,12 +177,11 @@ pub struct WebTransportDatagramQueue {
     max_age: Duration,
 }
 
-impl WebTransportDatagramQueue {
+impl DatagramQueue {
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            groups: IndexMap::default(),
-            rr_next: 0,
+            groups: BTreeMap::new(),
             total_count: 0,
             hard_limit: DEFAULT_HARD_LIMIT,
             high_water_mark: None,
@@ -261,32 +219,19 @@ impl WebTransportDatagramQueue {
     fn expire_old_datagrams(&mut self, now: Instant) -> Vec<Option<u64>> {
         let max_age = self.max_age;
         let mut all_expired = Vec::new();
-        let mut total_expired = 0usize;
-        let mut empty_groups = Vec::new();
-
-        for (&group_id, group) in &mut self.groups {
-            let expired = group.expire_old(now, max_age);
-            total_expired += expired.len();
-            all_expired.extend(expired);
-            if group.is_empty() {
-                empty_groups.push(group_id);
-            }
-        }
-
-        self.total_count -= total_expired;
-        for gid in empty_groups {
-            self.groups.shift_remove(&gid);
-        }
-        if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-            self.rr_next = 0;
-        }
+        self.groups.retain(|_, group| {
+            all_expired.extend(group.expire_old(now, max_age));
+            !group.is_empty()
+        });
+        self.total_count -= all_expired.len();
         all_expired
     }
 
-    /// Evict the oldest datagram from the globally lowest-priority bucket.
+    /// Evict a datagram from the globally lowest-priority bucket to make room.
     ///
-    /// "Lowest priority" means the lowest `send_order` across all groups. Ties
-    /// are broken by `group_id` (lowest first) for determinism.
+    /// "Lowest priority" means the lowest `send_order` across all groups; ties
+    /// are broken by `group_id` (lowest first) for determinism. Within the
+    /// chosen bucket, the oldest (FIFO-front) datagram is the one evicted.
     fn evict_lowest_priority(&mut self) -> Option<DatagramOutcome> {
         let group_id = self
             .groups
@@ -296,28 +241,19 @@ impl WebTransportDatagramQueue {
             .map(|(gid, _)| *gid)?;
 
         let (dgram, group_empty) = {
-            let Some(group) = self.groups.get_mut(&group_id) else {
-                unreachable!("group_id from min_by_key must exist")
-            };
+            // `group_id` came from `min_by_key` over this same map.
+            let group = self.groups.get_mut(&group_id)?;
             let dgram = group.evict_lowest()?;
             (dgram, group.is_empty())
         };
         self.total_count -= 1;
-        let lo = self
-            .groups
-            .get(&group_id)
-            .and_then(GroupQueue::lowest_order)
-            .unwrap_or(i64::MAX);
         qdebug!(
-            "Queue at hard limit ({}), dropping datagram {:?} from group {group_id} (lowest priority order {lo})",
+            "Queue at hard limit ({}), dropping datagram {:?} from group {group_id}",
             self.hard_limit,
             dgram.id,
         );
         if group_empty {
-            self.groups.shift_remove(&group_id);
-            if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-                self.rr_next = 0;
-            }
+            self.groups.remove(&group_id);
         }
         dgram.id.map(DatagramOutcome::Overflowed)
     }
@@ -386,75 +322,30 @@ impl WebTransportDatagramQueue {
     /// already validates size before calling [`Self::enqueue`], this error should
     /// not occur in practice.
     pub fn drain(&mut self, now: Instant) -> (Vec<Option<u64>>, Vec<QueuedDatagram>) {
-        let mut expired = self.expire_old_datagrams(now);
-        let mut to_send = Vec::new();
+        // Expiry runs once, up front: after this every remaining datagram is fresh.
+        let expired = self.expire_old_datagrams(now);
+        let mut to_send = Vec::with_capacity(self.total_count);
 
-        // Round-robin drain: one datagram per group per round until empty.
-        loop {
-            if self.groups.is_empty() {
-                break;
-            }
-
-            let n = self.groups.len();
-            let group_ids: Vec<u64> = (0..n)
-                .map(|i| {
-                    *self
-                        .groups
-                        .get_index((self.rr_next + i) % n)
-                        .expect("idx < len")
-                        .0
-                })
-                .collect();
-
-            let mut any_this_round = false;
-
-            for group_id in group_ids {
-                let mut expired_ids = Vec::new();
-                let order = match self.groups.get_mut(&group_id) {
-                    None => continue,
-                    Some(group) => group.highest_valid_order(now, self.max_age, &mut expired_ids),
-                };
-
-                self.total_count -= expired_ids.len();
-                expired.extend(expired_ids);
-
-                let Some(order) = order else {
-                    self.groups.shift_remove(&group_id);
-                    if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-                        self.rr_next = 0;
-                    }
-                    continue;
-                };
-
-                let (dgram, group_empty) = {
-                    let Some(group) = self.groups.get_mut(&group_id) else {
-                        unreachable!("key must exist")
-                    };
-                    let Some(dgram) = group.pop_front(order) else {
-                        unreachable!("order from highest_valid_order must exist")
-                    };
-                    (dgram, group.is_empty())
-                };
-                self.total_count -= 1;
+        // Round-robin drain: one datagram per group per round until every group is
+        // empty. `retain` drops each group as it runs dry, so the next round only
+        // visits groups that still have something to send.
+        while !self.groups.is_empty() {
+            self.groups.retain(|group_id, group| {
+                let order = group
+                    .highest_order()
+                    .expect("an empty group is removed as soon as it drains");
+                let dgram = group
+                    .pop_front(order)
+                    .expect("the highest-order bucket is non-empty");
                 qtrace!(
                     "Datagram {:?} drained (group={group_id}, order={order})",
                     dgram.id
                 );
                 to_send.push(dgram);
-
-                if group_empty {
-                    self.groups.shift_remove(&group_id);
-                    if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-                        self.rr_next = 0;
-                    }
-                }
-                any_this_round = true;
-            }
-
-            if !any_this_round {
-                break;
-            }
+                !group.is_empty()
+            });
         }
+        self.total_count = 0;
 
         (expired, to_send)
     }
@@ -472,7 +363,7 @@ impl WebTransportDatagramQueue {
     }
 }
 
-impl Default for WebTransportDatagramQueue {
+impl Default for DatagramQueue {
     fn default() -> Self {
         Self::new()
     }
@@ -484,7 +375,7 @@ mod tests {
 
     use super::*;
 
-    fn drain_ids(q: &mut WebTransportDatagramQueue) -> Vec<u64> {
+    fn drain_ids(q: &mut DatagramQueue) -> Vec<u64> {
         let (_, to_send) = q.drain(now());
         to_send
             .into_iter()
@@ -496,7 +387,7 @@ mod tests {
 
     #[test]
     fn queue_basic() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
 
         let (below, _) = q.enqueue(Bytes::from(vec![1, 2, 3]), Some(1), 3, t, 0, 0);
@@ -506,7 +397,7 @@ mod tests {
 
     #[test]
     fn high_water_mark() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         q.set_high_water_mark(2.0);
         let t = now();
 
@@ -518,7 +409,7 @@ mod tests {
 
     #[test]
     fn drain_basic() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
 
         q.enqueue(Bytes::from(vec![0, 1]), Some(1), 1, t, 0, 0);
@@ -534,7 +425,7 @@ mod tests {
 
     #[test]
     fn hard_limit_untracked_datagram_drops_silently() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.hard_limit = 1;
 
@@ -550,7 +441,7 @@ mod tests {
 
     #[test]
     fn max_age_expiration() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t0 = now();
         q.set_max_age(100.0, t0);
         q.enqueue(Bytes::from(vec![1]), Some(1), 1, t0, 0, 0);
@@ -566,7 +457,7 @@ mod tests {
 
     #[test]
     fn max_age_expiration_untracked_datagram_reports_nothing() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(100.0, t0);
 
@@ -580,7 +471,7 @@ mod tests {
 
     #[test]
     fn drain() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
 
         queue.enqueue(Bytes::from(vec![0, 1]), Some(1), 1, t, 0, 0);
@@ -599,7 +490,7 @@ mod tests {
     fn drain_reports_every_expired_datagram() {
         // Untracked datagrams produce no outcome, but the caller still has to be
         // able to count them, so `drain` reports one entry per expired datagram.
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t0 = now();
         q.set_max_age(50.0, t0);
 
@@ -613,7 +504,7 @@ mod tests {
 
     #[test]
     fn below_watermark_recovers_after_drain() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.set_high_water_mark(2.0);
 
@@ -634,7 +525,7 @@ mod tests {
     fn priority_order_within_group() {
         // Enqueue low-priority datagrams first, then high-priority.
         // The queue should send highest send_order first.
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.enqueue(Bytes::from(vec![0, 1]), Some(1), 1, t, 0, 10); // order 10
         q.enqueue(Bytes::from(vec![0, 2]), Some(2), 1, t, 0, 30); // order 30 (highest)
@@ -646,7 +537,7 @@ mod tests {
 
     #[test]
     fn fifo_within_same_order() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         // All same group, same order → FIFO.
         let t = now();
         q.enqueue(Bytes::from(vec![0, 10]), Some(10), 1, t, 0, 5);
@@ -658,7 +549,7 @@ mod tests {
 
     #[test]
     fn priority_mixed_orders_same_group() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.enqueue(Bytes::from(vec![0, 1]), Some(1), 1, t, 0, 1);
         q.enqueue(Bytes::from(vec![0, 2]), Some(2), 1, t, 0, 3);
@@ -673,7 +564,7 @@ mod tests {
 
     #[test]
     fn round_robin_two_groups() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         // Group A (id 0): 3 datagrams, Group B (id 1): 2 datagrams.
         // Round-robin should interleave: A, B, A, B, A.
         let t = now();
@@ -691,7 +582,7 @@ mod tests {
         // Each group has datagrams at different send_orders.
         // Group 0: order 10, order 5
         // Group 1: order 20, order 1
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.enqueue(Bytes::from(vec![0, 1]), Some(1), 1, t, 0, 10);
         q.enqueue(Bytes::from(vec![0, 2]), Some(2), 1, t, 0, 5);
@@ -705,7 +596,7 @@ mod tests {
 
     #[test]
     fn round_robin_three_groups() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         // One datagram per group; should all be sent in one round.
         q.enqueue(Bytes::from(vec![0, 1]), Some(1), 1, t, 10, 0);
@@ -719,7 +610,7 @@ mod tests {
 
     #[test]
     fn hard_limit_evicts_lowest_priority() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         q.hard_limit = 3;
 
         // Fill with order-0 datagrams.
@@ -741,7 +632,7 @@ mod tests {
 
     #[test]
     fn hard_limit_evicts_across_groups() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.hard_limit = 2;
 
@@ -758,7 +649,7 @@ mod tests {
     #[test]
     fn hard_limit_same_count() {
         // Backwards-compatibility: with one group and equal priorities, behaves like before.
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.hard_limit = 3;
         q.enqueue(Bytes::from(vec![1]), Some(1), 1, t, 0, 0);
@@ -772,7 +663,7 @@ mod tests {
 
     #[test]
     fn max_age_expiry_during_drain() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.set_max_age(50.0, t);
 
@@ -789,7 +680,7 @@ mod tests {
 
     #[test]
     fn max_age_expiry_high_priority_bucket() {
-        let mut q = WebTransportDatagramQueue::new();
+        let mut q = DatagramQueue::new();
         let t = now();
         q.set_max_age(50.0, t);
 
