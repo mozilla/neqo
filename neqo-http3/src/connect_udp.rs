@@ -62,11 +62,17 @@ pub trait ClientSession {
 
     /// Send a connect-udp datagram.
     ///
+    /// The `send_group_id` and `send_order` parameters are currently ignored
+    /// for `ConnectUdp` sessions (they are effectively forced to `0/0` in the
+    /// protocol implementation). They are exposed for API compatibility and
+    /// future use; callers should not rely on them having any effect.
+    ///
     /// # Errors
     ///
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    /// The function returns `NotAvailable` if QUIC datagrams are not enabled.
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
@@ -405,13 +411,19 @@ impl ServerSession {
         self.stream_handler.stream_id()
     }
 
-    /// Send connect-udp datagram.
+    /// Send CONNECT-UDP datagram.
+    ///
+    /// The `send_group_id` and `send_order` parameters are currently ignored by
+    /// the CONNECT-UDP implementation. They are accepted for API compatibility
+    /// only and do not affect how datagrams are sent on the wire.
     ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// The function returns `TooMuchData` if the supplied buffer is bigger than
     /// the allowed remote datagram size.
+    /// The function may also return `NotAvailable` if QUIC DATAGRAM support is
+    /// not enabled for this connection.
     pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         buf: &[u8],
