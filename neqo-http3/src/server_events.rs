@@ -332,11 +332,21 @@ impl WebTransportRequest {
 
     /// Send `WebTransport` datagram.
     ///
+    /// The `send_group_id` and `send_order` parameters are used to influence
+    /// how datagrams are scheduled for transmission. Datagrams with the same
+    /// `send_group_id` may be scheduled relative to each other using
+    /// `send_order` (for example, lower `send_order` values are sent earlier,
+    /// subject to congestion control and packetization). For default behavior
+    /// where no special scheduling is required, pass `0` for both
+    /// `send_group_id` and `send_order`.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size.
+    /// The function returns `TooMuchData` if the supplied buffer is bigger
+    /// than the allowed remote datagram size.
+    /// It may return `NotAvailable` if QUIC datagrams are not enabled for the
+    /// connection, even if the supplied buffer would otherwise be acceptable.
     pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         buf: &[u8],
@@ -460,13 +470,19 @@ impl ConnectUdpRequest {
         self.stream_handler.stream_id()
     }
 
-    /// Send connect-udp datagram.
+    /// Send CONNECT-UDP datagram.
+    ///
+    /// The `send_group_id` and `send_order` parameters are currently ignored by
+    /// the CONNECT-UDP implementation. They are accepted for API compatibility
+    /// only and do not affect how datagrams are sent on the wire.
     ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// The function returns `TooMuchData` if the supplied buffer is bigger than
     /// the allowed remote datagram size.
+    /// The function may also return `NotAvailable` if QUIC DATAGRAM support is
+    /// not enabled for this connection.
     pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         buf: &[u8],

@@ -745,7 +745,6 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn record_bytes_sent(&mut self, _bytes: u64) {}
 
-    #[expect(dead_code, reason = "later use")]
     fn record_bytes_sent_overhead(&mut self, _bytes: u64) {}
 
     fn record_bytes_received(&mut self, _bytes: u64) {}

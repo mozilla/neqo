@@ -160,9 +160,12 @@ impl GroupQueue {
 ///
 /// Datagrams are enqueued with a `send_group_id` and a `send_order`:
 ///
-/// * **Between groups** — groups receive equal bandwidth via round-robin
-///   (matching the WebTransport send-group spec semantics and the behavior of
-///   `pq` / `wwruotkk` for streams).
+/// * **Between groups** — groups receive equal bandwidth via round-robin:
+///   the scheduler walks the active groups in insertion order and, on each
+///   turn, allows at most one datagram to be sent from each group (if any are
+///   queued). This matches the WebTransport send-group semantics and is
+///   analogous to the fair-share stream send scheduler used in the
+///   `neqo-transport` crate.
 /// * **Within a group** — the datagram with the highest `send_order` is always
 ///   sent first. Equal-order datagrams are served FIFO.
 ///
@@ -360,10 +363,7 @@ impl WebTransportDatagramQueue {
     /// [`ExtendedConnectSession::send_datagram`][super::session::ExtendedConnectSession::send_datagram]
     /// already validates size before calling [`Self::enqueue`], this error should
     /// not occur in practice.
-    pub fn drain(
-        &mut self,
-        now: Instant,
-    ) -> (Vec<(u64, DatagramOutcome)>, Vec<QueuedDatagram>) {
+    pub fn drain(&mut self, now: Instant) -> (Vec<(u64, DatagramOutcome)>, Vec<QueuedDatagram>) {
         let mut expired = Vec::new();
         let mut to_send = Vec::new();
 
@@ -377,32 +377,34 @@ impl WebTransportDatagramQueue {
                 break;
             }
 
-            let n = self.groups.len();
-            let group_ids: Vec<u64> = (0..n)
-                .map(|i| *self.groups.get_index((self.rr_next + i) % n).unwrap().0)
-                .collect();
-
+            let to_visit = self.groups.len();
+            let mut visited = 0;
             let mut any_this_round = false;
+            let mut expired_ids = Vec::new();
 
-            for group_id in group_ids {
-                let mut expired_ids = Vec::new();
-                let order = match self.groups.get_mut(&group_id) {
-                    None => continue,
-                    Some(group) => group.highest_valid_order(now, self.max_age, &mut expired_ids),
-                };
+            while visited < to_visit && !self.groups.is_empty() {
+                let idx = self.rr_next % self.groups.len();
+                let group_id = *self.groups.get_index(idx).unwrap().0;
+                expired_ids.clear();
+                let order = self.groups.get_mut(&group_id).unwrap().highest_valid_order(
+                    now,
+                    self.max_age,
+                    &mut expired_ids,
+                );
 
-                for id in expired_ids {
+                for id in &expired_ids {
                     self.total_count -= 1;
-                    expired.push((id, DatagramOutcome::DroppedTooOld));
+                    expired.push((*id, DatagramOutcome::DroppedTooOld));
                 }
 
                 let order = match order {
                     Some(o) => o,
                     None => {
                         self.groups.shift_remove(&group_id);
-                        if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
+                        if !self.groups.is_empty() && self.rr_next >= self.groups.len() {
                             self.rr_next = 0;
                         }
+                        visited += 1;
                         continue;
                     }
                 };
@@ -421,11 +423,14 @@ impl WebTransportDatagramQueue {
 
                 if group_empty {
                     self.groups.shift_remove(&group_id);
-                    if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
+                    if !self.groups.is_empty() && self.rr_next >= self.groups.len() {
                         self.rr_next = 0;
                     }
+                } else {
+                    self.rr_next = (idx + 1) % self.groups.len();
                 }
                 any_this_round = true;
+                visited += 1;
             }
 
             if !any_this_round {
@@ -692,6 +697,10 @@ mod tests {
 
         let (_, to_send) = q.drain(t1);
         let sent_ids: Vec<_> = to_send.iter().map(|d| d.id).collect();
-        assert_eq!(sent_ids, vec![2], "lower-priority-but-fresh datagram is sent");
+        assert_eq!(
+            sent_ids,
+            vec![2],
+            "lower-priority-but-fresh datagram is sent"
+        );
     }
 }
