@@ -210,7 +210,7 @@ impl Http3ServerHandler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<crate::features::extended_connect::stats::WebTransportSessionStats> {
         self.needs_processing = true;
         self.base_handler
             .webtransport_close_session(conn, session_id, error, message, now)

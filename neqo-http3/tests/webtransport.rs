@@ -622,6 +622,7 @@ fn wt_export_keying_material_zero_length() {
     );
 }
 
+
 #[test]
 fn wt_export_keying_material_invalid_session() {
     let (mut client, mut server) = connect();
@@ -637,5 +638,218 @@ fn wt_export_keying_material_invalid_session() {
                 &mut [0u8; 32]
             )
             .is_err()
+    );
+}
+
+#[test]
+fn wt_session_stats_basic() {
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+
+    // Get initial stats
+    let stats = client.webtransport_session_stats(wt_session.stream_id());
+    assert!(stats.is_ok(), "Should have stats for active session");
+    let stats = stats.unwrap();
+
+    // Session stats track datagrams, not streams, so initially should be 0
+    assert_eq!(stats.bytes_sent, 0, "No datagrams sent yet");
+    assert_eq!(stats.bytes_received, 0, "No datagrams received yet");
+    assert_eq!(stats.datagrams_sent, 0);
+    assert_eq!(stats.datagrams_received, 0);
+}
+
+#[test]
+fn wt_session_stats_after_datagram_transfer() {
+    const DATAGRAM_DATA: &[u8] = &[1, 2, 3, 4, 5];
+
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let session_id = wt_session.stream_id();
+
+    // Get initial stats
+    let initial_stats = client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(initial_stats.bytes_sent, 0);
+    assert_eq!(initial_stats.datagrams_sent, 0);
+
+    // Send a datagram
+    client
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+
+    // Get stats after transfer
+    let final_stats = client.webtransport_session_stats(session_id).unwrap();
+
+    // Verify datagram stats increased
+    assert_eq!(
+        final_stats.datagrams_sent, 1,
+        "Should have sent one datagram"
+    );
+    assert!(
+        final_stats.bytes_sent >= DATAGRAM_DATA.len() as u64,
+        "bytes_sent should be at least datagram size: {} >= {}",
+        final_stats.bytes_sent,
+        DATAGRAM_DATA.len()
+    );
+}
+
+#[test]
+fn wt_transport_stats_populated() {
+    let (mut client, mut server) = connect();
+    let _wt_session = create_wt_session(&mut client, &mut server);
+
+    // Get transport-level stats
+    let transport_stats = client.transport_stats();
+
+    // Verify transport stats are populated
+    assert!(
+        transport_stats.packets_tx > 0,
+        "Should have transmitted packets"
+    );
+    assert!(
+        transport_stats.packets_rx > 0,
+        "Should have received packets"
+    );
+    assert!(transport_stats.bytes_rx > 0, "Should have received bytes");
+
+    // RTT may or may not be measured yet in test environment
+    // Just verify the fields exist and have reasonable values
+    if transport_stats.rtt > std::time::Duration::ZERO {
+        assert!(
+            transport_stats.rttvar <= transport_stats.rtt,
+            "RTT variation should not exceed smoothed RTT"
+        );
+    }
+    if transport_stats.min_rtt > std::time::Duration::ZERO {
+        assert!(
+            transport_stats.min_rtt <= transport_stats.rtt,
+            "min_rtt should be <= smoothed RTT"
+        );
+    }
+
+    // Congestion control stats
+    assert!(transport_stats.cwnd > 0, "cwnd should be positive");
+}
+
+#[test]
+fn wt_stats_track_packets() {
+    const BUF: &[u8] = &[0; 100];
+
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+
+    let initial_stats = client.transport_stats();
+    let initial_packets_tx = initial_stats.packets_tx;
+    let initial_packets_rx = initial_stats.packets_rx;
+
+    // Send data to generate more packets
+    let wt_stream = client
+        .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
+        .unwrap();
+    send_data_client(&mut client, &mut server, wt_stream, BUF);
+    receive_data_server(&mut client, &mut server, wt_stream, true, BUF, false);
+
+    let final_stats = client.transport_stats();
+
+    // Verify packet counts increased
+    assert!(
+        final_stats.packets_tx > initial_packets_tx,
+        "packets_tx should increase: {} -> {}",
+        initial_packets_tx,
+        final_stats.packets_tx
+    );
+    assert!(
+        final_stats.packets_rx > initial_packets_rx,
+        "packets_rx should increase: {} -> {}",
+        initial_packets_rx,
+        final_stats.packets_rx
+    );
+}
+
+#[test]
+fn wt_stats_at_session_close() {
+    const DATAGRAM_DATA: &[u8] = &[1, 2, 3, 4, 5];
+
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    let session_id = wt_session.stream_id();
+
+    // Send a datagram to have some stats
+    client
+        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now(), 0, 0)
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+
+    // Get stats before close
+    let stats_before = client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats_before.datagrams_sent, 1);
+
+    // Close the session - webtransport_close_session returns stats at close time
+    let close_stats = client
+        .webtransport_close_session(session_id, 0, "", now())
+        .unwrap();
+
+    // The stats returned at close should match the pre-close stats
+    assert_eq!(
+        close_stats.datagrams_sent, stats_before.datagrams_sent,
+        "Close stats should match pre-close stats"
+    );
+}
+
+#[test]
+fn wt_stats_rtt_reasonable() {
+    let (mut client, mut server) = connect();
+    let _wt_session = create_wt_session(&mut client, &mut server);
+
+    let stats = client.transport_stats();
+
+    // For loopback connection, RTT should be small
+    assert!(
+        stats.rtt < std::time::Duration::from_secs(1),
+        "RTT should be < 1s for loopback: {:?}",
+        stats.rtt
+    );
+    assert!(
+        stats.min_rtt < std::time::Duration::from_secs(1),
+        "min_rtt should be < 1s for loopback: {:?}",
+        stats.min_rtt
+    );
+
+    // Sanity check: min_rtt should be <= smoothed RTT
+    assert!(
+        stats.min_rtt <= stats.rtt,
+        "min_rtt ({:?}) should be <= smoothed RTT ({:?})",
+        stats.min_rtt,
+        stats.rtt
+    );
+}
+
+#[test]
+fn wt_stats_bytes_acknowledged() {
+    const DATA: &[u8] = &[1; 500];
+
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+
+    let initial_stats = client.transport_stats();
+    let initial_acked = initial_stats.bytes_acked;
+
+    // Send data and wait for ACK
+    let wt_stream = client
+        .webtransport_create_stream(wt_session.stream_id(), StreamType::UniDi)
+        .unwrap();
+    send_data_client(&mut client, &mut server, wt_stream, DATA);
+
+    // Ensure packets are acknowledged
+    receive_data_server(&mut client, &mut server, wt_stream, true, DATA, false);
+
+    let final_stats = client.transport_stats();
+
+    // bytes_acked should increase
+    assert!(
+        final_stats.bytes_acked > initial_acked,
+        "bytes_acked should increase after ACK: {} -> {}",
+        initial_acked,
+        final_stats.bytes_acked
     );
 }

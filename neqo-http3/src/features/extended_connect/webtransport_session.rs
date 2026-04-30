@@ -20,6 +20,7 @@ use crate::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         send_group::{SendGroup, SendGroupId},
         session::{DgramContextIdError, Protocol, State},
+        stats::WebTransportSessionStats,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
@@ -39,6 +40,8 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups for this session.
     send_groups: HashMap<SendGroupId, SendGroup>,
+    /// Session-level statistics.
+    stats: WebTransportSessionStats,
 }
 
 impl Display for Session {
@@ -59,6 +62,7 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashMap::default(),
+            stats: WebTransportSessionStats::new(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -82,6 +86,52 @@ impl Session {
     #[expect(dead_code, reason = "pending send group routing integration")]
     pub(crate) fn send_group_session(&self, group_id: SendGroupId) -> Option<StreamId> {
         self.send_groups.get(&group_id).map(|g| g.session_id())
+    }
+
+    pub(crate) fn record_bytes_sent(&mut self, bytes: u64) {
+        self.stats.bytes_sent += bytes;
+    }
+
+    pub(crate) fn record_bytes_received(&mut self, bytes: u64) {
+        self.stats.bytes_received += bytes;
+    }
+
+    pub(crate) fn record_datagram_sent(&mut self) {
+        self.stats.datagrams_sent += 1;
+    }
+
+    pub(crate) fn record_datagram_received(&mut self) {
+        self.stats.datagrams_received += 1;
+    }
+
+    pub(crate) fn record_stream_opened(&mut self, local: bool) {
+        if local {
+            self.stats.streams_opened_local += 1;
+        } else {
+            self.stats.streams_opened_remote += 1;
+        }
+    }
+
+    #[expect(dead_code, reason = "pending datagram stats update")]
+    pub(crate) fn record_datagram_expired_outgoing(&mut self) {
+        self.stats.expired_outgoing += 1;
+    }
+
+    #[expect(dead_code, reason = "pending datagram stats update")]
+    pub(crate) fn record_datagram_lost_outgoing(&mut self) {
+        self.stats.lost_outgoing += 1;
+    }
+
+    #[expect(dead_code, reason = "pending datagram stats update")]
+    pub(crate) fn record_datagram_dropped_incoming(&mut self) {
+        self.stats.dropped_incoming += 1;
+    }
+
+    #[must_use]
+    pub(crate) fn stats(&self) -> WebTransportSessionStats {
+        let mut stats = self.stats.clone();
+        stats.timestamp = Some(Instant::now());
+        stats
     }
 }
 
@@ -244,6 +294,30 @@ impl Protocol for Session {
 
     fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         Session::validate_send_group(self, group_id)
+    }
+
+    fn record_bytes_sent(&mut self, bytes: u64) {
+        Session::record_bytes_sent(self, bytes);
+    }
+
+    fn record_bytes_received(&mut self, bytes: u64) {
+        Session::record_bytes_received(self, bytes);
+    }
+
+    fn record_datagram_sent(&mut self) {
+        Session::record_datagram_sent(self);
+    }
+
+    fn record_datagram_received(&mut self) {
+        Session::record_datagram_received(self);
+    }
+
+    fn record_stream_opened(&mut self, local: bool) {
+        Session::record_stream_opened(self, local);
+    }
+
+    fn stats(&self) -> Option<WebTransportSessionStats> {
+        Some(Session::stats(self))
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
