@@ -9,7 +9,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use indexmap::IndexMap;
 use neqo_common::{qdebug, qtrace};
 
 pub const DEFAULT_HARD_LIMIT: usize = 1000;
@@ -163,38 +162,9 @@ impl GroupQueue {
         expired
     }
 
-    /// Find the highest `send_order` that has non-expired datagrams.
-    ///
-    /// Removes expired entries encountered during the scan and appends their IDs
-    /// to `expired_ids`. Returns the winning `send_order`, or `None` if the group
-    /// is empty after expiry.
-    fn highest_valid_order(
-        &mut self,
-        now: Instant,
-        max_age: Duration,
-        expired_ids: &mut Vec<Option<DatagramId>>,
-    ) -> Option<i64> {
-        loop {
-            // last key = highest send_order = highest priority
-            let order = *self.by_order.keys().next_back()?;
-            {
-                let Some(queue) = self.by_order.get_mut(&order) else {
-                    unreachable!("key from keys() must exist in same map")
-                };
-                // Expire stale entries at the front of this bucket (FIFO ⟹ front = oldest).
-                while matches!(queue.front(), Some(d) if d.age(now) > max_age) {
-                    let Some(d) = queue.pop_front() else {
-                        unreachable!("front just matched")
-                    };
-                    self.count -= 1;
-                    expired_ids.push(d.id);
-                }
-                if !queue.is_empty() {
-                    return Some(order);
-                }
-            }
-            self.by_order.remove(&order);
-        }
+    /// The highest `send_order` present in this group (i.e. the next to send).
+    fn highest_order(&self) -> Option<i64> {
+        self.by_order.keys().next_back().copied()
     }
 
     /// The timestamp of the longest-queued datagram in this group, across
@@ -216,8 +186,10 @@ impl GroupQueue {
 ///
 /// Datagrams are enqueued with a `send_group_id` and a `send_order`:
 ///
-/// * **Between groups** — groups receive equal bandwidth via round-robin (matching the WebTransport
-///   send-group spec semantics and the behavior of `pq` / `wwruotkk` for streams).
+/// * **Between groups** — groups receive equal bandwidth via round-robin: each round takes at most
+///   one datagram from every non-empty group, in ascending group-ID order. This matches the
+///   WebTransport send-group semantics and is analogous to the fair-share stream send scheduler
+///   used in the `neqo-transport` crate.
 /// * **Within a group** — the datagram with the highest `send_order` is always sent first.
 ///   Equal-order datagrams are served FIFO.
 ///
@@ -237,21 +209,20 @@ impl GroupQueue {
 /// deadline; nothing in this design covers that part of the spec.
 #[derive(Debug)]
 pub struct DatagramQueue {
-    /// Send groups in insertion order, for stable round-robin scheduling.
-    ///
-    /// The key is a raw `u64` group ID. `0` is used as the sentinel for the
+    /// Send groups, keyed by a raw `u64` group ID. `0` is the sentinel for the
     /// null sendGroup (datagrams with no group assigned), and is intentionally
     /// not a valid [`SendGroupId`] value. This differs from the stream
     /// scheduling path, which uses `SendGroupId` directly.
-    groups: IndexMap<u64, GroupQueue>,
-    /// Round-robin cursor: index in `groups` of the first group to serve next
-    /// round.
     ///
-    /// [`Self::drain`] is budget-limited, so a call can stop mid-round. When
-    /// that happens the cursor is advanced to the group that would have gone
-    /// next, so a later call resumes fairly instead of always starting at the
-    /// same group — see `round_robin_cursor_advances_under_partial_drain`.
-    rr_next: usize,
+    /// Ordered by group ID so that round-robin is deterministic. A group is
+    /// removed as soon as it becomes empty, so every entry here is non-empty.
+    groups: BTreeMap<u64, GroupQueue>,
+    /// Group ID at which the next round-robin round starts. Persisted across
+    /// [`Self::drain`] calls so a drain that stops on its budget resumes at the
+    /// group after the last one served; restarting at the lowest group ID every
+    /// time would starve higher-numbered groups whenever the budget is smaller
+    /// than the number of groups.
+    rr_next: u64,
     /// Total datagram count across all groups.
     total_count: usize,
     hard_limit: usize,
@@ -261,9 +232,9 @@ pub struct DatagramQueue {
 
 impl DatagramQueue {
     #[must_use]
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
-            groups: IndexMap::default(),
+            groups: BTreeMap::new(),
             rr_next: 0,
             total_count: 0,
             hard_limit: DEFAULT_HARD_LIMIT,
@@ -296,25 +267,11 @@ impl DatagramQueue {
     pub fn expire(&mut self, now: Instant) -> Vec<Option<DatagramId>> {
         let max_age = self.max_age;
         let mut all_expired = Vec::new();
-        let mut total_expired = 0usize;
-        let mut empty_groups = Vec::new();
-
-        for (&group_id, group) in &mut self.groups {
-            let expired = group.expire_old(now, max_age);
-            total_expired += expired.len();
-            all_expired.extend(expired);
-            if group.is_empty() {
-                empty_groups.push(group_id);
-            }
-        }
-
-        self.total_count -= total_expired;
-        for gid in empty_groups {
-            self.groups.shift_remove(&gid);
-        }
-        if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-            self.rr_next = 0;
-        }
+        self.groups.retain(|_, group| {
+            all_expired.extend(group.expire_old(now, max_age));
+            !group.is_empty()
+        });
+        self.total_count -= all_expired.len();
         all_expired
     }
 
@@ -346,21 +303,13 @@ impl DatagramQueue {
             (dgram, group.is_empty())
         };
         self.total_count -= 1;
-        let lo = self
-            .groups
-            .get(&group_id)
-            .and_then(GroupQueue::lowest_order)
-            .unwrap_or(i64::MAX);
         qdebug!(
-            "Queue at hard limit ({}), dropping datagram {:?} from group {group_id} (lowest priority order {lo})",
+            "Queue at hard limit ({}), dropping datagram {:?} from group {group_id}",
             self.hard_limit,
             dgram.id,
         );
         if group_empty {
-            self.groups.shift_remove(&group_id);
-            if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-                self.rr_next = 0;
-            }
+            self.groups.remove(&group_id);
         }
         Some(dgram)
     }
@@ -465,82 +414,48 @@ impl DatagramQueue {
         now: Instant,
         budget: usize,
     ) -> (Vec<Option<DatagramId>>, Vec<QueuedDatagram>) {
-        // Expiry is not a send, so it must not be gated on `budget`: otherwise
-        // stale datagrams pile up while the QUIC layer's queue is full.
-        let mut expired = self.expire(now);
-        let mut to_send = Vec::new();
+        // Expiry runs once, up front: after this every remaining datagram is fresh.
+        // It is not gated on `budget`, since expiry is not a send: otherwise stale
+        // datagrams would pile up while the QUIC layer's queue is full.
+        let expired = self.expire(now);
+        let count = budget.min(self.total_count);
+        let mut to_send = Vec::with_capacity(count);
 
-        // Round-robin drain: one datagram per group per round, until every
-        // group is empty or `budget` is spent.
-        'rounds: while !self.groups.is_empty() {
-            let n = self.groups.len();
-            let group_ids: Vec<u64> = (0..n)
-                .map(|i| {
-                    *self
-                        .groups
-                        .get_index((self.rr_next + i) % n)
-                        .expect("idx < len")
-                        .0
-                })
-                .collect();
+        // Round-robin drain: one datagram per group per round, resuming at
+        // `rr_next` and wrapping back to the lowest group ID, until the budget
+        // is spent. A group is removed as soon as it runs dry, so the next
+        // round only visits groups that still have something to send.
+        while to_send.len() < count {
+            let group_id = self
+                .groups
+                .range(self.rr_next..)
+                .chain(self.groups.iter())
+                .map(|(id, _)| *id)
+                .next()
+                .expect("a queue with datagrams left has a non-empty group");
 
-            let mut any_this_round = false;
-
-            for group_id in group_ids {
-                if to_send.len() >= budget {
-                    self.rr_next = self
-                        .groups
-                        .get_index_of(&group_id)
-                        .expect("group_id was just read from this map, before any removal below");
-                    break 'rounds;
-                }
-
-                let mut expired_ids = Vec::new();
-                let order = match self.groups.get_mut(&group_id) {
-                    None => continue,
-                    Some(group) => group.highest_valid_order(now, self.max_age, &mut expired_ids),
-                };
-
-                self.total_count -= expired_ids.len();
-                expired.extend(expired_ids);
-
-                let Some(order) = order else {
-                    self.groups.shift_remove(&group_id);
-                    if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-                        self.rr_next = 0;
-                    }
-                    continue;
-                };
-
-                let (dgram, group_empty) = {
-                    let Some(group) = self.groups.get_mut(&group_id) else {
-                        unreachable!("key must exist")
-                    };
-                    let Some(dgram) = group.pop_front(order) else {
-                        unreachable!("order from highest_valid_order must exist")
-                    };
-                    (dgram, group.is_empty())
-                };
-                self.total_count -= 1;
-                qtrace!(
-                    "Datagram {:?} drained (group={group_id}, order={order})",
-                    dgram.id
-                );
-                to_send.push(dgram);
-
-                if group_empty {
-                    self.groups.shift_remove(&group_id);
-                    if self.rr_next >= self.groups.len() && !self.groups.is_empty() {
-                        self.rr_next = 0;
-                    }
-                }
-                any_this_round = true;
+            let group = self
+                .groups
+                .get_mut(&group_id)
+                .expect("group_id was just read from this map");
+            let order = group
+                .highest_order()
+                .expect("an empty group is removed as soon as it drains");
+            let dgram = group
+                .pop_front(order)
+                .expect("the highest-order bucket is non-empty");
+            let drained = group.is_empty();
+            qtrace!(
+                "Datagram {:?} drained (group={group_id}, order={order})",
+                dgram.id
+            );
+            to_send.push(dgram);
+            if drained {
+                self.groups.remove(&group_id);
             }
-
-            if !any_this_round {
-                break;
-            }
+            self.rr_next = group_id.wrapping_add(1);
         }
+        self.total_count -= to_send.len();
 
         (expired, to_send)
     }
@@ -550,9 +465,9 @@ impl DatagramQueue {
     pub fn take_all(&mut self) -> Vec<QueuedDatagram> {
         self.total_count = 0;
         self.rr_next = 0;
-        self.groups
-            .drain(..)
-            .flat_map(|(_, group)| group.by_order.into_values().flatten())
+        std::mem::take(&mut self.groups)
+            .into_values()
+            .flat_map(|group| group.by_order.into_values().flatten())
             .collect()
     }
 

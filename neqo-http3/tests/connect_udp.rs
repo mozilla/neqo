@@ -125,7 +125,7 @@ fn exchange_packets_through_proxy(
     qinfo!("Processing client_inner");
     while let Some(dgram) = client_inner.process_output(now()).dgram() {
         client_outer
-            .connect_udp_send_datagram(connect_udp_session_id, dgram.as_ref(), None, now(), 0, 0)
+            .connect_udp_send_datagram(connect_udp_session_id, dgram.as_ref(), None, now())
             .unwrap();
     }
 
@@ -173,7 +173,7 @@ fn exchange_packets_through_proxy(
     qinfo!("Processing proxy");
     for dgram in server_out {
         proxy_session
-            .send_datagram(dgram.as_ref(), None, now(), 0, 0)
+            .send_datagram(dgram.as_ref(), None, now())
             .unwrap();
     }
     let mut proxy_out = vec![];
@@ -212,7 +212,7 @@ fn session_lifecycle(client_closes: bool) {
     let (mut client, mut proxy, session_id, proxy_session) = establish_new_session();
 
     client
-        .connect_udp_send_datagram(session_id, PING, None, now(), 0, 0)
+        .connect_udp_send_datagram(session_id, PING, None, now())
         .unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
@@ -231,9 +231,7 @@ fn session_lifecycle(client_closes: bool) {
     assert_eq!(session_id, id);
     assert_eq!(&datagram, PING);
 
-    proxy_session
-        .send_datagram(PONG, None, now(), 0, 0)
-        .unwrap();
+    proxy_session.send_datagram(PONG, None, now()).unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -372,7 +370,7 @@ fn send_dgram_on_non_active_session() {
     let (mut client, _proxy, connect_udp_session_id) = initiate_new_session();
 
     assert_eq!(
-        client.connect_udp_send_datagram(connect_udp_session_id, &[], None, now(), 0, 0),
+        client.connect_udp_send_datagram(connect_udp_session_id, &[], None, now()),
         Err(Error::InvalidStreamId)
     );
 }
@@ -401,9 +399,7 @@ fn server_datagram_before_accept() {
         let proxy_accept = proxy.process_output(now()).dgram().unwrap();
         assert!(proxy.process_output(now()).dgram().is_none());
 
-        proxy_session
-            .send_datagram(b"ping", None, now(), 0, 0)
-            .unwrap();
+        proxy_session.send_datagram(b"ping", None, now()).unwrap();
         let proxy_dgram = proxy.process_output(now()).dgram().unwrap();
 
         while client.next_event().is_some() {}
@@ -490,7 +486,7 @@ fn connect_udp_operation_on_fetch_stream() {
         .unwrap();
 
     assert_eq!(
-        client.connect_udp_send_datagram(fetch_stream, PING, None, now(), 0, 0),
+        client.connect_udp_send_datagram(fetch_stream, PING, None, now()),
         Err(Error::InvalidStreamId)
     );
 
@@ -577,7 +573,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
 
     qinfo!("Testing Capsule send (client -> server)");
     client
-        .connect_udp_send_datagram(session_id, PING, None, now(), 0, 0)
+        .connect_udp_send_datagram(session_id, PING, None, now())
         .unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
@@ -598,9 +594,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
     qinfo!("Capsule decode successful (client -> server)");
 
     qinfo!("Testing Capsule receive (server -> client)");
-    proxy_session
-        .send_datagram(PONG, None, now(), 0, 0)
-        .unwrap();
+    proxy_session.send_datagram(PONG, None, now()).unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -627,7 +621,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
         let mut payload = PING.to_vec();
         payload.push(i);
         client
-            .connect_udp_send_datagram(session_id, &payload, None, now(), 0, 0)
+            .connect_udp_send_datagram(session_id, &payload, None, now())
             .unwrap();
     }
 
@@ -762,7 +756,7 @@ fn connect_udp_datagram_outcome_uses_connect_udp_event() {
     let (mut client, mut proxy, session_id, _proxy_session) = establish_new_session();
 
     client
-        .connect_udp_send_datagram(session_id, PING, Some(1u64), now(), 0, 0)
+        .connect_udp_send_datagram(session_id, PING, Some(1u64), now())
         .unwrap();
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -804,10 +798,10 @@ fn connect_udp_server_send_datagram_reports_backpressure() {
     let (_client, _proxy, _session_id, proxy_session) = establish_new_session();
 
     for _ in 0..DEFAULT_HARD_LIMIT {
-        proxy_session.send_datagram(PING, None, now(), 0, 0).unwrap();
+        proxy_session.send_datagram(PING, None, now()).unwrap();
     }
     assert_eq!(
-        proxy_session.send_datagram(PING, None, now(), 0, 0),
+        proxy_session.send_datagram(PING, None, now()),
         Ok(DatagramQueueOutcome::Overflowed)
     );
 }
