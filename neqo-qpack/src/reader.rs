@@ -53,7 +53,7 @@ impl Reader for ReceiverConnWrapper<'_> {
 }
 
 impl<'a> ReceiverConnWrapper<'a> {
-    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+    pub(crate) const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
         Self { conn, stream_id }
     }
 }
@@ -79,11 +79,11 @@ impl ReadByte for ReceiverBufferWrapper<'_> {
 }
 
 impl<'a> ReceiverBufferWrapper<'a> {
-    pub const fn new(buf: &'a [u8]) -> Self {
+    pub(crate) const fn new(buf: &'a [u8]) -> Self {
         Self { buf, offset: 0 }
     }
 
-    pub const fn peek(&self) -> Res<u8> {
+    pub(crate) const fn peek(&self) -> Res<u8> {
         if self.offset == self.buf.len() {
             Err(Error::Decompression)
         } else {
@@ -91,7 +91,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
         }
     }
 
-    pub const fn done(&self) -> bool {
+    pub(crate) const fn done(&self) -> bool {
         self.offset == self.buf.len()
     }
 
@@ -100,7 +100,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint because of reaching the
     /// end of a buffer will be treated as the `Error::Decompression` error.
-    pub fn read_prefixed_int(&mut self, prefix_len: u8) -> Res<u64> {
+    pub(crate) fn read_prefixed_int(&mut self, prefix_len: u8) -> Res<u64> {
         debug_assert!(prefix_len < 8);
 
         let first_byte = self.read_byte()?;
@@ -119,7 +119,7 @@ impl<'a> ReceiverBufferWrapper<'a> {
     /// `ReceiverBufferWrapper` is only used for decoding header blocks. The header blocks are read
     /// entirely before a decoding starts, therefore any incomplete varint or literal because of
     /// reaching the end of a buffer will be treated as the `Error::Decompression` error.
-    pub fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<Vec<u8>> {
+    pub(crate) fn read_literal_from_buffer(&mut self, prefix_len: u8) -> Res<Vec<u8>> {
         debug_assert!(prefix_len < 7);
 
         let first_byte = self.read_byte()?;
@@ -361,7 +361,7 @@ pub(crate) mod test_receiver {
     use super::{Error, ReadByte, Reader, Res};
 
     #[derive(Default)]
-    pub struct TestReceiver {
+    pub(crate) struct TestReceiver {
         buf: VecDeque<u8>,
     }
 
@@ -386,7 +386,7 @@ pub(crate) mod test_receiver {
     }
 
     impl TestReceiver {
-        pub fn write(&mut self, buf: &[u8]) {
+        pub(crate) fn write(&mut self, buf: &[u8]) {
             for b in buf {
                 self.buf.push_front(*b);
             }

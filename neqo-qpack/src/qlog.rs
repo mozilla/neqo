@@ -14,7 +14,7 @@ use qlog::events::{
     qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
 };
 
-pub fn qpack_read_insert_count_increment_instruction(
+pub(crate) fn qpack_read_insert_count_increment_instruction(
     qlog: &mut Qlog,
     increment: u64,
     data: &[u8],

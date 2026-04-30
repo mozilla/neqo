@@ -11,12 +11,12 @@ use crate::huffman_table::HUFFMAN_TABLE;
 // Since we're encoding the table length as a u16, we need to ensure that it fits.
 static_assertions::const_assert!(HUFFMAN_TABLE.len() <= u16::MAX as usize);
 
-pub struct HuffmanDecoderNode {
+pub(crate) struct HuffmanDecoderNode {
     pub next: [Option<Box<Self>>; 2],
     pub value: Option<u16>,
 }
 
-pub fn huffman_decoder_root() -> &'static HuffmanDecoderNode {
+pub(crate) fn huffman_decoder_root() -> &'static HuffmanDecoderNode {
     static ROOT: OnceLock<HuffmanDecoderNode> = OnceLock::new();
     ROOT.get_or_init(|| make_huffman_tree(0, 0))
 }

@@ -15,6 +15,10 @@ use crate::{
     tracking::AckToken,
 };
 
+#[cfg_attr(
+    not(feature = "bench"),
+    expect(unreachable_pub, reason = "re-exported via recovery::Tokens")
+)]
 pub type Tokens = Vec<Token>;
 
 #[derive(Debug, Clone)]

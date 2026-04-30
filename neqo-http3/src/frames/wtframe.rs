@@ -9,10 +9,10 @@ use neqo_common::{Decoder, Encoder};
 use super::hframe::HFrameType;
 use crate::{Error, Res, frames::reader::FrameDecoder};
 
-pub type WebTransportFrameType = u64;
+pub(crate) type WebTransportFrameType = u64;
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum WebTransportFrame {
+pub(crate) enum WebTransportFrame {
     CloseSession { error: u32, message: String },
 }
 
@@ -27,7 +27,7 @@ impl WebTransportFrame {
     /// The value 1024 is used to limit the message size for security and interoperability.
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
-    pub fn encode(&self, enc: &mut Encoder) {
+    pub(crate) fn encode(&self, enc: &mut Encoder) {
         #[cfg(feature = "build-fuzzing-corpus")]
         let start = enc.len();
 

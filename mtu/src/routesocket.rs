@@ -27,10 +27,10 @@ type RouteSocketSeq = i32;
 
 static SEQ: AtomicRouteSocketSeq = AtomicRouteSocketSeq::new(0);
 
-pub struct RouteSocket(OwnedFd);
+pub(crate) struct RouteSocket(OwnedFd);
 
 impl RouteSocket {
-    pub fn new(domain: libc::c_int, protocol: libc::c_int) -> Result<Self> {
+    pub(crate) fn new(domain: libc::c_int, protocol: libc::c_int) -> Result<Self> {
         let fd = unsafe { socket(domain, SOCK_RAW, protocol) };
         if fd == -1 {
             return Err(Error::last_os_error());
@@ -38,7 +38,7 @@ impl RouteSocket {
         Ok(Self(unsafe { OwnedFd::from_raw_fd(fd) }))
     }
 
-    pub fn new_seq() -> RouteSocketSeq {
+    pub(crate) fn new_seq() -> RouteSocketSeq {
         SEQ.fetch_add(1, Ordering::Relaxed)
     }
 }

@@ -24,7 +24,7 @@ use crate::{
 /// Convert an integer congestion window value into a floating point value.
 /// This has the effect of reducing larger values to `1<<53`.
 /// If you have a congestion window that large, something is probably wrong.
-pub fn convert_to_f64(v: usize) -> f64 {
+pub(super) fn convert_to_f64(v: usize) -> f64 {
     let mut f_64 = f64::from(u32::try_from(v >> 21).unwrap_or(u32::MAX));
     f_64 *= 2_097_152.0; // f_64 <<= 21
     #[expect(clippy::cast_possible_truncation, reason = "The mask makes this safe.")]
@@ -34,7 +34,7 @@ pub fn convert_to_f64(v: usize) -> f64 {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct State {
+pub(super) struct State {
     /// > An estimate for the congestion window \[...\] in the Reno-friendly region -- that
     /// > is, an estimate for the congestion window of Reno.
     ///
@@ -100,6 +100,7 @@ impl Display for State {
 }
 
 #[derive(Debug, Default)]
+#[expect(unreachable_pub, reason = "re-exported via cc::Cubic")]
 pub struct Cubic {
     /// Current CUBIC parameters.
     current: State,
@@ -123,7 +124,7 @@ impl Cubic {
     /// See section 5.1 of RFC9438 for discussion on how to set the concrete value:
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fairness-to-reno>
-    pub const C: f64 = 0.4;
+    pub(crate) const C: f64 = 0.4;
 
     /// > CUBIC additive increase factor used in the Reno-friendly region \[to achieve approximately
     /// > the same average congestion window size as Reno\].
@@ -140,7 +141,7 @@ impl Cubic {
     /// `ALPHA = 3.0 * (1.0 - CUBIC_BETA) / (1.0 + CUBIC_BETA)`
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-reno-friendly-region>
-    pub const ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
+    pub(crate) const ALPHA: f64 = 3.0 * (1.0 - 0.7) / (1.0 + 0.7); // with CUBIC_BETA = 0.7
 
     /// > CUBIC multiplicative decrease factor
     ///
@@ -157,7 +158,7 @@ impl Cubic {
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing.
     /// The divisor is set to `100` to also accommodate the `0.85` beta value for ECN induced
     /// congestion events.
-    pub const BETA_USIZE_DIVISOR: usize = 100;
+    pub(crate) const BETA_USIZE_DIVISOR: usize = 100;
 
     /// > CUBIC multiplicative decrease factor
     ///
@@ -173,7 +174,7 @@ impl Cubic {
     ///
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
     /// construct `CUBIC_BETA = 0.7` from `70/100`.
-    pub const BETA_USIZE_DIVIDEND: usize = 70;
+    pub(crate) const BETA_USIZE_DIVIDEND: usize = 70;
 
     /// As per RFC 8511 it makes sense to have a different decrease factor for ECN-CE congestion
     /// events than for loss induced congestion events.
@@ -184,7 +185,7 @@ impl Cubic {
     ///
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
     /// construct the beta value from `85/100`.
-    pub const BETA_USIZE_DIVIDEND_ECN: usize = 85;
+    pub(crate) const BETA_USIZE_DIVIDEND_ECN: usize = 85;
 
     /// This is the factor that is used by fast convergence to further reduce the next `W_max` when
     /// a congestion event occurs while `cwnd < W_max`. This speeds up the bandwidth release for
@@ -193,7 +194,7 @@ impl Cubic {
     /// The calculation assumes `CUBIC_BETA = 0.7`.
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-fast-convergence>
-    pub const FAST_CONVERGENCE_FACTOR: f64 = f64::midpoint(1.0, 0.7);
+    pub(crate) const FAST_CONVERGENCE_FACTOR: f64 = f64::midpoint(1.0, 0.7);
 
     /// Original equation is:
     ///
@@ -263,12 +264,12 @@ impl Cubic {
     }
 
     #[cfg(test)]
-    pub const fn w_max(&self) -> Option<f64> {
+    pub(crate) const fn w_max(&self) -> Option<f64> {
         self.current.w_max
     }
 
     #[cfg(test)]
-    pub const fn set_w_max(&mut self, w_max: f64) {
+    pub(crate) const fn set_w_max(&mut self, w_max: f64) {
         self.current.w_max = Some(w_max);
     }
 }

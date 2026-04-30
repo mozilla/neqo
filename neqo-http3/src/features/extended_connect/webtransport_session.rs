@@ -24,7 +24,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct Session {
+pub(crate) struct Session {
     frame_reader: FrameReader,
     id: StreamId,
     send_streams: HashSet<StreamId>,

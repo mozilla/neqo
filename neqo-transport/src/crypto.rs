@@ -16,6 +16,7 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, PrivateKey, PublicKey, Record,
@@ -44,7 +45,7 @@ use crate::{
 /// to update keys.  This has to be much smaller than the number returned
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
 /// need to ask permission to update, this can be quite small.
-pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
+pub(crate) const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 
 // This is a testing kludge that allows for overwriting the number of
 // invocations of the next cipher to operate.  With this, it is possible
@@ -55,7 +56,7 @@ pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
 
 #[derive(Debug)]
-pub struct Crypto {
+pub(crate) struct Crypto {
     version: Version,
     protocols: Vec<String>,
     tls: Agent,
@@ -66,7 +67,7 @@ pub struct Crypto {
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
 
 impl Crypto {
-    pub fn new(
+    pub(crate) fn new(
         version: Version,
         conn_params: &ConnectionParameters,
         mut agent: Agent,
@@ -122,7 +123,7 @@ impl Crypto {
     }
 
     /// Get the name of the server.  (Only works for the client currently).
-    pub fn server_name(&self) -> Option<&str> {
+    pub(crate) fn server_name(&self) -> Option<&str> {
         if let Agent::Client(c) = &self.tls {
             Some(c.server_name())
         } else {
@@ -131,11 +132,11 @@ impl Crypto {
     }
 
     /// Get the set of enabled protocols.
-    pub fn protocols(&self) -> &[String] {
+    pub(crate) fn protocols(&self) -> &[String] {
         &self.protocols
     }
 
-    pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
+    pub(crate) fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         tphandler: TpHandler,
         anti_replay: &AntiReplay,
@@ -152,7 +153,7 @@ impl Crypto {
         }
     }
 
-    pub fn server_enable_ech(
+    pub(crate) fn server_enable_ech(
         &mut self,
         config: u8,
         public_name: &str,
@@ -167,7 +168,7 @@ impl Crypto {
         }
     }
 
-    pub fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
+    pub(crate) fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
         if let Agent::Client(c) = &mut self.tls {
             c.enable_ech(ech_config_list)?;
             Ok(())
@@ -177,11 +178,11 @@ impl Crypto {
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
-    pub fn ech_config(&self) -> &[u8] {
+    pub(crate) fn ech_config(&self) -> &[u8] {
         self.tls.ech_config()
     }
 
-    pub fn handshake(
+    pub(crate) fn handshake(
         &mut self,
         now: Instant,
         space: PacketNumberSpace,
@@ -218,7 +219,7 @@ impl Crypto {
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
-    pub fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
+    pub(crate) fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
@@ -241,14 +242,14 @@ impl Crypto {
     }
 
     /// Lock in a compatible upgrade.
-    pub fn confirm_version(&mut self, confirmed: Version) -> Res<()> {
+    pub(crate) fn confirm_version(&mut self, confirmed: Version) -> Res<()> {
         self.states.confirm_version(self.version, confirmed)?;
         self.version = confirmed;
         Ok(())
     }
 
     /// Returns true if new handshake keys were installed.
-    pub fn install_keys(&mut self, role: Role) -> Res<bool> {
+    pub(crate) fn install_keys(&mut self, role: Role) -> Res<bool> {
         if self.tls.state().is_final() {
             Ok(false)
         } else {
@@ -282,7 +283,7 @@ impl Crypto {
     }
 
     #[must_use]
-    pub const fn has_handshake_keys(&self) -> bool {
+    pub(crate) const fn has_handshake_keys(&self) -> bool {
         self.states.handshake.is_some() || self.states.app_write.is_some()
     }
 
@@ -295,7 +296,11 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn install_application_keys(&mut self, version: Version, expire_0rtt: Instant) -> Res<()> {
+    pub(crate) fn install_application_keys(
+        &mut self,
+        version: Version,
+        expire_0rtt: Instant,
+    ) -> Res<()> {
         self.maybe_install_application_write_key(version)?;
         // The write key might have been installed earlier, but it should
         // always be installed now.
@@ -311,7 +316,7 @@ impl Crypto {
     }
 
     /// Buffer crypto records for sending.
-    pub fn buffer_records(&mut self, records: RecordList) -> Res<()> {
+    pub(crate) fn buffer_records(&mut self, records: RecordList) -> Res<()> {
         for r in records {
             if r.ct != TLS_CT_HANDSHAKE {
                 return Err(Error::ProtocolViolation);
@@ -322,7 +327,7 @@ impl Crypto {
         Ok(())
     }
 
-    pub fn write_frame<B: Buffer>(
+    pub(crate) fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,
@@ -334,7 +339,7 @@ impl Crypto {
             .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
+    pub(crate) fn acked(&mut self, token: &CryptoRecoveryToken) {
         qdebug!(
             "Acked crypto frame space={} offset={} length={}",
             token.space,
@@ -344,7 +349,7 @@ impl Crypto {
         self.streams.acked(token);
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub(crate) fn lost(&mut self, token: &CryptoRecoveryToken) {
         qinfo!(
             "Lost crypto frame space={} offset={} length={}",
             token.space,
@@ -356,18 +361,18 @@ impl Crypto {
 
     /// Mark any outstanding frames in the indicated space as "lost" so
     /// that they can be sent again.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
+    pub(crate) fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
     }
 
     /// Discard state for a packet number space and return true
     /// if something was discarded.
-    pub fn discard(&mut self, space: PacketNumberSpace) -> bool {
+    pub(crate) fn discard(&mut self, space: PacketNumberSpace) -> bool {
         self.streams.discard(space);
         self.states.discard(space)
     }
 
-    pub fn create_resumption_token(
+    pub(crate) fn create_resumption_token(
         &mut self,
         new_token: Option<&[u8]>,
         tps: &TransportParameters,
@@ -393,7 +398,7 @@ impl Crypto {
         }
     }
 
-    pub fn has_resumption_token(&self) -> bool {
+    pub(crate) fn has_resumption_token(&self) -> bool {
         if let Agent::Client(c) = &self.tls {
             c.has_resumption_token()
         } else {
@@ -402,32 +407,32 @@ impl Crypto {
     }
 
     #[must_use]
-    pub const fn tls_mut(&mut self) -> &mut Agent {
+    pub(crate) const fn tls_mut(&mut self) -> &mut Agent {
         &mut self.tls
     }
 
     #[must_use]
-    pub const fn tls(&self) -> &Agent {
+    pub(crate) const fn tls(&self) -> &Agent {
         &self.tls
     }
 
     #[must_use]
-    pub const fn streams(&self) -> &CryptoStreams {
+    pub(crate) const fn streams(&self) -> &CryptoStreams {
         &self.streams
     }
 
     #[must_use]
-    pub const fn streams_mut(&mut self) -> &mut CryptoStreams {
+    pub(crate) const fn streams_mut(&mut self) -> &mut CryptoStreams {
         &mut self.streams
     }
 
     #[must_use]
-    pub const fn states(&self) -> &CryptoStates {
+    pub(crate) const fn states(&self) -> &CryptoStates {
         &self.states
     }
 
     #[must_use]
-    pub const fn states_mut(&mut self) -> &mut CryptoStates {
+    pub(crate) const fn states_mut(&mut self) -> &mut CryptoStates {
         &mut self.states
     }
 }
@@ -761,7 +766,7 @@ impl Display for CryptoDxState {
 }
 
 #[derive(Debug)]
-pub struct CryptoState {
+pub(crate) struct CryptoState {
     tx: CryptoDxState,
     rx: CryptoDxState,
 }
@@ -769,7 +774,7 @@ pub struct CryptoState {
 /// `CryptoDxAppData` wraps the state necessary for one direction of application data keys.
 /// This includes the secret needed to generate the next set of keys.
 #[derive(Debug)]
-pub struct CryptoDxAppData {
+pub(crate) struct CryptoDxAppData {
     dx: CryptoDxState,
     cipher: Cipher,
     // Not the secret used to create `self.dx`, but the one needed for the next iteration.
@@ -777,7 +782,7 @@ pub struct CryptoDxAppData {
 }
 
 impl CryptoDxAppData {
-    pub fn new(
+    pub(crate) fn new(
         version: Version,
         dir: CryptoDxDirection,
         secret: &SymKey,
@@ -795,7 +800,7 @@ impl CryptoDxAppData {
         Ok(next)
     }
 
-    pub fn next(&self) -> Res<Self> {
+    pub(crate) fn next(&self) -> Res<Self> {
         if self.dx.epoch == usize::MAX {
             // Guard against too many key updates.
             return Err(Error::KeysExhausted);
@@ -808,7 +813,7 @@ impl CryptoDxAppData {
         })
     }
 
-    pub const fn epoch(&self) -> usize {
+    pub(crate) const fn epoch(&self) -> usize {
         self.dx.epoch
     }
 }
@@ -819,7 +824,7 @@ impl CryptoDxAppData {
 /// used for Initial keys; a version has been selected at the time we need to
 /// get other keys, so those have fixed versions.
 #[derive(Debug, Default)]
-pub struct CryptoStates {
+pub(crate) struct CryptoStates {
     initials: EnumMap<Version, Option<CryptoState>>,
     handshake: Option<CryptoState>,
     zero_rtt: Option<CryptoDxState>, // One direction only!
@@ -840,7 +845,7 @@ impl CryptoStates {
     /// Select a `CryptoDxState` and `CryptoSpace` for the given `PacketNumberSpace`.
     /// This selects 0-RTT keys for `PacketNumberSpace::ApplicationData` if 1-RTT keys are
     /// not yet available.
-    pub fn select_tx_mut(
+    pub(crate) fn select_tx_mut(
         &mut self,
         version: Version,
         space: PacketNumberSpace,
@@ -862,7 +867,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn tx_mut<'a>(
+    pub(crate) fn tx_mut<'a>(
         &'a mut self,
         version: Version,
         epoch: Epoch,
@@ -879,7 +884,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn tx<'a>(&'a self, version: Version, epoch: Epoch) -> Option<&'a CryptoDxState> {
+    pub(crate) fn tx<'a>(&'a self, version: Version, epoch: Epoch) -> Option<&'a CryptoDxState> {
         let tx = |k: Option<&'a CryptoState>| k.map(|dx| &dx.tx);
         match epoch {
             Epoch::Initial => tx(self.initials[version].as_ref()),
@@ -892,7 +897,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn select_tx(
+    pub(crate) fn select_tx(
         &self,
         version: Version,
         space: PacketNumberSpace,
@@ -956,7 +961,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn rx_hp(&mut self, version: Version, epoch: Epoch) -> Option<&mut CryptoDxState> {
+    pub(crate) fn rx_hp(&mut self, version: Version, epoch: Epoch) -> Option<&mut CryptoDxState> {
         match epoch {
             Epoch::ApplicationData => self.app_read.as_mut().map(|ar| &mut ar.dx),
             Epoch::Initial => {
@@ -967,7 +972,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn rx<'a>(
+    pub(crate) fn rx<'a>(
         &'a mut self,
         version: Version,
         epoch: Epoch,
@@ -1001,7 +1006,7 @@ impl CryptoStates {
     /// is possible to attribute 0-RTT packets to an existing connection if there
     /// is a multi-packet Initial, that is an unusual circumstance, so we
     /// don't do caching for that in those places that call this function.
-    pub fn rx_pending(&self, space: Epoch) -> bool {
+    pub(crate) fn rx_pending(&self, space: Epoch) -> bool {
         match space {
             Epoch::Initial | Epoch::ZeroRtt => false,
             Epoch::Handshake => self.handshake.is_none() && !self.initials_is_empty(),
@@ -1011,7 +1016,7 @@ impl CryptoStates {
 
     /// Create the initial crypto state.
     /// Note that the version here can change and that's OK.
-    pub fn init<'v, V>(
+    pub(crate) fn init<'v, V>(
         &mut self,
         versions: V,
         role: Role,
@@ -1072,7 +1077,7 @@ impl CryptoStates {
     /// This is maybe slightly inefficient in the first case, because we might
     /// not need the send keys if the packet is subsequently discarded, but
     /// the overall effort is small enough to write off.
-    pub fn init_server(
+    pub(crate) fn init_server(
         &mut self,
         version: Version,
         dcid: &[u8],
@@ -1084,7 +1089,7 @@ impl CryptoStates {
         Ok(())
     }
 
-    pub fn confirm_version(&mut self, orig: Version, confirmed: Version) -> Res<()> {
+    pub(crate) fn confirm_version(&mut self, orig: Version, confirmed: Version) -> Res<()> {
         if orig != confirmed {
             // This part where the old data is removed and then re-added is to
             // appease the borrow checker.
@@ -1102,7 +1107,7 @@ impl CryptoStates {
         Ok(())
     }
 
-    pub fn set_0rtt_keys(
+    pub(crate) fn set_0rtt_keys(
         &mut self,
         version: Version,
         dir: CryptoDxDirection,
@@ -1122,7 +1127,7 @@ impl CryptoStates {
     }
 
     /// Discard keys and return true if that happened.
-    pub fn discard(&mut self, space: PacketNumberSpace) -> bool {
+    pub(crate) fn discard(&mut self, space: PacketNumberSpace) -> bool {
         match space {
             PacketNumberSpace::Initial => {
                 let empty = self.initials_is_empty();
@@ -1134,7 +1139,7 @@ impl CryptoStates {
         }
     }
 
-    pub fn discard_0rtt_keys(&mut self) {
+    pub(crate) fn discard_0rtt_keys(&mut self) {
         qtrace!("[{self}] discard 0-RTT keys");
         assert!(
             self.app_read.is_none(),
@@ -1143,7 +1148,7 @@ impl CryptoStates {
         self.zero_rtt = None;
     }
 
-    pub fn set_handshake_keys(
+    pub(crate) fn set_handshake_keys(
         &mut self,
         version: Version,
         write_secret: &SymKey,
@@ -1172,7 +1177,11 @@ impl CryptoStates {
         Ok(())
     }
 
-    pub fn set_application_write_key(&mut self, version: Version, secret: &SymKey) -> Res<()> {
+    pub(crate) fn set_application_write_key(
+        &mut self,
+        version: Version,
+        secret: &SymKey,
+    ) -> Res<()> {
         debug_assert!(self.app_write.is_none());
         debug_assert_ne!(self.cipher, 0);
         let mut app = CryptoDxAppData::new(version, CryptoDxDirection::Write, secret, self.cipher)?;
@@ -1186,7 +1195,7 @@ impl CryptoStates {
         Ok(())
     }
 
-    pub fn set_application_read_key(
+    pub(crate) fn set_application_read_key(
         &mut self,
         version: Version,
         secret: &SymKey,
@@ -1207,7 +1216,10 @@ impl CryptoStates {
     }
 
     /// Update the write keys.
-    pub fn initiate_key_update(&mut self, largest_acknowledged: Option<packet::Number>) -> Res<()> {
+    pub(crate) fn initiate_key_update(
+        &mut self,
+        largest_acknowledged: Option<packet::Number>,
+    ) -> Res<()> {
         // Only update if we are able to. We can only do this if we have
         // received an acknowledgement for a packet in the current phase.
         // Also, skip this if we are waiting for read keys on the existing
@@ -1248,7 +1260,7 @@ impl CryptoStates {
     /// Check whether write keys are close to running out of invocations.
     /// If that is close, update them if possible.  Failing to update at
     /// this stage is cause for a fatal error.
-    pub fn auto_update(&mut self) -> Res<()> {
+    pub(crate) fn auto_update(&mut self) -> Res<()> {
         if let Some(app_write) = self.app_write.as_ref()
             && app_write.dx.should_update()
         {
@@ -1269,7 +1281,7 @@ impl CryptoStates {
     /// Prepare to update read keys.  This doesn't happen immediately as
     /// we want to ensure that we can continue to receive any delayed
     /// packets that use the old keys.  So we just set a timer.
-    pub fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
+    pub(crate) fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
         qtrace!("[{self}] Key update received");
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
@@ -1288,14 +1300,14 @@ impl CryptoStates {
     }
 
     #[must_use]
-    pub const fn update_time(&self) -> Option<Instant> {
+    pub(crate) const fn update_time(&self) -> Option<Instant> {
         self.read_update_time
     }
 
     /// Check if time has passed for updating key update parameters.
     /// If it has, then swap keys over and allow more key updates to be initiated.
     /// This is also used to discard 0-RTT read keys at the server in the same way.
-    pub fn check_key_update(&mut self, now: Instant) -> Res<()> {
+    pub(crate) fn check_key_update(&mut self, now: Instant) -> Res<()> {
         if let Some(expiry) = self.read_update_time {
             // If enough time has passed, then install new keys and clear the timer.
             if now >= expiry {
@@ -1316,7 +1328,7 @@ impl CryptoStates {
 
     /// Get the current/highest epoch.  This returns (write, read) epochs.
     #[cfg(test)]
-    pub fn get_epochs(&self) -> (Option<usize>, Option<usize>) {
+    pub(crate) fn get_epochs(&self) -> (Option<usize>, Option<usize>) {
         let to_epoch = |app: &Option<CryptoDxAppData>| app.as_ref().map(|a| a.dx.epoch);
         (to_epoch(&self.app_write), to_epoch(&self.app_read))
     }
@@ -1325,7 +1337,7 @@ impl CryptoStates {
     /// valid packets that are protected with old keys. We need to ensure that
     /// these don't carry packet numbers higher than those in packets protected
     /// with the newer keys.  To ensure that, this is called after every decryption.
-    pub fn check_pn_overlap(&mut self) -> Res<()> {
+    pub(crate) fn check_pn_overlap(&mut self) -> Res<()> {
         // We only need to do the check while we are waiting for read keys to be updated.
         if self.read_update_time.is_some() {
             qtrace!("[{self}] Checking for PN overlap");
@@ -1427,13 +1439,13 @@ impl Display for CryptoStates {
 }
 
 #[derive(Debug, Default)]
-pub struct CryptoStream {
+pub(crate) struct CryptoStream {
     tx: TxBuffer,
     rx: RxStreamOrderer,
 }
 
 #[derive(Debug)]
-pub enum CryptoStreams {
+pub(crate) enum CryptoStreams {
     Initial {
         initial: CryptoStream,
         handshake: CryptoStream,
@@ -1452,7 +1464,7 @@ impl CryptoStreams {
     /// Keep around 64k if a server wants to push excess data at us.
     const BUFFER_LIMIT: u64 = 65536;
 
-    pub fn discard(&mut self, space: PacketNumberSpace) {
+    pub(crate) fn discard(&mut self, space: PacketNumberSpace) {
         match space {
             PacketNumberSpace::Initial => {
                 if let Self::Initial {
@@ -1482,7 +1494,7 @@ impl CryptoStreams {
         }
     }
 
-    pub fn send(&mut self, space: PacketNumberSpace, data: &[u8]) -> Res<()> {
+    pub(crate) fn send(&mut self, space: PacketNumberSpace, data: &[u8]) -> Res<()> {
         self.get_mut(space)
             .ok_or(Error::ProtocolViolation)?
             .tx
@@ -1490,7 +1502,12 @@ impl CryptoStreams {
         Ok(())
     }
 
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+    pub(crate) fn inbound_frame(
+        &mut self,
+        space: PacketNumberSpace,
+        offset: u64,
+        data: &[u8],
+    ) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
         rx.inbound_frame(offset, data);
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
@@ -1500,11 +1517,15 @@ impl CryptoStreams {
         }
     }
 
-    pub fn data_ready(&self, space: PacketNumberSpace) -> bool {
+    pub(crate) fn data_ready(&self, space: PacketNumberSpace) -> bool {
         self.get(space).is_some_and(|cs| cs.rx.data_ready())
     }
 
-    pub fn read_to_end(&mut self, space: PacketNumberSpace, buf: &mut Vec<u8>) -> Res<usize> {
+    pub(crate) fn read_to_end(
+        &mut self,
+        space: PacketNumberSpace,
+        buf: &mut Vec<u8>,
+    ) -> Res<usize> {
         Ok(self
             .get_mut(space)
             .ok_or(Error::ProtocolViolation)?
@@ -1512,13 +1533,13 @@ impl CryptoStreams {
             .read_to_end(buf))
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
+    pub(crate) fn acked(&mut self, token: &CryptoRecoveryToken) {
         if let Some(cs) = self.get_mut(token.space) {
             cs.tx.mark_as_acked(token.offset, token.length);
         }
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub(crate) fn lost(&mut self, token: &CryptoRecoveryToken) {
         // See BZ 1624800, ignore lost packets in spaces we've dropped keys
         if let Some(cs) = self.get_mut(token.space) {
             cs.tx.mark_as_lost(token.offset, token.length);
@@ -1527,7 +1548,7 @@ impl CryptoStreams {
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
     /// This can help speed up handshake times.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
+    pub(crate) fn resend_unacked(&mut self, space: PacketNumberSpace) {
         if space != PacketNumberSpace::ApplicationData
             && let Some(cs) = self.get_mut(space)
         {
@@ -1535,7 +1556,7 @@ impl CryptoStreams {
         }
     }
 
-    pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
+    pub(crate) fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
         self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
     }
 
@@ -1579,7 +1600,7 @@ impl CryptoStreams {
         }
     }
 
-    pub fn write_frame<B: Buffer>(
+    pub(crate) fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
         sni_slicing: bool,

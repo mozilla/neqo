@@ -76,6 +76,7 @@ impl State {
 }
 
 #[derive(Debug, Clone)]
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub struct ClosingFrame {
     path: PathRef,
     error: CloseReason,
@@ -99,11 +100,11 @@ impl ClosingFrame {
         }
     }
 
-    pub const fn path(&self) -> &PathRef {
+    pub(crate) const fn path(&self) -> &PathRef {
         &self.path
     }
 
-    pub fn sanitize(&self) -> Option<Self> {
+    pub(crate) fn sanitize(&self) -> Option<Self> {
         if let CloseReason::Application(_) = self.error {
             // The default CONNECTION_CLOSE frame that is sent when an application
             // error code needs to be sent in an Initial or Handshake packet.
@@ -121,9 +122,9 @@ impl ClosingFrame {
     /// Length of a closing frame with a truncated `reason_length`. Allow 8 bytes for the reason
     /// phrase to ensure that if it needs to be truncated there is still at least a few bytes of
     /// the value.
-    pub const MIN_LENGTH: usize = 1 + 8 + 8 + 2 + 8;
+    pub(crate) const MIN_LENGTH: usize = 1 + 8 + 8 + 2 + 8;
 
-    pub fn write_frame<B: Buffer>(&self, builder: &mut packet::Builder<B>) {
+    pub(crate) fn write_frame<B: Buffer>(&self, builder: &mut packet::Builder<B>) {
         if builder.remaining() < Self::MIN_LENGTH {
             return;
         }
@@ -162,7 +163,7 @@ impl ClosingFrame {
 /// * `CloseSent` -> Closing: any time a new `CONNECTION_CLOSE` is needed
 /// * -> Reset: from any state in case of a stateless reset
 #[derive(Debug, Clone)]
-pub enum StateSignaling {
+pub(super) enum StateSignaling {
     Idle,
     HandshakeDone,
     /// These states save the frame that needs to be sent.
@@ -175,14 +176,14 @@ pub enum StateSignaling {
 }
 
 impl StateSignaling {
-    pub fn handshake_done(&mut self) {
+    pub(super) fn handshake_done(&mut self) {
         if !matches!(self, Self::Idle) {
             return;
         }
         *self = Self::HandshakeDone;
     }
 
-    pub fn write_done<B: Buffer>(
+    pub(super) fn write_done<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
     ) -> Option<recovery::Token> {
@@ -193,7 +194,7 @@ impl StateSignaling {
         })
     }
 
-    pub fn close<A: AsRef<str>>(
+    pub(super) fn close<A: AsRef<str>>(
         &mut self,
         path: PathRef,
         error: CloseReason,
@@ -205,7 +206,7 @@ impl StateSignaling {
         }
     }
 
-    pub fn drain<A: AsRef<str>>(
+    pub(super) fn drain<A: AsRef<str>>(
         &mut self,
         path: PathRef,
         error: CloseReason,
@@ -218,7 +219,7 @@ impl StateSignaling {
     }
 
     /// If a close is pending, take a frame.
-    pub fn close_frame(&mut self) -> Option<ClosingFrame> {
+    pub(super) fn close_frame(&mut self) -> Option<ClosingFrame> {
         match self {
             Self::Closing(frame) => {
                 // When we are closing, we might need to send the close frame again.
@@ -237,14 +238,14 @@ impl StateSignaling {
     }
 
     /// If a close can be sent again, prepare to send it again.
-    pub fn send_close(&mut self) {
+    pub(super) fn send_close(&mut self) {
         if let Self::CloseSent(Some(frame)) = self {
             *self = Self::Closing(frame.clone());
         }
     }
 
     /// We just got a stateless reset.  Terminate.
-    pub fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         *self = Self::Reset;
     }
 }

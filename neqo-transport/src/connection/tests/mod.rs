@@ -67,7 +67,7 @@ const CLIENT_HANDSHAKE_1RTT_PACKETS: usize = 1;
 /// This version doesn't randomize the length; as the congestion control tests
 /// count the amount of data sent precisely.
 #[derive(Debug, Default)]
-pub struct CountingConnectionIdGenerator {
+pub(super) struct CountingConnectionIdGenerator {
     counter: u32,
 }
 
@@ -101,7 +101,7 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // test_fixture because they produce different - and incompatible - types.
 //
 // These are a direct copy of those functions.
-pub fn new_client(params: ConnectionParameters) -> Connection {
+pub(super) fn new_client(params: ConnectionParameters) -> Connection {
     fixture_init();
     let (log, _contents) = new_neqo_qlog();
     let mut client = Connection::new_client(
@@ -118,7 +118,7 @@ pub fn new_client(params: ConnectionParameters) -> Connection {
     client
 }
 
-pub fn default_client() -> Connection {
+pub(super) fn default_client() -> Connection {
     new_client(ConnectionParameters::default())
 }
 
@@ -135,7 +135,7 @@ fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Conne
     .unwrap()
 }
 
-pub fn new_server(params: ConnectionParameters) -> Connection {
+pub(super) fn new_server(params: ConnectionParameters) -> Connection {
     fixture_init();
     let (log, _contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
@@ -150,16 +150,16 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
         .expect("enable 0-RTT");
     c
 }
-pub fn default_server() -> Connection {
+pub(super) fn default_server() -> Connection {
     new_server(ConnectionParameters::default())
 }
-pub fn resumed_server(client: &Connection) -> Connection {
+pub(super) fn resumed_server(client: &Connection) -> Connection {
     new_server(ConnectionParameters::default().versions(client.version(), Version::all()))
 }
 
 /// If state is `AuthenticationNeeded` call `authenticated()`. This function will
 /// consume all outstanding events on the connection.
-pub fn maybe_authenticate(conn: &mut Connection) -> bool {
+pub(super) fn maybe_authenticate(conn: &mut Connection) -> bool {
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     if conn.events().any(authentication_needed) {
         conn.authenticated(AuthenticationStatus::Ok, now());
@@ -169,7 +169,7 @@ pub fn maybe_authenticate(conn: &mut Connection) -> bool {
 }
 
 /// Compute the RTT variance after `n` ACKs or other RTT updates.
-pub fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
+pub(super) fn rttvar_after_n_updates(n: usize, rtt: Duration) -> Duration {
     assert!(n > 0);
     let mut rttvar = rtt / 2;
     for _ in 1..n {

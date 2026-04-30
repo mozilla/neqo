@@ -20,7 +20,7 @@ use crate::{
 /// The remote control stream is responsible only for reading frames. The frames are handled by
 /// `Http3Connection`.
 #[derive(Debug)]
-pub struct ControlStreamRemote {
+pub(crate) struct ControlStreamRemote {
     stream_id: StreamId,
     frame_reader: FrameReader,
 }
@@ -32,7 +32,7 @@ impl Display for ControlStreamRemote {
 }
 
 impl ControlStreamRemote {
-    pub fn new(stream_id: StreamId) -> Self {
+    pub(crate) fn new(stream_id: StreamId) -> Self {
         Self {
             stream_id,
             frame_reader: FrameReader::new(),
@@ -40,7 +40,11 @@ impl ControlStreamRemote {
     }
 
     /// Check if a stream is the control stream and read received data.
-    pub fn receive_single(&mut self, conn: &mut Connection, now: Instant) -> Res<Option<HFrame>> {
+    pub(crate) fn receive_single(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<Option<HFrame>> {
         qdebug!("[{self}] Receiving data");
         match self.frame_reader.receive(
             &mut StreamReaderConnectionWrapper::new(conn, self.stream_id),

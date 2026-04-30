@@ -20,7 +20,7 @@ use super::{Node, Rng};
 
 /// An iterator that shares a `Random` instance and produces uniformly
 /// random `Duration`s within a specified range.
-pub struct RandomDelayIter {
+pub(super) struct RandomDelayIter {
     start: Duration,
     max: u64,
     rng: Option<Rng>,
@@ -31,7 +31,7 @@ impl RandomDelayIter {
     /// is inverted (i.e., `bounds.start > bounds.end`), or spans 2^64
     /// or more nanoseconds.
     /// A zero-length range means that random values won't be taken from the Rng
-    pub fn new(bounds: Range<Duration>) -> Self {
+    pub(super) fn new(bounds: Range<Duration>) -> Self {
         let max = u64::try_from(bounds.end.checked_sub(bounds.start).unwrap().as_nanos()).unwrap();
         Self {
             start: bounds.start,
@@ -40,11 +40,11 @@ impl RandomDelayIter {
         }
     }
 
-    pub fn set_rng(&mut self, rng: Rng) {
+    pub(super) fn set_rng(&mut self, rng: Rng) {
         self.rng = Some(rng);
     }
 
-    pub fn next(&self) -> Duration {
+    pub(super) fn next(&self) -> Duration {
         let mut rng = self.rng.as_ref().unwrap().borrow_mut();
         let r = rng.random_from(0..self.max);
         self.start + Duration::from_nanos(r)

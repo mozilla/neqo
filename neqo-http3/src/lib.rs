@@ -640,7 +640,7 @@ enum CloseType {
 
 impl CloseType {
     #[must_use]
-    pub const fn error(&self) -> Option<AppError> {
+    pub(crate) const fn error(&self) -> Option<AppError> {
         match self {
             Self::ResetApp(error) | Self::ResetRemote(error) | Self::LocalError(error) => {
                 Some(*error)
@@ -650,7 +650,7 @@ impl CloseType {
     }
 
     #[must_use]
-    pub const fn locally_initiated(&self) -> bool {
+    pub(crate) const fn locally_initiated(&self) -> bool {
         matches!(self, Self::ResetApp(_))
     }
 }

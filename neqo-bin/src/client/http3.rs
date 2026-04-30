@@ -35,7 +35,7 @@ use crate::{
     send_data::{SendData, SendResult},
 };
 
-pub struct Handler {
+pub(super) struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
     url_handler: UrlHandler,
     token: Option<ResumptionToken>,
@@ -63,7 +63,7 @@ impl Handler {
     }
 }
 
-pub fn create_client(
+pub(super) fn create_client(
     args: &Args,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,

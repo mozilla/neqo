@@ -307,7 +307,7 @@ fn disables_on_remark() {
 /// modifies packets via `new_path_modifier`.  It sends `burst` packets on the new path.
 /// The function returns the TOS value of the last packet sent on the old path and the TOS value
 /// of the last packet sent on the new path to allow for verification of correct behavior.
-pub fn migration_with_modifiers(
+pub(super) fn migration_with_modifiers(
     orig_path_modifier: fn(Datagram) -> Option<Datagram>,
     new_path_modifier: fn(Datagram) -> Option<Datagram>,
     burst: usize,

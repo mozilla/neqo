@@ -212,7 +212,7 @@ impl Packet {
 
 /// A collection for packets that we have sent that haven't been acknowledged.
 #[derive(Debug, Default)]
-pub struct Packets {
+pub(crate) struct Packets {
     /// The collection.
     packets: BTreeMap<u64, Packet>,
 }
@@ -224,15 +224,15 @@ impl Packets {
         reason = "OK here."
     )]
     #[must_use]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.packets.len()
     }
 
-    pub fn track(&mut self, packet: Packet) {
+    pub(crate) fn track(&mut self, packet: Packet) {
         self.packets.insert(packet.pn, packet);
     }
 
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
         self.packets.values_mut()
     }
 
@@ -240,7 +240,7 @@ impl Packets {
     /// The values returned will be reversed, so that the most recent packet appears first.
     /// This is because ACK frames arrive with ranges starting from the largest acknowledged
     /// and we want to match that.
-    pub fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
+    pub(crate) fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
         R::IntoIter: ExactSizeIterator,
@@ -302,13 +302,13 @@ impl Packets {
     }
 
     /// Empty out the packets, but keep the offset.
-    pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> + use<> {
+    pub(crate) fn drain_all(&mut self) -> impl Iterator<Item = Packet> + use<> {
         std::mem::take(&mut self.packets).into_values()
     }
 
     /// See `LossRecoverySpace::remove_old_lost` for details on `now` and `cd`.
     /// Returns the number of ack-eliciting packets removed.
-    pub fn remove_expired(&mut self, now: Instant, cd: Duration) -> usize {
+    pub(crate) fn remove_expired(&mut self, now: Instant, cd: Duration) -> usize {
         let mut it = self.packets.iter();
         // If the first item is not expired, do nothing (the most common case).
         if it.next().is_some_and(|(_, p)| p.expired(now, cd)) {
@@ -336,7 +336,7 @@ impl Packets {
 /// Test helper to create a sent packet.
 #[cfg(test)]
 #[must_use]
-pub fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> Packet {
+pub(crate) fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> Packet {
     Packet::new(
         packet::Type::Short,
         pn,

@@ -20,12 +20,12 @@ use test_fixture::{CountingConnectionIdGenerator, default_client, now};
 ///
 /// When the count of received packets doesn't match the count of received packets with the
 /// (default) DSCP.
-pub fn assert_dscp(stats: &Stats) {
+pub(crate) fn assert_dscp(stats: &Stats) {
     assert_eq!(stats.dscp_rx[Dscp::Cs0], stats.packets_rx);
 }
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
-pub fn new_server(params: ConnectionParameters) -> Server {
+pub(crate) fn new_server(params: ConnectionParameters) -> Server {
     Server::new(
         now(),
         test_fixture::DEFAULT_KEYS,
@@ -39,12 +39,12 @@ pub fn new_server(params: ConnectionParameters) -> Server {
 }
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
-pub fn default_server() -> Server {
+pub(crate) fn default_server() -> Server {
     new_server(ConnectionParameters::default())
 }
 
 // Check that there is at least one connection.  Returns a ref to the first confirmed connection.
-pub fn connected_server(server: &Server) -> ConnectionRef {
+pub(crate) fn connected_server(server: &Server) -> ConnectionRef {
     #[expect(
         clippy::mutable_key_type,
         reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
@@ -59,7 +59,7 @@ pub fn connected_server(server: &Server) -> ConnectionRef {
 }
 
 /// Connect.  This returns a reference to the server connection.
-pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
+pub(crate) fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
     server.set_validation(ValidateAddress::Never);
 
     assert_eq!(*client.state(), State::Init);
@@ -96,7 +96,7 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
 
 #[cfg(test)]
 /// Scrub through client events to find a resumption token.
-pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
+pub(crate) fn find_ticket(client: &mut Connection) -> ResumptionToken {
     client
         .events()
         .find_map(|e| {
@@ -111,7 +111,7 @@ pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
 
 #[cfg(test)]
 /// Connect to the server and have it generate a ticket.
-pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
+pub(crate) fn generate_ticket(server: &mut Server) -> ResumptionToken {
     let mut client = default_client();
     let server_conn = connect(&mut client, server);
 

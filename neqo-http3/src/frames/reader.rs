@@ -17,7 +17,7 @@ use crate::{Error, RecvStream, Res};
 
 const MAX_READ_SIZE: usize = 2048; // Given a practical MTU of 1500 bytes, this seems reasonable.
 
-pub trait FrameDecoder<T> {
+pub(crate) trait FrameDecoder<T> {
     /// Fuzzing corpus name for this frame type. If `Some`, decoded frames will be
     /// written to the fuzzing corpus with this name.
     #[cfg(feature = "build-fuzzing-corpus")]
@@ -38,8 +38,7 @@ pub trait FrameDecoder<T> {
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<T>>;
 }
 
-#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
-pub trait StreamReader {
+pub(crate) trait StreamReader {
     /// # Errors
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
@@ -48,13 +47,13 @@ pub trait StreamReader {
     fn read_data(&mut self, buf: &mut [u8], now: Instant) -> Res<(usize, bool)>;
 }
 
-pub struct StreamReaderConnectionWrapper<'a> {
+pub(crate) struct StreamReaderConnectionWrapper<'a> {
     conn: &'a mut Connection,
     stream_id: StreamId,
 }
 
 impl<'a> StreamReaderConnectionWrapper<'a> {
-    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+    pub(crate) const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
         Self { conn, stream_id }
     }
 }
@@ -69,14 +68,14 @@ impl StreamReader for StreamReaderConnectionWrapper<'_> {
     }
 }
 
-pub struct StreamReaderRecvStreamWrapper<'a> {
+pub(crate) struct StreamReaderRecvStreamWrapper<'a> {
     recv_stream: &'a mut Box<dyn RecvStream>,
     conn: &'a mut Connection,
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
     #[cfg_attr(fuzzing, expect(private_interfaces, reason = "OK for fuzzing."))]
-    pub fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
+    pub(crate) fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
         Self { recv_stream, conn }
     }
 }
@@ -98,8 +97,7 @@ enum FrameReaderState {
     UnknownFrameDischargeData { decoder: IncrementalDecoderIgnore },
 }
 
-#[expect(clippy::module_name_repetitions, reason = "This is OK.")]
-pub struct FrameReader {
+pub(crate) struct FrameReader {
     state: FrameReaderState,
     frame_type: HFrameType,
     frame_len: u64,
@@ -123,7 +121,7 @@ impl Debug for FrameReader {
 
 impl FrameReader {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             state: FrameReaderState::GetType {
                 decoder: IncrementalDecoderUint::default(),
@@ -135,7 +133,7 @@ impl FrameReader {
     }
 
     #[must_use]
-    pub fn new_with_type(frame_type: HFrameType) -> Self {
+    pub(crate) fn new_with_type(frame_type: HFrameType) -> Self {
         Self {
             state: FrameReaderState::GetLength {
                 decoder: IncrementalDecoderUint::default(),
@@ -176,7 +174,7 @@ impl FrameReader {
     ///
     /// May return `HttpFrame` if a frame cannot be decoded.
     /// and `TransportStreamDoesNotExist` if `stream_recv` fails.
-    pub fn receive<T: FrameDecoder<T>>(
+    pub(crate) fn receive<T: FrameDecoder<T>>(
         &mut self,
         stream_reader: &mut dyn StreamReader,
         now: Instant,

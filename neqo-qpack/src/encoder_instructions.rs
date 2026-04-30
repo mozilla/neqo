@@ -24,7 +24,7 @@ use crate::{
 // The encoder only uses InsertWithNameLiteral.
 // All instructions are used for testing, therefore they are guarded with `#[cfg(test)]`.
 #[derive(Debug, PartialEq, Eq)]
-pub enum EncoderInstruction<'a> {
+pub(crate) enum EncoderInstruction<'a> {
     Capacity {
         value: u64,
     },
@@ -98,7 +98,7 @@ enum EncoderInstructionReaderState {
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
-pub enum DecodedEncoderInstruction {
+pub(crate) enum DecodedEncoderInstruction {
     Capacity {
         value: u64,
     },
@@ -154,7 +154,7 @@ impl<'a> From<&'a EncoderInstruction<'a>> for DecodedEncoderInstruction {
 }
 
 #[derive(Debug, Default)]
-pub struct EncoderInstructionReader {
+pub(crate) struct EncoderInstructionReader {
     state: EncoderInstructionReaderState,
     instruction: DecodedEncoderInstruction,
 }
@@ -233,7 +233,7 @@ impl EncoderInstructionReader {
     /// 1) `NeedMoreData` if the reader needs more data
     /// 2) `ClosedCriticalStream`
     /// 3) other errors will be translated to `EncoderStream` by the caller of this function.
-    pub fn read_instructions<T: ReadByte + Reader>(
+    pub(crate) fn read_instructions<T: ReadByte + Reader>(
         &mut self,
         recv: &mut T,
     ) -> Res<DecodedEncoderInstruction> {

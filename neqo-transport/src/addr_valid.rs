@@ -56,14 +56,14 @@ pub enum ValidateAddress {
     Always,
 }
 
-pub enum AddressValidationResult {
+pub(crate) enum AddressValidationResult {
     Pass,
     ValidRetry(ConnectionId),
     Validate,
     Invalid,
 }
 
-pub struct AddressValidation {
+pub(crate) struct AddressValidation {
     /// What sort of validation is performed.
     validation: ValidateAddress,
     /// A self-encryption object used for protecting Retry tokens.
@@ -73,7 +73,7 @@ pub struct AddressValidation {
 }
 
 impl AddressValidation {
-    pub fn new(now: Instant, validation: ValidateAddress) -> Res<Self> {
+    pub(crate) fn new(now: Instant, validation: ValidateAddress) -> Res<Self> {
         Ok(Self {
             validation,
             self_encrypt: SelfEncrypt::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256)?,
@@ -107,7 +107,7 @@ impl AddressValidation {
         aad
     }
 
-    pub fn generate_token(
+    pub(crate) fn generate_token(
         &self,
         dcid: Option<&ConnectionId>,
         peer_address: SocketAddr,
@@ -152,7 +152,7 @@ impl AddressValidation {
     }
 
     /// This generates a token for use with Retry.
-    pub fn generate_retry_token(
+    pub(crate) fn generate_retry_token(
         &self,
         dcid: &ConnectionId,
         peer_address: SocketAddr,
@@ -162,11 +162,15 @@ impl AddressValidation {
     }
 
     /// This generates a token for use with `NEW_TOKEN`.
-    pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Res<Vec<u8>> {
+    pub(crate) fn generate_new_token(
+        &self,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Res<Vec<u8>> {
         self.generate_token(None, peer_address, now)
     }
 
-    pub fn set_validation(&mut self, validation: ValidateAddress) {
+    pub(crate) fn set_validation(&mut self, validation: ValidateAddress) {
         qtrace!("AddressValidation {self:p}: set to {validation:?}");
         self.validation = validation;
     }
@@ -211,7 +215,7 @@ impl AddressValidation {
         usize::try_from(difference).expect("u32 fits in usize") < TOKEN_IDENTIFIER_RETRY.len()
     }
 
-    pub fn validate(
+    pub(crate) fn validate(
         &self,
         token: &[u8],
         peer_address: SocketAddr,
@@ -283,7 +287,7 @@ impl AddressValidation {
 }
 
 #[expect(clippy::large_enum_variant, reason = "No way around it.")]
-pub enum NewTokenState {
+pub(crate) enum NewTokenState {
     Client {
         /// Tokens that haven't been taken yet.
         pending: SmallVec<[Vec<u8>; MAX_NEW_TOKEN]>,
@@ -294,7 +298,7 @@ pub enum NewTokenState {
 }
 
 impl NewTokenState {
-    pub fn new(role: Role) -> Self {
+    pub(crate) fn new(role: Role) -> Self {
         match role {
             Role::Client => Self::Client {
                 pending: SmallVec::<[_; MAX_NEW_TOKEN]>::new(),
@@ -305,7 +309,7 @@ impl NewTokenState {
     }
 
     /// Is there a token available?
-    pub fn has_token(&self) -> bool {
+    pub(crate) fn has_token(&self) -> bool {
         match self {
             Self::Client { pending, .. } => !pending.is_empty(),
             Self::Server(..) => false,
@@ -314,7 +318,7 @@ impl NewTokenState {
 
     /// If this is a client, take a token if there is one.
     /// If this is a server, panic.
-    pub fn take_token(&mut self) -> Option<&[u8]> {
+    pub(crate) fn take_token(&mut self) -> Option<&[u8]> {
         if let Self::Client { pending, old } = self {
             pending.pop().map(|t| {
                 if old.len() >= MAX_SAVED_TOKENS {
@@ -330,7 +334,7 @@ impl NewTokenState {
 
     /// If this is a client, save a token.
     /// If this is a server, panic.
-    pub fn save_token(&mut self, token: Vec<u8>) {
+    pub(crate) fn save_token(&mut self, token: Vec<u8>) {
         if let Self::Client { pending, old } = self {
             for t in old.iter().rev().chain(pending.iter().rev()) {
                 if t == &token {
@@ -350,7 +354,7 @@ impl NewTokenState {
 
     /// If this is a server, maybe send a frame.
     /// If this is a client, do nothing.
-    pub fn write_frames<B: Buffer>(
+    pub(crate) fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
@@ -363,7 +367,7 @@ impl NewTokenState {
 
     /// If this a server, buffer a `NEW_TOKEN` for sending.
     /// If this is a client, panic.
-    pub fn send_new_token(&mut self, token: Vec<u8>) {
+    pub(crate) fn send_new_token(&mut self, token: Vec<u8>) {
         if let Self::Server(sender) = self {
             sender.send_new_token(token);
         } else {
@@ -373,7 +377,7 @@ impl NewTokenState {
 
     /// If this a server, process a lost signal for a `NEW_TOKEN` frame.
     /// If this is a client, panic.
-    pub fn lost(&mut self, seqno: usize) {
+    pub(crate) fn lost(&mut self, seqno: usize) {
         if let Self::Server(sender) = self {
             sender.lost(seqno);
         } else {
@@ -383,7 +387,7 @@ impl NewTokenState {
 
     /// If this a server, process remove the acknowledged `NEW_TOKEN` frame.
     /// If this is a client, panic.
-    pub fn acked(&mut self, seqno: usize) {
+    pub(crate) fn acked(&mut self, seqno: usize) {
         if let Self::Server(sender) = self {
             sender.acked(seqno);
         } else {
@@ -405,7 +409,7 @@ impl NewTokenFrameStatus {
 }
 
 #[derive(Default)]
-pub struct NewTokenSender {
+pub(crate) struct NewTokenSender {
     /// The unacknowledged `NEW_TOKEN` frames we are yet to send.
     tokens: Vec<NewTokenFrameStatus>,
     /// A sequence number that is used to track individual tokens
@@ -415,7 +419,7 @@ pub struct NewTokenSender {
 
 impl NewTokenSender {
     /// Add a token to be sent.
-    pub fn send_new_token(&mut self, token: Vec<u8>) {
+    pub(crate) fn send_new_token(&mut self, token: Vec<u8>) {
         self.tokens.push(NewTokenFrameStatus {
             seqno: self.next_seqno,
             token,
@@ -424,7 +428,7 @@ impl NewTokenSender {
         self.next_seqno += 1;
     }
 
-    pub fn write_frames<B: Buffer>(
+    pub(crate) fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
@@ -444,7 +448,7 @@ impl NewTokenSender {
         }
     }
 
-    pub fn lost(&mut self, seqno: usize) {
+    pub(crate) fn lost(&mut self, seqno: usize) {
         for t in &mut self.tokens {
             if t.seqno == seqno {
                 t.needs_sending = true;
@@ -453,7 +457,7 @@ impl NewTokenSender {
         }
     }
 
-    pub fn acked(&mut self, seqno: usize) {
+    pub(crate) fn acked(&mut self, seqno: usize) {
         self.tokens.retain(|i| i.seqno != seqno);
     }
 }

@@ -19,7 +19,7 @@ use crate::{
 
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
 /// QUIC varint encoding.
-pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
+pub(crate) const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
 static_assertions::const_assert_eq!(
     Encoder::varint_len(FrameType::Datagram as u64),
     DATAGRAM_FRAME_TYPE_VARINT_LEN
@@ -41,13 +41,13 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
-pub struct QuicDatagram {
+pub(crate) struct QuicDatagram {
     data: Vec<u8>,
     tracking: DatagramTracking,
 }
 
 impl QuicDatagram {
-    pub const MAX_SIZE: u64 = 65535;
+    pub(crate) const MAX_SIZE: u64 = 65535;
 
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
@@ -60,7 +60,7 @@ impl AsRef<[u8]> for QuicDatagram {
     }
 }
 
-pub struct QuicDatagrams {
+pub(crate) struct QuicDatagrams {
     /// The max size of a datagram that would be acceptable.
     local_datagram_size: u64,
     /// The max size of a datagram that would be acceptable by the peer.
@@ -75,7 +75,7 @@ pub struct QuicDatagrams {
 }
 
 impl QuicDatagrams {
-    pub fn new(
+    pub(crate) fn new(
         local_datagram_size: u64,
         max_queued_outgoing_datagrams: usize,
         max_queued_incoming_datagrams: usize,
@@ -91,18 +91,18 @@ impl QuicDatagrams {
         }
     }
 
-    pub const fn remote_datagram_size(&self) -> u64 {
+    pub(crate) const fn remote_datagram_size(&self) -> u64 {
         self.remote_datagram_size
     }
 
-    pub fn set_remote_datagram_size(&mut self, v: u64) {
+    pub(crate) fn set_remote_datagram_size(&mut self, v: u64) {
         self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
     /// This function tries to write a datagram frame into a packet. If the
     /// frame does not fit into the packet, the datagram will be dropped and a
     /// [`OutgoingDatagramOutcome::DroppedTooBig`] event will be posted.
-    pub fn write_frames<B: Buffer>(
+    pub(crate) fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
@@ -158,7 +158,7 @@ impl QuicDatagrams {
     /// datagram can fit into a packet (i.e. MTU limit). This is checked during
     /// creation of an actual packet and the datagram will be dropped if it does
     /// not fit into the packet.
-    pub fn add_datagram(
+    pub(crate) fn add_datagram(
         &mut self,
         data: Vec<u8>,
         tracking: DatagramTracking,
@@ -187,7 +187,7 @@ impl QuicDatagrams {
         Ok(())
     }
 
-    pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
+    pub(crate) fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
         if self.local_datagram_size < u64::try_from(data.len())? {
             return Err(Error::ProtocolViolation);
         }

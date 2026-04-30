@@ -469,7 +469,7 @@ impl Debug for Stats {
 }
 
 #[derive(Default, Clone)]
-pub struct StatsCell {
+pub(crate) struct StatsCell {
     stats: Rc<RefCell<Stats>>,
 }
 

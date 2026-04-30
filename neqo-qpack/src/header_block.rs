@@ -152,7 +152,7 @@ impl Deref for HeaderEncoder {
     }
 }
 
-pub struct HeaderDecoder<'a> {
+pub(crate) struct HeaderDecoder<'a> {
     buf: ReceiverBufferWrapper<'a>,
     base: u64,
     req_insert_cnt: u64,
@@ -165,13 +165,13 @@ impl Display for HeaderDecoder<'_> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum HeaderDecoderResult {
+pub(crate) enum HeaderDecoderResult {
     Blocked(u64),
     Headers(Vec<Header>),
 }
 
 impl<'a> HeaderDecoder<'a> {
-    pub const fn new(buf: &'a [u8]) -> Self {
+    pub(crate) const fn new(buf: &'a [u8]) -> Self {
         Self {
             buf: ReceiverBufferWrapper::new(buf),
             base: 0,
@@ -179,7 +179,7 @@ impl<'a> HeaderDecoder<'a> {
         }
     }
 
-    pub fn refers_dynamic_table(
+    pub(crate) fn refers_dynamic_table(
         &mut self,
         max_entries: u64,
         total_num_of_inserts: u64,
@@ -191,7 +191,7 @@ impl<'a> HeaderDecoder<'a> {
         Ok(self.req_insert_cnt != 0)
     }
 
-    pub fn decode_header_block(
+    pub(crate) fn decode_header_block(
         &mut self,
         table: &HeaderTable,
         max_entries: u64,
@@ -257,7 +257,7 @@ impl<'a> HeaderDecoder<'a> {
         Ok(HeaderDecoderResult::Headers(h))
     }
 
-    pub const fn get_req_insert_cnt(&self) -> u64 {
+    pub(crate) const fn get_req_insert_cnt(&self) -> u64 {
         self.req_insert_cnt
     }
 

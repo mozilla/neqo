@@ -89,22 +89,22 @@ pub(crate) struct ExtendedConnectFeature {
 
 impl ExtendedConnectFeature {
     #[must_use]
-    pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
+    pub(crate) fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
         Self {
             feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
         }
     }
 
-    pub fn set_listener(&mut self, new_listener: Http3ClientEvents) {
+    pub(crate) fn set_listener(&mut self, new_listener: Http3ClientEvents) {
         self.feature_negotiation.set_listener(new_listener);
     }
 
-    pub fn handle_settings(&mut self, settings: &HSettings) {
+    pub(crate) fn handle_settings(&mut self, settings: &HSettings) {
         self.feature_negotiation.handle_settings(settings);
     }
 
     #[must_use]
-    pub const fn enabled(&self) -> bool {
+    pub(crate) const fn enabled(&self) -> bool {
         self.feature_negotiation.enabled()
     }
 }
@@ -139,7 +139,7 @@ impl HeaderListener {
         });
     }
 
-    pub fn get_headers(&mut self) -> Option<Headers> {
+    pub(crate) fn get_headers(&mut self) -> Option<Headers> {
         mem::take(&mut self.headers)
     }
 }

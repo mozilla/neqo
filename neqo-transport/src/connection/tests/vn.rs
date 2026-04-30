@@ -35,7 +35,7 @@ const INITIAL_PTO: Duration = Duration::from_millis(300);
 ///
 /// When the count of received packets doesn't match the count of received packets with the
 /// (default) DSCP.
-pub fn assert_dscp(stats: &Stats) {
+pub(super) fn assert_dscp(stats: &Stats) {
     assert_eq!(stats.dscp_rx[Dscp::Cs0], stats.packets_rx);
 }
 
@@ -590,7 +590,7 @@ fn server_initial_versions() {
 /// packet receipt correctly.
 #[test]
 fn client_initial_versions() {
-    pub struct CryptoWriter {}
+    pub(crate) struct CryptoWriter {}
 
     impl test_internal::FrameWriter for CryptoWriter {
         fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {

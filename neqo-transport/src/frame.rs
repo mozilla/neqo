@@ -681,7 +681,7 @@ impl<'a> Frame<'a> {
 }
 
 /// Extension trait for [`Encoder`] that automates writing to fuzzing corpus.
-pub trait FrameEncoder {
+pub(crate) trait FrameEncoder {
     /// Encode a frame with the given type and encoding closure.
     ///
     /// This method:

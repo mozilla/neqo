@@ -26,6 +26,7 @@ use static_assertions::{const_assert, const_assert_eq};
 )]
 #[expect(
     non_camel_case_types,
+    unreachable_pub,
     clippy::allow_attributes,
     clippy::allow_attributes_without_reason,
     clippy::struct_field_names,
@@ -381,7 +382,7 @@ fn if_index_mtu(remote: IpAddr) -> Result<(u16, Option<usize>)> {
     }
 }
 
-pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
+pub(crate) fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     let (if_index, mtu1) = if_index_mtu(remote)?;
     let (if_name, mtu2) = if_name_mtu(if_index.into())?;
     Ok((if_name, mtu1.or(mtu2).ok_or_else(default_err)?))

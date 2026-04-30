@@ -27,13 +27,13 @@ use crate::{
 // Leave space for large QUIC header.
 const DATAGRAM_SIZE: u64 = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) as u64 - 40;
 
-pub fn wt_default_parameters() -> Http3Parameters {
+pub(super) fn wt_default_parameters() -> Http3Parameters {
     Http3Parameters::default()
         .webtransport(true)
         .connection_parameters(ConnectionParameters::default().datagram_size(DATAGRAM_SIZE))
 }
 
-pub fn default_http3_client(client_params: Http3Parameters) -> Http3Client {
+pub(super) fn default_http3_client(client_params: Http3Parameters) -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
@@ -46,7 +46,7 @@ pub fn default_http3_client(client_params: Http3Parameters) -> Http3Client {
     .expect("create a default client")
 }
 
-pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
+pub(super) fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
@@ -59,7 +59,7 @@ pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
     .expect("create a server")
 }
 
-pub fn assert_wt(headers: &[Header]) {
+pub(super) fn assert_wt(headers: &[Header]) {
     assert!(
         headers.contains_header(":method", "CONNECT")
             && headers.contains_header(":protocol", "webtransport")
@@ -127,17 +127,20 @@ struct WtTest {
 }
 
 impl WtTest {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (client, server) = connect(wt_default_parameters(), wt_default_parameters());
         Self { client, server }
     }
 
-    pub fn new_with_params(client_params: Http3Parameters, server_params: Http3Parameters) -> Self {
+    pub(crate) fn new_with_params(
+        client_params: Http3Parameters,
+        server_params: Http3Parameters,
+    ) -> Self {
         let (client, server) = connect(client_params, server_params);
         Self { client, server }
     }
 
-    pub fn new_with(mut client: Http3Client, mut server: Http3Server) -> Self {
+    pub(crate) fn new_with(mut client: Http3Client, mut server: Http3Server) -> Self {
         connect_with(&mut client, &mut server);
         Self { client, server }
     }
@@ -213,7 +216,7 @@ impl WtTest {
         }
     }
 
-    pub fn cancel_session_client(&mut self, wt_stream_id: StreamId) {
+    pub(crate) fn cancel_session_client(&mut self, wt_stream_id: StreamId) {
         self.client
             .cancel_fetch(wt_stream_id, Error::HttpNone.code())
             .unwrap();
@@ -238,7 +241,7 @@ impl WtTest {
         }
     }
 
-    pub fn check_session_closed_event_client(
+    pub(crate) fn check_session_closed_event_client(
         &mut self,
         wt_session_id: StreamId,
         expected_reason: &CloseReason,
@@ -260,7 +263,7 @@ impl WtTest {
         assert!(event_found);
     }
 
-    pub fn cancel_session_server(&mut self, wt_session: &WebTransportRequest) {
+    pub(crate) fn cancel_session_server(&mut self, wt_session: &WebTransportRequest) {
         wt_session.cancel_fetch(Error::HttpNone.code()).unwrap();
         self.exchange_packets();
     }
@@ -282,7 +285,7 @@ impl WtTest {
         }
     }
 
-    pub fn check_session_closed_event_server(
+    pub(crate) fn check_session_closed_event_server(
         &self,
         wt_session: &WebTransportRequest,
         expected_reason: &CloseReason,
@@ -585,13 +588,22 @@ impl WtTest {
         assert_eq!(close_event, expected_session_close.is_some());
     }
 
-    pub fn session_close_frame_client(&mut self, session_id: StreamId, error: u32, message: &str) {
+    pub(crate) fn session_close_frame_client(
+        &mut self,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+    ) {
         self.client
             .webtransport_close_session(session_id, error, message, now())
             .unwrap();
     }
 
-    pub fn session_close_frame_server(wt_session: &WebTransportRequest, error: u32, message: &str) {
+    pub(crate) fn session_close_frame_server(
+        wt_session: &WebTransportRequest,
+        error: u32,
+        message: &str,
+    ) {
         wt_session.close_session(error, message, now()).unwrap();
     }
 

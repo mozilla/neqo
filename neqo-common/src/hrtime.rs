@@ -116,7 +116,7 @@ mod mac {
 
     #[repr(C)]
     #[derive(Debug, Copy, Clone, Default)]
-    pub struct thread_time_constraint_policy {
+    pub(super) struct thread_time_constraint_policy {
         period: u32,
         computation: u32,
         constraint: u32,
@@ -157,7 +157,7 @@ mod mac {
     }
 
     /// Set a thread time policy.
-    pub fn set_thread_policy(mut policy: thread_time_constraint_policy) {
+    pub(super) fn set_thread_policy(mut policy: thread_time_constraint_policy) {
         _ = unsafe {
             thread_policy_set(
                 pthread_mach_thread_np(pthread_self()),
@@ -168,7 +168,7 @@ mod mac {
         };
     }
 
-    pub fn get_scale() -> f64 {
+    pub(super) fn get_scale() -> f64 {
         const NANOS_PER_MSEC: f64 = 1_000_000.0;
         let mut timebase_info = mach_timebase_info_data_t::default();
         unsafe {
@@ -178,7 +178,7 @@ mod mac {
     }
 
     /// Create a realtime policy and set it.
-    pub fn set_realtime(base: f64) {
+    pub(super) fn set_realtime(base: f64) {
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,
@@ -194,7 +194,7 @@ mod mac {
     }
 
     /// Get the default policy.
-    pub fn get_default_policy() -> thread_time_constraint_policy {
+    pub(super) fn get_default_policy() -> thread_time_constraint_policy {
         let mut policy = thread_time_constraint_policy::default();
         let mut count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
         let mut get_default = 0;

@@ -859,7 +859,7 @@ impl<T> TpZeroRttChecker<T>
 where
     T: ZeroRttChecker + 'static,
 {
-    pub fn wrap(
+    pub(crate) fn wrap(
         handler: Rc<RefCell<TransportParametersHandler>>,
         app_checker: T,
     ) -> Box<dyn ZeroRttChecker> {

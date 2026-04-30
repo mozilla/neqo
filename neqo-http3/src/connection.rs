@@ -48,7 +48,7 @@ use crate::{
     stream_type_reader::NewStreamHeadReader,
 };
 
-pub struct RequestDescription<'b, T: RequestTarget> {
+pub(crate) struct RequestDescription<'b, T: RequestTarget> {
     pub method: &'b str,
     pub connect_type: Option<ConnectType>,
     pub target: T,
@@ -284,7 +284,7 @@ impl Http3State {
 /// [`ConnectionEvent::RecvStreamReadable`]: neqo_transport::ConnectionEvent::RecvStreamReadable
 /// [`ConnectionEvent::NewStream`]: neqo_transport::ConnectionEvent::NewStream
 #[derive(Debug)]
-pub struct Http3Connection {
+pub(crate) struct Http3Connection {
     role: Role,
     state: Http3State,
     local_params: Http3Parameters,
@@ -307,7 +307,7 @@ impl Display for Http3Connection {
 
 impl Http3Connection {
     /// Create a new connection.
-    pub fn new(conn_params: Http3Parameters, role: Role) -> Self {
+    pub(crate) fn new(conn_params: Http3Parameters, role: Role) -> Self {
         Self {
             state: Http3State::Initializing,
             control_stream_local: ControlStreamLocal::default(),
@@ -776,7 +776,7 @@ impl Http3Connection {
     }
 
     /// This is called when an application closes the connection.
-    pub fn close(&mut self, error: AppError) {
+    pub(crate) fn close(&mut self, error: AppError) {
         qdebug!("[{self}] Close connection error {error:?}");
         self.state = Http3State::Closing(CloseReason::Application(error));
         if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
@@ -884,7 +884,7 @@ impl Http3Connection {
         Ok(headers)
     }
 
-    pub fn request<T>(
+    pub(crate) fn request<T>(
         &mut self,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
@@ -1001,7 +1001,7 @@ impl Http3Connection {
     ///
     /// It returns an error if a stream does not exist or an error happens while reading a stream,
     /// e.g. early close, protocol error, etc.
-    pub fn read_data(
+    pub(crate) fn read_data(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -1019,7 +1019,7 @@ impl Http3Connection {
 
     /// This is called when an application resets a stream.
     /// The application reset will close both sides.
-    pub fn stream_reset_send(
+    pub(crate) fn stream_reset_send(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -1036,7 +1036,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn stream_stop_sending(
+    pub(crate) fn stream_stop_sending(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -1059,7 +1059,7 @@ impl Http3Connection {
     /// # Errors
     ///
     /// Returns `InvalidStreamId` if the stream id doesn't exist
-    pub fn stream_set_sendorder(
+    pub(crate) fn stream_set_sendorder(
         conn: &mut Connection,
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
@@ -1075,7 +1075,7 @@ impl Http3Connection {
     /// # Errors
     ///
     /// Returns `InvalidStreamId` if the stream id doesn't exist
-    pub fn stream_set_fairness(
+    pub(crate) fn stream_set_fairness(
         conn: &mut Connection,
         stream_id: StreamId,
         fairness: bool,
@@ -1084,7 +1084,7 @@ impl Http3Connection {
             .map_err(|_| Error::InvalidStreamId)
     }
 
-    pub fn cancel_fetch(
+    pub(crate) fn cancel_fetch(
         &mut self,
         stream_id: StreamId,
         error: AppError,
@@ -1136,7 +1136,7 @@ impl Http3Connection {
     }
 
     /// This is called when an application wants to close the sending side of a stream.
-    pub fn stream_close_send(
+    pub(crate) fn stream_close_send(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -1159,7 +1159,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_session<T>(
+    pub(crate) fn webtransport_create_session<T>(
         &mut self,
         conn: &mut Connection,
         events: Box<dyn ExtendedConnectEvents>,
@@ -1182,7 +1182,7 @@ impl Http3Connection {
         )
     }
 
-    pub fn connect_udp_create_session<T>(
+    pub(crate) fn connect_udp_create_session<T>(
         &mut self,
         conn: &mut Connection,
         events: Box<dyn ExtendedConnectEvents>,
@@ -1205,7 +1205,7 @@ impl Http3Connection {
         )
     }
 
-    pub fn extended_connect_create_session<T>(
+    pub(crate) fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
         events: Box<dyn ExtendedConnectEvents>,
@@ -1539,7 +1539,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
+    pub(crate) fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         conn: &mut Connection,
@@ -1550,7 +1550,7 @@ impl Http3Connection {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
-    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+    pub(crate) fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         conn: &mut Connection,
@@ -1820,55 +1820,55 @@ impl Http3Connection {
         stream
     }
 
-    pub const fn webtransport_enabled(&self) -> bool {
+    pub(crate) const fn webtransport_enabled(&self) -> bool {
         self.webtransport.enabled()
     }
 
-    pub const fn connect_udp_enabled(&self) -> bool {
+    pub(crate) const fn connect_udp_enabled(&self) -> bool {
         self.connect_udp.enabled()
     }
 
     #[must_use]
-    pub const fn state(&self) -> &Http3State {
+    pub(crate) const fn state(&self) -> &Http3State {
         &self.state
     }
 
-    pub fn set_state(&mut self, state: Http3State) {
+    pub(crate) fn set_state(&mut self, state: Http3State) {
         self.state = state;
     }
 
     #[must_use]
-    pub const fn state_mut(&mut self) -> &mut Http3State {
+    pub(crate) const fn state_mut(&mut self) -> &mut Http3State {
         &mut self.state
     }
 
     #[must_use]
-    pub const fn qpack_encoder(&self) -> &Rc<RefCell<qpack::Encoder>> {
+    pub(crate) const fn qpack_encoder(&self) -> &Rc<RefCell<qpack::Encoder>> {
         &self.qpack_encoder
     }
 
     #[must_use]
-    pub const fn qpack_decoder(&self) -> &Rc<RefCell<qpack::Decoder>> {
+    pub(crate) const fn qpack_decoder(&self) -> &Rc<RefCell<qpack::Decoder>> {
         &self.qpack_decoder
     }
 
     #[must_use]
-    pub fn send_streams(&self) -> &HashMap<StreamId, Box<dyn SendStream>> {
+    pub(crate) fn send_streams(&self) -> &HashMap<StreamId, Box<dyn SendStream>> {
         &self.send_streams
     }
 
     #[must_use]
-    pub fn send_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn SendStream>> {
+    pub(crate) fn send_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn SendStream>> {
         &mut self.send_streams
     }
 
     #[must_use]
-    pub fn recv_streams(&self) -> &HashMap<StreamId, Box<dyn RecvStream>> {
+    pub(crate) fn recv_streams(&self) -> &HashMap<StreamId, Box<dyn RecvStream>> {
         &self.recv_streams
     }
 
     #[must_use]
-    pub fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
+    pub(crate) fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
         &mut self.recv_streams
     }
 }

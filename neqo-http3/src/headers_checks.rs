@@ -48,7 +48,7 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 ///
 /// Returns an error if response headers do not contain
 /// a status header or if the value of the header is 101 or cannot be parsed.
-pub fn is_interim(headers: &[Header]) -> Res<bool> {
+pub(crate) fn is_interim(headers: &[Header]) -> Res<bool> {
     if let Some(h) = headers.iter().take(1).find_header(":status") {
         let status_code = std::str::from_utf8(h.value())
             .map_err(|_| Error::InvalidHeader)?
@@ -94,7 +94,7 @@ fn track_pseudo(
 /// # Errors
 ///
 /// Returns an error if headers are not well formed.
-pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
+pub(crate) fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     let mut method_value: Option<&[u8]> = None;
     let mut protocol_value: Option<&[u8]> = None;
     let mut scheme_value: Option<&[u8]> = None;
@@ -162,7 +162,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
 /// # Errors
 ///
 /// Returns an error if trailers are not well formed.
-pub fn trailers_valid(headers: &[Header]) -> Res<()> {
+pub(crate) fn trailers_valid(headers: &[Header]) -> Res<()> {
     for header in headers {
         if header.name().starts_with(':') {
             return Err(Error::InvalidHeader);

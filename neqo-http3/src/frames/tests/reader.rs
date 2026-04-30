@@ -28,7 +28,7 @@ struct FrameReaderTest {
 }
 
 impl FrameReaderTest {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (conn_c, mut conn_s) = connect();
         let stream_id = conn_s.stream_create(StreamType::BiDi).unwrap();
         Self {

@@ -5,22 +5,22 @@
 // except according to those terms.
 
 #[derive(Debug)]
-pub struct StaticTableEntry {
+pub(crate) struct StaticTableEntry {
     index: u64,
     name: &'static [u8],
     value: &'static [u8],
 }
 
 impl StaticTableEntry {
-    pub const fn name(&self) -> &[u8] {
+    pub(crate) const fn name(&self) -> &[u8] {
         self.name
     }
 
-    pub const fn value(&self) -> &[u8] {
+    pub(crate) const fn value(&self) -> &[u8] {
         self.value
     }
 
-    pub const fn index(&self) -> u64 {
+    pub(crate) const fn index(&self) -> u64 {
         self.index
     }
 }
@@ -31,7 +31,7 @@ macro_rules! static_table_entries {
     };
 }
 
-pub const HEADER_STATIC_TABLE: &[StaticTableEntry] = static_table_entries![
+pub(crate) const HEADER_STATIC_TABLE: &[StaticTableEntry] = static_table_entries![
     0, b":authority", b"";
     1, b":path", b"/";
     2, b"age", b"0";

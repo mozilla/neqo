@@ -7,7 +7,7 @@
 //! Fuzzing support for QPACK.
 
 #[cfg(feature = "build-fuzzing-corpus")]
-pub use write_corpus::write_item_to_fuzzing_corpus;
+pub(crate) use write_corpus::write_item_to_fuzzing_corpus;
 
 #[cfg(feature = "build-fuzzing-corpus")]
 /// Helpers to write data to the fuzzing corpus.
@@ -15,7 +15,7 @@ mod write_corpus {
     use neqo_transport::StreamId;
 
     /// Write QPACK data to the fuzzing corpus.
-    pub fn write_item_to_fuzzing_corpus(stream_id: StreamId, buf: &[u8]) {
+    pub(crate) fn write_item_to_fuzzing_corpus(stream_id: StreamId, buf: &[u8]) {
         let mut data = Vec::with_capacity(size_of::<u64>() + buf.len());
         data.extend_from_slice(&stream_id.as_u64().to_le_bytes());
         data.extend_from_slice(buf);

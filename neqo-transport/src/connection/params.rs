@@ -6,6 +6,7 @@
 
 use std::{cmp::max, time::Duration};
 
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
@@ -82,7 +83,7 @@ pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
 /// for the size of the connection-level receive window.
 ///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
-pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
+pub(crate) const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
 
 // Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
 const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;

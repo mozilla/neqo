@@ -71,17 +71,17 @@ impl From<packet::Type> for PacketNumberSpace {
     }
 }
 
-pub type PacketNumberSpaceSet = EnumSet<PacketNumberSpace>;
+pub(crate) type PacketNumberSpaceSet = EnumSet<PacketNumberSpace>;
 
 /// `InsertionResult` tracks whether something was inserted for `PacketRange::add()`.
-pub enum InsertionResult {
+pub(crate) enum InsertionResult {
     Largest,
     Smallest,
     NotInserted,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PacketRange {
+pub(crate) struct PacketRange {
     largest: packet::Number,
     smallest: packet::Number,
     ack_needed: bool,
@@ -89,7 +89,7 @@ pub struct PacketRange {
 
 impl PacketRange {
     /// Make a single packet range.
-    pub const fn new(pn: packet::Number) -> Self {
+    pub(crate) const fn new(pn: packet::Number) -> Self {
         Self {
             largest: pn,
             smallest: pn,
@@ -98,24 +98,24 @@ impl PacketRange {
     }
 
     /// Get the number of acknowledged packets in the range.
-    pub const fn len(&self) -> u64 {
+    pub(crate) const fn len(&self) -> u64 {
         self.largest - self.smallest + 1
     }
 
     /// Returns whether this needs to be sent.
-    pub const fn ack_needed(&self) -> bool {
+    pub(crate) const fn ack_needed(&self) -> bool {
         self.ack_needed
     }
 
     /// Return whether the given number is in the range.
-    pub const fn contains(&self, pn: packet::Number) -> bool {
+    pub(crate) const fn contains(&self, pn: packet::Number) -> bool {
         (pn >= self.smallest) && (pn <= self.largest)
     }
 
     /// Maybe add a packet number to the range.  Returns true if it was added
     /// at the small end (which indicates that this might need merging with a
     /// preceding range).
-    pub fn add(&mut self, pn: packet::Number) -> InsertionResult {
+    pub(crate) fn add(&mut self, pn: packet::Number) -> InsertionResult {
         assert!(!self.contains(pn));
         // Only insert if this is adjacent the current range.
         if (self.largest + 1) == pn {
@@ -146,7 +146,7 @@ impl PacketRange {
     /// When a packet containing the range `other` is acknowledged,
     /// clear the `ack_needed` attribute on this.
     /// Requires that other is equal to this, or a larger range.
-    pub const fn acknowledged(&mut self, other: &Self) {
+    pub(crate) const fn acknowledged(&mut self, other: &Self) {
         if (other.smallest <= self.smallest) && (other.largest >= self.largest) {
             self.ack_needed = false;
         }
@@ -160,16 +160,16 @@ impl Display for PacketRange {
 }
 
 /// The default maximum ACK delay we use locally and advertise to the remote.
-pub const DEFAULT_LOCAL_ACK_DELAY: Duration = Duration::from_millis(20);
+pub(crate) const DEFAULT_LOCAL_ACK_DELAY: Duration = Duration::from_millis(20);
 /// The default maximum ACK delay we assume the remote uses.
 ///
 /// > If this value is absent, a default of 25 milliseconds is assumed.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9000#section-18.2>
-pub const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
+pub(crate) const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
 /// The default number of in-order packets we will receive after
 /// largest acknowledged without sending an immediate acknowledgment.
-pub const DEFAULT_ACK_PACKET_TOLERANCE: packet::Number = 1;
+pub(crate) const DEFAULT_ACK_PACKET_TOLERANCE: packet::Number = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
@@ -190,7 +190,7 @@ impl AckToken {
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
 #[derive(Debug)]
-pub struct RecvdPackets {
+pub(crate) struct RecvdPackets {
     space: PacketNumberSpace,
     ranges: VecDeque<PacketRange>,
     /// The packet number of the lowest number packet that we are tracking.
@@ -221,7 +221,7 @@ pub struct RecvdPackets {
 
 impl RecvdPackets {
     /// Make a new `RecvdPackets` for the indicated packet number space.
-    pub fn new(space: PacketNumberSpace) -> Self {
+    pub(crate) fn new(space: PacketNumberSpace) -> Self {
         Self {
             space,
             ranges: VecDeque::new(),
@@ -244,17 +244,17 @@ impl RecvdPackets {
     }
 
     /// Get the ECN counts.
-    pub const fn ecn_marks(&mut self) -> &mut ecn::Count {
+    pub(crate) const fn ecn_marks(&mut self) -> &mut ecn::Count {
         &mut self.ecn_count
     }
 
     /// Get the time at which the next ACK should be sent.
-    pub const fn ack_time(&self) -> Option<Instant> {
+    pub(crate) const fn ack_time(&self) -> Option<Instant> {
         self.ack_time
     }
 
     /// Update acknowledgment delay parameters.
-    pub const fn ack_freq(
+    pub(crate) const fn ack_freq(
         &mut self,
         seqno: u64,
         tolerance: packet::Number,
@@ -327,7 +327,7 @@ impl RecvdPackets {
 
     /// Add the packet to the tracked set.
     /// Return true if the packet was the largest received so far.
-    pub fn set_received(
+    pub(crate) fn set_received(
         &mut self,
         now: Instant,
         pn: packet::Number,
@@ -373,13 +373,13 @@ impl RecvdPackets {
     }
 
     /// If we just received a PING frame, we should immediately acknowledge.
-    pub fn immediate_ack(&mut self, now: Instant) {
+    pub(crate) fn immediate_ack(&mut self, now: Instant) {
         self.ack_time = Some(now);
         qdebug!("[{self}] immediate_ack at {now:?}");
     }
 
     /// Check if the packet is a duplicate.
-    pub fn is_duplicate(&self, pn: packet::Number) -> bool {
+    pub(crate) fn is_duplicate(&self, pn: packet::Number) -> bool {
         if pn < self.min_tracked {
             return true;
         }
@@ -390,7 +390,7 @@ impl RecvdPackets {
     }
 
     /// Mark the given range as having been acknowledged.
-    pub fn acknowledged(&mut self, acked: &[PacketRange]) {
+    pub(crate) fn acknowledged(&mut self, acked: &[PacketRange]) {
         let mut range_iter = self.ranges.iter_mut();
         let mut cur = range_iter.next().expect("should have at least one range");
         for ack in acked {
@@ -406,7 +406,7 @@ impl RecvdPackets {
 
     /// Length of the worst possible ACK frame, assuming only one range and ECN counts.
     /// Note that this assumes one byte for the type and count of extra ranges.
-    pub const USEFUL_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
+    pub(crate) const USEFUL_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
 
     /// Generate an ACK frame for this packet number space.
     ///
@@ -519,12 +519,12 @@ impl Display for RecvdPackets {
     }
 }
 
-pub struct AckTracker {
+pub(crate) struct AckTracker {
     spaces: EnumMap<PacketNumberSpace, Option<RecvdPackets>>,
 }
 
 impl AckTracker {
-    pub fn drop_space(&mut self, space: PacketNumberSpace) {
+    pub(crate) fn drop_space(&mut self, space: PacketNumberSpace) {
         assert_ne!(
             space,
             PacketNumberSpace::ApplicationData,
@@ -536,11 +536,11 @@ impl AckTracker {
         self.spaces[space].take();
     }
 
-    pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
+    pub(crate) fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut RecvdPackets> {
         self.spaces[space].as_mut()
     }
 
-    pub fn ack_freq(
+    pub(crate) fn ack_freq(
         &mut self,
         seqno: u64,
         tolerance: packet::Number,
@@ -554,14 +554,14 @@ impl AckTracker {
     }
 
     /// Force an ACK to be generated immediately.
-    pub fn immediate_ack(&mut self, space: PacketNumberSpace, now: Instant) {
+    pub(crate) fn immediate_ack(&mut self, space: PacketNumberSpace, now: Instant) {
         if let Some(space) = self.get_mut(space) {
             space.immediate_ack(now);
         }
     }
 
     /// Determine the earliest time that an ACK might be needed.
-    pub fn ack_time(&self, now: Instant) -> Option<Instant> {
+    pub(crate) fn ack_time(&self, now: Instant) -> Option<Instant> {
         if log_enabled!(Level::Trace) {
             for (space, recvd) in &self.spaces {
                 if let Some(recvd) = recvd {
@@ -588,7 +588,7 @@ impl AckTracker {
             .min()
     }
 
-    pub fn acked(&mut self, token: &AckToken) {
+    pub(crate) fn acked(&mut self, token: &AckToken) {
         if let Some(space) = self.get_mut(token.space) {
             space.acknowledged(&token.ranges);
         }

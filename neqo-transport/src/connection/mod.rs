@@ -68,18 +68,21 @@ use crate::{
 };
 
 mod idle;
-pub mod params;
+pub(crate) mod params;
 mod state;
 #[cfg(any(test, feature = "build-fuzzing-corpus"))]
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub mod test_internal;
+pub(crate) mod test_internal;
 
 use idle::IdleTimeout;
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use params::ConnectionParameters;
 use params::PreferredAddressConfig;
 use state::StateSignaling;
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use state::{ClosingFrame, State};
 
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use crate::send_stream::{RetransmissionPriority, TransmissionPriority};
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -237,14 +240,18 @@ enum AddressValidationInfo {
 }
 
 impl AddressValidationInfo {
-    pub fn token(&self) -> &[u8] {
+    pub(crate) fn token(&self) -> &[u8] {
         match self {
             Self::NewToken(token) | Self::Retry { token, .. } => token,
             _ => &[],
         }
     }
 
-    pub fn generate_new_token(&self, peer_address: SocketAddr, now: Instant) -> Option<Vec<u8>> {
+    pub(crate) fn generate_new_token(
+        &self,
+        peer_address: SocketAddr,
+        now: Instant,
+    ) -> Option<Vec<u8>> {
         match self {
             Self::Server(w) => w
                 .upgrade()?

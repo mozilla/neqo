@@ -32,7 +32,7 @@ use crate::{
 /// a new connection across all QUIC versions this server supports.
 pub const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 
-pub const BIT_LONG: u8 = 0x80;
+pub(crate) const BIT_LONG: u8 = 0x80;
 const BIT_SHORT: u8 = 0x00;
 const BIT_FIXED_QUIC: u8 = 0x40;
 const BIT_SPIN: u8 = 0x20;
@@ -47,12 +47,16 @@ const MAX_PACKET_NUMBER_LEN: usize = 4;
 /// The length of a long packet length field.
 const LONG_PACKET_LENGTH_LEN: usize = 2;
 
-pub mod metadata;
+pub(crate) mod metadata;
 mod retry;
 
+#[cfg_attr(
+    not(any(fuzzing, feature = "bench")),
+    expect(unreachable_pub, reason = "re-exported via lib.rs")
+)]
 pub use metadata::MetaData;
 
-pub type Number = u64;
+pub(crate) type Number = u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Enum, EnumIter, FromRepr, Hash)]
 #[repr(u8)]
@@ -563,7 +567,7 @@ impl<B> From<Builder<B>> for Encoder<B> {
 
 /// `Public` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
-pub struct Public<'a> {
+pub(crate) struct Public<'a> {
     /// The packet type.
     packet_type: Type,
     /// The recovered destination connection ID.
@@ -626,7 +630,7 @@ impl<'a> Public<'a> {
     /// # Errors
     ///
     /// This will return an error if the packet could not be decoded.
-    pub fn decode(
+    pub(crate) fn decode(
         data: &'a mut [u8],
         dcid_decoder: &dyn ConnectionIdDecoder,
     ) -> Res<(Self, &'a mut [u8])> {
@@ -638,7 +642,7 @@ impl<'a> Public<'a> {
     /// # Errors
     ///
     /// This will return an error if the packet could not be decoded.
-    pub fn decode_server(
+    pub(crate) fn decode_server(
         data: &'a mut [u8],
         dcid_decoder: &dyn ConnectionIdDecoder,
     ) -> Res<(Self, &'a mut [u8])> {
@@ -769,7 +773,7 @@ impl<'a> Public<'a> {
 
     /// Validate the given packet as though it were a retry.
     #[must_use]
-    pub fn is_valid_retry(&self, odcid: &ConnectionId) -> bool {
+    pub(crate) fn is_valid_retry(&self, odcid: &ConnectionId) -> bool {
         if self.packet_type != Type::Retry {
             return false;
         }
@@ -792,19 +796,19 @@ impl<'a> Public<'a> {
     }
 
     #[must_use]
-    pub fn is_valid_initial(&self) -> bool {
+    pub(crate) fn is_valid_initial(&self) -> bool {
         // Packet has to be an initial, with a DCID of 8 bytes, or a token.
         // Note: the Server class validates the token and checks the length.
         self.packet_type == Type::Initial && (self.dcid().len() >= 8 || !self.token.is_empty())
     }
 
     #[must_use]
-    pub const fn packet_type(&self) -> Type {
+    pub(crate) const fn packet_type(&self) -> Type {
         self.packet_type
     }
 
     #[must_use]
-    pub fn dcid(&self) -> ConnectionIdRef<'_> {
+    pub(crate) fn dcid(&self) -> ConnectionIdRef<'_> {
         self.dcid.as_cid_ref()
     }
 
@@ -812,7 +816,7 @@ impl<'a> Public<'a> {
     ///
     /// This will panic if called for a short header packet.
     #[must_use]
-    pub fn scid(&self) -> ConnectionIdRef<'_> {
+    pub(crate) fn scid(&self) -> ConnectionIdRef<'_> {
         self.scid
             .as_ref()
             .expect("should only be called for long header packets")
@@ -820,17 +824,17 @@ impl<'a> Public<'a> {
     }
 
     #[must_use]
-    pub fn token(&self) -> &[u8] {
+    pub(crate) fn token(&self) -> &[u8] {
         &self.token
     }
 
     #[must_use]
-    pub fn version(&self) -> Option<Version> {
+    pub(crate) fn version(&self) -> Option<Version> {
         Version::try_from(self.version?).ok()
     }
 
     #[must_use]
-    pub fn wire_version(&self) -> version::Wire {
+    pub(crate) fn wire_version(&self) -> version::Wire {
         debug_assert!(self.version.is_some());
         self.version.unwrap_or(0)
     }
@@ -841,13 +845,13 @@ impl<'a> Public<'a> {
         reason = "Is OK here."
     )]
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.data.len()
     }
 
     #[cfg(feature = "build-fuzzing-corpus")]
     #[must_use]
-    pub const fn data(&self) -> &[u8] {
+    pub(crate) const fn data(&self) -> &[u8] {
         self.data
     }
 
@@ -922,7 +926,7 @@ impl<'a> Public<'a> {
     /// # Errors
     ///
     /// This will return an error if the packet cannot be decrypted.
-    pub fn decrypt(
+    pub(crate) fn decrypt(
         mut self,
         crypto: &mut CryptoStates,
         release_at: Instant,
@@ -989,7 +993,7 @@ impl<'a> Public<'a> {
     ///
     /// This will return an error if the packet is not a version negotiation packet
     /// or if the versions cannot be decoded.
-    pub fn supported_versions(&self) -> Res<Vec<version::Wire>> {
+    pub(crate) fn supported_versions(&self) -> Res<Vec<version::Wire>> {
         if self.packet_type != Type::VersionNegotiation {
             return Err(Error::InvalidPacket);
         }
@@ -1018,7 +1022,7 @@ impl fmt::Debug for Public<'_> {
 /// Error information from a failed decryption attempt.
 /// Contains minimal packet information needed for error handling.
 #[derive(Debug)]
-pub struct DecryptionError<'a> {
+pub(crate) struct DecryptionError<'a> {
     /// The error that occurred.
     pub error: Error,
     /// The original packet data (unchanged since decryption failed).
@@ -1042,7 +1046,7 @@ impl<'a> From<(Public<'a>, Error)> for DecryptionError<'a> {
 
 impl DecryptionError<'_> {
     #[must_use]
-    pub const fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.data.len()
     }
 
@@ -1050,12 +1054,16 @@ impl DecryptionError<'_> {
     // triggers the `clippy::len_without_is_empty` lint without this.
     #[cfg(any(fuzzing, feature = "bench"))]
     #[must_use]
-    pub const fn is_empty(&self) -> bool {
+    #[expect(
+        dead_code,
+        reason = "Exists to satisfy `clippy::len_without_is_empty` when `packet` is `pub mod`."
+    )]
+    pub(crate) const fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
 
     #[must_use]
-    pub const fn packet_type(&self) -> Type {
+    pub(crate) const fn packet_type(&self) -> Type {
         self.packet_type
     }
 }
@@ -1117,7 +1125,7 @@ impl Deref for Decrypted<'_> {
 }
 
 #[cfg(test)]
-pub const LIMIT: usize = 2048;
+pub(crate) const LIMIT: usize = 2048;
 
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg(test)]

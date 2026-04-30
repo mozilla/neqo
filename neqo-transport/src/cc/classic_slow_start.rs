@@ -16,6 +16,7 @@ use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::Congesti
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9002#section-7.3.1-2>
 #[derive(Debug, Default)]
+#[expect(unreachable_pub, reason = "re-exported via cc::ClassicSlowStart")]
 pub struct ClassicSlowStart {}
 
 impl Display for ClassicSlowStart {

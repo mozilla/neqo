@@ -35,7 +35,7 @@ use crate::{
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
 
-pub type PathRef = Rc<RefCell<Path>>;
+pub(crate) type PathRef = Rc<RefCell<Path>>;
 
 /// A collection for network paths.
 /// This holds a collection of paths that have been used for sending or
@@ -44,7 +44,7 @@ pub type PathRef = Rc<RefCell<Path>>;
 /// This structure limits its storage and will forget about paths if it
 /// is exposed to too many paths.
 #[derive(Debug)]
-pub struct Paths {
+pub(crate) struct Paths {
     /// All of the paths.  All of these paths will be permanent.
     #[expect(clippy::struct_field_names, reason = "This is the best name.")]
     paths: Vec<PathRef>,
@@ -68,7 +68,7 @@ pub struct Paths {
 
 impl Paths {
     #[must_use]
-    pub fn new(pmtud: bool) -> Self {
+    pub(crate) fn new(pmtud: bool) -> Self {
         Self {
             paths: Vec::new(),
             primary: None,
@@ -81,7 +81,7 @@ impl Paths {
 
     /// Find the path for the given addresses.
     /// This might be a temporary path.
-    pub fn find_path(
+    pub(crate) fn find_path(
         &self,
         local: SocketAddr,
         remote: SocketAddr,
@@ -106,12 +106,12 @@ impl Paths {
     }
 
     /// Get a reference to the primary path, if one exists.
-    pub fn primary(&self) -> Option<PathRef> {
+    pub(crate) fn primary(&self) -> Option<PathRef> {
         self.primary.clone()
     }
 
     /// Returns true if the path is not permanent.
-    pub fn is_temporary(&self, path: &PathRef) -> bool {
+    pub(crate) fn is_temporary(&self, path: &PathRef) -> bool {
         // Ask the path first, which is simpler.
         path.borrow().is_temporary() || !self.paths.iter().any(|p| Rc::ptr_eq(p, path))
     }
@@ -129,7 +129,7 @@ impl Paths {
 
     /// Adopt a temporary path as permanent.
     /// The first path that is made permanent is made primary.
-    pub fn make_permanent(
+    pub(crate) fn make_permanent(
         &mut self,
         path: &PathRef,
         local_cid: Option<ConnectionId>,
@@ -193,7 +193,7 @@ impl Paths {
     /// Otherwise, migration will occur after probing succeeds.
     /// The path is always probed and will be abandoned if probing fails.
     /// Returns `true` if the path was migrated.
-    pub fn migrate(
+    pub(crate) fn migrate(
         &mut self,
         path: &PathRef,
         force: bool,
@@ -223,7 +223,12 @@ impl Paths {
     ///
     /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
     /// for themselves.
-    pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
+    pub(crate) fn process_timeout(
+        &mut self,
+        now: Instant,
+        pto: Duration,
+        stats: &mut Stats,
+    ) -> bool {
         let to_retire = &mut self.to_retire;
         let mut primary_failed = false;
         self.paths.retain(|p| {
@@ -272,7 +277,7 @@ impl Paths {
     }
 
     /// Get when the next call to `process_timeout()` should be scheduled.
-    pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
+    pub(crate) fn next_timeout(&self, pto: Duration) -> Option<Instant> {
         self.paths
             .iter()
             .filter_map(|p| p.borrow().next_timeout(pto))
@@ -282,7 +287,7 @@ impl Paths {
     /// Set the identified path to be primary.
     /// This panics if `make_permanent` hasn't been called.
     /// If PMTUD is enabled, it will be started on the new primary path.
-    pub fn handle_migration(
+    pub(crate) fn handle_migration(
         &mut self,
         path: &PathRef,
         remote: SocketAddr,
@@ -314,7 +319,7 @@ impl Paths {
 
     /// Select a path to send on.  This will select the first path that has
     /// probes to send, then fall back to the primary path.
-    pub fn select_path(&self) -> Option<PathRef> {
+    pub(crate) fn select_path(&self) -> Option<PathRef> {
         self.paths
             .iter()
             .find_map(|p| p.borrow().has_probe().then(|| Rc::clone(p)))
@@ -325,7 +330,12 @@ impl Paths {
     /// Returns `true` if migration occurred.
     /// If PMTUD is enabled and migration occurs, it will be started on the new primary path.
     #[must_use]
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant, stats: &mut Stats) -> bool {
+    pub(crate) fn path_response(
+        &mut self,
+        response: [u8; 8],
+        now: Instant,
+        stats: &mut Stats,
+    ) -> bool {
         // TODO(mt) consider recording an RTT measurement here as we don't train
         // RTT for non-primary paths.
         for p in &self.paths {
@@ -352,7 +362,7 @@ impl Paths {
     /// Keep active paths if possible by pulling new connection IDs from the provided store.
     /// One slightly non-obvious consequence of this is that if migration is being attempted
     /// and the new path cannot obtain a new connection ID, the migration attempt will fail.
-    pub fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<Srt>) {
+    pub(crate) fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<Srt>) {
         let to_retire = &mut self.to_retire;
         let migration_target = &mut self.migration_target;
 
@@ -391,7 +401,7 @@ impl Paths {
     }
 
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
-    pub fn write_frames<B: Buffer>(
+    pub(crate) fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
@@ -415,39 +425,39 @@ impl Paths {
         }
     }
 
-    pub fn lost_retire_cid(&mut self, lost: u64) {
+    pub(crate) fn lost_retire_cid(&mut self, lost: u64) {
         self.to_retire.push(lost);
     }
 
-    pub fn acked_retire_cid(&mut self, acked: u64) {
+    pub(crate) fn acked_retire_cid(&mut self, acked: u64) {
         self.to_retire.retain(|&seqno| seqno != acked);
     }
 
-    pub fn lost_ack_frequency(&self, lost: &AckRate) {
+    pub(crate) fn lost_ack_frequency(&self, lost: &AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().lost_ack_frequency(lost);
         }
     }
 
-    pub fn acked_ack_frequency(&self, acked: &AckRate) {
+    pub(crate) fn acked_ack_frequency(&self, acked: &AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().acked_ack_frequency(acked);
         }
     }
 
-    pub fn acked_ecn(&self) {
+    pub(crate) fn acked_ecn(&self) {
         if let Some(path) = self.primary() {
             path.borrow_mut().acked_ecn();
         }
     }
 
-    pub fn lost_ecn(&self, stats: &mut Stats) {
+    pub(crate) fn lost_ecn(&self, stats: &mut Stats) {
         if let Some(path) = self.primary() {
             path.borrow_mut().lost_ecn(stats);
         }
     }
 
-    pub fn start_ecn(&self, stats: &mut Stats) {
+    pub(crate) fn start_ecn(&self, stats: &mut Stats) {
         if let Some(path) = self.primary() {
             path.borrow_mut().start_ecn(stats);
         }
@@ -455,7 +465,7 @@ impl Paths {
 
     /// Get an estimate of the RTT on the primary path.
     #[cfg(test)]
-    pub fn rtt(&self) -> Duration {
+    pub(crate) fn rtt(&self) -> Duration {
         // Rather than have this fail when there is no active path,
         // make a new RTT estimate and interrogate that.
         // That is more expensive, but it should be rare and breaking encapsulation
@@ -466,7 +476,7 @@ impl Paths {
         )
     }
 
-    pub fn set_qlog(&mut self, qlog: Qlog) {
+    pub(crate) fn set_qlog(&mut self, qlog: Qlog) {
         for p in &mut self.paths {
             p.borrow_mut().set_qlog(qlog.clone());
         }

@@ -18,7 +18,7 @@ use crate::{
 
 /// Server events for a single connection.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Http3ServerConnEvent {
+pub(crate) enum Http3ServerConnEvent {
     /// Headers are ready.
     Headers {
         stream_info: Http3StreamInfo,
@@ -51,7 +51,7 @@ pub enum Http3ServerConnEvent {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum WebTransportEvent {
+pub(crate) enum WebTransportEvent {
     Session {
         stream_id: StreamId,
         headers: Vec<Header>,
@@ -69,7 +69,7 @@ pub enum WebTransportEvent {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ConnectUdpEvent {
+pub(crate) enum ConnectUdpEvent {
     Session {
         stream_id: StreamId,
         headers: Vec<Header>,
@@ -86,7 +86,7 @@ pub enum ConnectUdpEvent {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Http3ServerConnEvents {
+pub(crate) struct Http3ServerConnEvents {
     events: Rc<RefCell<VecDeque<Http3ServerConnEvent>>>,
 }
 
@@ -253,19 +253,19 @@ impl Http3ServerConnEvents {
         self.events.borrow_mut().retain(|evt| !f(evt));
     }
 
-    pub fn has_events(&self) -> bool {
+    pub(crate) fn has_events(&self) -> bool {
         !self.events.borrow().is_empty()
     }
 
-    pub fn next_event(&self) -> Option<Http3ServerConnEvent> {
+    pub(crate) fn next_event(&self) -> Option<Http3ServerConnEvent> {
         self.events.borrow_mut().pop_front()
     }
 
-    pub fn connection_state_change(&self, state: Http3State) {
+    pub(crate) fn connection_state_change(&self, state: Http3State) {
         self.insert(Http3ServerConnEvent::StateChange(state));
     }
 
-    pub fn priority_update(&self, stream_id: StreamId, priority: Priority) {
+    pub(crate) fn priority_update(&self, stream_id: StreamId, priority: Priority) {
         self.insert(Http3ServerConnEvent::PriorityUpdate {
             stream_id,
             priority,

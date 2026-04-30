@@ -17,7 +17,7 @@ struct BitReader<'a> {
 }
 
 impl<'a> BitReader<'a> {
-    pub const fn new(input: &'a [u8]) -> Self {
+    pub(crate) const fn new(input: &'a [u8]) -> Self {
         BitReader {
             input,
             offset: 0,
@@ -25,7 +25,7 @@ impl<'a> BitReader<'a> {
         }
     }
 
-    pub fn read_bit(&mut self) -> Res<u8> {
+    pub(crate) fn read_bit(&mut self) -> Res<u8> {
         if self.input.len() == self.offset {
             return Err(Error::NeedMoreData);
         }
@@ -41,7 +41,7 @@ impl<'a> BitReader<'a> {
         Ok((self.input[self.offset] >> self.current_bit) & 0x01)
     }
 
-    pub fn verify_ending(&mut self, i: u8) -> Res<()> {
+    pub(crate) fn verify_ending(&mut self, i: u8) -> Res<()> {
         if (i + self.current_bit) > 7 {
             return Err(Error::HuffmanDecompression);
         }
@@ -60,7 +60,7 @@ impl<'a> BitReader<'a> {
         }
     }
 
-    pub const fn has_more_data(&self) -> bool {
+    pub(crate) const fn has_more_data(&self) -> bool {
         !self.input.is_empty() && (self.offset != self.input.len() || (self.current_bit != 0))
     }
 }

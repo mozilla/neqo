@@ -26,7 +26,9 @@ use crate::{
     stats::{CongestionControlStats, SlowStartExitReason},
 };
 
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub const CWND_INITIAL_PKTS: usize = 10;
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,21 +48,21 @@ enum Phase {
 }
 
 impl Phase {
-    pub const fn in_recovery(self) -> bool {
+    pub(crate) const fn in_recovery(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::Recovery)
     }
 
-    pub fn in_slow_start(self) -> bool {
+    pub(crate) fn in_slow_start(self) -> bool {
         self == Self::SlowStart
     }
 
     /// These states are transient, we tell qlog on entry, but not on exit.
-    pub const fn transient(self) -> bool {
+    pub(crate) const fn transient(self) -> bool {
         matches!(self, Self::RecoveryStart | Self::PersistentCongestion)
     }
 
     /// Update a transient phase to the actual phase.
-    pub fn update(&mut self) {
+    pub(crate) fn update(&mut self) {
         *self = match self {
             Self::PersistentCongestion => Self::SlowStart,
             Self::RecoveryStart => Self::Recovery,
@@ -68,7 +70,7 @@ impl Phase {
         };
     }
 
-    pub const fn to_qlog(self) -> &'static str {
+    pub(crate) const fn to_qlog(self) -> &'static str {
         match self {
             Self::SlowStart | Self::PersistentCongestion => "slow_start",
             Self::CongestionAvoidance => "congestion_avoidance",
@@ -77,7 +79,7 @@ impl Phase {
     }
 }
 
-pub trait WindowAdjustment: Display + Debug {
+pub(crate) trait WindowAdjustment: Display + Debug {
     /// This is called when an ack is received.
     /// The function calculates the amount of acked bytes congestion controller needs
     /// to collect before increasing its cwnd by `MAX_DATAGRAM_SIZE`.
@@ -117,7 +119,7 @@ pub trait WindowAdjustment: Display + Debug {
 /// Implementations define when and if to exit from slow start, how the slow start threshold
 /// (`ssthresh`) is set on exit and they can influence how fast the exponential congestion window
 /// growth rate during slow start is.
-pub trait SlowStart: Display + Debug {
+pub(crate) trait SlowStart: Display + Debug {
     /// Enables a trait implementor to track RTT rounds via the next packet numer that is to be sent
     /// out.
     fn on_packet_sent(&mut self, sent_pn: packet::Number);
@@ -169,7 +171,7 @@ impl Display for State {
 }
 
 impl State {
-    pub const fn new(mtu: usize) -> Self {
+    pub(crate) const fn new(mtu: usize) -> Self {
         Self {
             phase: Phase::SlowStart,
             congestion_window: cwnd_initial(mtu),
@@ -181,6 +183,7 @@ impl State {
 }
 
 #[derive(Debug)]
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub struct ClassicCongestionController<S, T> {
     slow_start: S,
     congestion_control: T,
@@ -226,7 +229,7 @@ impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
 }
 
 impl<S, T> ClassicCongestionController<S, T> {
-    pub const fn max_datagram_size(&self) -> usize {
+    pub(crate) const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
     }
 }
@@ -595,7 +598,7 @@ where
     S: SlowStart,
     T: WindowAdjustment,
 {
-    pub fn new(
+    pub(crate) fn new(
         slow_start: S,
         congestion_control: T,
         pmtud: Pmtud,
@@ -618,31 +621,31 @@ where
 
     #[cfg(test)]
     #[must_use]
-    pub const fn ssthresh(&self) -> usize {
+    pub(crate) const fn ssthresh(&self) -> usize {
         self.current.ssthresh
     }
 
     #[cfg(test)]
-    pub const fn set_ssthresh(&mut self, v: usize) {
+    pub(crate) const fn set_ssthresh(&mut self, v: usize) {
         self.current.ssthresh = v;
     }
 
     /// Accessor for [`ClassicCongestionController::congestion_control`]. Is used to call Cubic
     /// getters in tests.
     #[cfg(test)]
-    pub const fn congestion_control(&self) -> &T {
+    pub(crate) const fn congestion_control(&self) -> &T {
         &self.congestion_control
     }
 
     /// Mutable accessor for [`ClassicCongestionController::congestion_control`]. Is used to call
     /// Cubic setters in tests.
     #[cfg(test)]
-    pub const fn congestion_control_mut(&mut self) -> &mut T {
+    pub(crate) const fn congestion_control_mut(&mut self) -> &mut T {
         &mut self.congestion_control
     }
 
     #[cfg(test)]
-    pub const fn acked_bytes(&self) -> usize {
+    pub(crate) const fn acked_bytes(&self) -> usize {
         self.current.acked_bytes
     }
 

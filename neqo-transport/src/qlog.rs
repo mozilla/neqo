@@ -51,7 +51,11 @@ use crate::{
     version::{self, Version},
 };
 
-pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
+pub(crate) fn connection_tparams_set(
+    qlog: &mut Qlog,
+    tph: &TransportParametersHandler,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
             let remote = tph.remote();
@@ -100,11 +104,11 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
     );
 }
 
-pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+pub(crate) fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+pub(crate) fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
@@ -133,7 +137,7 @@ fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-pub fn connection_state_updated(
+pub(crate) fn connection_state_updated(
     qlog: &mut Qlog,
     old_state: &State,
     new_state: &State,
@@ -150,7 +154,7 @@ pub fn connection_state_updated(
     );
 }
 
-pub fn client_version_information_initiated(
+pub(crate) fn client_version_information_initiated(
     qlog: &mut Qlog,
     version_config: &version::Config,
     now: Instant,
@@ -173,7 +177,7 @@ pub fn client_version_information_initiated(
     );
 }
 
-pub fn client_version_information_negotiated(
+pub(crate) fn client_version_information_negotiated(
     qlog: &mut Qlog,
     client: &[Version],
     server: &[version::Wire],
@@ -197,7 +201,7 @@ pub fn client_version_information_negotiated(
     );
 }
 
-pub fn server_version_information_failed(
+pub(crate) fn server_version_information_failed(
     qlog: &mut Qlog,
     server: &[Version],
     client: version::Wire,
@@ -220,7 +224,7 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
+pub(crate) fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
     qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
@@ -258,7 +262,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
         now,
     );
 }
-pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
+pub(crate) fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
     qlog.add_event_at(
         || {
             let header =
@@ -282,7 +286,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
     );
 }
 
-pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
+pub(crate) fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
@@ -305,7 +309,7 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     });
 }
 
-pub fn recovery_parameters_set(
+pub(crate) fn recovery_parameters_set(
     qlog: &mut Qlog,
     plpmtu: usize,
     cc: CongestionControl,
@@ -344,14 +348,14 @@ pub fn recovery_parameters_set(
     );
 }
 
-pub fn connection_closed(qlog: &mut Qlog, close_reason: &CloseReason, now: Instant) {
+pub(crate) fn connection_closed(qlog: &mut Qlog, close_reason: &CloseReason, now: Instant) {
     qlog.add_event_at(
         || Some(EventData::ConnectionClosed(close_reason.into())),
         now,
     );
 }
 
-pub fn packets_acked(
+pub(crate) fn packets_acked(
     qlog: &mut Qlog,
     space: PacketNumberSpace,
     acked_pkts: &[sent::Packet],
@@ -373,7 +377,13 @@ pub fn packets_acked(
     );
 }
 
-pub fn mtu_updated(qlog: &mut Qlog, old_mtu: usize, new_mtu: usize, done: bool, now: Instant) {
+pub(crate) fn mtu_updated(
+    qlog: &mut Qlog,
+    old_mtu: usize,
+    new_mtu: usize,
+    done: bool,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
             Some(EventData::MtuUpdated(MtuUpdated {
@@ -388,7 +398,7 @@ pub fn mtu_updated(qlog: &mut Qlog, old_mtu: usize, new_mtu: usize, done: bool, 
 
 #[derive(Clone, Copy)]
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
-pub enum Metric {
+pub(crate) enum Metric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
     LatestRtt(Duration),
@@ -401,7 +411,7 @@ pub enum Metric {
     PacingRate(u64),
 }
 
-pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
+pub(crate) fn metrics_updated<M: IntoIterator<Item = Metric>>(
     qlog: &mut Qlog,
     updated_metrics: M,
     now: Instant,
@@ -494,7 +504,7 @@ impl From<CongestionStateTrigger> for CongestionStateUpdatedTrigger {
     }
 }
 
-pub fn congestion_state_updated(
+pub(crate) fn congestion_state_updated(
     qlog: &mut Qlog,
     old_state: &'static str,
     new_state: &'static str,
@@ -528,11 +538,11 @@ pub enum LossTimerType {
 /// loss-detection (Ack) timer is derived lazily from packet state on every
 /// call to [`crate::recovery::Loss::next_timeout`] and has no single arm or
 /// cancel point to instrument.
-pub fn loss_timer_set(qlog: &mut Qlog, now: Instant) {
+pub(crate) fn loss_timer_set(qlog: &mut Qlog, now: Instant) {
     loss_timer_updated(qlog, LossTimerEventType::Set, Some(TimerType::Pto), now);
 }
 
-pub fn loss_timer_expired(qlog: &mut Qlog, timer_type: LossTimerType, now: Instant) {
+pub(crate) fn loss_timer_expired(qlog: &mut Qlog, timer_type: LossTimerType, now: Instant) {
     loss_timer_updated(
         qlog,
         LossTimerEventType::Expired,
@@ -544,7 +554,7 @@ pub fn loss_timer_expired(qlog: &mut Qlog, timer_type: LossTimerType, now: Insta
 /// Emit a `loss_timer_updated` Cancelled event.
 ///
 /// See [`loss_timer_set`] for why only `TimerType::Pto` is used here.
-pub fn loss_timer_cancelled(qlog: &mut Qlog, now: Instant) {
+pub(crate) fn loss_timer_cancelled(qlog: &mut Qlog, now: Instant) {
     loss_timer_updated(
         qlog,
         LossTimerEventType::Cancelled,

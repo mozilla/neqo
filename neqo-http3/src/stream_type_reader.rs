@@ -16,12 +16,12 @@ use crate::{
     frames::{HFrame, hframe::HFrameType, reader::FrameDecoder},
 };
 
-pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
-pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
-pub const WEBTRANSPORT_STREAM: u64 = 0x41;
+pub(crate) const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
+pub(crate) const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
+pub(crate) const WEBTRANSPORT_STREAM: u64 = 0x41;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum NewStreamType {
+pub(crate) enum NewStreamType {
     Control,
     Decoder,
     Encoder,
@@ -79,7 +79,7 @@ impl NewStreamType {
 ///    is identified by the type and `PushId`. After reading the type in the `ReadType` state,
 ///    `NewStreamHeadReader` changes to `ReadId` state and from there to `Done` state
 #[derive(Debug)]
-pub enum NewStreamHeadReader {
+pub(crate) enum NewStreamHeadReader {
     ReadType {
         role: Role,
         reader: IncrementalDecoderUint,
@@ -94,7 +94,7 @@ pub enum NewStreamHeadReader {
 }
 
 impl NewStreamHeadReader {
-    pub fn new(stream_id: StreamId, role: Role) -> Self {
+    pub(crate) fn new(stream_id: StreamId, role: Role) -> Self {
         Self::ReadType {
             role,
             reader: IncrementalDecoderUint::default(),
@@ -130,7 +130,7 @@ impl NewStreamHeadReader {
         }
     }
 
-    pub fn get_type(&mut self, conn: &mut Connection) -> Res<Option<NewStreamType>> {
+    pub(crate) fn get_type(&mut self, conn: &mut Connection) -> Res<Option<NewStreamType>> {
         loop {
             let (output, fin) = self.read(conn)?;
             let Some(output) = output else {

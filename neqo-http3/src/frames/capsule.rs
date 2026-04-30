@@ -9,21 +9,21 @@ use neqo_common::{Bytes, Encoder, qdebug};
 use super::{hframe::HFrameType, reader::FrameDecoder};
 use crate::Res;
 
-pub const CAPSULE_TYPE_DATAGRAM: HFrameType = HFrameType(0x00);
+pub(crate) const CAPSULE_TYPE_DATAGRAM: HFrameType = HFrameType(0x00);
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub enum Capsule {
+pub(crate) enum Capsule {
     Datagram { payload: Bytes },
 }
 
 impl Capsule {
-    pub const fn capsule_type(&self) -> u64 {
+    pub(crate) const fn capsule_type(&self) -> u64 {
         match self {
             Self::Datagram { .. } => CAPSULE_TYPE_DATAGRAM.0,
         }
     }
 
-    pub fn encode(&self, enc: &mut Encoder) {
+    pub(crate) fn encode(&self, enc: &mut Encoder) {
         enc.encode_varint(self.capsule_type());
         match self {
             Self::Datagram { payload } => {

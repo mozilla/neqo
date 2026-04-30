@@ -31,7 +31,7 @@ use rustc_hash::FxHashMap as HashMap;
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
 use crate::{STREAM_IO_BUFFER_SIZE, now};
 
-pub struct Handler<'a> {
+pub(super) struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
     handled_urls: Vec<Url>,
@@ -125,7 +125,7 @@ impl super::Handler for Handler<'_> {
     }
 }
 
-pub fn create_client(
+pub(super) fn create_client(
     args: &Args,
     local_addr: SocketAddr,
     remote_addr: SocketAddr,
@@ -229,7 +229,7 @@ impl super::Client for Connection {
 }
 
 impl<'b> Handler<'b> {
-    pub fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
+    pub(super) fn new(url_queue: VecDeque<Url>, args: &'b Args) -> Self {
         Self {
             streams: HashMap::default(),
             url_queue,

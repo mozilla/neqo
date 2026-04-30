@@ -47,7 +47,7 @@ struct ServerZeroRttChecker {
 }
 
 impl ServerZeroRttChecker {
-    pub fn new(checker: Box<dyn ZeroRttChecker>) -> Self {
+    pub(crate) fn new(checker: Box<dyn ZeroRttChecker>) -> Self {
         Self {
             checker: Rc::new(RefCell::new(checker)),
         }

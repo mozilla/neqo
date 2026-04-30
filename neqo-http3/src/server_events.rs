@@ -581,7 +581,7 @@ pub enum Http3ServerEvent {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Http3ServerEvents {
+pub(crate) struct Http3ServerEvents {
     events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
 }
 
@@ -591,17 +591,17 @@ impl Http3ServerEvents {
     }
 
     /// Take all events
-    pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> + use<> {
+    pub(crate) fn events(&self) -> impl Iterator<Item = Http3ServerEvent> + use<> {
         self.events.replace(VecDeque::new()).into_iter()
     }
 
     /// Whether there is request pending.
-    pub fn has_events(&self) -> bool {
+    pub(crate) fn has_events(&self) -> bool {
         !self.events.borrow().is_empty()
     }
 
     /// Take the next event if present.
-    pub fn next_event(&self) -> Option<Http3ServerEvent> {
+    pub(crate) fn next_event(&self) -> Option<Http3ServerEvent> {
         self.events.borrow_mut().pop_front()
     }
 

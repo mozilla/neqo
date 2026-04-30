@@ -31,9 +31,9 @@ const SETTINGS_H3_DATAGRAM: SettingsType = 0x33;
 /// Advertises support for HTTP Extended CONNECT.
 ///
 /// See <https://www.rfc-editor.org/rfc/rfc9220#section-5>
-pub const SETTINGS_ENABLE_CONNECT_PROTOCOL: SettingsType = 0x08;
+pub(crate) const SETTINGS_ENABLE_CONNECT_PROTOCOL: SettingsType = 0x08;
 
-pub const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
+pub(crate) const H3_RESERVED_SETTINGS: &[SettingsType] = &[0x2, 0x3, 0x4, 0x5];
 
 #[derive(Clone, PartialEq, Eq, Debug, Copy)]
 pub enum HSettingType {
@@ -251,20 +251,20 @@ impl From<&Http3Parameters> for HSettings {
 }
 
 #[derive(Debug)]
-pub struct HttpZeroRttChecker {
+pub(crate) struct HttpZeroRttChecker {
     settings: Http3Parameters,
 }
 
 impl HttpZeroRttChecker {
     /// Right now we only have QPACK settings, so that is all this takes.
     #[must_use]
-    pub const fn new(settings: Http3Parameters) -> Self {
+    pub(crate) const fn new(settings: Http3Parameters) -> Self {
         Self { settings }
     }
 
     /// Save the settings that matter for 0-RTT.
     #[must_use]
-    pub fn save(settings: &Http3Parameters) -> Vec<u8> {
+    pub(crate) fn save(settings: &Http3Parameters) -> Vec<u8> {
         let mut enc = Encoder::default();
         enc.encode_varint(SETTINGS_ZERO_RTT_VERSION)
             .encode_varint(SETTINGS_QPACK_MAX_TABLE_CAPACITY)

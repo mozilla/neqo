@@ -10,7 +10,7 @@ use neqo_common::{Datagram, qdebug, qinfo};
 
 use crate::crypto::Epoch;
 
-pub struct SavedDatagram {
+pub(crate) struct SavedDatagram {
     /// The datagram.
     pub d: Datagram,
     /// The time that the datagram was received.
@@ -18,7 +18,7 @@ pub struct SavedDatagram {
 }
 
 #[derive(Default)]
-pub struct SavedDatagrams {
+pub(crate) struct SavedDatagrams {
     handshake: Vec<SavedDatagram>,
     application_data: Vec<SavedDatagram>,
     available: Option<Epoch>,
@@ -27,7 +27,7 @@ pub struct SavedDatagrams {
 impl SavedDatagrams {
     /// The number of datagrams that are saved during the handshake when
     /// keys to decrypt them are not yet available.
-    pub const CAPACITY: usize = 4;
+    pub(crate) const CAPACITY: usize = 4;
 
     fn store(&mut self, epoch: Epoch) -> &mut Vec<SavedDatagram> {
         match epoch {
@@ -38,11 +38,11 @@ impl SavedDatagrams {
     }
 
     /// Return whether either store of datagrams is currently full.
-    pub const fn is_either_full(&self) -> bool {
+    pub(crate) const fn is_either_full(&self) -> bool {
         self.handshake.len() == Self::CAPACITY || self.application_data.len() == Self::CAPACITY
     }
 
-    pub fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant) {
+    pub(crate) fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant) {
         let store = self.store(epoch);
 
         if store.len() < Self::CAPACITY {
@@ -53,7 +53,7 @@ impl SavedDatagrams {
         }
     }
 
-    pub fn make_available(&mut self, epoch: Epoch) {
+    pub(crate) fn make_available(&mut self, epoch: Epoch) {
         debug_assert_ne!(epoch, Epoch::ZeroRtt);
         debug_assert_ne!(epoch, Epoch::Initial);
         if !self.store(epoch).is_empty() {
@@ -61,11 +61,11 @@ impl SavedDatagrams {
         }
     }
 
-    pub const fn available(&self) -> Option<Epoch> {
+    pub(crate) const fn available(&self) -> Option<Epoch> {
         self.available
     }
 
-    pub fn take_saved(&mut self) -> Vec<SavedDatagram> {
+    pub(crate) fn take_saved(&mut self) -> Vec<SavedDatagram> {
         self.available
             .take()
             .map_or_else(Vec::new, |epoch| mem::take(self.store(epoch)))

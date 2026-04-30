@@ -17,6 +17,7 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
+#[expect(unreachable_pub, reason = "re-exported via cc::NewReno")]
 pub struct NewReno {}
 
 impl Display for NewReno {

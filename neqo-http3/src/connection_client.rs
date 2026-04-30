@@ -1421,11 +1421,11 @@ mod tests {
     }
 
     /// Create a http3 client with default configuration.
-    pub fn default_http3_client() -> Http3Client {
+    pub(super) fn default_http3_client() -> Http3Client {
         default_http3_client_param(100)
     }
 
-    pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
+    pub(super) fn default_http3_client_param(max_table_size: u64) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
@@ -1485,7 +1485,7 @@ mod tests {
     }
 
     impl TestServer {
-        pub fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self::new_with_settings(&[
                 HSetting::new(HSettingType::MaxTableCapacity, 100),
                 HSetting::new(HSettingType::BlockedStreams, 100),
@@ -1493,7 +1493,7 @@ mod tests {
             ])
         }
 
-        pub fn new_with_settings(server_settings: &[HSetting]) -> Self {
+        pub(crate) fn new_with_settings(server_settings: &[HSetting]) -> Self {
             fixture_init();
             let max_table_size = server_settings
                 .iter()
@@ -1527,7 +1527,7 @@ mod tests {
             }
         }
 
-        pub fn new_with_conn(conn: Connection) -> Self {
+        pub(crate) fn new_with_conn(conn: Connection) -> Self {
             let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
                 &qpack::Settings {
                     max_table_size_encoder: 128,
@@ -1549,7 +1549,7 @@ mod tests {
             }
         }
 
-        pub fn create_qpack_streams(&mut self) {
+        pub(crate) fn create_qpack_streams(&mut self) {
             // Create a QPACK encoder stream
             self.encoder_stream_id = Some(self.conn.stream_create(StreamType::UniDi).unwrap());
             self.encoder
@@ -1570,7 +1570,7 @@ mod tests {
             );
         }
 
-        pub fn create_control_stream(&mut self) {
+        pub(crate) fn create_control_stream(&mut self) {
             // Create control stream
             let control = self.conn.stream_create(StreamType::UniDi).unwrap();
             qtrace!("[TestServer] control stream: {control}");
@@ -1594,7 +1594,7 @@ mod tests {
             );
         }
 
-        pub fn check_client_control_qpack_streams_no_resumption(&mut self) {
+        pub(crate) fn check_client_control_qpack_streams_no_resumption(&mut self) {
             self.check_client_control_qpack_streams(
                 ENCODER_STREAM_DATA,
                 EXPECTED_REQUEST_HEADER_FRAME,
@@ -1603,7 +1603,7 @@ mod tests {
             );
         }
 
-        pub fn check_control_qpack_request_streams_resumption(
+        pub(crate) fn check_control_qpack_request_streams_resumption(
             &mut self,
             expect_encoder_stream_data: &[u8],
             expect_request_header: &[u8],
@@ -1618,7 +1618,7 @@ mod tests {
         }
 
         // Check that server has received correct settings and qpack streams.
-        pub fn check_client_control_qpack_streams(
+        pub(crate) fn check_client_control_qpack_streams(
             &mut self,
             expect_encoder_stream_data: &[u8],
             expect_request_header: &[u8],
@@ -1710,7 +1710,7 @@ mod tests {
             assert!(!fin);
         }
 
-        pub fn read_and_check_stream_data(
+        pub(crate) fn read_and_check_stream_data(
             &mut self,
             stream_id: StreamId,
             expected_data: &[u8],
@@ -1723,7 +1723,7 @@ mod tests {
             assert_eq!(&buf[..amount], expected_data);
         }
 
-        pub fn encode_headers(
+        pub(crate) fn encode_headers(
             &mut self,
             stream_id: StreamId,
             headers: &[Header],

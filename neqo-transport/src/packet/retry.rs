@@ -31,7 +31,7 @@ thread_local!(static RETRY_AEAD_V1: RefCell<Aead> = RefCell::new(make_aead(Versi
 thread_local!(static RETRY_AEAD_V2: RefCell<Aead> = RefCell::new(make_aead(Version::Version2)));
 
 /// Run a function with the appropriate Retry AEAD.
-pub fn use_aead<F, T>(version: Version, f: F) -> Res<T>
+pub(super) fn use_aead<F, T>(version: Version, f: F) -> Res<T>
 where
     F: FnOnce(&Aead) -> Res<T>,
 {
@@ -49,6 +49,6 @@ where
 }
 
 /// Determine how large the expansion is for a given key.
-pub fn expansion(version: Version) -> usize {
+pub(super) fn expansion(version: Version) -> usize {
     use_aead(version, |aead| Ok(aead.expansion())).expect("Unable to access Retry AEAD")
 }

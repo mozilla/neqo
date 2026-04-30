@@ -343,25 +343,25 @@ impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
     }
 }
 
-pub type RemoteConnectionIdEntry = ConnectionIdEntry<Srt>;
+pub(crate) type RemoteConnectionIdEntry = ConnectionIdEntry<Srt>;
 
 /// A collection of connection IDs that are indexed by a sequence number.
 /// Used to store connection IDs that are provided by a peer.
 #[derive(Debug, Default)]
-pub struct ConnectionIdStore<SRT: Clone + PartialEq> {
+pub(crate) struct ConnectionIdStore<SRT: Clone + PartialEq> {
     cids: SmallVec<[ConnectionIdEntry<SRT>; 8]>,
 }
 
 impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
-    pub fn retire(&mut self, seqno: u64) {
+    pub(crate) fn retire(&mut self, seqno: u64) {
         self.cids.retain(|c| c.seqno != seqno);
     }
 
-    pub fn contains(&self, cid: ConnectionIdRef) -> bool {
+    pub(crate) fn contains(&self, cid: ConnectionIdRef) -> bool {
         self.cids.iter().any(|c| c.cid == cid)
     }
 
-    pub fn next(&mut self) -> Option<ConnectionIdEntry<SRT>> {
+    pub(crate) fn next(&mut self) -> Option<ConnectionIdEntry<SRT>> {
         if self.cids.is_empty() {
             None
         } else {
@@ -369,13 +369,13 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.cids.len()
     }
 }
 
 impl ConnectionIdStore<Srt> {
-    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>) -> Res<()> {
+    pub(crate) fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>) -> Res<()> {
         // It's OK if this perfectly matches an existing entry.
         if self.cids.iter().any(|c| c == &entry) {
             return Ok(());
@@ -396,7 +396,7 @@ impl ConnectionIdStore<Srt> {
     }
 
     // Retire connection IDs and return the sequence numbers of those that were retired.
-    pub fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
+    pub(crate) fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
         let mut retired = Vec::new();
         self.cids.retain(|e| {
             if !e.is_empty() && e.seqno < retire_prior {

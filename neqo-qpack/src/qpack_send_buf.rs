@@ -11,7 +11,7 @@ use crate::{huffman, prefix::Prefix};
 /// This trait extends the standard [`neqo_common::Encoder`] with QPACK-specific
 /// methods for encoding integers with prefixes and literal strings with
 /// optional Huffman encoding.
-pub trait Encoder {
+pub(crate) trait Encoder {
     /// Encode an integer with a QPACK prefix according to RFC 7541 Section 5.1.
     fn encode_prefixed_encoded_int(&mut self, prefix: Prefix, val: u64) -> usize;
 

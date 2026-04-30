@@ -16,11 +16,11 @@ use rustc_hash::FxHashMap as HashMap;
 
 use crate::{BufferedStream, Error, Http3StreamType, RecvStream, Res, frames::HFrame};
 
-pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
+pub(crate) const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
 /// The local control stream, responsible for encoding frames and sending them
 #[derive(Debug, Default)]
-pub struct ControlStreamLocal {
+pub(crate) struct ControlStreamLocal {
     stream: BufferedStream,
     /// `stream_id`s of outstanding request streams
     outstanding_priority_update: VecDeque<StreamId>,
@@ -34,16 +34,16 @@ impl Display for ControlStreamLocal {
 
 impl ControlStreamLocal {
     /// Add a new frame that needs to be send.
-    pub fn queue_frame(&mut self, f: &HFrame) {
+    pub(crate) fn queue_frame(&mut self, f: &HFrame) {
         self.stream.encode_with(|e| f.encode(e));
     }
 
-    pub fn queue_update_priority(&mut self, stream_id: StreamId) {
+    pub(crate) fn queue_update_priority(&mut self, stream_id: StreamId) {
         self.outstanding_priority_update.push_back(stream_id);
     }
 
     /// Send control data if available.
-    pub fn send(
+    pub(crate) fn send(
         &mut self,
         conn: &mut Connection,
         recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
@@ -90,7 +90,7 @@ impl ControlStreamLocal {
     }
 
     /// Create a control stream.
-    pub fn create(&mut self, conn: &mut Connection) -> Res<()> {
+    pub(crate) fn create(&mut self, conn: &mut Connection) -> Res<()> {
         qtrace!("[{self}] Create a control stream");
         self.stream.init(conn.stream_create(StreamType::UniDi)?);
         self.stream
@@ -99,7 +99,7 @@ impl ControlStreamLocal {
     }
 
     #[must_use]
-    pub fn stream_id(&self) -> Option<StreamId> {
+    pub(crate) fn stream_id(&self) -> Option<StreamId> {
         (&self.stream).into()
     }
 }

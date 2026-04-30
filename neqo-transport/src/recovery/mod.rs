@@ -6,7 +6,7 @@
 
 // Tracking of sent packets and detecting their loss.
 
-pub mod sent;
+pub(crate) mod sent;
 mod token;
 
 use std::{
@@ -20,6 +20,10 @@ use enum_map::EnumMap;
 use enumset::enum_set;
 use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use strum::IntoEnumIterator as _;
+#[cfg_attr(
+    not(feature = "bench"),
+    expect(unreachable_pub, reason = "re-exported via lib.rs")
+)]
 pub use token::{StreamRecoveryToken, Token, Tokens};
 
 use crate::{
@@ -31,24 +35,28 @@ use crate::{
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
 };
 
-pub const PACKET_THRESHOLD: u64 = 3;
+pub(crate) const PACKET_THRESHOLD: u64 = 3;
 /// `ACK_ONLY_SIZE_LIMIT` is the minimum size of the congestion window.
 /// If the congestion window is this small, we will only send ACK frames.
-pub const ACK_ONLY_SIZE_LIMIT: usize = 256;
+pub(crate) const ACK_ONLY_SIZE_LIMIT: usize = 256;
 /// The maximum number of packets we send on a PTO.
-pub const MAX_PTO_PACKET_COUNT: usize = 2;
+pub(crate) const MAX_PTO_PACKET_COUNT: usize = 2;
 /// The preferred limit on the number of packets that are tracked.
 /// If we exceed this number, we start sending `PING` frames sooner to
 /// force the peer to acknowledge some of them.
-pub const MAX_OUTSTANDING_UNACK: usize = 200;
+pub(crate) const MAX_OUTSTANDING_UNACK: usize = 200;
 /// Disable PING until this many packets are outstanding.
-pub const MIN_OUTSTANDING_UNACK: usize = 16;
+pub(crate) const MIN_OUTSTANDING_UNACK: usize = 16;
 /// The scale we use for the fast PTO feature.
+#[cfg_attr(
+    not(feature = "bench"),
+    expect(unreachable_pub, reason = "re-exported via lib.rs")
+)]
 pub const FAST_PTO_SCALE: u8 = 100;
 
 /// `SendProfile` tells a sender how to send packets.
 #[derive(Debug)]
-pub struct SendProfile {
+pub(crate) struct SendProfile {
     /// The limit on the size of the packet.
     limit: usize,
     /// What spaces should be probed.
@@ -59,7 +67,7 @@ pub struct SendProfile {
 
 impl SendProfile {
     #[must_use]
-    pub fn new_limited(limit: usize) -> Self {
+    pub(crate) fn new_limited(limit: usize) -> Self {
         // When the limit is too low, we only send ACK frames.
         // Set the limit to `ACK_ONLY_SIZE_LIMIT - 1` to ensure that
         // ACK-only packets are still limited in size.
@@ -71,7 +79,7 @@ impl SendProfile {
     }
 
     #[must_use]
-    pub fn new_paced() -> Self {
+    pub(crate) fn new_paced() -> Self {
         // When pacing, we still allow ACK frames to be sent.
         Self {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
@@ -81,7 +89,7 @@ impl SendProfile {
     }
 
     #[must_use]
-    pub fn new_pto(mtu: usize, probe: PacketNumberSpaceSet) -> Self {
+    pub(crate) fn new_pto(mtu: usize, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(mtu > ACK_ONLY_SIZE_LIMIT);
         Self {
             limit: mtu,
@@ -94,30 +102,30 @@ impl SendProfile {
     /// that caused the timer to pop, but it is helpful to send a PING in a space
     /// that has the PTO timer armed.
     #[must_use]
-    pub fn should_probe(&self, space: PacketNumberSpace) -> bool {
+    pub(crate) fn should_probe(&self, space: PacketNumberSpace) -> bool {
         self.probe.contains(space)
     }
 
     /// Determine whether an ACK-only packet should be sent. Returns true if the congestion window
     /// is too small to send data frames.
     #[must_use]
-    pub const fn ack_only(&self) -> bool {
+    pub(crate) const fn ack_only(&self) -> bool {
         self.limit < ACK_ONLY_SIZE_LIMIT
     }
 
     #[must_use]
-    pub const fn paced(&self) -> bool {
+    pub(crate) const fn paced(&self) -> bool {
         self.paced
     }
 
     #[must_use]
-    pub const fn limit(&self) -> usize {
+    pub(crate) const fn limit(&self) -> usize {
         self.limit
     }
 }
 
 #[derive(Debug)]
-pub struct LossRecoverySpace {
+pub(crate) struct LossRecoverySpace {
     space: PacketNumberSpace,
     largest_acked: Option<packet::Number>,
     largest_acked_sent_time: Option<Instant>,
@@ -142,7 +150,7 @@ pub struct LossRecoverySpace {
 
 impl LossRecoverySpace {
     #[must_use]
-    pub fn new(space: PacketNumberSpace) -> Self {
+    pub(crate) fn new(space: PacketNumberSpace) -> Self {
         Self {
             space,
             largest_acked: None,
@@ -158,16 +166,16 @@ impl LossRecoverySpace {
     /// largest acknowledged and that isn't yet declared lost.
     /// Use the value we prepared earlier in `detect_lost_packets`.
     #[must_use]
-    pub const fn loss_recovery_timer_start(&self) -> Option<Instant> {
+    pub(crate) const fn loss_recovery_timer_start(&self) -> Option<Instant> {
         self.first_ooo_time
     }
 
     #[must_use]
-    pub const fn in_flight_outstanding(&self) -> bool {
+    pub(crate) const fn in_flight_outstanding(&self) -> bool {
         self.in_flight_outstanding > 0
     }
 
-    pub fn pto_packets(&mut self) -> impl Iterator<Item = &sent::Packet> {
+    pub(crate) fn pto_packets(&mut self) -> impl Iterator<Item = &sent::Packet> {
         self.sent_packets.iter_mut().filter_map(|sent| {
             sent.pto().then(|| {
                 qtrace!("PTO: marking packet {} lost ", sent.pn());
@@ -177,7 +185,7 @@ impl LossRecoverySpace {
     }
 
     #[must_use]
-    pub fn pto_base_time(&self) -> Option<Instant> {
+    pub(crate) fn pto_base_time(&self) -> Option<Instant> {
         if self.in_flight_outstanding() {
             debug_assert!(self.last_ack_eliciting.is_some());
             self.last_ack_eliciting
@@ -207,7 +215,7 @@ impl LossRecoverySpace {
         }
     }
 
-    pub fn on_packet_sent(&mut self, sent_packet: sent::Packet) {
+    pub(crate) fn on_packet_sent(&mut self, sent_packet: sent::Packet) {
         if sent_packet.ack_eliciting() {
             self.last_ack_eliciting = Some(sent_packet.time_sent());
             self.in_flight_outstanding += 1;
@@ -227,7 +235,7 @@ impl LossRecoverySpace {
     /// we would risk setting up a feedback loop; having this many packets
     /// outstanding can be normal and we don't want to PING too often.
     #[must_use]
-    pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
+    pub(crate) fn should_probe(&self, pto: Duration, now: Instant) -> bool {
         let n_pto = if self.sent_packets.len() >= MAX_OUTSTANDING_UNACK {
             1
         } else if self.sent_packets.len() >= MIN_OUTSTANDING_UNACK {
@@ -305,7 +313,7 @@ impl LossRecoverySpace {
     /// Detect lost packets.
     /// `loss_delay` is the time we will wait before declaring something lost.
     /// `cleanup_delay` is the time we will wait before cleaning up a lost packet.
-    pub fn detect_lost_packets(
+    pub(crate) fn detect_lost_packets(
         &mut self,
         now: Instant,
         loss_delay: Duration,
@@ -359,7 +367,7 @@ impl LossRecoverySpace {
 }
 
 #[derive(Debug)]
-pub struct LossRecoverySpaces {
+pub(crate) struct LossRecoverySpaces {
     spaces: EnumMap<PacketNumberSpace, Option<LossRecoverySpace>>,
 }
 
@@ -370,7 +378,7 @@ impl LossRecoverySpaces {
     /// # Panics
     ///
     /// If the space has already been removed.
-    pub fn drop_space(
+    pub(crate) fn drop_space(
         &mut self,
         space: PacketNumberSpace,
     ) -> impl IntoIterator<Item = sent::Packet> + use<> {
@@ -384,11 +392,11 @@ impl LossRecoverySpaces {
     }
 
     #[must_use]
-    pub fn get(&self, space: PacketNumberSpace) -> Option<&LossRecoverySpace> {
+    pub(crate) fn get(&self, space: PacketNumberSpace) -> Option<&LossRecoverySpace> {
         self.spaces[space].as_ref()
     }
 
-    pub fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut LossRecoverySpace> {
+    pub(crate) fn get_mut(&mut self, space: PacketNumberSpace) -> Option<&mut LossRecoverySpace> {
         self.spaces[space].as_mut()
     }
 
@@ -427,7 +435,7 @@ struct PtoState {
 }
 
 impl PtoState {
-    pub fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
+    pub(crate) fn new(space: PacketNumberSpace, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(probe.contains(space));
         Self {
             space,
@@ -437,7 +445,7 @@ impl PtoState {
         }
     }
 
-    pub fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet) {
+    pub(crate) fn pto(&mut self, space: PacketNumberSpace, probe: PacketNumberSpaceSet) {
         debug_assert!(probe.contains(space));
         self.space = min(space, self.space);
         self.count += 1;
@@ -445,17 +453,17 @@ impl PtoState {
         self.probe |= probe;
     }
 
-    pub const fn count(&self) -> usize {
+    pub(crate) const fn count(&self) -> usize {
         self.count
     }
 
-    pub fn count_pto(&self, stats: &mut Stats) {
+    pub(crate) fn count_pto(&self, stats: &mut Stats) {
         stats.add_pto_count(self.count);
     }
 
     /// Generate a sending profile, indicating what space it should be from.
     /// This takes a packet from the supply if one remains, or returns `None`.
-    pub fn send_profile(&mut self, mtu: usize) -> Option<SendProfile> {
+    pub(crate) fn send_profile(&mut self, mtu: usize) -> Option<SendProfile> {
         (self.packets > 0).then(|| {
             self.packets -= 1;
             // This is a PTO, so ignore the limit.
@@ -463,7 +471,7 @@ impl PtoState {
         })
     }
 
-    pub fn pto_sent(&mut self, space: PacketNumberSpace) {
+    pub(crate) fn pto_sent(&mut self, space: PacketNumberSpace) {
         // For Initial and Handshake packets, don't force probes after the first packet.
         // Probing forces the inclusion of frames, even when there is nothing to send.
         // We do want to send subsequent packets if there is something there,
@@ -475,7 +483,7 @@ impl PtoState {
 }
 
 #[derive(Debug)]
-pub struct Loss {
+pub(crate) struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
     pto_state: Option<PtoState>,
@@ -489,7 +497,7 @@ pub struct Loss {
 
 impl Loss {
     #[must_use]
-    pub fn new(stats: StatsCell, fast_pto: u8) -> Self {
+    pub(crate) fn new(stats: StatsCell, fast_pto: u8) -> Self {
         Self {
             confirmed_time: None,
             pto_state: None,
@@ -501,16 +509,19 @@ impl Loss {
     }
 
     #[must_use]
-    pub fn largest_acknowledged_pn(&self, pn_space: PacketNumberSpace) -> Option<packet::Number> {
+    pub(crate) fn largest_acknowledged_pn(
+        &self,
+        pn_space: PacketNumberSpace,
+    ) -> Option<packet::Number> {
         self.spaces.get(pn_space)?.largest_acked
     }
 
-    pub fn set_qlog(&mut self, qlog: Qlog) {
+    pub(crate) fn set_qlog(&mut self, qlog: Qlog) {
         self.qlog = qlog;
     }
 
     /// Drop all 0rtt packets.
-    pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+    pub(crate) fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
         let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
             return Vec::new();
         };
@@ -526,7 +537,12 @@ impl Loss {
         dropped
     }
 
-    pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: sent::Packet, now: Instant) {
+    pub(crate) fn on_packet_sent(
+        &mut self,
+        path: &PathRef,
+        mut sent_packet: sent::Packet,
+        now: Instant,
+    ) {
         let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
         qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(pto) = self.pto_state.as_mut() {
@@ -545,7 +561,7 @@ impl Loss {
 
     /// Whether to probe the path.
     #[must_use]
-    pub fn should_probe(&self, pto: Duration, now: Instant) -> bool {
+    pub(crate) fn should_probe(&self, pto: Duration, now: Instant) -> bool {
         self.spaces
             .get(PacketNumberSpace::ApplicationData)
             .is_some_and(|sp| sp.should_probe(pto, now))
@@ -613,7 +629,7 @@ impl Loss {
     }
 
     /// Returns (acked packets, lost packets)
-    pub fn on_ack_received<R>(
+    pub(crate) fn on_ack_received<R>(
         &mut self,
         primary_path: &PathRef,
         pn_space: PacketNumberSpace,
@@ -706,7 +722,7 @@ impl Loss {
 
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
-    pub fn retry(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+    pub(crate) fn retry(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
         if self.pto_state.is_some() {
             qlog::loss_timer_cancelled(&mut self.qlog, now);
         }
@@ -740,14 +756,19 @@ impl Loss {
     /// It marks all packets that are outstanding as having being sent on a non-primary path.
     /// This way failure to deliver on the old path doesn't count against the congestion
     /// control state on the new path and the RTT measurements don't apply either.
-    pub fn migrate(&mut self) {
+    pub(crate) fn migrate(&mut self) {
         for space in self.spaces.iter_mut() {
             space.migrate();
         }
     }
 
     /// Discard state for a given packet number space.
-    pub fn discard(&mut self, primary_path: &PathRef, space: PacketNumberSpace, now: Instant) {
+    pub(crate) fn discard(
+        &mut self,
+        primary_path: &PathRef,
+        space: PacketNumberSpace,
+        now: Instant,
+    ) {
         qdebug!("[{self}] Reset loss recovery state for {space:?}");
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
@@ -770,7 +791,7 @@ impl Loss {
     /// Calculate when the next timeout is likely to be.  This is the earlier of the loss timer
     /// and the PTO timer; either or both might be disabled, so this can return `None`.
     #[must_use]
-    pub fn next_timeout(&self, path: &Path) -> Option<Instant> {
+    pub(crate) fn next_timeout(&self, path: &Path) -> Option<Instant> {
         let rtt = path.rtt();
         let loss_time = self.earliest_loss_time(rtt);
         let pto_time = if path.pto_possible() {
@@ -932,7 +953,7 @@ impl Loss {
         }
     }
 
-    pub fn timeout(
+    pub(crate) fn timeout(
         &mut self,
         primary_path: &PathRef,
         now: Instant,
@@ -983,7 +1004,7 @@ impl Loss {
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
     #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
-    pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
+    pub(crate) fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
@@ -1068,7 +1089,7 @@ mod tests {
     // This shadows functions on the base object so that the path and RTT estimator
     // is used consistently in the tests.  It also simplifies the function signatures.
     impl Fixture {
-        pub fn on_ack_received(
+        pub(crate) fn on_ack_received(
             &mut self,
             pn_space: PacketNumberSpace,
             acked_ranges: Vec<RangeInclusive<packet::Number>>,
@@ -1080,27 +1101,27 @@ mod tests {
                 .on_ack_received(&self.path, pn_space, acked_ranges, ack_ecn, ack_delay, now)
         }
 
-        pub fn on_packet_sent(&mut self, sent_packet: sent::Packet, now: Instant) {
+        pub(crate) fn on_packet_sent(&mut self, sent_packet: sent::Packet, now: Instant) {
             self.lr.on_packet_sent(&self.path, sent_packet, now);
         }
 
-        pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
+        pub(crate) fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
             self.lr.timeout(&self.path, now, true)
         }
 
-        pub fn next_timeout(&self) -> Option<Instant> {
+        pub(crate) fn next_timeout(&self) -> Option<Instant> {
             self.lr.next_timeout(&self.path.borrow())
         }
 
-        pub fn discard(&mut self, space: PacketNumberSpace, now: Instant) {
+        pub(crate) fn discard(&mut self, space: PacketNumberSpace, now: Instant) {
             self.lr.discard(&self.path, space, now);
         }
 
-        pub fn pto_time(&self, space: PacketNumberSpace) -> Option<Instant> {
+        pub(crate) fn pto_time(&self, space: PacketNumberSpace) -> Option<Instant> {
             self.lr.pto_time(self.path.borrow().rtt(), space)
         }
 
-        pub fn send_profile(&mut self, now: Instant) -> SendProfile {
+        pub(crate) fn send_profile(&mut self, now: Instant) -> SendProfile {
             self.lr.send_profile(&self.path.borrow(), now)
         }
     }

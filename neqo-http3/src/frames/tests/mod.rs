@@ -13,7 +13,7 @@ use crate::frames::{
     FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame, reader::FrameDecoder,
 };
 
-pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {
+pub(super) fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T {
     // For data, headers and push_promise we do not read all bytes from the buffer
     let d2 = Encoder::from_hex(st);
     assert_eq!(d.as_ref(), &d2.as_ref()[..d.as_ref().len()]);
@@ -60,14 +60,14 @@ pub fn enc_dec<T: FrameDecoder<T>>(d: &Encoder, st: &str, remaining: usize) -> T
     frame.unwrap()
 }
 
-pub fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
+pub(super) fn enc_dec_hframe(f: &HFrame, st: &str, remaining: usize) {
     let mut d = Encoder::default();
     f.encode(&mut d);
     let frame = enc_dec::<HFrame>(&d, st, remaining);
     assert_eq!(*f, frame);
 }
 
-pub fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
+pub(super) fn enc_dec_wtframe(f: &WebTransportFrame, st: &str, remaining: usize) {
     let mut d = Encoder::default();
     f.encode(&mut d);
     let frame = enc_dec::<WebTransportFrame>(&d, st, remaining);

@@ -21,10 +21,15 @@ mod cubic;
 mod hystart;
 mod new_reno;
 
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use classic_slow_start::ClassicSlowStart;
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use cubic::Cubic;
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use hystart::{HyStart, HyStartCssBaseline};
+#[expect(unreachable_pub, reason = "re-exported via lib.rs")]
 pub use new_reno::NewReno;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -33,7 +38,7 @@ pub enum CongestionTrigger {
     Ecn,
 }
 
-pub trait CongestionController: Display + Debug {
+pub(crate) trait CongestionController: Display + Debug {
     fn set_qlog(&mut self, qlog: Qlog);
 
     #[must_use]

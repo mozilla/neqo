@@ -27,7 +27,7 @@ use crate::{
     qlog,
 };
 
-pub struct RecvMessageInfo {
+pub(crate) struct RecvMessageInfo {
     pub message_type: MessageType,
     pub stream_type: Http3StreamType,
     pub stream_id: StreamId,
@@ -73,7 +73,7 @@ struct PushInfo {
 }
 
 #[derive(Debug)]
-pub struct RecvMessage {
+pub(crate) struct RecvMessage {
     state: RecvMessageState,
     stream_info: Http3StreamInfo,
     message_type: MessageType,
@@ -93,7 +93,7 @@ impl Display for RecvMessage {
 }
 
 impl RecvMessage {
-    pub fn new(
+    pub(crate) fn new(
         message_info: &RecvMessageInfo,
         qpack_decoder: Rc<RefCell<qpack::Decoder>>,
         conn_events: Box<dyn HttpRecvStreamEvents>,

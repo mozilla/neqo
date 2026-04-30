@@ -9,7 +9,9 @@ use test_fixture::*;
 
 /// Connect a client and server, send a GET request from the client,
 /// and exchange packets so the server receives it.
-pub fn connect_and_send_request(close_sending_side: bool) -> (Http3Client, Http3Server, StreamId) {
+pub(crate) fn connect_and_send_request(
+    close_sending_side: bool,
+) -> (Http3Client, Http3Server, StreamId) {
     let mut client = default_http3_client();
     let mut server = default_http3_server();
     let dgram = connect_peers(&mut client, &mut server);

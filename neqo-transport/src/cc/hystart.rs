@@ -34,6 +34,7 @@ pub enum HyStartCssBaseline {
 }
 
 #[derive(Debug)]
+#[expect(unreachable_pub, reason = "re-exported via cc::HyStart")]
 pub struct HyStart {
     /// > While an arriving ACK may newly acknowledge an arbitrary number of bytes, the HyStart++
     /// > algorithm limits the number of those bytes applied to increase the cwnd to `L*SMSS`
@@ -62,21 +63,21 @@ impl Display for HyStart {
 }
 
 impl HyStart {
-    pub const MIN_RTT_THRESH: Duration = Duration::from_millis(4);
+    pub(crate) const MIN_RTT_THRESH: Duration = Duration::from_millis(4);
 
-    pub const MAX_RTT_THRESH: Duration = Duration::from_millis(16);
+    pub(crate) const MAX_RTT_THRESH: Duration = Duration::from_millis(16);
 
-    pub const MIN_RTT_DIVISOR: u32 = 8;
+    pub(crate) const MIN_RTT_DIVISOR: u32 = 8;
 
-    pub const N_RTT_SAMPLE: usize = 8;
+    pub(crate) const N_RTT_SAMPLE: usize = 8;
 
-    pub const CSS_GROWTH_DIVISOR: usize = 4;
+    pub(crate) const CSS_GROWTH_DIVISOR: usize = 4;
 
-    pub const CSS_ROUNDS: usize = 5;
+    pub(crate) const CSS_ROUNDS: usize = 5;
 
-    pub const NON_PACED_L: usize = 8;
+    pub(crate) const NON_PACED_L: usize = 8;
 
-    pub const fn new(pacing: bool, css_baseline_mode: HyStartCssBaseline) -> Self {
+    pub(crate) const fn new(pacing: bool, css_baseline_mode: HyStartCssBaseline) -> Self {
         let limit = if pacing {
             usize::MAX
         } else {
@@ -155,7 +156,7 @@ impl HyStart {
     }
 
     /// Checks if HyStart is in Conservative Slow Start. Is `pub` for use in tests.
-    pub const fn in_css(&self) -> bool {
+    pub(crate) const fn in_css(&self) -> bool {
         self.css_baseline_min_rtt.is_some()
     }
 
@@ -164,27 +165,27 @@ impl HyStart {
     }
 
     #[cfg(test)]
-    pub const fn window_end(&self) -> Option<packet::Number> {
+    pub(crate) const fn window_end(&self) -> Option<packet::Number> {
         self.window_end
     }
 
     #[cfg(test)]
-    pub const fn rtt_sample_count(&self) -> usize {
+    pub(crate) const fn rtt_sample_count(&self) -> usize {
         self.rtt_sample_count
     }
 
     #[cfg(test)]
-    pub const fn current_round_min_rtt(&self) -> Option<Duration> {
+    pub(crate) const fn current_round_min_rtt(&self) -> Option<Duration> {
         self.current_round_min_rtt
     }
 
     #[cfg(test)]
-    pub const fn last_round_min_rtt(&self) -> Option<Duration> {
+    pub(crate) const fn last_round_min_rtt(&self) -> Option<Duration> {
         self.last_round_min_rtt
     }
 
     #[cfg(test)]
-    pub const fn css_round_count(&self) -> usize {
+    pub(crate) const fn css_round_count(&self) -> usize {
         self.css_round_count
     }
 }

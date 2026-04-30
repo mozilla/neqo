@@ -9,7 +9,7 @@ use std::{borrow::Cow, cmp::min};
 use crate::STREAM_IO_BUFFER_SIZE;
 
 #[derive(Debug, Default)]
-pub struct SendData {
+pub(crate) struct SendData {
     data: Cow<'static, [u8]>,
     offset: usize,
     remaining: usize,
@@ -41,7 +41,7 @@ impl From<&str> for SendData {
 }
 
 impl SendData {
-    pub const fn zeroes(total: usize) -> Self {
+    pub(crate) const fn zeroes(total: usize) -> Self {
         const MESSAGE: &[u8] = &[0; STREAM_IO_BUFFER_SIZE];
         Self {
             data: Cow::Borrowed(MESSAGE),
@@ -60,7 +60,7 @@ impl SendData {
     /// Returns `SendResult::Done` if all data was sent, `SendResult::MoreData` if
     /// more data remains, or `SendResult::StreamClosed` if the stream was closed
     /// (e.g., by `STOP_SENDING`).
-    pub fn send<F, E>(&mut self, mut f: F) -> SendResult
+    pub(crate) fn send<F, E>(&mut self, mut f: F) -> SendResult
     where
         F: FnMut(&[u8]) -> Result<usize, E>,
     {
@@ -77,14 +77,14 @@ impl SendData {
         SendResult::Done
     }
 
-    pub const fn len(&self) -> usize {
+    pub(crate) const fn len(&self) -> usize {
         self.total
     }
 }
 
 /// Result of a graceful send operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SendResult {
+pub(crate) enum SendResult {
     /// All data was sent successfully.
     Done,
     /// More data remains to be sent (stream buffer full).

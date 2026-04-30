@@ -25,7 +25,7 @@ use crate::{
 };
 
 /// The number of packets we allow to burst from the pacer.
-pub const PACING_BURST_SIZE: usize = 2;
+pub(crate) const PACING_BURST_SIZE: usize = 2;
 
 #[derive(Debug)]
 pub struct PacketSender {

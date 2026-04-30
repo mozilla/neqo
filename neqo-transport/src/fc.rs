@@ -35,7 +35,7 @@ use crate::{
 /// per RTT.
 ///
 /// Value aligns with [`crate::connection::params::ConnectionParameters::DEFAULT_ACK_RATIO`].
-pub const WINDOW_UPDATE_FRACTION: u64 = 4;
+pub(crate) const WINDOW_UPDATE_FRACTION: u64 = 4;
 
 /// Multiplier for auto-tuning the stream receive window.
 ///
@@ -616,13 +616,13 @@ impl ReceiverFlowControl<StreamType> {
     }
 }
 
-pub struct RemoteStreamLimit {
+pub(crate) struct RemoteStreamLimit {
     streams_fc: ReceiverFlowControl<StreamType>,
     next_stream: StreamId,
 }
 
 impl RemoteStreamLimit {
-    pub const fn new(stream_type: StreamType, max_streams: u64, role: Role) -> Self {
+    pub(crate) const fn new(stream_type: StreamType, max_streams: u64, role: Role) -> Self {
         Self {
             streams_fc: ReceiverFlowControl::new(stream_type, max_streams),
             // // This is for a stream created by a peer, therefore we use role.remote().
@@ -630,19 +630,19 @@ impl RemoteStreamLimit {
         }
     }
 
-    pub const fn is_allowed(&self, stream_id: StreamId) -> bool {
+    pub(crate) const fn is_allowed(&self, stream_id: StreamId) -> bool {
         let stream_idx = stream_id.as_u64() >> 2;
         self.streams_fc.check_allowed(stream_idx)
     }
 
-    pub fn is_new_stream(&self, stream_id: StreamId) -> Res<bool> {
+    pub(crate) fn is_new_stream(&self, stream_id: StreamId) -> Res<bool> {
         if !self.is_allowed(stream_id) {
             return Err(Error::StreamLimit);
         }
         Ok(stream_id >= self.next_stream)
     }
 
-    pub fn take_stream_id(&mut self) -> StreamId {
+    pub(crate) fn take_stream_id(&mut self) -> StreamId {
         let new_stream = self.next_stream;
         self.next_stream.next();
         assert!(self.is_allowed(new_stream));
@@ -663,10 +663,14 @@ impl DerefMut for RemoteStreamLimit {
     }
 }
 
-pub struct RemoteStreamLimits(EnumMap<StreamType, RemoteStreamLimit>);
+pub(crate) struct RemoteStreamLimits(EnumMap<StreamType, RemoteStreamLimit>);
 
 impl RemoteStreamLimits {
-    pub const fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
+    pub(crate) const fn new(
+        local_max_stream_bidi: u64,
+        local_max_stream_uni: u64,
+        role: Role,
+    ) -> Self {
         // Array order must match StreamType enum order: BiDi, UniDi
         Self(EnumMap::from_array([
             RemoteStreamLimit::new(StreamType::BiDi, local_max_stream_bidi, role),
@@ -689,13 +693,13 @@ impl IndexMut<StreamType> for RemoteStreamLimits {
     }
 }
 
-pub struct LocalStreamLimits {
+pub(crate) struct LocalStreamLimits {
     limits: EnumMap<StreamType, SenderFlowControl<StreamType>>,
     role_bit: u64,
 }
 
 impl LocalStreamLimits {
-    pub const fn new(role: Role) -> Self {
+    pub(crate) const fn new(role: Role) -> Self {
         Self {
             // Array order must match StreamType enum order: BiDi, UniDi
             limits: EnumMap::from_array([
@@ -706,7 +710,7 @@ impl LocalStreamLimits {
         }
     }
 
-    pub fn take_stream_id(&mut self, stream_type: StreamType) -> Option<StreamId> {
+    pub(crate) fn take_stream_id(&mut self, stream_type: StreamType) -> Option<StreamId> {
         let fc = &mut self.limits[stream_type];
         if fc.available() > 0 {
             let new_stream = fc.used();

@@ -38,7 +38,7 @@ impl From<HFrameType> for u64 {
 
 // data for DATA frame is not read into HFrame::Data.
 #[derive(PartialEq, Eq, Debug)]
-pub enum HFrame {
+pub(crate) enum HFrame {
     Data {
         len: u64, // length of the data
     },
@@ -92,7 +92,7 @@ impl HFrame {
         }
     }
 
-    pub fn encode<B: Buffer>(&self, enc: &mut Encoder<B>) {
+    pub(crate) fn encode<B: Buffer>(&self, enc: &mut Encoder<B>) {
         enc.encode_varint(self.get_type());
 
         match self {

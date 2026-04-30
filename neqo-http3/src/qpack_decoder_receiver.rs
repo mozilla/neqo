@@ -12,13 +12,13 @@ use neqo_transport::{Connection, StreamId};
 use crate::{CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream};
 
 #[derive(Debug)]
-pub struct DecoderRecvStream {
+pub(crate) struct DecoderRecvStream {
     stream_id: StreamId,
     decoder: Rc<RefCell<qpack::Decoder>>,
 }
 
 impl DecoderRecvStream {
-    pub const fn new(stream_id: StreamId, decoder: Rc<RefCell<qpack::Decoder>>) -> Self {
+    pub(crate) const fn new(stream_id: StreamId, decoder: Rc<RefCell<qpack::Decoder>>) -> Self {
         Self { stream_id, decoder }
     }
 }

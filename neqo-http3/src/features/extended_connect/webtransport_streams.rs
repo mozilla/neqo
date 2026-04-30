@@ -15,11 +15,11 @@ use crate::{
     SendStream, SendStreamEvents, Stream,
 };
 
-pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
-pub const WEBTRANSPORT_STREAM: u64 = 0x41;
+pub(crate) const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
+pub(crate) const WEBTRANSPORT_STREAM: u64 = 0x41;
 
 #[derive(Debug)]
-pub struct WebTransportRecvStream {
+pub(crate) struct WebTransportRecvStream {
     stream_id: StreamId,
     stream_info: Http3StreamInfo,
     events: Box<dyn RecvStreamEvents>,
@@ -29,7 +29,7 @@ pub struct WebTransportRecvStream {
 }
 
 impl WebTransportRecvStream {
-    pub fn new(
+    pub(crate) fn new(
         stream_id: StreamId,
         session_id: StreamId,
         events: Box<dyn RecvStreamEvents>,
@@ -120,7 +120,7 @@ enum WebTransportSenderStreamState {
 }
 
 #[derive(Debug)]
-pub struct WebTransportSendStream {
+pub(crate) struct WebTransportSendStream {
     stream_id: StreamId,
     stream_info: Http3StreamInfo,
     state: WebTransportSenderStreamState,
@@ -130,7 +130,7 @@ pub struct WebTransportSendStream {
 }
 
 impl WebTransportSendStream {
-    pub fn new(
+    pub(crate) fn new(
         stream_id: StreamId,
         session_id: StreamId,
         events: Box<dyn SendStreamEvents>,

@@ -162,7 +162,7 @@ mod tests {
     }
 
     impl UintTestCase {
-        pub fn run(&self) {
+        pub(crate) fn run(&self) {
             eprintln!(
                 "IncrementalDecoderUint decoder with {:?} ; expect {:?}",
                 self.b, self.v

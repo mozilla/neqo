@@ -20,7 +20,7 @@ use crate::{
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
-pub enum DecoderInstruction {
+pub(crate) enum DecoderInstruction {
     InsertCountIncrement {
         increment: u64,
     },
@@ -77,7 +77,7 @@ enum DecoderInstructionReaderState {
 }
 
 #[derive(Debug, Default)]
-pub struct DecoderInstructionReader {
+pub(crate) struct DecoderInstructionReader {
     state: DecoderInstructionReaderState,
     instruction: DecoderInstruction,
 }
@@ -94,7 +94,10 @@ impl DecoderInstructionReader {
     /// 1) `NeedMoreData` if the reader needs more data
     /// 2) `ClosedCriticalStream`
     /// 3) other errors will be translated to `DecoderStream` by the caller of this function.
-    pub fn read_instructions<R: ReadByte>(&mut self, recv: &mut R) -> Res<DecoderInstruction> {
+    pub(crate) fn read_instructions<R: ReadByte>(
+        &mut self,
+        recv: &mut R,
+    ) -> Res<DecoderInstruction> {
         qdebug!("[{self}] read a new instruction");
         loop {
             match &mut self.state {

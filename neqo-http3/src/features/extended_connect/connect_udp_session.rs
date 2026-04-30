@@ -22,7 +22,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct Session {
+pub(crate) struct Session {
     frame_reader: FrameReader,
     session_id: StreamId,
 }

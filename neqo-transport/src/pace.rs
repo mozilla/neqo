@@ -17,7 +17,7 @@ use neqo_common::qtrace;
 use crate::rtt::GRANULARITY;
 
 /// A pacer that uses a leaky bucket.
-pub struct Pacer {
+pub(crate) struct Pacer {
     /// Whether pacing is enabled.
     enabled: bool,
     /// The last update time.
@@ -52,7 +52,7 @@ impl Pacer {
     /// The value of `p` is the packet size in bytes, which determines the minimum
     /// credit needed before a packet is sent.  This should be a substantial
     /// fraction of the maximum packet size, if not the packet size.
-    pub fn new(enabled: bool, now: Instant, m: usize, p: usize) -> Self {
+    pub(crate) fn new(enabled: bool, now: Instant, m: usize, p: usize) -> Self {
         assert!(m >= p, "maximum capacity has to be at least one packet");
         assert!(isize::try_from(p).is_ok(), "p ({p}) exceeds isize::MAX");
         Self {
@@ -64,11 +64,11 @@ impl Pacer {
         }
     }
 
-    pub const fn mtu(&self) -> usize {
+    pub(crate) const fn mtu(&self) -> usize {
         self.p
     }
 
-    pub const fn set_mtu(&mut self, mtu: usize) {
+    pub(crate) const fn set_mtu(&mut self, mtu: usize) {
         self.p = mtu;
     }
 
@@ -76,7 +76,7 @@ impl Pacer {
     /// RTT, provided congestion window and accumulated credit or debt.  This
     /// doesn't update state.  This returns a time, which could be in the past
     /// (this object doesn't know what the current time is).
-    pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
+    pub(crate) fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
         let packet = isize::try_from(self.p).expect("packet size fits into isize");
 
         if self.c >= packet {
@@ -138,7 +138,7 @@ impl Pacer {
     /// This function takes the current time (`now`), an estimate of the round
     /// trip time (`rtt`), the estimated congestion window (`cwnd`), and the
     /// number of bytes that were sent (`count`).
-    pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
+    pub(crate) fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
         if !self.enabled {
             self.t = now;
             return;

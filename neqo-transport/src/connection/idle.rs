@@ -27,21 +27,21 @@ enum IdleTimeoutState {
 /// -transport 10.1 ("Idle Timeout").
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9000#section-10.1>
-pub struct IdleTimeout {
+pub(super) struct IdleTimeout {
     timeout: Duration,
     state: IdleTimeoutState,
     keep_alive_outstanding: bool,
 }
 
 impl IdleTimeout {
-    pub const fn new(timeout: Duration) -> Self {
+    pub(super) const fn new(timeout: Duration) -> Self {
         Self {
             timeout,
             state: IdleTimeoutState::Init,
             keep_alive_outstanding: false,
         }
     }
-    pub fn set_peer_timeout(&mut self, peer_timeout: Duration) {
+    pub(super) fn set_peer_timeout(&mut self, peer_timeout: Duration) {
         self.timeout = min(self.timeout, peer_timeout);
     }
 
@@ -52,14 +52,14 @@ impl IdleTimeout {
         }
     }
 
-    pub fn expiry(&self, now: Instant, pto: Duration) -> Instant {
+    pub(super) fn expiry(&self, now: Instant, pto: Duration) -> Instant {
         let delay = max(self.timeout, pto * 3);
         let t = self.start(now) + delay;
         qtrace!("IdleTimeout::expiry@{now:?} pto={pto:?} => {t:?}");
         t
     }
 
-    pub const fn on_packet_sent(&mut self, now: Instant) {
+    pub(super) const fn on_packet_sent(&mut self, now: Instant) {
         // Only reset idle timeout if we've received a packet since the last
         // time we reset the timeout here.
         match self.state {
@@ -78,7 +78,7 @@ impl IdleTimeout {
         }
     }
 
-    pub fn on_packet_received(&mut self, now: Instant) {
+    pub(super) fn on_packet_received(&mut self, now: Instant) {
         // Only update if this doesn't rewind the idle timeout.
         // We sometimes process packets after caching them, which uses
         // the time the packet was received.  That could be in the past.
@@ -93,7 +93,7 @@ impl IdleTimeout {
         }
     }
 
-    pub fn expired(&self, now: Instant, pto: Duration) -> bool {
+    pub(super) fn expired(&self, now: Instant, pto: Duration) -> bool {
         now >= self.expiry(now, pto)
     }
 
@@ -103,7 +103,7 @@ impl IdleTimeout {
         self.start(now) + max(self.timeout / 2, pto)
     }
 
-    pub fn next_keep_alive(&self, now: Instant, pto: Duration) -> Option<Instant> {
+    pub(super) fn next_keep_alive(&self, now: Instant, pto: Duration) -> Option<Instant> {
         if self.keep_alive_outstanding {
             return None;
         }
@@ -118,7 +118,7 @@ impl IdleTimeout {
         Some(timeout)
     }
 
-    pub fn send_keep_alive(
+    pub(super) fn send_keep_alive(
         &mut self,
         now: Instant,
         pto: Duration,
@@ -133,11 +133,11 @@ impl IdleTimeout {
         }
     }
 
-    pub const fn lost_keep_alive(&mut self) {
+    pub(super) const fn lost_keep_alive(&mut self) {
         self.keep_alive_outstanding = false;
     }
 
-    pub const fn ack_keep_alive(&mut self) {
+    pub(super) const fn ack_keep_alive(&mut self) {
         self.keep_alive_outstanding = false;
     }
 }

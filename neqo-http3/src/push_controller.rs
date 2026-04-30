@@ -63,7 +63,7 @@ struct ActivePushStreams {
 impl ActivePushStreams {
     // Const constructor for compile-time initialization in PushController::new().
     // Could derive Default if const was not required.
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             push_streams: VecDeque::new(),
             first_push_id: PushId::new(0),
@@ -71,7 +71,7 @@ impl ActivePushStreams {
     }
 
     /// Returns None if a stream has been closed already.
-    pub fn get_mut(
+    pub(crate) fn get_mut(
         &mut self,
         push_id: PushId,
     ) -> Option<&mut <usize as SliceIndex<[PushState]>>::Output> {
@@ -90,12 +90,12 @@ impl ActivePushStreams {
     }
 
     /// Returns None if a stream has been closed already.
-    pub fn get(&mut self, push_id: PushId) -> Option<&mut PushState> {
+    pub(crate) fn get(&mut self, push_id: PushId) -> Option<&mut PushState> {
         self.get_mut(push_id)
     }
 
     /// Returns the State of a closed push stream or None for already closed streams.
-    pub fn close(&mut self, push_id: PushId) -> Option<PushState> {
+    pub(crate) fn close(&mut self, push_id: PushId) -> Option<PushState> {
         match self.get_mut(push_id) {
             None | Some(PushState::Closed) => None,
             Some(s) => {
@@ -110,7 +110,7 @@ impl ActivePushStreams {
     }
 
     #[must_use]
-    pub fn number_done(&self) -> PushId {
+    pub(crate) fn number_done(&self) -> PushId {
         self.first_push_id
             + u64::try_from(
                 self.push_streams
@@ -121,7 +121,7 @@ impl ActivePushStreams {
             .expect("usize fits in u64")
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.first_push_id = PushId::new(0);
         self.push_streams.clear();
     }
@@ -146,7 +146,7 @@ impl ActivePushStreams {
 /// `CANCEL_PUSH` frame. The difference is that                              `PushCanceled` will not
 /// be posted and a `CANCEL_PUSH` frame may be sent.
 #[derive(Debug)]
-pub struct PushController {
+pub(crate) struct PushController {
     max_concurent_push: u64,
     current_max_push_id: PushId,
     // push_streams holds the states of push streams.
@@ -165,7 +165,7 @@ impl Display for PushController {
 }
 
 impl PushController {
-    pub const fn new(max_concurent_push: u64, conn_events: Http3ClientEvents) -> Self {
+    pub(crate) const fn new(max_concurent_push: u64, conn_events: Http3ClientEvents) -> Self {
         Self {
             max_concurent_push,
             current_max_push_id: PushId::new(0),
@@ -179,7 +179,7 @@ impl PushController {
     /// # Errors
     ///
     /// `HttpId` if `push_id` greater than it is allowed has been received.
-    pub fn new_push_promise(
+    pub(crate) fn new_push_promise(
         &mut self,
         push_id: PushId,
         ref_stream_id: StreamId,
@@ -233,7 +233,11 @@ impl PushController {
         }
     }
 
-    pub fn add_new_push_stream(&mut self, push_id: PushId, stream_id: StreamId) -> Res<bool> {
+    pub(crate) fn add_new_push_stream(
+        &mut self,
+        push_id: PushId,
+        stream_id: StreamId,
+    ) -> Res<bool> {
         qtrace!("A new push stream with push_id={push_id} stream_id={stream_id}");
         self.check_push_id(push_id)?;
 
@@ -278,7 +282,7 @@ impl PushController {
         }
     }
 
-    pub fn handle_cancel_push(
+    pub(crate) fn handle_cancel_push(
         &mut self,
         push_id: PushId,
         conn: &mut Connection,
@@ -316,7 +320,7 @@ impl PushController {
         }
     }
 
-    pub fn close(&mut self, push_id: PushId) {
+    pub(crate) fn close(&mut self, push_id: PushId) {
         qtrace!("Push stream has been closed");
         if let Some(push_state) = self.push_streams.close(push_id) {
             debug_assert!(matches!(push_state, PushState::Active { .. }));
@@ -325,7 +329,7 @@ impl PushController {
         }
     }
 
-    pub fn cancel(
+    pub(crate) fn cancel(
         &mut self,
         push_id: PushId,
         conn: &mut Connection,
@@ -369,7 +373,7 @@ impl PushController {
         }
     }
 
-    pub fn push_stream_reset(&mut self, push_id: PushId, close_type: CloseType) {
+    pub(crate) fn push_stream_reset(&mut self, push_id: PushId, close_type: CloseType) {
         qtrace!("Push stream has been reset, push_id={push_id}");
         if let Some(push_state) = self.push_streams.get(push_id) {
             match push_state {
@@ -395,14 +399,14 @@ impl PushController {
         }
     }
 
-    pub fn get_active_stream_id(&mut self, push_id: PushId) -> Option<StreamId> {
+    pub(crate) fn get_active_stream_id(&mut self, push_id: PushId) -> Option<StreamId> {
         match self.push_streams.get(push_id) {
             Some(PushState::Active { stream_id, .. }) => Some(*stream_id),
             _ => None,
         }
     }
 
-    pub fn maybe_send_max_push_id_frame(&mut self, base_handler: &mut Http3Connection) {
+    pub(crate) fn maybe_send_max_push_id_frame(&mut self, base_handler: &mut Http3Connection) {
         let push_done = self.push_streams.number_done();
         if self.max_concurent_push > 0
             && (self.current_max_push_id - push_done) <= (self.max_concurent_push / 2).into()
@@ -414,19 +418,19 @@ impl PushController {
         }
     }
 
-    pub const fn handle_zero_rtt_rejected(&mut self) {
+    pub(crate) const fn handle_zero_rtt_rejected(&mut self) {
         self.current_max_push_id = PushId::new(0);
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.push_streams.clear();
     }
 
-    pub const fn can_receive_push(&self) -> bool {
+    pub(crate) const fn can_receive_push(&self) -> bool {
         self.max_concurent_push > 0
     }
 
-    pub fn new_stream_event(&mut self, push_id: PushId, event: Http3ClientEvent) {
+    pub(crate) fn new_stream_event(&mut self, push_id: PushId, event: Http3ClientEvent) {
         match self.push_streams.get_mut(push_id) {
             None => {
                 debug_assert!(false, "Push has been closed already");
@@ -450,13 +454,13 @@ impl PushController {
 /// `PushHeaderReady` and `PushDataReadable` events or to postpone them if
 /// a `push_promise` has not been yet received for the stream.
 #[derive(Debug)]
-pub struct RecvPushEvents {
+pub(crate) struct RecvPushEvents {
     push_id: PushId,
     push_handler: Rc<RefCell<PushController>>,
 }
 
 impl RecvPushEvents {
-    pub const fn new(push_id: PushId, push_handler: Rc<RefCell<PushController>>) -> Self {
+    pub(crate) const fn new(push_id: PushId, push_handler: Rc<RefCell<PushController>>) -> Self {
         Self {
             push_id,
             push_handler,

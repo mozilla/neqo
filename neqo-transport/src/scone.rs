@@ -10,7 +10,7 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Scone {
+pub(crate) struct Scone {
     updated: Instant,
     rate: Bitrate,
 }
@@ -19,23 +19,23 @@ impl Scone {
     pub(crate) const PERIOD: Duration = Duration::from_secs(67);
 
     #[must_use]
-    pub const fn new(updated: Instant, rate: Bitrate) -> Self {
+    pub(crate) const fn new(updated: Instant, rate: Bitrate) -> Self {
         Self { updated, rate }
     }
 
     /// Determine if the advice has expired.
     #[must_use]
-    pub fn expired(&self, now: Instant) -> bool {
+    pub(crate) fn expired(&self, now: Instant) -> bool {
         self.updated + Self::PERIOD <= now
     }
 
     #[must_use]
-    pub const fn rate(&self) -> Bitrate {
+    pub(crate) const fn rate(&self) -> Bitrate {
         self.rate
     }
 
     /// Update the value, return true if updated.
-    pub fn update(&mut self, now: Instant, rate: Option<Bitrate>) -> bool {
+    pub(crate) fn update(&mut self, now: Instant, rate: Option<Bitrate>) -> bool {
         // This uses the simplest form of update, to keep it simple.
         // A fancier method would remember some number of higher-rate updates
         // and switch to those when the lower rate expires.

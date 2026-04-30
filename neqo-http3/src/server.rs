@@ -415,7 +415,7 @@ mod tests {
             .max_blocked_streams(qpack_settings.max_blocked_streams)
     }
 
-    pub fn create_server(conn_params: Http3Parameters) -> Http3Server {
+    pub(super) fn create_server(conn_params: Http3Parameters) -> Http3Server {
         fixture_init();
         Http3Server::new(
             now(),
@@ -430,7 +430,7 @@ mod tests {
     }
 
     /// Create a http3 server with default configuration.
-    pub fn default_server() -> Http3Server {
+    pub(super) fn default_server() -> Http3Server {
         create_server(http3params(DEFAULT_SETTINGS))
     }
 
@@ -1365,7 +1365,7 @@ mod tests {
     }
 
     #[derive(Debug, Default)]
-    pub struct RejectZeroRtt {}
+    pub(super) struct RejectZeroRtt {}
     impl ZeroRttChecker for RejectZeroRtt {
         fn check(&self, _token: &[u8]) -> ZeroRttCheckResult {
             ZeroRttCheckResult::Reject

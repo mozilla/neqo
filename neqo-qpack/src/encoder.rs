@@ -36,7 +36,7 @@ enum LocalStreamState {
 }
 
 impl LocalStreamState {
-    pub const fn stream_id(&self) -> Option<StreamId> {
+    pub(crate) const fn stream_id(&self) -> Option<StreamId> {
         match self {
             Self::NoStream => None,
             Self::Uninitialized(stream_id) | Self::Initialized(stream_id) => Some(*stream_id),
@@ -572,20 +572,20 @@ mod tests {
     }
 
     impl TestEncoder {
-        pub fn change_capacity(&mut self, capacity: u64) -> Res<()> {
+        pub(crate) fn change_capacity(&mut self, capacity: u64) -> Res<()> {
             self.encoder.set_max_capacity(capacity)?;
             // We will try to really change the table only when we send the change capacity
             // instruction.
             self.encoder.send_encoder_updates(&mut self.conn)
         }
 
-        pub fn insert(&mut self, header: &[u8], value: &[u8], inst: &[u8]) {
+        pub(crate) fn insert(&mut self, header: &[u8], value: &[u8], inst: &[u8]) {
             let res = self.encoder.send_and_insert(&mut self.conn, header, value);
             assert!(res.is_ok());
             self.send_instructions(inst);
         }
 
-        pub fn encode_header_block(
+        pub(crate) fn encode_header_block(
             &mut self,
             stream_id: StreamId,
             headers: &[Header],
@@ -599,7 +599,7 @@ mod tests {
             self.send_instructions(inst);
         }
 
-        pub fn send_instructions(&mut self, encoder_instruction: &[u8]) {
+        pub(crate) fn send_instructions(&mut self, encoder_instruction: &[u8]) {
             self.encoder.send_encoder_updates(&mut self.conn).unwrap();
             let out = self.conn.process_output(now());
             let out2 = self.peer_conn.process(out.dgram(), now());

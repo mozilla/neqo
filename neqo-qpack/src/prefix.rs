@@ -48,7 +48,7 @@ impl Prefix {
 #[macro_export]
 macro_rules! create_prefix {
     ($n:ident) => {
-        pub const $n: Prefix = Prefix {
+        pub(crate) const $n: Prefix = Prefix {
             prefix: 0x0,
             len: 0,
             mask: 0xFF,
@@ -57,7 +57,7 @@ macro_rules! create_prefix {
     ($n:ident, $v:expr, $l:expr) => {
         static_assertions::const_assert!($l < 7);
         static_assertions::const_assert!($v & ((1 << (8 - $l)) - 1) == 0);
-        pub const $n: Prefix = Prefix {
+        pub(crate) const $n: Prefix = Prefix {
             prefix: $v,
             len: $l,
             mask: ((1 << $l) - 1) << (8 - $l),
@@ -67,7 +67,7 @@ macro_rules! create_prefix {
         static_assertions::const_assert!($l < 7);
         static_assertions::const_assert!($v & ((1 << (8 - $l)) - 1) == 0);
         static_assertions::const_assert!((((1 << $l) - 1) << (8 - $l)) >= $m);
-        pub const $n: Prefix = Prefix {
+        pub(crate) const $n: Prefix = Prefix {
             prefix: $v,
             len: $l,
             mask: $m,
