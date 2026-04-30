@@ -28,7 +28,7 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::Certifi
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
+    ReceiveOutput, Res, SendGroupId,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -894,6 +894,39 @@ impl Http3Client {
         Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
     }
 
+    /// Sets the `SendGroup` for a given WebTransport stream
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        // Update the HTTP3-layer stream record (validates ownership against the session).
+        self.base_handler
+            .stream_set_sendgroup(stream_id, sendgroup)?;
+        // Update the transport-layer scheduler so sendOrder is namespaced per group.
+        self.conn
+            .stream_sendgroup(stream_id, Some(sendgroup.as_u64()))
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
+    /// Clears the `SendGroup` for a given WebTransport stream
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    pub fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        // Update the HTTP3-layer stream record.
+        self.base_handler.stream_clear_sendgroup(stream_id)?;
+        // Remove the group assignment in the transport-layer scheduler.
+        self.conn
+            .stream_sendgroup(stream_id, None)
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
     /// Sets the `Fairness` for a given stream
     ///
     /// # Errors
@@ -1438,6 +1471,61 @@ impl Http3Client {
     /// Returns error if the session ID is invalid.
     pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
         self.base_handler.webtransport_session_protocol(session_id)
+    }
+
+    /// Create a new send group for a WebTransport session.
+    ///
+    /// Send groups allow organizing streams with shared prioritization.
+    ///
+    /// Register a send group with a caller-provided ID for a WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, is not a WebTransport session,
+    /// or the group ID is already in use.
+    pub fn webtransport_register_send_group(
+        &mut self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<()> {
+        self.base_handler
+            .webtransport_register_send_group(session_id, group_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.base_handler
+            .webtransport_validate_send_group(session_id, group_id)
+    }
+
+    /// Create a WebTransport stream with a send group.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, stream creation fails, or send group is invalid.
+    pub fn webtransport_create_stream_with_send_group(
+        &mut self,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        self.base_handler
+            .webtransport_create_stream_local_with_send_group(
+                &mut self.conn,
+                session_id,
+                stream_type,
+                Box::new(self.events.clone()),
+                Box::new(self.events.clone()),
+                send_group,
+            )
     }
 }
 

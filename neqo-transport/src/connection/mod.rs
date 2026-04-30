@@ -52,7 +52,7 @@ use crate::{
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{SendOrder, Streams},
+    streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
         TransportParameterId::{
@@ -3748,6 +3748,19 @@ impl Connection {
     /// When the stream does not exist.
     pub fn stream_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.streams.set_fairness(stream_id, fairness)
+    }
+
+    /// Assign a stream to a send group for per-group sendOrder namespacing and fair
+    /// bandwidth allocation between groups per the WebTransport spec.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        group_id: Option<SendGroupId>,
+    ) -> Res<()> {
+        self.streams.set_sendgroup(stream_id, group_id)
     }
 
     /// # Errors
