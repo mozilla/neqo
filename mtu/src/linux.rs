@@ -348,7 +348,7 @@ fn if_name_mtu(if_index: i32, fd: &mut RouteSocket) -> Result<(String, usize)> {
     Err(default_err())
 }
 
-pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
+pub(crate) fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     // Create a netlink socket.
     let mut fd = RouteSocket::new(AF_NETLINK, NETLINK_ROUTE)?;
     let if_index = if_index(remote, &mut fd)?;

@@ -111,7 +111,7 @@ const fn aligned_by(size: usize, align: usize) -> usize {
 //
 // See <https://github.com/mozilla/mtu/issues/82>.
 #[cfg(any(target_os = "ios", target_os = "tvos", target_os = "visionos"))]
-pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
+pub(crate) fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     return Err(default_err());
 }
 

@@ -52,7 +52,7 @@ impl Drop for MibTablePtr {
     }
 }
 
-pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
+pub(crate) fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
     // Convert remote to Windows SOCKADDR_INET format. The SOCKADDR_INET union contains an IPv4 or
     // an IPv6 address.
     //
