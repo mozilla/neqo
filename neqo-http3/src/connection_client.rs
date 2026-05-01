@@ -811,7 +811,8 @@ impl Http3Client {
     /// # Errors
     ///
     /// This may return an error if the particular session does not exist
-    /// or the connection is not in the active state.
+    /// or the connection is not in the active state or if we're it would
+    /// exceed the connection stream limit.
     pub fn webtransport_create_stream(
         &mut self,
         session_id: StreamId,
@@ -1323,7 +1324,7 @@ impl Http3Client {
                 )?,
 
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
-                    self.events.new_requests_creatable(stream_type);
+                    self.events.stream_creatable(stream_type);
                 }
                 ConnectionEvent::AuthenticationNeeded => self.events.authentication_needed(),
                 ConnectionEvent::EchFallbackAuthenticationNeeded { public_name } => {
