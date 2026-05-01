@@ -293,14 +293,14 @@ impl SendStream for SendMessage {
         Some(self)
     }
 
-    fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<()> {
+    fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<bool> {
         let data_frame = HFrame::Data {
             len: buf.len() as u64,
         };
         self.stream.encode_with(|e| data_frame.encode(e));
         self.stream.buffer(buf);
         _ = self.stream.send_buffer(conn, now)?;
-        Ok(())
+        Ok(true)
     }
 }
 

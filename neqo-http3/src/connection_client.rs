@@ -39,6 +39,12 @@ use crate::{
     settings::HSettings,
 };
 
+#[derive(Debug, Clone, Copy)]
+pub struct SendStreamFlowControl {
+    pub available: usize,
+    pub buffered: usize,
+}
+
 // This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal
 // a given id. Only the same type (bidirectional or unidirectional) streams are filtered.
 fn id_gte<U>(base: StreamId) -> impl FnMut((&StreamId, &U)) -> Option<StreamId> + 'static
@@ -1055,6 +1061,39 @@ impl Http3Client {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
+    }
+
+    /// Returns available send window and buffered bytes for a WebTransport send stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist.
+    pub fn webtransport_send_stream_flow_control_info(
+        &self,
+        stream_id: StreamId,
+    ) -> Res<SendStreamFlowControl> {
+        let available = self.conn.stream_avail_send_space(stream_id)?;
+        let buffered = self.conn.stream_send_buffered(stream_id)?;
+        Ok(SendStreamFlowControl {
+            available,
+            buffered,
+        })
+    }
+
+    /// Send data atomically on a WebTransport send stream.
+    /// Returns true if all data was sent, false if it couldn't fit.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist or other stream errors.
+    pub fn webtransport_send_stream_atomic(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        self.base_handler
+            .webtransport_send_stream_atomic(&mut self.conn, stream_id, data, now)
     }
 
     /// Export WebTransport keying material per
