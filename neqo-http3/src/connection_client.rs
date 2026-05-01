@@ -837,46 +837,87 @@ impl Http3Client {
     /// Returns `Ok(true)` if the queue is below the high water mark, or
     /// `Ok(false)` if it is at or above it.
     ///
+    /// The `send_group_id` and `send_order` arguments are application-defined
+    /// values that are forwarded to the underlying transport:
+    ///
+    /// * `send_group_id` can be used to group related datagrams for logging,
+    ///   diagnostics, or scheduling purposes.
+    /// * `send_order` can be used to express the relative sending order within
+    ///   a given group.
+    ///
+    /// Callers that do not care about grouping or ordering can pass `0` for
+    /// both `send_group_id` and `send_order`.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    /// It may also return `NotAvailable` if QUIC datagrams are not enabled
+    /// or otherwise unavailable for this connection.
     pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(
         bool,
         Option<(u64, crate::features::extended_connect::DatagramOutcome)>,
     )> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
-        self.base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)
+        qtrace!(
+            "webtransport_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
+        self.base_handler.webtransport_send_datagram(
+            session_id,
+            &mut self.conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 
     /// Send `ConnectUdp` datagram.
+    ///
+    /// The `send_group_id` and `send_order` parameters are currently ignored
+    /// for ConnectUdp sessions (they are effectively forced to `0/0` in the
+    /// protocol implementation). They are exposed for API compatibility and
+    /// future use; callers should not rely on them having any effect.
     ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    /// The function returns `NotAvailable` if QUIC datagrams are not enabled.
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(
         bool,
         Option<(u64, crate::features::extended_connect::DatagramOutcome)>,
     )> {
-        qtrace!("connect_udp_send_datagram session:{session_id:?}");
-        self.base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)
+        qtrace!(
+            "connect_udp_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
+        self.base_handler.connect_udp_send_datagram(
+            session_id,
+            &mut self.conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.

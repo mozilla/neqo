@@ -433,6 +433,8 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<(bool, Option<(u64, super::datagram_queue::DatagramOutcome)>)> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
@@ -476,6 +478,8 @@ impl Session {
             id_u64,
             payload_len,
             now,
+            send_group_id,
+            send_order,
         );
 
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
@@ -741,7 +745,6 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn record_bytes_sent(&mut self, _bytes: u64) {}
 
-    #[expect(dead_code, reason = "later use")]
     fn record_bytes_sent_overhead(&mut self, _bytes: u64) {}
 
     fn record_bytes_received(&mut self, _bytes: u64) {}
@@ -789,6 +792,8 @@ pub(crate) trait Protocol: Debug + Display {
         _id: u64,
         _payload_len: usize,
         _now: Instant,
+        _send_group_id: u64,
+        _send_order: i64,
     ) -> (bool, Option<(u64, super::datagram_queue::DatagramOutcome)>) {
         (true, None)
     }
