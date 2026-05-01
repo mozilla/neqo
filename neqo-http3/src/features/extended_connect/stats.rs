@@ -11,10 +11,13 @@
 use std::time::Instant;
 
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct WebTransportSessionStats {
     pub timestamp: Option<Instant>,
     /// Payload bytes sent (excludes framing overhead and retransmissions).
     pub bytes_sent: u64,
+    /// Framing overhead bytes for sent datagrams (excludes retransmissions).
+    pub bytes_sent_overhead: u64,
     pub bytes_received: u64,
     pub datagrams_sent: u64,
     pub datagrams_received: u64,

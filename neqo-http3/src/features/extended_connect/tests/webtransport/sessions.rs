@@ -1267,3 +1267,30 @@ fn wt_session_stats_datagrams() {
 
     wt.check_datagram_received_server(&wt_session, DGRAM);
 }
+
+#[test]
+fn wt_session_stats_bytes_sent_overhead() {
+    const DGRAM: &[u8] = &[0x12, 0x34, 0x56, 0x78];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let expected_overhead = u64::try_from(Encoder::varint_len(session_id.as_u64() / 4)).unwrap();
+
+    wt.send_datagram(session_id, DGRAM).unwrap();
+    wt.exchange_packets();
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.bytes_sent, DGRAM.len() as u64);
+    assert_eq!(stats.bytes_sent_overhead, expected_overhead);
+    assert_eq!(stats.datagrams_sent, 1);
+
+    wt.send_datagram(session_id, DGRAM).unwrap();
+    wt.exchange_packets();
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.bytes_sent, 2 * DGRAM.len() as u64);
+    assert_eq!(stats.bytes_sent_overhead, 2 * expected_overhead);
+    assert_eq!(stats.datagrams_sent, 2);
+}
