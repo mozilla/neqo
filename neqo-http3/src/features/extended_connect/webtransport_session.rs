@@ -18,6 +18,7 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+        datagram_queue::{DatagramOutcome, WebTransportDatagramQueue},
         send_group::{SendGroup, SendGroupId},
         session::{DgramContextIdError, Protocol, State},
         stats::WebTransportSessionStats,
@@ -42,6 +43,8 @@ pub struct Session {
     send_groups: HashMap<SendGroupId, SendGroup>,
     /// Session-level statistics.
     stats: WebTransportSessionStats,
+    /// Datagram queue for managing outgoing datagrams.
+    datagram_queue: WebTransportDatagramQueue,
 }
 
 impl Display for Session {
@@ -63,6 +66,7 @@ impl Session {
             negotiated_protocol: None,
             send_groups: HashMap::default(),
             stats: WebTransportSessionStats::new(),
+            datagram_queue: WebTransportDatagramQueue::new(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -132,6 +136,38 @@ impl Session {
         let mut stats = self.stats.clone();
         stats.timestamp = Some(Instant::now());
         stats
+    }
+
+    pub(crate) fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.datagram_queue.set_high_water_mark(mark);
+    }
+
+    pub(crate) fn set_datagram_max_age(
+        &mut self,
+        age_ms: f64,
+        now: Instant,
+    ) -> Vec<(u64, DatagramOutcome)> {
+        self.datagram_queue.set_max_age(age_ms, now)
+    }
+
+    pub(crate) fn enqueue_datagram(
+        &mut self,
+        data: Bytes,
+        id: u64,
+        payload_len: usize,
+        now: Instant,
+    ) -> (bool, Option<(u64, DatagramOutcome)>) {
+        self.datagram_queue.enqueue(data, id, payload_len, now)
+    }
+
+    pub(crate) fn drain_datagram_queue(
+        &mut self,
+        now: Instant,
+    ) -> (
+        Vec<(u64, DatagramOutcome)>,
+        Vec<super::datagram_queue::QueuedDatagram>,
+    ) {
+        self.datagram_queue.drain(now)
     }
 }
 
@@ -354,5 +390,33 @@ impl Protocol for Session {
             "[{self}] WebTransport does not support datagram capsules."
         );
         Ok(())
+    }
+
+    fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.set_datagram_high_water_mark(mark);
+    }
+
+    fn set_datagram_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(u64, DatagramOutcome)> {
+        self.set_datagram_max_age(age_ms, now)
+    }
+
+    fn enqueue_datagram(
+        &mut self,
+        data: Bytes,
+        id: u64,
+        payload_len: usize,
+        now: Instant,
+    ) -> (bool, Option<(u64, DatagramOutcome)>) {
+        self.enqueue_datagram(data, id, payload_len, now)
+    }
+
+    fn drain_datagram_queue(
+        &mut self,
+        now: Instant,
+    ) -> (
+        Vec<(u64, DatagramOutcome)>,
+        Vec<super::datagram_queue::QueuedDatagram>,
+    ) {
+        self.drain_datagram_queue(now)
     }
 }

@@ -16,6 +16,7 @@ use crate::{
     Error, RecvStream, Res, SendStream,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
+        datagram_queue::{DatagramOutcome, WebTransportDatagramQueue},
         session::{DgramContextIdError, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, capsule::Capsule},
@@ -25,6 +26,7 @@ use crate::{
 pub struct Session {
     frame_reader: FrameReader,
     session_id: StreamId,
+    datagram_queue: WebTransportDatagramQueue,
 }
 
 impl Session {
@@ -33,6 +35,7 @@ impl Session {
         Self {
             session_id,
             frame_reader: FrameReader::new(),
+            datagram_queue: WebTransportDatagramQueue::new(),
         }
     }
 }
@@ -99,6 +102,34 @@ impl Protocol for Session {
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder) {
         encoder.encode_varint(0u64);
+    }
+
+    fn set_datagram_high_water_mark(&mut self, mark: f64) {
+        self.datagram_queue.set_high_water_mark(mark);
+    }
+
+    fn set_datagram_max_age(&mut self, age_ms: f64, now: Instant) -> Vec<(u64, DatagramOutcome)> {
+        self.datagram_queue.set_max_age(age_ms, now)
+    }
+
+    fn enqueue_datagram(
+        &mut self,
+        data: Bytes,
+        id: u64,
+        payload_len: usize,
+        now: Instant,
+    ) -> (bool, Option<(u64, DatagramOutcome)>) {
+        self.datagram_queue.enqueue(data, id, payload_len, now)
+    }
+
+    fn drain_datagram_queue(
+        &mut self,
+        now: Instant,
+    ) -> (
+        Vec<(u64, DatagramOutcome)>,
+        Vec<super::datagram_queue::QueuedDatagram>,
+    ) {
+        self.datagram_queue.drain(now)
     }
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
