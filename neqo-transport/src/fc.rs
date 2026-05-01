@@ -330,7 +330,6 @@ where
     }
 
     pub const fn set_max_active(&mut self, max: u64) {
-        // If max_active has been increased, send an update immediately.
         self.frame_pending |= self.max_active < max;
         self.max_active = max;
     }

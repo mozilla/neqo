@@ -1500,8 +1500,77 @@ impl Http3Connection {
         self.recv_streams
             .get(&session_id)
             .and_then(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().connect_type() == ExtendedConnectType::WebTransport)
             .and_then(|s| s.borrow().stats())
             .ok_or(Error::InvalidStreamId)
+    }
+
+    pub(crate) fn webtransport_increase_max_uni_streams(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let session = self
+            .recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .ok_or(Error::InvalidStreamId)?;
+        if session.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
+        session.borrow_mut().set_anticipated_incoming_uni(value);
+        // Sum across all sessions: multiple WebTransport sessions may share a
+        // connection in the future, and each session's streams count against the
+        // same QUIC connection-level limit.  The connection's baseline is
+        // LOCAL_STREAM_LIMIT_UNI (100); only a total exceeding that will cause a
+        // MAX_STREAMS frame to be sent.
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().connect_type() == ExtendedConnectType::WebTransport)
+            .map(|s| u64::from(s.borrow().anticipated_incoming_uni()))
+            .sum();
+        conn.set_remote_max_streams_uni(total);
+        Ok(())
+    }
+
+    pub(crate) fn webtransport_increase_max_bidi_streams(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let session = self
+            .recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .ok_or(Error::InvalidStreamId)?;
+        {
+            let session_ref = session.borrow();
+            if session_ref.connect_type() != ExtendedConnectType::WebTransport {
+                return Err(Error::InvalidStreamId);
+            }
+        }
+        session.borrow_mut().set_anticipated_incoming_bidi(value);
+        // Sum across all sessions: see comment in webtransport_increase_max_uni_streams.
+        // The connection's baseline is LOCAL_STREAM_LIMIT_BIDI (100).
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| {
+                let session = s.extended_connect_session()?;
+                let session_ref = session.borrow();
+                if session_ref.connect_type() == ExtendedConnectType::WebTransport {
+                    Some(u64::from(session_ref.anticipated_incoming_bidi()))
+                } else {
+                    None
+                }
+            })
+            .sum();
+        conn.set_remote_max_streams_bidi(total);
+        Ok(())
     }
 
     pub(crate) fn connect_udp_close_session(
