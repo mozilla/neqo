@@ -270,6 +270,18 @@ impl Http3Server {
                             headers,
                         );
                     }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::Draining {
+                        session_id,
+                    }) => {
+                        // A remote endpoint sent WT_DRAIN_SESSION, signalling it wishes to
+                        // gracefully close the session. Expose this to the server application.
+                        self.events
+                            .webtransport_session_draining(WebTransportRequest::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ));
+                    }
                     Http3ServerConnEvent::WebTransport(WebTransportEvent::SessionClosed {
                         stream_id,
                         reason,
@@ -358,6 +370,28 @@ impl Http3Server {
         for handler in self.http3_handlers.values() {
             handler.borrow_mut().test_queue_goaway(stream_id);
         }
+    }
+
+    /// Send a `WT_DRAIN_SESSION` capsule on the given WebTransport session stream.
+    /// Only used in tests.
+    #[cfg(test)]
+    pub fn test_drain_webtransport_session(
+        &self,
+        session_id: neqo_transport::StreamId,
+        now: Instant,
+    ) -> Res<()> {
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to iterate over handlers in undefined order for test drain"
+        )]
+        for (conn, handler) in &self.http3_handlers {
+            handler.borrow_mut().test_webtransport_drain_session(
+                &mut conn.borrow_mut(),
+                session_id,
+                now,
+            )?;
+        }
+        Ok(())
     }
 }
 fn prepare_data(

@@ -183,8 +183,9 @@ fn frame_reading_with_stream_wt_close_session() {
     }
     let frame = fr.process::<WebTransportFrame>(&[0x6f]);
 
-    assert!(frame.is_some());
-    let WebTransportFrame::CloseSession { error, message } = frame.unwrap();
+    let Some(WebTransportFrame::CloseSession { error, message }) = frame else {
+        panic!("expected CloseSession frame");
+    };
     assert_eq!(error, 5);
     assert_eq!(message, "Hello");
 }
@@ -208,8 +209,9 @@ fn unknown_wt_frame() {
     let frame = fr.process(&[
         0x68, 0x43, 0x09, 0x00, 0x00, 0x00, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f,
     ]);
-    assert!(frame.is_some());
-    let WebTransportFrame::CloseSession { error, message } = frame.unwrap();
+    let Some(WebTransportFrame::CloseSession { error, message }) = frame else {
+        panic!("expected CloseSession frame");
+    };
     assert_eq!(error, 5);
     assert_eq!(message, "Hello");
 }
