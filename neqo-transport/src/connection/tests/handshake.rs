@@ -804,8 +804,7 @@ fn corrupted_initial() {
         .iter()
         .enumerate()
         .rev()
-        .skip(1) // Skip the last byte, which might be a SCONE indicator.
-        .find(|&(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
+        .find(|&(_, &v)| v != 0)
         .unwrap();
     corrupted[idx] ^= 0x76;
 
@@ -1638,11 +1637,19 @@ fn scone(enable: bool) {
 
     let ci = client.process_output(now).dgram().unwrap();
     let ci_len = ci.len();
-    assert_eq!(
-        &ci[ci_len - Connection::SCONE_INDICATION.len()..],
-        Connection::SCONE_INDICATION,
-        "Client should send indication"
-    );
+    if enable {
+        assert_eq!(
+            &ci[ci_len - Connection::SCONE_INDICATION.len()..],
+            Connection::SCONE_INDICATION,
+            "Client should send indication"
+        );
+    } else {
+        assert_ne!(
+            &ci[ci_len - Connection::SCONE_INDICATION.len()..],
+            Connection::SCONE_INDICATION,
+            "Client should not send indication when SCONE is disabled"
+        );
+    }
     server.process_input(ci, now);
 
     connect(&mut client, &mut server);
@@ -1712,8 +1719,10 @@ fn scone_enabled() {
     scone(true);
 }
 
-/// The scone test passes, even when the config item isn't set.
-/// This is because the transport parameter is the only thing it affects.
+/// With the connection parameter disabled, the client does not send the SCONE
+/// indicator in Initial padding and does not advertise the SCONE transport
+/// parameter. Inbound SCONE packets are still tolerated but do not generate
+/// `SconeUpdated` events, since neither peer has negotiated the feature.
 #[test]
 fn scone_disabled() {
     scone(false);
