@@ -80,6 +80,7 @@ fn initialize_on_first_ack_only() {
 }
 
 #[test]
+#[cfg(debug_assertions)]
 #[should_panic(
     expected = "bin_duration must be non-zero for correctness and to guard against div by zero -- initial_rtt was zero or too small"
 )]
@@ -279,6 +280,68 @@ fn sent_and_acked_bytes_accumulate() {
     assert_eq!(search.curr_idx(), Some(1));
     assert_eq!(search.acked_bin(1), 4 * MIN_INITIAL_PACKET_SIZE);
     assert_eq!(search.sent_bin(1), 4 * MIN_INITIAL_PACKET_SIZE);
+}
+
+#[test]
+fn prev_idx_and_fraction_calculation() {
+    let (mut search, bin_duration, mut now) = init_search(INITIAL_RTT);
+
+    // Progress time so we have some space to look back for the test's sake.
+    now += bin_duration * 5;
+    search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(INITIAL_RTT),
+        1,
+        MIN_INITIAL_PACKET_SIZE,
+        INITIAL_CWND,
+        &mut CongestionControlStats::default(),
+        now,
+    );
+    let curr_idx = search.curr_idx().unwrap();
+    let (prev_idx, fraction) = search.calc_prev_idx_test(INITIAL_RTT, curr_idx);
+
+    // With `rtt = 100ms` and `bin_duration = 35ms` we have passed `100 / 35 = 2.857` bins. Since
+    // the value is floored we should get `prev_idx = curr_idx - 2` and `fraction = 85`.
+    assert_eq!(
+        prev_idx,
+        curr_idx - 2,
+        "prev_idx should be `curr_idx - 2` and curr_idx is {curr_idx}"
+    );
+    assert_eq!(fraction, 85);
+}
+
+#[test]
+fn sent_and_acked_byte_computation() {
+    let (mut search, bin_duration, mut now) = init_search(INITIAL_RTT);
+
+    // Send and ack some packets to fill the bins. We advance one bin boundary per loop, so this
+    // will give us exactly `previous_bin + 1000` bytes in each new bin for both sent and acked
+    // bins.
+    for pn in 0..20 {
+        search.on_packet_sent(pn, 1000);
+        now += bin_duration + Duration::from_nanos(1);
+        search.on_packets_acked(
+            &RttEstimate::new(INITIAL_RTT),
+            pn,
+            1000,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+            now,
+        );
+    }
+
+    let curr_idx = search.curr_idx().unwrap();
+    let (prev_idx, fraction) = search.calc_prev_idx_test(INITIAL_RTT, curr_idx);
+
+    let sent_bytes = search.compute_sent_test(prev_idx - 10, prev_idx, fraction);
+    let delv_bytes = search.compute_delv_test(curr_idx - 10, curr_idx);
+
+    // We looked back exactly 10 bins and each bin grew by 1000 bytes, so the results for both
+    // `sent_bytes` and `delv_bytes` should be `10 * 1000 = 10_000`.
+    assert!(
+        sent_bytes == delv_bytes && delv_bytes == 10_000,
+        "Should have `sent_bytes == delv_bytes == 10_000 and got `sent_bytes = {sent_bytes}` and `delv_bytes = {delv_bytes}`"
+    );
 }
 
 #[test]

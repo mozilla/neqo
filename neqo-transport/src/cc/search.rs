@@ -166,6 +166,20 @@ impl Search {
         Some(curr_idx)
     }
 
+    /// Computes the previous index and the remaining fraction if the previous index doesn't exactly
+    /// land on a bin boundary.
+    ///
+    /// Returns `prev_idx` and `fraction` scaled to `0..[Self::SCALE]`.
+    const fn calc_prev_idx(&self, rtt: Duration, curr_idx: usize) -> (usize, usize) {
+        let rtt_nanos = rtt.as_nanos();
+        let bin_nanos = self.bin_duration.as_nanos();
+        let bins_last_rtt = (rtt_nanos / bin_nanos) as usize;
+        let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
+        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as usize;
+
+        (prev_idx, fraction)
+    }
+
     /// Computes delivered bytes between two bin indices.
     const fn compute_delv(&self, old: usize, new: usize) -> usize {
         self.acked_bins[new % Self::NUM_ACKED_BINS]
@@ -215,6 +229,24 @@ impl Search {
     pub const fn sent_bin(&self, idx: usize) -> usize {
         self.sent_bins[idx % Self::NUM_SENT_BINS]
     }
+
+    /// Re-exports the internal `calc_prev_idx` function for use in tests.
+    #[cfg(test)]
+    pub const fn calc_prev_idx_test(&self, rtt: Duration, curr_idx: usize) -> (usize, usize) {
+        self.calc_prev_idx(rtt, curr_idx)
+    }
+
+    /// Re-exports the internal `compute_sent` function for use in tests.
+    #[cfg(test)]
+    pub const fn compute_sent_test(&self, old: usize, new: usize, fraction: usize) -> usize {
+        self.compute_sent(old, new, fraction)
+    }
+
+    /// Re-exports the internal `compute_delv` function for use in tests.
+    #[cfg(test)]
+    pub const fn compute_delv_test(&self, old: usize, new: usize) -> usize {
+        self.compute_delv(old, new)
+    }
 }
 
 impl SlowStart for Search {
@@ -249,11 +281,7 @@ impl SlowStart for Search {
         // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
         // so `prev_idx` might be too recent by a fraction of a bin. Said fraction is scaled to
         // `0..[Self::SCALE]` for interpolation in `compute_sent`.
-        let rtt_nanos = rtt.as_nanos();
-        let bin_nanos = self.bin_duration.as_nanos();
-        let bins_last_rtt = (rtt_nanos / bin_nanos) as usize;
-        let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
-        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as usize;
+        let (prev_idx, fraction) = self.calc_prev_idx(rtt, curr_idx);
         qdebug!(
             "SEARCH: on_packets_acked: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}"
         );
