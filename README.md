@@ -160,6 +160,53 @@ something has changed.
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
 4. Navigate to <https://localhost:12345> and accept the self-signed certificate.
 
+## Releasing Neqo and landing it in Firefox
+
+Neqo follows [semantic versioning](https://semver.org/). While the version is
+still below `1.0`, a **minor** bump (`0.X.0`) signals a breaking change and a
+**patch** bump (`0.X.Y`) is reserved for backwards-compatible fixes.
+
+### Minor release (e.g. `v0.26.0` → `v0.27.0`)
+
+1. Bump the workspace version in [`Cargo.toml`](./Cargo.toml). Commit the
+   resulting `Cargo.toml` and `Cargo.lock` change and open a pull request
+   against `main`.
+2. Merge the pull request.
+3. Create the `vX.Y.Z` git tag pointing at the **merged** commit on `main` and
+   push it.
+4. Publish a [GitHub release](https://github.com/mozilla/neqo/releases) for the
+   new tag.
+5. File a Bugzilla bug under *Core :: Networking* titled `Update neqo to
+   vX.Y.Z` (see [bug 2030978](https://bugzilla.mozilla.org/show_bug.cgi?id=2030978)
+   for an example).
+6. In a [`firefox`](https://github.com/mozilla-firefox/firefox) checkout, bump
+   the `neqo-*` dependency versions in
+   [`netwerk/socket/neqo_glue/Cargo.toml`](https://github.com/mozilla-firefox/firefox/blob/main/netwerk/socket/neqo_glue/Cargo.toml)
+   and
+   [`netwerk/test/http3server/Cargo.toml`](https://github.com/mozilla-firefox/firefox/blob/main/netwerk/test/http3server/Cargo.toml)
+   (see [Phabricator D293565](https://phabricator.services.mozilla.com/D293565)
+   for an example).
+7. Run `./mach -v vendor rust --force --ignore-modified`.
+8. Run `./mach cargo vet` and obtain the necessary supply-chain audits.
+9. Submit the change to Phabricator referencing the Bugzilla bug.
+
+### Patch release (e.g. `v0.26.0` → `v0.26.1`)
+
+Patch releases ship from a long-lived release branch so that `main` can keep
+moving with breaking changes.
+
+1. If it doesn't exist yet, create the `vX.Y` branch on GitHub off the
+   `vX.Y.0` tag (e.g. the
+   [`v0.26`](https://github.com/mozilla/neqo/tree/v0.26) branch was cut from
+   `v0.26.0`). Backport the fixes onto that branch.
+2. From the `vX.Y` branch, open a pull request that bumps the version to
+   `vX.Y.Z` in [`Cargo.toml`](./Cargo.toml) and targets `vX.Y` (not `main`).
+3. Follow steps 2–9 of the minor release flow, tagging and releasing off the
+   `vX.Y` branch instead of `main`. See
+   [bug 2034178](https://bugzilla.mozilla.org/show_bug.cgi?id=2034178) and
+   [Phabricator D296371](https://phabricator.services.mozilla.com/D296371) for
+   an example.
+
 [NSS]: https://hg.mozilla.org/projects/nss
 [NSPR]: https://hg.mozilla.org/projects/nspr
 [GYP]: https://github.com/nodejs/gyp-next
