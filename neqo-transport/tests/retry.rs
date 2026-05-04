@@ -287,7 +287,7 @@ fn retry_after_initial() {
     // We need to have the client just process the Initial.
     let dgram = client.process(Some(server_initial), now()).dgram();
     assert!(dgram.is_some());
-    assert!(*client.state() != State::Connected);
+    assert_ne!(*client.state(), State::Connected);
 
     let retry = retry_server.process(cinit, now()).dgram(); // Retry!
     assert!(retry.is_some());
