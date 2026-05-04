@@ -3973,7 +3973,7 @@ impl Connection {
                 };
                 let x = f.dump();
                 if !x.is_empty() {
-                    _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
+                    _ = write!(&mut s, "\n  {} {x}", meta.direction());
                 }
             }
             qdebug!("[{self}] {meta}{s}");
