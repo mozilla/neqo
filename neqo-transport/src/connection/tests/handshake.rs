@@ -563,7 +563,7 @@ fn reorder_handshake() {
         c_stats_before.packets_rx,
         usize::from(s_hs1_has_initial) + usize::from(s_hs2_has_initial)
     );
-    assert!(c_stats_before.dropped_rx == 0);
+    assert_eq!(c_stats_before.dropped_rx, 0);
 
     // Deliver all Initial packets.
     client.process_input(s_initial_2, now);
