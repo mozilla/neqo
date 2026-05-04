@@ -14,8 +14,8 @@ use test_fixture::now;
 use super::make_cc_hystart;
 use crate::{
     cc::{
-        CWND_INITIAL_PKTS, CongestionController as _, HyStartCssBaseline,
-        classic_cc::SlowStart as _, hystart::HyStart,
+        CongestionController as _, HyStartCssBaseline, classic_cc::SlowStart as _,
+        hystart::HyStart, tests::INITIAL_CWND,
     },
     packet::MIN_INITIAL_PACKET_SIZE,
     recovery::sent,
@@ -26,7 +26,6 @@ use crate::{
 const BASE_RTT: Duration = Duration::from_millis(100);
 const HIGH_RTT: Duration = Duration::from_millis(120);
 const LOW_RTT: Duration = Duration::from_millis(80);
-const INITIAL_CWND: usize = CWND_INITIAL_PKTS * MIN_INITIAL_PACKET_SIZE;
 
 /// Helper to create a HyStart instance with pacing enabled (L=infinity).
 fn make_hystart_paced() -> HyStart {

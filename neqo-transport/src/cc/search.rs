@@ -4,8 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 //
-// Slow start Exit At Right CHokepoint (SEARCH) implementation as per
-// <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09>
+//! Slow start Exit At Right CHokepoint (SEARCH) implementation as per
+//! <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09>
 
 use std::{
     fmt::Display,
@@ -90,7 +90,7 @@ impl Search {
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
         self.bin_duration =
-            initial_rtt * Self::WINDOW_SIZE_FACTOR / (Self::SCALE as u32 * Self::W as u32);
+            initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE as u32 / Self::W as u32;
         if self.bin_duration.is_zero() {
             debug_assert!(
                 false,
@@ -189,6 +189,31 @@ impl Search {
             .saturating_mul(Self::SCALE - fraction),
         );
         sent / Self::SCALE
+    }
+
+    #[cfg(test)]
+    pub const fn curr_idx(&self) -> Option<usize> {
+        self.curr_idx
+    }
+
+    #[cfg(test)]
+    pub const fn bin_end(&self) -> Option<Instant> {
+        self.bin_end
+    }
+
+    #[cfg(test)]
+    pub const fn bin_duration(&self) -> Duration {
+        self.bin_duration
+    }
+
+    #[cfg(test)]
+    pub const fn acked_bin(&self, idx: usize) -> usize {
+        self.acked_bins[idx % Self::NUM_ACKED_BINS]
+    }
+
+    #[cfg(test)]
+    pub const fn sent_bin(&self, idx: usize) -> usize {
+        self.sent_bins[idx % Self::NUM_SENT_BINS]
     }
 }
 
