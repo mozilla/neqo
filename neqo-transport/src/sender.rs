@@ -14,7 +14,7 @@ use crate::{
     ConnectionParameters, SlowStart, Stats,
     cc::{
         ClassicCongestionController, ClassicSlowStart, CongestionControl, CongestionController,
-        Cubic, HyStart, NewReno,
+        Cubic, HyStart, NewReno, Search,
     },
     pace::Pacer,
     pmtud::Pmtud,
@@ -77,6 +77,22 @@ impl PacketSender {
                             conn_params.pacing_enabled(),
                             conn_params.get_hystart_css_baseline(),
                         ),
+                        Cubic::default(),
+                        pmtud,
+                        spurious_recovery,
+                    ))
+                }
+                (CongestionControl::NewReno, SlowStart::Search) => {
+                    Box::new(ClassicCongestionController::new(
+                        Search::new(),
+                        NewReno::default(),
+                        pmtud,
+                        spurious_recovery,
+                    ))
+                }
+                (CongestionControl::Cubic, SlowStart::Search) => {
+                    Box::new(ClassicCongestionController::new(
+                        Search::new(),
                         Cubic::default(),
                         pmtud,
                         spurious_recovery,
