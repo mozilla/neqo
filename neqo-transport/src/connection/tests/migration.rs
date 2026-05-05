@@ -72,6 +72,16 @@ const fn new_port(a: SocketAddr) -> SocketAddr {
     SocketAddr::new(a.ip(), port)
 }
 
+fn connected_with_v4_path(client: &mut Connection, server: &mut Connection, now: Instant) {
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
+        .unwrap();
+    let probe = client.process_output(now).dgram().unwrap();
+    assert_v4_path(&probe, true);
+    let resp = server.process(Some(probe), now).dgram().unwrap();
+    client.process_input(resp, now); // PATH_RESPONSE — v4 path is now valid.
+}
+
 fn assert_path_challenge(
     c: &Connection,
     d: &Datagram,
@@ -614,6 +624,125 @@ fn migrate_same_fail() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::NoAvailablePath))
     ));
+}
+
+/// When `on_path_unavailable` is called for the primary path and a valid alternate
+/// path exists, the client falls back to the alternate immediately.
+#[test]
+fn path_unavailable_primary_with_fallback() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    // Migrate to v4 and complete the PATH_CHALLENGE/RESPONSE exchange, making v4
+    // the primary with the original v6 path remaining as a valid fallback.
+    connected_with_v4_path(&mut client, &mut server, now);
+
+    // Simulate a send error on the current primary (v4) path.
+    client.on_path_unavailable(DEFAULT_ADDR_V4, DEFAULT_ADDR_V4, now);
+
+    // The client re-probes the failed v4 path while falling back to v6.
+    let probe = client.process_output(now).dgram().unwrap();
+    assert_v4_path(&probe, true); // PATH_CHALLENGE on the re-probed path
+
+    // Application data now flows on the v6 fallback path.
+    let data = send_something(&mut client, now);
+    assert_v6_path(&data, false);
+}
+
+/// When `on_path_unavailable` is called for the only path, the client re-probes
+/// that path. After all probes are exhausted the connection closes.
+#[test]
+fn path_unavailable_only_path_closes() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, Duration::from_millis(10));
+
+    // Simulate a send error on the only path (v6).
+    client.on_path_unavailable(DEFAULT_ADDR, DEFAULT_ADDR, now);
+
+    // The client immediately sends a PATH_CHALLENGE to probe liveness.
+    let probe = client.process_output(now).dgram().unwrap();
+    assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
+    assert_path_challenge_min_len(&client, &probe, now);
+
+    // Each PTO timeout triggers another PATH_CHALLENGE. After MAX_PROBES probes
+    // with ECN and MAX_PROBES without, the path is declared failed.
+    // -1 because the first PATH_CHALLENGE was already sent above.
+    for _ in 0..Path::MAX_PROBES * 2 - 1 {
+        let cb = client.process_output(now).callback();
+        assert_ne!(cb, Duration::new(0, 0));
+        now += cb;
+
+        let probe = client.process_output(now).dgram().unwrap();
+        assert_v6_path(&probe, true); // Contains PATH_CHALLENGE.
+        assert_path_challenge_min_len(&client, &probe, now);
+
+        // A PTO may also fire, sending a PING on the same path.
+        let before = client.stats().frame_tx;
+        if let Some(ping) = client.process_output(now).dgram() {
+            assert_v6_path(&ping, false);
+            assert_eq!(client.stats().frame_tx.ping, before.ping + 1);
+        }
+    }
+
+    let pto = client.process_output(now).callback();
+    assert_ne!(pto, Duration::new(0, 0));
+    now += pto;
+
+    assert!(matches!(client.process_output(now), Output::None));
+    assert!(matches!(
+        client.state(),
+        State::Closed(CloseReason::Transport(Error::NoAvailablePath))
+    ));
+}
+
+/// When `on_path_unavailable` is called for a non-primary path, the primary
+/// path is unchanged and the non-primary path is scheduled for re-probing.
+#[test]
+fn path_unavailable_non_primary_no_fallback() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    // Initiate a migration to v4 but do not complete it (no PATH_RESPONSE).
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
+        .unwrap();
+    let _probe = client.process_output(now).dgram().unwrap(); // PATH_CHALLENGE sent
+
+    // The v4 migration target is not yet valid.  Report send error on it.
+    client.on_path_unavailable(DEFAULT_ADDR_V4, DEFAULT_ADDR_V4, now);
+
+    // The v4 path is scheduled for re-probing; consume that output.
+    let re_probe = client.process_output(now).dgram().unwrap();
+    assert_v4_path(&re_probe, true);
+
+    // The primary path (v6) should still be used for application data.
+    let data = send_something(&mut client, now);
+    assert_v6_path(&data, false);
+}
+
+/// `on_path_unavailable` on a server doesn't trigger migration, but re-probes.
+#[test]
+fn path_unavailable_server_no_migration() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    // The server should handle the call without panicking or closing.
+    server.on_path_unavailable(DEFAULT_ADDR, DEFAULT_ADDR, now);
+
+    // The server re-probes the path.
+    let probe = server.process_output(now).dgram().unwrap();
+    assert_v6_path(&probe, true);
+    assert_eq!(server.stats().frame_tx.path_challenge, 1);
+
+    // The connection is still alive.
+    assert!(matches!(server.state(), State::Confirmed));
 }
 
 /// This gets the connection ID from a datagram using the default

@@ -937,6 +937,12 @@ impl Http3Client {
             .stats(&mut self.conn)
     }
 
+    /// Called when a UDP send for a datagram on this connection fails with a network error that
+    /// indicates that the path may have become unavailable.
+    pub fn on_path_unavailable(&mut self, local: SocketAddr, remote: SocketAddr, now: Instant) {
+        self.conn.on_path_unavailable(local, remote, now);
+    }
+
     /// This function combines  `process_input` and `process_output` function.
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
