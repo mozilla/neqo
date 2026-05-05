@@ -48,7 +48,7 @@ impl Display for Search {
 
 impl Search {
     /// Factor for calculating the window size with the initial RTT, as an integer
-    /// out of `[Self::SCALE]` (= 3.50).
+    /// out of [`Self::SCALE`] (= 3.50).
     const WINDOW_SIZE_FACTOR: u32 = 350;
     /// Number of bins per window.
     const W: usize = 10;
@@ -64,7 +64,7 @@ impl Search {
     /// Total number of bins in the circular buffer for sent bytes.
     const NUM_SENT_BINS: usize = Self::NUM_ACKED_BINS + Self::EXTRA_BINS;
     /// The upper bound for the permissible normalized difference between previously sent bytes and
-    /// current delivered bytes, as an integer out of `[Self::SCALE]` (= 0.26).
+    /// current delivered bytes, as an integer out of [`Self::SCALE`] (= 0.26).
     const THRESH: usize = 26;
     /// Scale factor for integer approximation of fractional values.
     const SCALE: usize = 100;
@@ -166,43 +166,50 @@ impl Search {
         Some(curr_idx)
     }
 
-    /// Computes the previous index and the remaining fraction if the previous index doesn't exactly
-    /// land on a bin boundary.
+    /// Computes the previous index one RTT ago and the remaining fraction if the previous index
+    /// doesn't exactly land on a bin boundary.
     ///
-    /// Returns `prev_idx` and `fraction` scaled to `0..[Self::SCALE]`.
-    const fn calc_prev_idx(&self, rtt: Duration, curr_idx: usize) -> (usize, usize) {
+    /// Returns `prev_idx` and `fraction` scaled to `0..[Self::SCALE]`. The `fraction` is returned
+    /// as a `u64` because it will be used as such in [`Self::compute_sent`] to avoid `usize`
+    /// saturation on 32-bit systems with large bandwidths.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "casting a small u128 to u64 because it will be used as such by the caller"
+    )]
+    const fn calc_prev_idx(&self, rtt: Duration, curr_idx: usize) -> (usize, u64) {
         let rtt_nanos = rtt.as_nanos();
         let bin_nanos = self.bin_duration.as_nanos();
         let bins_last_rtt = (rtt_nanos / bin_nanos) as usize;
         let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
-        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as usize;
+        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as u64;
 
         (prev_idx, fraction)
     }
 
-    /// Computes delivered bytes between two bin indices.
-    const fn compute_delv(&self, old: usize, new: usize) -> usize {
+    /// Computes delivered bytes between two bin indices. Widens the result to `u64` to avoid
+    /// saturation or overflow further down the line on 32-bit systems with large bandwidths.
+    const fn compute_delv(&self, old: usize, new: usize) -> u64 {
         self.acked_bins[new % Self::NUM_ACKED_BINS]
-            .saturating_sub(self.acked_bins[old % Self::NUM_ACKED_BINS])
+            .saturating_sub(self.acked_bins[old % Self::NUM_ACKED_BINS]) as u64
     }
 
     /// Computes sent bytes between two (previous) bin indices. Interpolates a fraction of each bin
     /// on the ends to get the accurate value when the actual previous timestamp is between two
-    /// bins. The fraction is an integer out of `[Self::SCALE]`, i.e. a value between `0` and `99`.
-    const fn compute_sent(&self, old: usize, new: usize, fraction: usize) -> usize {
+    /// bins. The fraction is an integer out of [`Self::SCALE`], i.e. a value between `0` and `99`.
+    /// Widens intermittent results and returns `u64` to avoid saturation or overflow on 32-bit
+    /// systems with large bandwidths.
+    const fn compute_sent(&self, old: usize, new: usize, fraction: u64) -> u64 {
         // NOTE: SEARCH draft-09 does forward interpolation here, i.e. `new + 1`/`old + 1`. That is
         // a mistake in the draft and has been discussed with the SEARCH team. Subtracting
         // is correct.
-        let mut sent = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
+        let low_idx = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
             .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
-        .saturating_mul(fraction);
-
-        sent = sent.saturating_add(
-            (self.sent_bins[new % Self::NUM_SENT_BINS]
-                .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
-            .saturating_mul(Self::SCALE - fraction),
-        );
-        sent / Self::SCALE
+            as u64;
+        let high_idx = (self.sent_bins[new % Self::NUM_SENT_BINS]
+            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
+            as u64;
+        let sent = low_idx * fraction + high_idx * (Self::SCALE as u64 - fraction);
+        sent / Self::SCALE as u64
     }
 
     #[cfg(test)]
@@ -232,24 +239,28 @@ impl Search {
 
     /// Re-exports the internal `calc_prev_idx` function for use in tests.
     #[cfg(test)]
-    pub const fn calc_prev_idx_test(&self, rtt: Duration, curr_idx: usize) -> (usize, usize) {
+    pub const fn calc_prev_idx_test(&self, rtt: Duration, curr_idx: usize) -> (usize, u64) {
         self.calc_prev_idx(rtt, curr_idx)
     }
 
     /// Re-exports the internal `compute_sent` function for use in tests.
     #[cfg(test)]
-    pub const fn compute_sent_test(&self, old: usize, new: usize, fraction: usize) -> usize {
+    pub const fn compute_sent_test(&self, old: usize, new: usize, fraction: u64) -> u64 {
         self.compute_sent(old, new, fraction)
     }
 
     /// Re-exports the internal `compute_delv` function for use in tests.
     #[cfg(test)]
-    pub const fn compute_delv_test(&self, old: usize, new: usize) -> usize {
+    pub const fn compute_delv_test(&self, old: usize, new: usize) -> u64 {
         self.compute_delv(old, new)
     }
 }
 
 impl SlowStart for Search {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "casting u64 back to usize after it is surely fitting on 32-bit systems"
+    )]
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,
@@ -305,7 +316,7 @@ impl SlowStart for Search {
             return None;
         }
         let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff = diff * Self::SCALE / prev_sent;
+        let norm_diff = (diff * Self::SCALE as u64 / prev_sent) as usize;
 
         if norm_diff < Self::THRESH {
             qdebug!(
