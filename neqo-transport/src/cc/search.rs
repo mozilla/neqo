@@ -34,9 +34,9 @@ pub struct Search {
     bin_end: Option<Instant>,
     /// The duration of each bin.
     bin_duration: Duration,
-    /// Tracking amount of acked bytes this connection. Is incremented on every ACK.
+    /// Tracking amount of acked bytes on this connection. Is incremented on every ACK.
     acked_bytes: usize,
-    /// Tracking amount of sent bytes this connection. Is incremented on every sent packet.
+    /// Tracking amount of sent bytes on this connection. Is incremented on every sent packet.
     sent_bytes: usize,
 }
 
@@ -92,6 +92,9 @@ impl Search {
         self.bin_duration =
             initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE as u32 / Self::W as u32;
         if self.bin_duration.is_zero() {
+            qdebug!(
+                "skipping initialization because bin_duration.is_zero() but bin_duration must be non-zero - initial_rtt: {initial_rtt:?}",
+            );
             debug_assert!(
                 false,
                 "bin_duration must be non-zero for correctness and to guard against div by zero -- initial_rtt was zero or too small"
@@ -172,16 +175,13 @@ impl Search {
     /// Returns `prev_idx` and `fraction` scaled to `0..[Self::SCALE]`. The `fraction` is returned
     /// as a `u64` because it will be used as such in [`Self::compute_sent`] to avoid `usize`
     /// saturation on 32-bit systems with large bandwidths.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "casting a small u128 to u64 because it will be used as such by the caller"
-    )]
-    const fn calc_prev_idx(&self, rtt: Duration, curr_idx: usize) -> (usize, u64) {
+    fn calc_prev_idx(&self, rtt: Duration, curr_idx: usize) -> (usize, u64) {
         let rtt_nanos = rtt.as_nanos();
         let bin_nanos = self.bin_duration.as_nanos();
-        let bins_last_rtt = (rtt_nanos / bin_nanos) as usize;
+        let bins_last_rtt = usize::try_from(rtt_nanos / bin_nanos).unwrap_or(usize::MAX);
         let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
-        let fraction = ((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos) as u64;
+        let fraction =
+            u64::try_from((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos).unwrap_or(0);
 
         (prev_idx, fraction)
     }
@@ -239,7 +239,7 @@ impl Search {
 
     /// Re-exports the internal `calc_prev_idx` function for use in tests.
     #[cfg(test)]
-    pub const fn calc_prev_idx_test(&self, rtt: Duration, curr_idx: usize) -> (usize, u64) {
+    pub fn calc_prev_idx_test(&self, rtt: Duration, curr_idx: usize) -> (usize, u64) {
         self.calc_prev_idx(rtt, curr_idx)
     }
 
@@ -257,10 +257,6 @@ impl Search {
 }
 
 impl SlowStart for Search {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "casting u64 back to usize after it is surely fitting on 32-bit systems"
-    )]
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,
@@ -272,7 +268,7 @@ impl SlowStart for Search {
     ) -> Option<usize> {
         let rtt = rtt_est.latest_rtt();
         // Store delivered bytes on every ACK
-        self.acked_bytes += new_acked_bytes;
+        self.acked_bytes = self.acked_bytes.saturating_add(new_acked_bytes);
 
         // Initialize on first ACK.
         if self.curr_idx.is_none() {
@@ -316,7 +312,8 @@ impl SlowStart for Search {
             return None;
         }
         let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff = (diff * Self::SCALE as u64 / prev_sent) as usize;
+        let norm_diff =
+            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
 
         if norm_diff < Self::THRESH {
             qdebug!(
@@ -346,12 +343,15 @@ impl SlowStart for Search {
     }
 
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {
-        self.sent_bytes += sent_bytes;
+        self.sent_bytes = self.sent_bytes.saturating_add(sent_bytes);
     }
 
     fn reset(&mut self) {
         // `curr_idx.is_none()` triggers re-initialization on the next ACK, which overwrites all
-        // other relevant fields with fresh data.
+        // other relevant fields with fresh data. The cumulative byte counters have to be reset
+        // seperately so they can still grow while waiting for the first ACK after the reset.
         self.curr_idx = None;
+        self.acked_bytes = 0;
+        self.sent_bytes = 0;
     }
 }
