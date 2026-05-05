@@ -902,6 +902,28 @@ impl Connection {
         self.crypto.tls().peer_certificate()
     }
 
+    /// Export keying material per RFC 5705/8446.
+    ///
+    /// This can only be called after the handshake is complete.
+    /// Per RFC 8446 §7.5, `label` must begin with `"EXPORTER-"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if connection is not in a connected or closing state,
+    /// or export fails.
+    pub fn export_keying_material(&self, label: &[u8], context: &[u8], out: &mut [u8]) -> Res<()> {
+        if !(self.state.connected() || self.state.closing()) {
+            return Err(Error::NotConnected);
+        }
+        if out.is_empty() {
+            return Err(Error::InvalidInput);
+        }
+        self.crypto
+            .tls()
+            .export_keying_material(label, context, out)
+            .map_err(Into::into)
+    }
+
     /// Call by application when the peer cert has been verified.
     ///
     /// This panics if there is no active peer.  It's OK to call this
