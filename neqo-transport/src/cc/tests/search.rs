@@ -230,6 +230,11 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
         new_bin_duration,
         "bin_duration should be re-initialized with the new RTT"
     );
+    assert_eq!(
+        search.bin_end(),
+        Some(now + new_bin_duration),
+        "bin_end should be re-initialized with the new RTT"
+    );
 }
 
 #[test]

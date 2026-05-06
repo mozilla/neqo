@@ -232,3 +232,61 @@ impl PacketSender {
         self.cc.recovery_packet()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use test_fixture::now;
+
+    use super::PacketSender;
+    use crate::{ConnectionParameters, SlowStart, cc::CongestionControl, pmtud::Pmtud};
+
+    #[test]
+    fn packet_sender_creation_and_display() {
+        let now = now();
+        let cases = [
+            (
+                CongestionControl::NewReno,
+                SlowStart::Classic,
+                "ClassicSlowStart/NewReno",
+            ),
+            (
+                CongestionControl::NewReno,
+                SlowStart::HyStart,
+                "HyStart++/NewReno",
+            ),
+            (
+                CongestionControl::NewReno,
+                SlowStart::Search,
+                "SEARCH/NewReno",
+            ),
+            (
+                CongestionControl::Cubic,
+                SlowStart::Classic,
+                "ClassicSlowStart/Cubic",
+            ),
+            (
+                CongestionControl::Cubic,
+                SlowStart::HyStart,
+                "HyStart++/Cubic",
+            ),
+            (CongestionControl::Cubic, SlowStart::Search, "SEARCH/Cubic"),
+        ];
+        for (cc, ss, expected_prefix) in cases {
+            let params = ConnectionParameters::default()
+                .congestion_control(cc)
+                .slow_start(ss);
+            let sender = PacketSender::new(
+                &params,
+                Pmtud::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(1500)),
+                now,
+            );
+            let description = sender.cc.to_string();
+            assert!(
+                description.starts_with(expected_prefix),
+                "expected prefix {expected_prefix:?}, got {description:?}",
+            );
+        }
+    }
+}

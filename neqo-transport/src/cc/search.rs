@@ -349,7 +349,7 @@ impl SlowStart for Search {
     fn reset(&mut self) {
         // `curr_idx.is_none()` triggers re-initialization on the next ACK, which overwrites all
         // other relevant fields with fresh data. The cumulative byte counters have to be reset
-        // seperately so they can still grow while waiting for the first ACK after the reset.
+        // separately so they can still grow while waiting for the first ACK after the reset.
         self.curr_idx = None;
         self.acked_bytes = 0;
         self.sent_bytes = 0;
