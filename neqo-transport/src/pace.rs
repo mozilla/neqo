@@ -16,6 +16,9 @@ use neqo_common::qtrace;
 
 use crate::rtt::GRANULARITY;
 
+/// Scale factor for [`Pacer::SPEEDUP_SLOW_START`] and [`Pacer::SPEEDUP`].
+pub(crate) const SPEEDUP_SCALE: usize = 10;
+
 /// A pacer that uses a leaky bucket.
 pub struct Pacer {
     /// Whether pacing is enabled.
@@ -29,18 +32,24 @@ pub struct Pacer {
     c: isize,
     /// The packet size or minimum capacity for sending, in bytes.
     p: usize,
+    /// The current pacing speedup multiplier, scaled by [`SPEEDUP_SCALE`].
+    /// Use [`Pacer::SPEEDUP_SLOW_START`] during slow start and [`Pacer::SPEEDUP`] otherwise.
+    speedup: usize,
 }
 
 impl Pacer {
-    /// This value determines how much faster the pacer operates than the
-    /// congestion window.
+    /// Speedup factor during slow start: 2.0 × [`SPEEDUP_SCALE`].
     ///
-    /// A value of 1 would cause all packets to be spaced over the entire RTT,
-    /// which is a little slow and might act as an additional restriction in
-    /// the case the congestion controller increases the congestion window.
-    /// This value spaces packets over half the congestion window, which matches
-    /// our current congestion controller, which double the window every RTT.
-    const SPEEDUP: usize = 2;
+    /// Spaces packets over half the congestion window, matching the window doubling rate
+    /// of slow start.
+    pub(crate) const SPEEDUP_SLOW_START: usize = 20;
+
+    /// Speedup factor outside slow start: 1.2 × [`SPEEDUP_SCALE`].
+    ///
+    /// A value of [`SPEEDUP_SCALE`] would space packets over the entire RTT.
+    /// This small headroom keeps pacing from becoming an artificial bottleneck
+    /// during congestion avoidance.
+    pub(crate) const SPEEDUP: usize = 12;
 
     /// Create a new `Pacer`.  This takes the current time, the maximum burst size,
     /// and the packet size.
@@ -61,6 +70,7 @@ impl Pacer {
             m,
             c: isize::try_from(m).expect("maximum capacity fits into isize"),
             p,
+            speedup: Self::SPEEDUP_SLOW_START,
         }
     }
 
@@ -70,6 +80,37 @@ impl Pacer {
 
     pub const fn set_mtu(&mut self, mtu: usize) {
         self.p = mtu;
+    }
+
+    pub(crate) fn set_speedup(&mut self, speedup: usize) {
+        self.speedup = speedup;
+    }
+
+    /// Bytes sendable at `speedup / SPEEDUP_SCALE * cwnd / rtt` pace over `elapsed`.
+    /// Returns `None` if `rtt` is zero.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "Check if this can be removed with MSRV > 1.90"
+    )]
+    fn bytes_for(&self, cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
+        let factor = u128::try_from(cwnd)
+            .expect("usize fits into u128")
+            .saturating_mul(u128::try_from(self.speedup).expect("usize fits into u128"));
+        let scaled_rtt = rtt
+            .as_nanos()
+            .saturating_mul(u128::try_from(SPEEDUP_SCALE).expect("usize fits into u128"));
+        elapsed
+            .as_nanos()
+            .saturating_mul(factor)
+            .checked_div(scaled_rtt)
+    }
+
+    /// Compute the effective pacing rate in bytes per second.
+    ///
+    /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
+    pub(crate) fn rate(&self, cwnd: usize, rtt: Duration) -> Option<u64> {
+        u64::try_from(self.bytes_for(cwnd, rtt, Duration::from_secs(1))?).ok()
     }
 
     /// Determine when the next packet will be available based on the provided
@@ -85,14 +126,15 @@ impl Pacer {
         }
 
         // This is the inverse of the function in `spend`:
-        // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
+        // self.t + rtt * (self.p - self.c) * SPEEDUP_SCALE / (self.speedup * cwnd)
         let r = rtt.as_nanos();
         let deficit =
             u128::try_from(packet - self.c).expect("packet is larger than current credit");
-        let d = r.saturating_mul(deficit);
+        let scale = u128::try_from(SPEEDUP_SCALE).expect("usize fits into u128");
+        let d = r.saturating_mul(deficit).saturating_mul(scale);
         let divisor = u128::try_from(cwnd)
             .expect("usize fits into u128")
-            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
+            .saturating_mul(u128::try_from(self.speedup).expect("usize fits into u128"));
         let add = d / divisor;
         let w = u64::try_from(add).map_or(rtt, Duration::from_nanos);
 
@@ -105,30 +147,6 @@ impl Pacer {
         let nxt = self.t + w;
         qtrace!("[{self}] next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
         nxt
-    }
-
-    /// Bytes sendable at `SPEEDUP * cwnd / rtt` pace over `elapsed`.
-    /// Returns `None` if `rtt` is zero.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::unwrap_in_result,
-        reason = "Check if this can be removed with MSRV > 1.90"
-    )]
-    fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
-        let factor = u128::try_from(cwnd)
-            .expect("usize fits into u128")
-            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
-        elapsed
-            .as_nanos()
-            .saturating_mul(factor)
-            .checked_div(rtt.as_nanos())
-    }
-
-    /// Compute the effective pacing rate in bytes per second.
-    ///
-    /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
-    pub(crate) fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
-        u64::try_from(Self::bytes_for(cwnd, rtt, Duration::from_secs(1))?).ok()
     }
 
     /// Spend credit. This cannot fail, but instead may carry debt into the
@@ -146,8 +164,9 @@ impl Pacer {
 
         qtrace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
         // Increase the capacity by the elapsed fraction of the RTT times the
-        // pacing rate, i.e. `(now - self.t) * SPEEDUP * cwnd / rtt`.
-        let incr = Self::bytes_for(cwnd, rtt, now.saturating_duration_since(self.t))
+        // pacing rate, i.e. `(now - self.t) * speedup * cwnd / (rtt * SPEEDUP_SCALE)`.
+        let incr = self
+            .bytes_for(cwnd, rtt, now.saturating_duration_since(self.t))
             .and_then(|b| usize::try_from(b).ok())
             .unwrap_or(self.m);
 
@@ -181,14 +200,26 @@ mod tests {
 
     use test_fixture::now;
 
-    use super::Pacer;
+    use super::{Pacer, SPEEDUP_SCALE};
 
     const RTT: Duration = Duration::from_secs(1);
     const PACKET: usize = 1000;
     const CWND: usize = PACKET * 10;
 
+    fn pacer_slow_start() -> Pacer {
+        Pacer::new(true, now(), PACKET, PACKET)
+        // speedup defaults to SPEEDUP_SLOW_START
+    }
+
+    fn pacer_ca() -> Pacer {
+        let mut p = Pacer::new(true, now(), PACKET, PACKET);
+        p.set_speedup(Pacer::SPEEDUP);
+        p
+    }
+
     #[test]
     fn even() {
+        // Slow start: 2x speedup → pacing interval = RTT * PACKET / (2 * CWND) = RTT/20
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
@@ -252,25 +283,33 @@ mod tests {
 
     #[test]
     fn rate_basic() {
-        // 10 KB cwnd, 100 ms RTT → 2 * 10_000 * 1e9 / 100_000_000 = 200_000 B/s
-        assert_eq!(
-            Pacer::rate(10_000, Duration::from_millis(100)),
-            Some(200_000)
-        );
+        // Slow start: 2x speedup.
+        // 10 KB cwnd, 100 ms RTT → 20 * 10_000 * 1e9 / (100_000_000 * 10) = 200_000 B/s
+        let p = pacer_slow_start();
+        assert_eq!(p.rate(10_000, Duration::from_millis(100)), Some(200_000));
+    }
+
+    #[test]
+    fn rate_congestion_avoidance() {
+        // Congestion avoidance: 1.2x speedup.
+        // 10 KB cwnd, 100 ms RTT → 12 * 10_000 * 1e9 / (100_000_000 * 10) = 120_000 B/s
+        let p = pacer_ca();
+        assert_eq!(p.rate(10_000, Duration::from_millis(100)), Some(120_000));
     }
 
     #[test]
     fn rate_zero_rtt() {
-        assert_eq!(Pacer::rate(10_000, Duration::ZERO), None);
+        let p = pacer_slow_start();
+        assert_eq!(p.rate(10_000, Duration::ZERO), None);
     }
 
     /// When the computed wait equals GRANULARITY exactly, pacing should NOT
     /// send immediately; only strictly sub-granularity waits are suppressed.
     #[test]
     fn not_immediately_at_exact_granularity() {
-        // Choose RTT and CWND so w = rtt * PACKET / (SPEEDUP * cwnd) = 1ms = GRANULARITY.
-        // With PACKET=1000, SPEEDUP=2: cwnd = rtt_ns * 1000 / (2 * 1_000_000).
-        // rtt=10ms → cwnd = 10_000_000 * 1000 / 2_000_000 = 5000.
+        // Slow start: 2x speedup (SPEEDUP_SLOW_START=20, SPEEDUP_SCALE=10).
+        // w = rtt * PACKET * SPEEDUP_SCALE / (SPEEDUP_SLOW_START * cwnd) = 1ms = GRANULARITY.
+        // rtt=10ms: cwnd = 10_000_000 * 1000 * 10 / (20 * 1_000_000) = 5000.
         const SHORT_RTT: Duration = Duration::from_millis(10);
         const CWND_AT_GRANULARITY: usize = 5000; // yields w = 1ms = GRANULARITY
         let n = now();
@@ -282,6 +321,28 @@ mod tests {
             n,
             "at exactly GRANULARITY should not send immediately"
         );
+    }
+
+    #[test]
+    fn congestion_avoidance_pacing_slower_than_slow_start() {
+        // Congestion avoidance (1.2x) should pace more slowly than slow start (2x):
+        // longer inter-packet interval for the same cwnd and RTT.
+        let n = now();
+        let mut p_ss = Pacer::new(true, n, PACKET, PACKET);
+        let mut p_ca = Pacer::new(true, n, PACKET, PACKET);
+        p_ca.set_speedup(Pacer::SPEEDUP);
+
+        p_ss.spend(n, RTT, CWND, PACKET);
+        p_ca.spend(n, RTT, CWND, PACKET);
+
+        assert!(p_ca.next(RTT, CWND) > p_ss.next(RTT, CWND));
+    }
+
+    #[test]
+    fn speedup_scale_sanity() {
+        // Verify the constants are consistent with their intended ratios.
+        assert_eq!(Pacer::SPEEDUP_SLOW_START, 2 * SPEEDUP_SCALE);
+        assert_eq!(Pacer::SPEEDUP * 10, 12 * SPEEDUP_SCALE);
     }
 
     #[test]
