@@ -86,15 +86,14 @@ impl Pacer {
 
         // This is the inverse of the function in `spend`:
         // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
-        let r = rtt.as_nanos();
-        let deficit =
-            u128::try_from(packet - self.c).expect("packet is larger than current credit");
-        let d = r.saturating_mul(deficit);
-        let divisor = u128::try_from(cwnd)
-            .expect("usize fits into u128")
-            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
-        let add = d / divisor;
-        let w = u64::try_from(add).map_or(rtt, Duration::from_nanos);
+        //
+        // The key product is rtt_ns * deficit.  `deficit` is at most 2 * MTU
+        // (~3000 bytes for QUIC).  Even a 10-second RTT (10^10 ns) gives
+        // 10^10 * 3000 = 3*10^13, far below u64::MAX (1.8*10^19).
+        let deficit = u64::try_from(packet - self.c).expect("packet is larger than current credit");
+        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
+        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP as u64);
+        let w = Duration::from_nanos(rtt_ns.saturating_mul(deficit) / divisor);
 
         // If the increment is below the timer granularity, send immediately.
         if w < GRANULARITY {
@@ -109,26 +108,25 @@ impl Pacer {
 
     /// Bytes sendable at `SPEEDUP * cwnd / rtt` pace over `elapsed`.
     /// Returns `None` if `rtt` is zero.
-    #[allow(
-        clippy::allow_attributes,
-        clippy::unwrap_in_result,
-        reason = "Check if this can be removed with MSRV > 1.90"
-    )]
-    fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u128> {
-        let factor = u128::try_from(cwnd)
-            .expect("usize fits into u128")
-            .saturating_mul(u128::try_from(Self::SPEEDUP).expect("usize fits into u128"));
-        elapsed
-            .as_nanos()
-            .saturating_mul(factor)
-            .checked_div(rtt.as_nanos())
+    ///
+    /// The key product is `elapsed_ns * cwnd * SPEEDUP`.  At 400 Gbps with a
+    /// 100 ms RTT the BDP is ~5 GB, so `factor` = cwnd * 2 ≈ 10^10.  The
+    /// inter-packet interval at that rate is ~24 ns, giving a product of
+    /// ~2.4*10^11, well within u64.  Even a full-RTT elapsed (10^8 ns) gives
+    /// 10^8 * 10^10 = 10^18 < `u64::MAX` (1.8*10^19).  Beyond that the
+    /// `saturating_mul` caps the value and callers clamp to `self.m`.
+    fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u64> {
+        let rtt_ns = u64::try_from(rtt.as_nanos()).ok()?;
+        let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
+        let factor = (cwnd as u64).saturating_mul(Self::SPEEDUP as u64);
+        elapsed_ns.saturating_mul(factor).checked_div(rtt_ns)
     }
 
     /// Compute the effective pacing rate in bytes per second.
     ///
     /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
     pub(crate) fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
-        u64::try_from(Self::bytes_for(cwnd, rtt, Duration::from_secs(1))?).ok()
+        Self::bytes_for(cwnd, rtt, Duration::from_secs(1))
     }
 
     /// Spend credit. This cannot fail, but instead may carry debt into the
