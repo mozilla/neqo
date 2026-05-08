@@ -101,7 +101,7 @@ impl RecvStreams {
 
     /// Note that a stream has transitioned to a terminal state so that
     /// the next call to `clear_terminal` will run the scan.
-    pub fn note_terminal(&mut self) {
+    pub const fn note_terminal(&mut self) {
         self.has_terminal = true;
     }
 
