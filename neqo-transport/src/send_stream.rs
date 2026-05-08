@@ -1649,6 +1649,7 @@ impl SendStreams {
     }
 
     /// Remove terminal streams. Returns `true` if any were removed.
+    #[must_use]
     pub fn remove_terminal(&mut self) -> bool {
         if !self.has_terminal {
             return false;

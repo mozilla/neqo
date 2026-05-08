@@ -110,6 +110,8 @@ impl RecvStreams {
             return (0, 0);
         }
         self.has_terminal = false;
+        // Note: retained terminal bidi streams (send counterpart alive) will be re-flagged
+        // when their send side is removed via `cleanup_closed_streams`.
         let mut removed_bidi = 0;
         let mut removed_uni = 0;
         self.streams.retain(|id, s| {
