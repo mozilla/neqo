@@ -1497,6 +1497,8 @@ pub struct SendStreams {
     // Streams which are owned by the IndexMap.
     sendordered: BTreeMap<SendOrder, OrderGroup>,
     regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
+    /// Set when any stream transitions to a terminal state; cleared by `remove_terminal`.
+    has_terminal: bool,
 }
 
 impl SendStreams {
@@ -1610,12 +1612,14 @@ impl SendStreams {
     pub fn acked(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
             ss.mark_as_acked(token.offset, token.length, token.fin);
+            self.has_terminal |= ss.is_terminal();
         }
     }
 
     pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.map.get_mut(&id) {
             ss.reset_acked();
+            self.has_terminal |= ss.is_terminal();
         }
     }
 
@@ -1641,11 +1645,19 @@ impl SendStreams {
         self.map.clear();
         self.sendordered.clear();
         self.regular.clear();
+        self.has_terminal = false;
     }
 
-    pub fn remove_terminal(&mut self) {
+    /// Remove terminal streams. Returns `true` if any were removed.
+    pub fn remove_terminal(&mut self) -> bool {
+        if !self.has_terminal {
+            return false;
+        }
+        self.has_terminal = false;
+        let mut removed = false;
         self.map.retain(|stream_id, stream| {
             if stream.is_terminal() {
+                removed = true;
                 if stream.is_fair() {
                     match stream.sendorder() {
                         None => self.regular.remove(*stream_id),
@@ -1656,11 +1668,11 @@ impl SendStreams {
                         }
                     }
                 }
-                // if unfair, we're done
                 return false;
             }
             true
         });
+        removed
     }
 
     pub(crate) fn write_frames<B: Buffer>(

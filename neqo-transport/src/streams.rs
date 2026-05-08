@@ -122,6 +122,8 @@ impl Streams {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.reset(*application_error_code, *final_size)?;
+                    // reset() transitions the stream to ResetRecvd (terminal).
+                    self.recv.note_terminal();
                 }
             }
             Frame::StopSending {
@@ -316,9 +318,17 @@ impl Streams {
         self.recv.clear();
     }
 
+    /// Note that a recv stream has become terminal (e.g. the application read the FIN).
+    pub fn note_recv_terminal(&mut self) {
+        self.recv.note_terminal();
+    }
+
     pub fn cleanup_closed_streams(&mut self) {
-        // filter the list, removing closed streams
-        self.send.remove_terminal();
+        // Remove terminal send streams. If any were removed, bidi recv streams whose
+        // send counterpart just disappeared may now be clearable too.
+        if self.send.remove_terminal() {
+            self.recv.note_terminal();
+        }
 
         let (removed_bidi, removed_uni) = self.recv.clear_terminal(&self.send, self.role);
 

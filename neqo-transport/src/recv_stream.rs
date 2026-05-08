@@ -37,6 +37,8 @@ use crate::{
 pub struct RecvStreams {
     streams: BTreeMap<StreamId, RecvStream>,
     keep_alive: Weak<()>,
+    /// Set when any stream transitions to a terminal state; cleared by `clear_terminal`.
+    has_terminal: bool,
 }
 
 impl RecvStreams {
@@ -94,9 +96,20 @@ impl RecvStreams {
 
     pub fn clear(&mut self) {
         self.streams.clear();
+        self.has_terminal = false;
+    }
+
+    /// Note that a stream has transitioned to a terminal state so that
+    /// the next call to `clear_terminal` will run the scan.
+    pub fn note_terminal(&mut self) {
+        self.has_terminal = true;
     }
 
     pub fn clear_terminal(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
+        if !self.has_terminal {
+            return (0, 0);
+        }
+        self.has_terminal = false;
         let mut removed_bidi = 0;
         let mut removed_uni = 0;
         self.streams.retain(|id, s| {

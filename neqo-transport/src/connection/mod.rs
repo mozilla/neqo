@@ -3846,10 +3846,12 @@ impl Connection {
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        let rb = stream.read(data)?;
-        Ok(rb)
+        let (n, fin) = self.streams.get_recv_stream_mut(stream_id)?.read(data)?;
+        if fin {
+            // read() returning fin=true means the stream just transitioned to DataRead.
+            self.streams.note_recv_terminal();
+        }
+        Ok((n, fin))
     }
 
     /// Application is no longer interested in this stream.
