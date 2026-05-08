@@ -4,8 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// This file is included by two bench binaries; each uses only one entry point.
-#![allow(dead_code)]
+#![expect(dead_code, reason = "Included by two bench binaries; each uses only one entry point.")]
 
 use std::{hint::black_box, time::Duration};
 
@@ -30,7 +29,7 @@ const BENCHMARK_PARAMS: [(usize, usize); 3] = [(1, 1_000), (1_000, 1), (1_000, 1
 
 /// Flow-control benchmark parameters: `(streams, data_size)`.
 ///
-/// Data sizes exceed the 1 MB per-stream and 2 MB connection-level flow-control
+/// Data sizes meet or exceed the 1 MB per-stream and 2 MB connection-level flow-control
 /// windows, so streams regularly block waiting for `MAX_STREAM_DATA` grants.
 const FC_BENCHMARK_PARAMS: [(usize, usize); 2] = [
     (1, 4 * 1024 * 1024),  // 4× per-stream window
@@ -89,8 +88,8 @@ const CONFIGS: [(&str, SetupFn, &[(usize, usize)]); 2] = [
 /// Runs all stream benchmarks measuring wall-clock CPU time.
 pub fn walltime(c: &mut Criterion) {
     fixture_init();
-    for (group, setup_fn, params) in CONFIGS {
-        let mut group = c.benchmark_group(group);
+    for (group_name, setup_fn, params) in CONFIGS {
+        let mut group = c.benchmark_group(group_name);
         for &(streams, data_size) in params {
             let name = format!("walltime/{streams}-streams/each-{data_size}-bytes");
             group.bench_function(&name, |b| {
@@ -108,8 +107,8 @@ pub fn walltime(c: &mut Criterion) {
 /// Runs all stream benchmarks measuring simulated network time (throughput).
 pub fn simulated(c: &mut Criterion) {
     fixture_init();
-    for (group, setup_fn, params) in CONFIGS {
-        let mut group = c.benchmark_group(group);
+    for (group_name, setup_fn, params) in CONFIGS {
+        let mut group = c.benchmark_group(group_name);
         for &(streams, data_size) in params {
             let name = format!("simulated/{streams}-streams/each-{data_size}-bytes");
             group.throughput(Throughput::Bytes((streams * data_size) as u64));
