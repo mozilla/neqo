@@ -3861,6 +3861,7 @@ impl Connection {
         let stream = self.streams.get_recv_stream_mut(stream_id)?;
 
         stream.stop_sending(err);
+        self.streams.note_recv_terminal();
         Ok(())
     }
 

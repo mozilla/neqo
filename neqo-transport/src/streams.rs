@@ -301,6 +301,7 @@ impl Streams {
             StreamRecoveryToken::StopSending { stream_id } => {
                 if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
                     rs.stop_sending_acked();
+                    self.recv.note_terminal();
                 }
             }
             // We only worry when these are lost
