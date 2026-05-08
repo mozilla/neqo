@@ -87,9 +87,9 @@ impl Pacer {
         // This is the inverse of the function in `spend`:
         // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
         //
-        // The key product is rtt_ns * deficit.  `deficit` is at most 2 * MTU
-        // (~3000 bytes for QUIC).  Even a 10-second RTT (10^10 ns) gives
-        // 10^10 * 3000 = 3*10^13, far below u64::MAX (1.8*10^19).
+        // `deficit` can exceed 2 × MTU when `self.c` carries accumulated debt
+        // from consecutive sub-granularity sends.  `saturating_mul` caps the
+        // product safely regardless of the actual value.
         let deficit = u64::try_from(packet - self.c).expect("packet is larger than current credit");
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
         let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP as u64);
@@ -116,7 +116,7 @@ impl Pacer {
     /// 10^8 * 10^10 = 10^18 < `u64::MAX` (1.8*10^19).  Beyond that the
     /// `saturating_mul` caps the value and callers clamp to `self.m`.
     fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u64> {
-        let rtt_ns = u64::try_from(rtt.as_nanos()).ok()?;
+        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
         let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
         let factor = (cwnd as u64).saturating_mul(Self::SPEEDUP as u64);
         elapsed_ns.saturating_mul(factor).checked_div(rtt_ns)
@@ -124,7 +124,7 @@ impl Pacer {
 
     /// Compute the effective pacing rate in bytes per second.
     ///
-    /// Returns `None` if `rtt` is zero or the rate exceeds `u64::MAX`.
+    /// Returns `None` if `rtt` is zero.
     pub(crate) fn rate(cwnd: usize, rtt: Duration) -> Option<u64> {
         Self::bytes_for(cwnd, rtt, Duration::from_secs(1))
     }
