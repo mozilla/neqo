@@ -28,7 +28,7 @@ pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};
 pub use new_reno::NewReno;
 #[cfg(test)]
-pub use search::Result;
+pub use search::Outcome;
 pub use search::Search;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

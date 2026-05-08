@@ -12,7 +12,9 @@ use test_fixture::now;
 
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
-    cc::{CongestionControlStats, Result, Search, classic_cc::SlowStart as _, tests::INITIAL_CWND},
+    cc::{
+        CongestionControlStats, Outcome, Search, classic_cc::SlowStart as _, tests::INITIAL_CWND,
+    },
     rtt::RttEstimate,
 };
 
@@ -345,7 +347,7 @@ fn sent_and_acked_byte_computation() {
     // `sent_bytes` and `delv_bytes` should be `10 * 1000 = 10_000`.
     assert!(
         sent_bytes == delv_bytes && delv_bytes == 10_000,
-        "Should have `sent_bytes == delv_bytes == 10_000 and got `sent_bytes = {sent_bytes}` and `delv_bytes = {delv_bytes}`"
+        "Should have `sent_bytes == delv_bytes == 10_000` and got `sent_bytes = {sent_bytes}` and `delv_bytes = {delv_bytes}`"
     );
 }
 
@@ -450,7 +452,7 @@ fn inflated_rtt_is_guarded() {
     let high_rtt = Duration::from_millis(600);
     assert_eq!(
         search.evaluate_test(high_rtt, curr_idx, INITIAL_CWND),
-        Result::RttInflated,
+        Outcome::RttInflated,
     );
 }
 
@@ -479,7 +481,7 @@ fn no_sent_bytes() {
     let curr_idx = search.curr_idx().unwrap();
     assert_eq!(
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-        Result::ZeroSent,
+        Outcome::ZeroSent,
     );
 }
 
@@ -509,7 +511,7 @@ fn warming_up() {
     let curr_idx = search.curr_idx().unwrap();
     assert_eq!(
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-        Result::WarmingUp,
+        Outcome::WarmingUp,
     );
 
     // One more bin crosses the boundary: prev_idx = 13 - 2 = 11 > W(10).
@@ -528,7 +530,7 @@ fn warming_up() {
     // Now the SEARCH checks should run.
     assert_eq!(
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-        Result::Continue,
+        Outcome::Continue,
     );
 }
 
@@ -572,7 +574,7 @@ fn continue_when_delivery_rate_steady() {
         let curr_idx = search.curr_idx().unwrap();
         assert_eq!(
             search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-            Result::Continue,
+            Outcome::Continue,
         );
     }
 }

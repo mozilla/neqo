@@ -18,7 +18,7 @@ use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::Congesti
 
 /// The outcome of a single SEARCH evaluation.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Result {
+pub enum Outcome {
     /// Evaluation ran and slow start should be exited with the provided cwnd.
     Exit(usize),
     /// Evaluation ran and slow start should be continued.
@@ -228,6 +228,53 @@ impl Search {
         sent / Self::SCALE as u64
     }
 
+    /// Evaluates whether SEARCH should exit slow start.
+    ///
+    /// Returns [`Outcome::Exit`] with the current cwnd if the normalized delivery-rate
+    /// difference exceeds [`Self::THRESH`], or a non-exit variant explaining why not.
+    fn evaluate(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Outcome {
+        // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
+        // so `prev_idx` might be too recent by a fraction of a bin. Said fraction is scaled to
+        // `0..[Self::SCALE]` for interpolation in `compute_sent`.
+        let (prev_idx, fraction) = self.calc_prev_idx(rtt, curr_idx);
+        qdebug!("SEARCH: evaluate: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}");
+
+        if prev_idx <= Self::W {
+            qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (warming up)");
+            return Outcome::WarmingUp;
+        }
+        if curr_idx - prev_idx >= Self::EXTRA_BINS {
+            qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (RTT inflated)");
+            return Outcome::RttInflated;
+        }
+
+        let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
+        let prev_sent = self.compute_sent(prev_idx - Self::W, prev_idx, fraction);
+        qdebug!("SEARCH: evaluate: curr_delv {curr_delv} prev_sent {prev_sent}");
+
+        if prev_sent == 0 {
+            qdebug!("SEARCH: evaluate: prev_sent is zero, can't evaluate");
+            return Outcome::ZeroSent;
+        }
+
+        let diff = prev_sent.saturating_sub(curr_delv);
+        let norm_diff =
+            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
+
+        if norm_diff < Self::THRESH {
+            qdebug!(
+                "SEARCH: evaluate: norm_diff {norm_diff} < THRESH {} --> continue",
+                Self::THRESH
+            );
+            return Outcome::Continue;
+        }
+        qdebug!(
+            "SEARCH: evaluate: norm_diff {norm_diff} >= THRESH {} --> exit",
+            Self::THRESH
+        );
+        Outcome::Exit(curr_cwnd)
+    }
+
     #[cfg(test)]
     pub const fn curr_idx(&self) -> Option<usize> {
         self.curr_idx
@@ -273,55 +320,8 @@ impl Search {
 
     /// Re-exports the internal `evaluate` function for use in tests.
     #[cfg(test)]
-    pub fn evaluate_test(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Result {
+    pub fn evaluate_test(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Outcome {
         self.evaluate(rtt, curr_idx, curr_cwnd)
-    }
-
-    /// Evaluates whether SEARCH should exit slow start.
-    ///
-    /// Returns [`Result::Exit`] with the current cwnd if the normalized delivery-rate
-    /// difference exceeds [`Self::THRESH`], or a non-exit variant explaining why not.
-    fn evaluate(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Result {
-        // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
-        // so `prev_idx` might be too recent by a fraction of a bin. Said fraction is scaled to
-        // `0..[Self::SCALE]` for interpolation in `compute_sent`.
-        let (prev_idx, fraction) = self.calc_prev_idx(rtt, curr_idx);
-        qdebug!("SEARCH: evaluate: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}");
-
-        if prev_idx <= Self::W {
-            qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (warming up)");
-            return Result::WarmingUp;
-        }
-        if curr_idx - prev_idx >= Self::EXTRA_BINS {
-            qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (RTT inflated)");
-            return Result::RttInflated;
-        }
-
-        let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
-        let prev_sent = self.compute_sent(prev_idx - Self::W, prev_idx, fraction);
-        qdebug!("SEARCH: evaluate: curr_delv {curr_delv} prev_sent {prev_sent}");
-
-        if prev_sent == 0 {
-            qdebug!("SEARCH: evaluate: prev_sent is zero, can't evaluate");
-            return Result::ZeroSent;
-        }
-
-        let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff =
-            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
-
-        if norm_diff < Self::THRESH {
-            qdebug!(
-                "SEARCH: evaluate: norm_diff {norm_diff} < THRESH {} --> continue",
-                Self::THRESH
-            );
-            return Result::Continue;
-        }
-        qdebug!(
-            "SEARCH: evaluate: norm_diff {norm_diff} >= THRESH {} --> exit",
-            Self::THRESH
-        );
-        Result::Exit(curr_cwnd)
     }
 }
 
@@ -365,7 +365,7 @@ impl SlowStart for Search {
         //
         // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#section-3.2-17>
         match self.evaluate(rtt, curr_idx, curr_cwnd) {
-            Result::Exit(cwnd) => Some(cwnd),
+            Outcome::Exit(cwnd) => Some(cwnd),
             _ => None,
         }
     }
