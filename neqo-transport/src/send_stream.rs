@@ -688,7 +688,8 @@ pub struct SendStream {
     state: State,
     conn_events: ConnectionEvents,
     priority: TransmissionPriority,
-    retransmission_priority: RetransmissionPriority,
+    /// Cached `priority + retransmission_priority`, recomputed in `set_priority`.
+    effective_priority: TransmissionPriority,
     retransmission_offset: u64,
     sendorder: Option<SendOrder>,
     bytes_sent: u64,
@@ -711,7 +712,8 @@ impl SendStream {
             },
             conn_events,
             priority: TransmissionPriority::default(),
-            retransmission_priority: RetransmissionPriority::default(),
+            effective_priority: TransmissionPriority::default()
+                + RetransmissionPriority::default(),
             retransmission_offset: 0,
             sendorder: None,
             bytes_sent: 0,
@@ -754,13 +756,13 @@ impl SendStream {
         self.fair
     }
 
-    pub const fn set_priority(
+    pub fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
     ) {
         self.priority = transmission;
-        self.retransmission_priority = retransmission;
+        self.effective_priority = transmission + retransmission;
     }
 
     #[must_use]
@@ -912,7 +914,7 @@ impl SendStream {
     ) {
         let retransmission = if priority == self.priority {
             false
-        } else if priority == self.priority + self.retransmission_priority {
+        } else if priority == self.effective_priority {
             true
         } else {
             return;
@@ -997,7 +999,7 @@ impl SendStream {
             State::ResetSent {
                 ref mut priority, ..
             } => {
-                *priority = Some(self.priority + self.retransmission_priority);
+                *priority = Some(self.effective_priority);
             }
             State::ResetRecvd { .. } => (),
             _ => unreachable!(),
