@@ -21,7 +21,7 @@ use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
     hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
 };
-use neqo_crypto::{
+use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
     agent::{CertificateCompressor, CertificateInfo},
@@ -2695,7 +2695,7 @@ impl Connection {
                 path.borrow().pmtud().probe_size()
             } else {
                 profile.limit()
-                    - if space == PacketNumberSpace::Initial {
+                    - if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
                         // Reserve some space for the SCONE indication in an Initial.
                         // This reduces the amount available for building the packet,
                         // but we'll pad to `profile.limit()` when padding.
@@ -2863,16 +2863,20 @@ impl Connection {
         );
         let pad_amount = profile.limit() - encoder.len();
         initial.track_padding(pad_amount);
-        // This ensures that the last bytes are a SCONE indication, if there is enough space.
-        // This is not tracked, other than for congestion control (above)
-        if pad_amount >= Self::SCONE_INDICATION.len() {
-            encoder.pad_to(
-                profile.limit() - Self::SCONE_INDICATION.len() + 1,
-                Self::SCONE_INDICATION[0],
-            );
-            encoder.encode(&Self::SCONE_INDICATION[1..]);
+        if self.conn_params.scone_enabled() {
+            // This ensures that the last bytes are a SCONE indication, if there is enough space.
+            // This is not tracked, other than for congestion control (above)
+            if pad_amount >= Self::SCONE_INDICATION.len() {
+                encoder.pad_to(
+                    profile.limit() - Self::SCONE_INDICATION.len() + 1,
+                    Self::SCONE_INDICATION[0],
+                );
+                encoder.encode(&Self::SCONE_INDICATION[1..]);
+            } else {
+                encoder.pad_to(profile.limit(), Self::SCONE_INDICATION[0]);
+            }
         } else {
-            encoder.pad_to(profile.limit(), Self::SCONE_INDICATION[0]);
+            encoder.pad_to(profile.limit(), 0);
         }
     }
 
@@ -3198,7 +3202,7 @@ impl Connection {
             }
             _ => {
                 qerror!("Crypto state should not be new or failed after successful handshake");
-                return Err(Error::Crypto(neqo_crypto::Error::Internal));
+                return Err(Error::Crypto(nss::Error::Internal));
             }
         }
 
@@ -3973,7 +3977,7 @@ impl Connection {
                 };
                 let x = f.dump();
                 if !x.is_empty() {
-                    _ = write!(&mut s, "\n  {} {}", meta.direction(), &x);
+                    _ = write!(&mut s, "\n  {} {x}", meta.direction());
                 }
             }
             qdebug!("[{self}] {meta}{s}");

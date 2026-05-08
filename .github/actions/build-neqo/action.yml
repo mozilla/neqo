@@ -17,6 +17,9 @@ inputs:
   baseline-ref:
     description: Git ref to build baseline binaries from
     default: "origin/main"
+  nss-minimum-version:
+    description: Minimum NSS version required by nss-rs
+    required: true
 
 runs:
   using: composite
@@ -36,7 +39,7 @@ runs:
     - name: Install NSS
       uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
       with:
-        version-file: neqo/neqo-crypto/min_version.txt
+        minimum-version: ${{ inputs.nss-minimum-version }}
         token: ${{ inputs.token }}
 
     - name: Build neqo

@@ -24,9 +24,13 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - id: nss-version
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
       - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
         with:
-          version-file: neqo-crypto/min_version.txt
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0

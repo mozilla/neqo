@@ -11,12 +11,12 @@ mod common;
 use std::time::{Duration, Instant};
 
 use neqo_common::{Datagram, event::Provider as _, qtrace};
-use neqo_crypto::{AuthenticationStatus, ResumptionToken};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
 };
 use neqo_transport::{CloseReason, ConnectionParameters, Error, Output, StreamType};
+use nss::{AuthenticationStatus, ResumptionToken};
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];

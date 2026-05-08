@@ -18,9 +18,7 @@ use std::{
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug};
-use neqo_crypto::{
-    AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys,
-};
+use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
@@ -565,7 +563,7 @@ fn reorder_handshake() {
         c_stats_before.packets_rx,
         usize::from(s_hs1_has_initial) + usize::from(s_hs2_has_initial)
     );
-    assert!(c_stats_before.dropped_rx == 0);
+    assert_eq!(c_stats_before.dropped_rx, 0);
 
     // Deliver all Initial packets.
     client.process_input(s_initial_2, now);
@@ -806,8 +804,7 @@ fn corrupted_initial() {
         .iter()
         .enumerate()
         .rev()
-        .skip(1) // Skip the last byte, which might be a SCONE indicator.
-        .find(|&(_, &v)| v != Connection::SCONE_INDICATION[0]) // The SCONE padding value.
+        .find(|&(_, &v)| v != 0)
         .unwrap();
     corrupted[idx] ^= 0x76;
 
@@ -1640,11 +1637,19 @@ fn scone(enable: bool) {
 
     let ci = client.process_output(now).dgram().unwrap();
     let ci_len = ci.len();
-    assert_eq!(
-        &ci[ci_len - Connection::SCONE_INDICATION.len()..],
-        Connection::SCONE_INDICATION,
-        "Client should send indication"
-    );
+    if enable {
+        assert_eq!(
+            &ci[ci_len - Connection::SCONE_INDICATION.len()..],
+            Connection::SCONE_INDICATION,
+            "Client should send indication"
+        );
+    } else {
+        assert_ne!(
+            &ci[ci_len - Connection::SCONE_INDICATION.len()..],
+            Connection::SCONE_INDICATION,
+            "Client should not send indication when SCONE is disabled"
+        );
+    }
     server.process_input(ci, now);
 
     connect(&mut client, &mut server);
@@ -1714,8 +1719,10 @@ fn scone_enabled() {
     scone(true);
 }
 
-/// The scone test passes, even when the config item isn't set.
-/// This is because the transport parameter is the only thing it affects.
+/// With the connection parameter disabled, the client does not send the SCONE
+/// indicator in Initial padding and does not advertise the SCONE transport
+/// parameter. Inbound SCONE packets are still tolerated but do not generate
+/// `SconeUpdated` events, since neither peer has negotiated the feature.
 #[test]
 fn scone_disabled() {
     scone(false);
@@ -1765,7 +1772,7 @@ fn grease_quic_bit_respects_current_handshake() {
 fn certificate_compression() {
     use std::sync::Mutex;
 
-    use neqo_crypto::agent::CertificateCompressor;
+    use nss::agent::CertificateCompressor;
 
     // These statics work for concurrent test execution because the certificate is
     // effectively a fixed value. A more robust approach would use a hash-based lookup,
@@ -1778,7 +1785,7 @@ fn certificate_compression() {
         const ID: u16 = 0x1234;
         const NAME: &std::ffi::CStr = c"xor";
         const ENABLE_ENCODING: bool = true;
-        fn decode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<()> {
+        fn decode(input: &[u8], output: &mut [u8]) -> nss::Res<()> {
             output
                 .iter_mut()
                 .zip(input)
@@ -1786,7 +1793,7 @@ fn certificate_compression() {
             *DECODED.lock().unwrap() = output[..input.len()].to_vec();
             Ok(())
         }
-        fn encode(input: &[u8], output: &mut [u8]) -> neqo_crypto::Res<usize> {
+        fn encode(input: &[u8], output: &mut [u8]) -> nss::Res<usize> {
             *ORIGINAL.lock().unwrap() = input.to_vec();
             output
                 .iter_mut()

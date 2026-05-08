@@ -42,12 +42,15 @@ jobs:
           submodules: "recursive"
           persist-credentials: false
 
+      - id: nss-version
+        uses: ./neqo/.github/actions/minimum-version
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: bench-build
           benches: "true"
           baseline-ref: origin/${{ env.BASE_REF }}
+          nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
   bench:
     name: cargo bench

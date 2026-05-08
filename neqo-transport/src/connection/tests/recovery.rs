@@ -7,7 +7,7 @@
 use std::time::{Duration, Instant};
 
 use neqo_common::qdebug;
-use neqo_crypto::AuthenticationStatus;
+use nss::AuthenticationStatus;
 use test_fixture::{
     assertions::{
         assert_contains_handshake, assert_handshake, assert_initial, is_handshake, is_initial,

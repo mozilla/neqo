@@ -6,7 +6,6 @@ use libfuzzer_sys::fuzz_target;
 #[cfg(all(fuzzing, not(windows)))]
 fuzz_target!(|data: &[u8]| {
     use neqo_common::{Datagram, Encoder, Role};
-    use neqo_crypto::AeadTrait as _;
     use neqo_transport::{ConnectionParameters, Version, packet::MIN_INITIAL_PACKET_SIZE};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN,

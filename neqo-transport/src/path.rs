@@ -14,7 +14,7 @@ use std::{
 };
 
 use neqo_common::{Buffer, Encoder, Tos, datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
-use neqo_crypto::random;
+use nss::random;
 
 use crate::{
     ConnectionParameters, Stats,
