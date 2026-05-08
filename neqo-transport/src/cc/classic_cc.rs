@@ -358,7 +358,7 @@ where
                 cc_stats,
                 now,
             ) {
-                qinfo!("Exited slow start by algorithm");
+                qdebug!("Exited slow start by algorithm");
                 self.current.congestion_window = exit_cwnd;
                 self.current.ssthresh = exit_cwnd;
                 cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
