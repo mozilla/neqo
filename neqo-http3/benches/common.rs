@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(dead_code, reason = "Included by two bench binaries; each uses only one entry point.")]
+#![expect(
+    dead_code,
+    reason = "Included by two bench binaries; each uses only one entry point."
+)]
 
 use std::{hint::black_box, time::Duration};
 
@@ -113,7 +116,11 @@ pub fn simulated(c: &mut Criterion) {
             let name = format!("simulated/{streams}-streams/each-{data_size}-bytes");
             group.throughput(Throughput::Bytes((streams * data_size) as u64));
             group.bench_function(&name, |b| {
-                b.iter_custom(|iters| (0..iters).map(|_| setup_fn(streams, data_size).run()).sum::<Duration>());
+                b.iter_custom(|iters| {
+                    (0..iters)
+                        .map(|_| setup_fn(streams, data_size).run())
+                        .sum::<Duration>()
+                });
             });
         }
         group.finish();
