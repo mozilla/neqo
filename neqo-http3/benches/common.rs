@@ -114,7 +114,7 @@ pub fn simulated(c: &mut Criterion) {
             let name = format!("simulated/{streams}-streams/each-{data_size}-bytes");
             group.throughput(Throughput::Bytes((streams * data_size) as u64));
             group.bench_function(&name, |b| {
-                b.iter_custom(|iters| (0..iters).map(|_| setup_fn(streams, data_size).run()).sum());
+                b.iter_custom(|iters| (0..iters).map(|_| setup_fn(streams, data_size).run()).sum::<Duration>());
             });
         }
         group.finish();
