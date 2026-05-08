@@ -279,7 +279,7 @@ impl Search {
 
     /// Evaluates whether SEARCH should exit slow start.
     ///
-    /// Returns [`search::Result::Exit`] with the current cwnd if the normalized delivery-rate
+    /// Returns [`Result::Exit`] with the current cwnd if the normalized delivery-rate
     /// difference exceeds [`Self::THRESH`], or a non-exit variant explaining why not.
     fn evaluate(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Result {
         // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
