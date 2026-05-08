@@ -688,7 +688,7 @@ pub struct SendStream {
     state: State,
     conn_events: ConnectionEvents,
     priority: TransmissionPriority,
-    /// Cached `priority + retransmission_priority`, recomputed in `set_priority`.
+    /// Cached result of `priority + retransmission`, recomputed in `set_priority`.
     effective_priority: TransmissionPriority,
     retransmission_offset: u64,
     sendorder: Option<SendOrder>,
@@ -712,8 +712,7 @@ impl SendStream {
             },
             conn_events,
             priority: TransmissionPriority::default(),
-            effective_priority: TransmissionPriority::default()
-                + RetransmissionPriority::default(),
+            effective_priority: TransmissionPriority::default() + RetransmissionPriority::default(),
             retransmission_offset: 0,
             sendorder: None,
             bytes_sent: 0,
