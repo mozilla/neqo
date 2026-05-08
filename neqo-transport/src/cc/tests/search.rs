@@ -12,7 +12,7 @@ use test_fixture::now;
 
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
-    cc::{CongestionControlStats, Search, classic_cc::SlowStart as _, tests::INITIAL_CWND},
+    cc::{CongestionControlStats, Result, Search, classic_cc::SlowStart as _, tests::INITIAL_CWND},
     rtt::RttEstimate,
 };
 
@@ -419,5 +419,160 @@ fn search_exits_when_delivery_rate_slows_down() {
         }
         pn += 1;
         bytes_this_round += bytes_this_round / 4;
+    }
+}
+
+#[test]
+fn inflated_rtt_is_guarded() {
+    let (mut search, bin_duration, mut now) = init_search(INITIAL_RTT);
+    let rtt_est = RttEstimate::new(INITIAL_RTT);
+    let mut pn = 1;
+
+    // Advance to curr_idx >= 28 so that with 600ms RTT:
+    //   bins_last_rtt = 600ms / 35ms = 17, so prev_idx = curr_idx - 17
+    //   prev_idx = 28 - 17 = 11 > W(10) --> first guard passes
+    //   curr_idx - prev_idx = 17 >= EXTRA_BINS(15) --> second guard fires
+    while search.curr_idx() < Some(28) {
+        search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+        now += bin_duration + Duration::from_nanos(1);
+        search.on_packets_acked(
+            &rtt_est,
+            pn,
+            MIN_INITIAL_PACKET_SIZE,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+            now,
+        );
+        pn += 1;
+    }
+
+    let curr_idx = search.curr_idx().unwrap();
+    let high_rtt = Duration::from_millis(600);
+    assert_eq!(
+        search.evaluate_test(high_rtt, curr_idx, INITIAL_CWND),
+        Result::RttInflated,
+    );
+}
+
+#[test]
+fn no_sent_bytes() {
+    let (mut search, bin_duration, mut now) = init_search(INITIAL_RTT);
+    let rtt_est = RttEstimate::new(INITIAL_RTT);
+    let mut pn = 1;
+
+    // After init_search, never call on_packet_sent again. All subsequent bins are
+    // stamped with the same cumulative sent_bytes value, making compute_sent return 0.
+    // Advance to curr_idx >= 13 so prev_idx = curr_idx - 2 > W(10).
+    while search.curr_idx() < Some(13) {
+        now += bin_duration + Duration::from_nanos(1);
+        search.on_packets_acked(
+            &rtt_est,
+            pn,
+            0,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+            now,
+        );
+        pn += 1;
+    }
+
+    let curr_idx = search.curr_idx().unwrap();
+    assert_eq!(
+        search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
+        Result::ZeroSent,
+    );
+}
+
+#[test]
+fn warming_up() {
+    let (mut search, bin_duration, mut now) = init_search(INITIAL_RTT);
+    let rtt_est = RttEstimate::new(INITIAL_RTT);
+    let mut pn = 1;
+
+    // Advance to curr_idx = 12, the exact WarmingUp boundary.
+    // bins_last_rtt = 100ms / 35ms = 2, so prev_idx = 12 - 2 = 10 = W(10).
+    // Guard is prev_idx <= W, so this is the last index that returns WarmingUp.
+    while search.curr_idx() < Some(12) {
+        search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+        now += bin_duration + Duration::from_nanos(1);
+        search.on_packets_acked(
+            &rtt_est,
+            pn,
+            MIN_INITIAL_PACKET_SIZE,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+            now,
+        );
+        pn += 1;
+    }
+
+    let curr_idx = search.curr_idx().unwrap();
+    assert_eq!(
+        search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
+        Result::WarmingUp,
+    );
+
+    // One more bin crosses the boundary: prev_idx = 13 - 2 = 11 > W(10).
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.on_packets_acked(
+        &rtt_est,
+        pn,
+        MIN_INITIAL_PACKET_SIZE,
+        INITIAL_CWND,
+        &mut CongestionControlStats::default(),
+        now,
+    );
+
+    let curr_idx = search.curr_idx().unwrap();
+    // Now the SEARCH checks should run.
+    assert_eq!(
+        search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
+        Result::Continue,
+    );
+}
+
+#[test]
+fn continue_when_delivery_rate_steady() {
+    let (mut search, bin_duration, mut now) = init_search(INITIAL_RTT);
+    let rtt_est = RttEstimate::new(INITIAL_RTT);
+    let mut pn = 1;
+
+    // Advance past warm-up boundary with equal send/ack each bin.
+    // With W = 10 and bin_duration = 100ms / 35ms = 2 we need to advance to curr_idx = 12.
+    while search.curr_idx() < Some(13) {
+        search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+        now += bin_duration + Duration::from_nanos(1);
+        search.on_packets_acked(
+            &rtt_est,
+            pn,
+            MIN_INITIAL_PACKET_SIZE,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+            now,
+        );
+        pn += 1;
+    }
+
+    // Keep going for 10 more bins with steady delivery rate, asserting
+    // Continue each time.
+    for _ in 0..10 {
+        search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+        now += bin_duration + Duration::from_nanos(1);
+        search.on_packets_acked(
+            &rtt_est,
+            pn,
+            MIN_INITIAL_PACKET_SIZE,
+            INITIAL_CWND,
+            &mut CongestionControlStats::default(),
+            now,
+        );
+        pn += 1;
+
+        let curr_idx = search.curr_idx().unwrap();
+        assert_eq!(
+            search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
+            Result::Continue,
+        );
     }
 }

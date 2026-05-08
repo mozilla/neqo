@@ -16,6 +16,22 @@ use neqo_common::qdebug;
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
+/// The outcome of a single SEARCH evaluation.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Result {
+    /// Evaluation ran and slow start should be exited with the provided cwnd.
+    Exit(usize),
+    /// Evaluation ran and slow start should be continued.
+    Continue,
+    /// Not enough data to run SEARCH evaluation (expected early in the connection or after reset).
+    WarmingUp,
+    /// Can't run SEARCH evaluation because RTT inflated past the point where there is enough
+    /// data to look back one RTT.
+    RttInflated,
+    /// Haven't sent data for the last RTT thus can't evaluate.
+    ZeroSent,
+}
+
 /// Slow start Exit At Right CHokepoint (SEARCH).
 ///
 /// Exits slow start when the delivery rate flattens, indicating the network is
@@ -254,6 +270,59 @@ impl Search {
     pub const fn compute_delv_test(&self, old: usize, new: usize) -> u64 {
         self.compute_delv(old, new)
     }
+
+    /// Re-exports the internal `evaluate` function for use in tests.
+    #[cfg(test)]
+    pub fn evaluate_test(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Result {
+        self.evaluate(rtt, curr_idx, curr_cwnd)
+    }
+
+    /// Evaluates whether SEARCH should exit slow start.
+    ///
+    /// Returns [`search::Result::Exit`] with the current cwnd if the normalized delivery-rate
+    /// difference exceeds [`Self::THRESH`], or a non-exit variant explaining why not.
+    fn evaluate(&self, rtt: Duration, curr_idx: usize, curr_cwnd: usize) -> Result {
+        // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
+        // so `prev_idx` might be too recent by a fraction of a bin. Said fraction is scaled to
+        // `0..[Self::SCALE]` for interpolation in `compute_sent`.
+        let (prev_idx, fraction) = self.calc_prev_idx(rtt, curr_idx);
+        qdebug!("SEARCH: evaluate: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}");
+
+        if prev_idx <= Self::W {
+            qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (warming up)");
+            return Result::WarmingUp;
+        }
+        if curr_idx - prev_idx >= Self::EXTRA_BINS {
+            qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (RTT inflated)");
+            return Result::RttInflated;
+        }
+
+        let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
+        let prev_sent = self.compute_sent(prev_idx - Self::W, prev_idx, fraction);
+        qdebug!("SEARCH: evaluate: curr_delv {curr_delv} prev_sent {prev_sent}");
+
+        if prev_sent == 0 {
+            qdebug!("SEARCH: evaluate: prev_sent is zero, can't evaluate");
+            return Result::ZeroSent;
+        }
+
+        let diff = prev_sent.saturating_sub(curr_delv);
+        let norm_diff =
+            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
+
+        if norm_diff < Self::THRESH {
+            qdebug!(
+                "SEARCH: evaluate: norm_diff {norm_diff} < THRESH {} --> continue",
+                Self::THRESH
+            );
+            return Result::Continue;
+        }
+        qdebug!(
+            "SEARCH: evaluate: norm_diff {norm_diff} >= THRESH {} --> exit",
+            Self::THRESH
+        );
+        Result::Exit(curr_cwnd)
+    }
 }
 
 impl SlowStart for Search {
@@ -285,50 +354,6 @@ impl SlowStart for Search {
 
         let curr_idx = self.update_bins(now)?;
 
-        // Compute how many bins fit in the last RTT. Integer division implicitly floors that value,
-        // so `prev_idx` might be too recent by a fraction of a bin. Said fraction is scaled to
-        // `0..[Self::SCALE]` for interpolation in `compute_sent`.
-        let (prev_idx, fraction) = self.calc_prev_idx(rtt, curr_idx);
-        qdebug!(
-            "SEARCH: on_packets_acked: prev_idx {prev_idx} curr_idx {curr_idx} fraction {fraction}"
-        );
-
-        // Early return if we don't have enough data for a SEARCH check. This could be either
-        // because there isn't enough data to look back by an RTT if we're early in the connection,
-        // or because the difference between `curr_idx` and `prev_idx` is too big because of RTT
-        // inflation. In the latter case we don't have data to look back far enough and SEARCH stops
-        // working.
-        if prev_idx <= Self::W || curr_idx - prev_idx >= Self::EXTRA_BINS {
-            qdebug!("SEARCH: on_packets_acked: not enough data for SEARCH check");
-            return None;
-        }
-
-        let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
-        let prev_sent = self.compute_sent(prev_idx - Self::W, prev_idx, fraction);
-        qdebug!("SEARCH: on_packets_acked: curr_delv {curr_delv} prev_sent {prev_sent}");
-
-        // Avoid division by zero if we haven't sent anything.
-        if prev_sent == 0 {
-            return None;
-        }
-        let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff =
-            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
-
-        if norm_diff < Self::THRESH {
-            qdebug!(
-                "SEARCH: on_packets_acked: norm_diff {norm_diff} < THRESH {} --> continue",
-                Self::THRESH
-            );
-            return None;
-        }
-        qdebug!(
-            "SEARCH: on_packets_acked: norm_diff {norm_diff} >= THRESH {} --> exit",
-            Self::THRESH
-        );
-        // If SEARCH checks run and the normative difference is not beneath the threshold we return
-        // the current congestion window to exit slow start with it at the call site.
-        //
         // NOTE: SEARCH draft-09 implements a drain-phase to gradually lower the congestion window
         // towards the approximated empty-buffer BDP. I think that could be counter-intuitive while
         // using CUBIC in our case, as CUBIC tries to keep the buffers full and ideally we'd land
@@ -339,7 +364,10 @@ impl SlowStart for Search {
         // drain-target in telemetry for further analysis (TODO).
         //
         // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#section-3.2-17>
-        Some(curr_cwnd)
+        match self.evaluate(rtt, curr_idx, curr_cwnd) {
+            Result::Exit(cwnd) => Some(cwnd),
+            _ => None,
+        }
     }
 
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {
