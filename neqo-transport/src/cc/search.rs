@@ -21,8 +21,9 @@ use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::Congesti
 pub enum Outcome {
     /// Evaluation ran and slow start should be exited with the provided cwnd.
     Exit(usize),
-    /// Evaluation ran and slow start should be continued.
-    Continue,
+    /// Evaluation ran and slow start should be continued. Provides the normalized difference
+    /// between sent and acked bytes, which can be used in metrics to tune the exit threshold.
+    Continue(usize),
     /// Not enough data to run SEARCH evaluation (expected early in the connection or after reset).
     WarmingUp,
     /// Can't run SEARCH evaluation because RTT inflated past the point where there isn't enough
@@ -270,7 +271,7 @@ impl Search {
                 "SEARCH: evaluate: norm_diff {norm_diff} < THRESH {} --> continue",
                 Self::THRESH
             );
-            return Outcome::Continue;
+            return Outcome::Continue(norm_diff);
         }
         qdebug!(
             "SEARCH: evaluate: norm_diff {norm_diff} >= THRESH {} --> exit",
@@ -411,6 +412,14 @@ impl SlowStart for Search {
                     cc_stats
                         .search_lookback_bins_needed
                         .map_or(lookback_bins, |c| c.max(lookback_bins)),
+                );
+                None
+            }
+            Outcome::Continue(norm_diff) => {
+                cc_stats.search_max_norm_diff = Some(
+                    cc_stats
+                        .search_max_norm_diff
+                        .map_or(norm_diff, |c| c.max(norm_diff)),
                 );
                 None
             }

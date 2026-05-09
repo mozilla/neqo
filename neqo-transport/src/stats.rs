@@ -187,6 +187,10 @@ pub struct CongestionControlStats {
     /// SEARCH can't run because there is not enough data for lookback. Is `None` if SEARCH never
     /// ran into this issue.
     pub search_lookback_bins_needed: Option<usize>,
+    /// Records the maximum non-exiting value that the normalized difference between sent and acked
+    /// bytes ever reached. Can be used to tune the exit threshold. `None` means that the SEARCH
+    /// check never ran.
+    pub search_max_norm_diff: Option<usize>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal

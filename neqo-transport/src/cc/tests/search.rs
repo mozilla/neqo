@@ -587,7 +587,7 @@ fn warming_up() {
     // Now the SEARCH checks should run.
     assert_eq!(
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-        Outcome::Continue,
+        Outcome::Continue(0),
     );
 }
 
@@ -631,7 +631,25 @@ fn continue_when_delivery_rate_steady() {
         let curr_idx = search.curr_idx().unwrap();
         assert_eq!(
             search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-            Outcome::Continue,
+            Outcome::Continue(0),
         );
     }
+
+    // Verify the stat is recorded and tracks the running max.
+    // Ack less than sent to create a non-zero norm_diff.
+    let mut cc_stats = CongestionControlStats::default();
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE / 4);
+    search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
+    let max = cc_stats.search_max_norm_diff;
+    assert!(max > Some(0));
+
+    // A subsequent steady round should not overwrite the max.
+    pn += 1;
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
+    assert_eq!(cc_stats.search_max_norm_diff, max);
 }
