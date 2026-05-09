@@ -25,9 +25,9 @@ pub enum Outcome {
     Continue,
     /// Not enough data to run SEARCH evaluation (expected early in the connection or after reset).
     WarmingUp,
-    /// Can't run SEARCH evaluation because RTT inflated past the point where there is enough
-    /// data to look back one RTT.
-    RttInflated,
+    /// Can't run SEARCH evaluation because RTT inflated past the point where there isn't enough
+    /// data to look back one RTT. Provides the amount of bins that SEARCH tried to look back.
+    RttInflated(usize),
     /// Haven't sent data for the last RTT thus can't evaluate.
     ZeroSent,
 }
@@ -249,7 +249,7 @@ impl Search {
         }
         if curr_idx - prev_idx >= Self::EXTRA_BINS {
             qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (RTT inflated)");
-            return Outcome::RttInflated;
+            return Outcome::RttInflated(curr_idx - prev_idx);
         }
 
         let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
@@ -405,6 +405,14 @@ impl SlowStart for Search {
             Outcome::Exit(cwnd) => {
                 self.record_target_cwnd_estimates(curr_idx, rtt, cc_stats);
                 Some(cwnd)
+            }
+            Outcome::RttInflated(lookback_bins) => {
+                cc_stats.search_lookback_bins_needed = Some(
+                    cc_stats
+                        .search_lookback_bins_needed
+                        .map_or(lookback_bins, |c| c.max(lookback_bins)),
+                );
+                None
             }
             _ => None,
         }

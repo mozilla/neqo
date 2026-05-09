@@ -485,8 +485,39 @@ fn inflated_rtt_is_guarded() {
     let high_rtt = Duration::from_millis(600);
     assert_eq!(
         search.evaluate_test(high_rtt, curr_idx, INITIAL_CWND),
-        Outcome::RttInflated,
+        Outcome::RttInflated(17),
     );
+
+    // Verify the stat is recorded through the full on_packets_acked path.
+    let mut cc_stats = CongestionControlStats::default();
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(high_rtt),
+        pn,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+    assert_eq!(cc_stats.search_lookback_bins_needed, Some(17));
+
+    // A lower RTT that still triggers RttInflated should not overwrite the max.
+    // curr_idx is now 29. With 525ms RTT: bins_last_rtt = floor(525/35) = 15,
+    // prev_idx = 29 - 15 = 14 > W(10), curr_idx - prev_idx = 15 >= EXTRA_BINS(15) → RttInflated.
+    pn += 1;
+    let lower_rtt = Duration::from_millis(525);
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(lower_rtt),
+        pn,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+    assert_eq!(cc_stats.search_lookback_bins_needed, Some(17));
 }
 
 #[test]

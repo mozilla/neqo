@@ -183,6 +183,10 @@ pub struct CongestionControlStats {
     /// Drain-phase target estimate for the BDP with full buffers. None if we haven't exited slow
     /// start through SEARCH.
     pub search_full_buffer_target: Option<usize>,
+    /// Records the maximum value of lookback bins needed due to RTT inflation. Fires whenever
+    /// SEARCH can't run because there is not enough data for lookback. Is `None` if SEARCH never
+    /// ran into this issue.
+    pub search_lookback_bins_needed: Option<usize>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal
