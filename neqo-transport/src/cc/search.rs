@@ -54,6 +54,8 @@ pub struct Search {
     acked_bytes: usize,
     /// Tracking amount of sent bytes on this connection. Is incremented on every sent packet.
     sent_bytes: usize,
+    /// The RTT used to initialize SEARCH (set in [`Self::initialize`]).
+    initial_rtt: Duration,
 }
 
 impl Display for Search {
@@ -95,6 +97,7 @@ impl Search {
             bin_duration: Duration::from_millis(0),
             acked_bytes: 0,
             sent_bytes: 0,
+            initial_rtt: Duration::ZERO,
         }
     }
 
@@ -104,6 +107,7 @@ impl Search {
         reason = "casting small constant usize to u32 for use in Duration::div"
     )]
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
+        self.initial_rtt = initial_rtt;
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
         self.bin_duration =
             initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE as u32 / Self::W as u32;
@@ -275,6 +279,42 @@ impl Search {
         Outcome::Exit(curr_cwnd)
     }
 
+    /// SEARCH suggests a drain-phase to slowly converge towards a BDP estimate. We're currently not
+    /// implementing this, but do record the calculated targets for evaluation in this function.
+    ///
+    /// The draft specifies using the initial rtt to approximate an 'empty-buffer BDP'.
+    ///
+    /// In addition also record an estimate using the current rtt to approximate BDP with full
+    /// buffers. This should estimate the upper end of the CUBIC curve during congestion avoidance.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "casting small u128 division result to usize"
+    )]
+    const fn record_target_cwnd_estimates(
+        &self,
+        curr_idx: usize,
+        rtt: Duration,
+        cc_stats: &mut CongestionControlStats,
+    ) {
+        let initial_rtt_bins = self
+            .initial_rtt
+            .as_nanos()
+            .div_ceil(self.bin_duration.as_nanos()) as usize;
+        let initial_rtt_cong_idx = curr_idx.saturating_sub(initial_rtt_bins);
+        let empty_buffer_target = self.compute_delv(initial_rtt_cong_idx, curr_idx);
+
+        cc_stats.search_empty_buffer_target = Some(empty_buffer_target as usize);
+
+        // Only compute full_buffer_target when the current RTT fits within the acked_bins
+        // circular buffer (W + 1 slots). Beyond that, modulo indexing reads overwritten entries.
+        let current_rtt_bins = rtt.as_nanos().div_ceil(self.bin_duration.as_nanos()) as usize;
+        if current_rtt_bins <= Self::W {
+            let current_rtt_cong_idx = curr_idx.saturating_sub(current_rtt_bins);
+            cc_stats.search_full_buffer_target =
+                Some(self.compute_delv(current_rtt_cong_idx, curr_idx) as usize);
+        }
+    }
+
     #[cfg(test)]
     pub const fn curr_idx(&self) -> Option<usize> {
         self.curr_idx
@@ -331,7 +371,7 @@ impl SlowStart for Search {
         rtt_est: &RttEstimate,
         _largest_acked: packet::Number,
         curr_cwnd: usize,
-        _cc_stats: &mut CongestionControlStats,
+        cc_stats: &mut CongestionControlStats,
         now: Instant,
     ) -> Option<usize> {
         let rtt = rtt_est.latest_rtt();
@@ -358,11 +398,14 @@ impl SlowStart for Search {
         // draft-09 undershoots CUBIC's cwnd range in my testing.
         //
         // For now I recommend just exiting slow start without the drain-phase and capturing the
-        // drain-target in telemetry for further analysis (TODO).
+        // drain-target in telemetry for further analysis.
         //
         // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#section-3.2-17>
         match self.evaluate(rtt, curr_idx, curr_cwnd) {
-            Outcome::Exit(cwnd) => Some(cwnd),
+            Outcome::Exit(cwnd) => {
+                self.record_target_cwnd_estimates(curr_idx, rtt, cc_stats);
+                Some(cwnd)
+            }
             _ => None,
         }
     }

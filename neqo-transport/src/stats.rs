@@ -177,6 +177,12 @@ pub struct CongestionControlStats {
     /// Number of CSS (Conservative Slow Start) rounds completed. Only meaningful when HyStart++ is
     /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
     pub hystart_css_rounds_finished: usize,
+    /// Drain-phase target estimate for the BDP with empty buffers. None if we haven't exited slow
+    /// start through SEARCH.
+    pub search_empty_buffer_target: Option<usize>,
+    /// Drain-phase target estimate for the BDP with full buffers. None if we haven't exited slow
+    /// start through SEARCH.
+    pub search_full_buffer_target: Option<usize>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal
