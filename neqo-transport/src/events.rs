@@ -6,7 +6,7 @@
 
 // Collecting a list of events relevant to whoever is using the Connection.
 
-use std::{cell::RefCell, collections::VecDeque, num::NonZeroU64, net::SocketAddr, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, net::SocketAddr, num::NonZeroU64, rc::Rc};
 
 use neqo_common::event::Provider as EventProvider;
 use nss::ResumptionToken;
