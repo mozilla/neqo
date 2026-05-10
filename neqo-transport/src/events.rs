@@ -6,7 +6,7 @@
 
 // Collecting a list of events relevant to whoever is using the Connection.
 
-use std::{cell::RefCell, collections::VecDeque, num::NonZeroU64, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, num::NonZeroU64, net::SocketAddr, rc::Rc};
 
 use neqo_common::event::Provider as EventProvider;
 use nss::ResumptionToken;
@@ -82,6 +82,11 @@ pub enum ConnectionEvent {
     /// An update was received to SCONE throughput advice.
     /// The value is the approximate rate in bits per second; None = unknown.
     SconeUpdated(Option<NonZeroU64>),
+    /// A path migration completed; the connection is now sending on this path.
+    PathMigrated {
+        local: SocketAddr,
+        remote: SocketAddr,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -214,6 +219,10 @@ impl ConnectionEvents {
                 .borrow_mut()
                 .push_back(ConnectionEvent::OutgoingDatagramOutcome { id: *id, outcome });
         }
+    }
+
+    pub fn path_migrated(&self, local: SocketAddr, remote: SocketAddr) {
+        self.insert(ConnectionEvent::PathMigrated { local, remote });
     }
 
     fn insert(&self, event: ConnectionEvent) {

@@ -2096,6 +2096,9 @@ impl Connection {
             .migrate(&path, force, now, &mut self.stats.borrow_mut())
         {
             self.loss_recovery.migrate();
+            let local = path.borrow().local_address();
+            let remote = path.borrow().remote_address();
+            self.events.path_migrated(local, remote);
         }
         Ok(())
     }
@@ -2164,8 +2167,14 @@ impl Connection {
         }
 
         if self.ensure_permanent(path, now).is_ok() {
+            let was_primary = path.borrow().is_primary();
             self.paths
                 .handle_migration(path, remote, now, &mut self.stats.borrow_mut());
+            if !was_primary {
+                let local = path.borrow().local_address();
+                let remote_addr = path.borrow().remote_address();
+                self.events.path_migrated(local, remote_addr);
+            }
         } else {
             qinfo!(
                 "[{self}] {} Peer migrated, but no connection ID available",
@@ -3382,6 +3391,11 @@ impl Connection {
                 {
                     // This PATH_RESPONSE enabled migration; tell loss recovery.
                     self.loss_recovery.migrate();
+                    if let Some(primary) = self.paths.primary() {
+                        let local = primary.borrow().local_address();
+                        let remote = primary.borrow().remote_address();
+                        self.events.path_migrated(local, remote);
+                    }
                 }
             }
             Frame::ConnectionClose {
