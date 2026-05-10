@@ -2096,11 +2096,15 @@ impl Connection {
             .migrate(&path, force, now, &mut self.stats.borrow_mut())
         {
             self.loss_recovery.migrate();
-            let local = path.borrow().local_address();
-            let remote = path.borrow().remote_address();
-            self.events.path_migrated(local, remote);
+            self.path_migrated(&path);
         }
         Ok(())
+    }
+
+    fn path_migrated(&mut self, path: &PathRef) {
+        let p = path.borrow();
+        self.events
+            .path_migrated(p.local_address(), p.remote_address());
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
@@ -2171,9 +2175,7 @@ impl Connection {
             self.paths
                 .handle_migration(path, remote, now, &mut self.stats.borrow_mut());
             if !was_primary {
-                let local = path.borrow().local_address();
-                let remote_addr = path.borrow().remote_address();
-                self.events.path_migrated(local, remote_addr);
+                self.path_migrated(path);
             }
         } else {
             qinfo!(
@@ -3392,9 +3394,7 @@ impl Connection {
                     // This PATH_RESPONSE enabled migration; tell loss recovery.
                     self.loss_recovery.migrate();
                     if let Some(primary) = self.paths.primary() {
-                        let local = primary.borrow().local_address();
-                        let remote = primary.borrow().remote_address();
-                        self.events.path_migrated(local, remote);
+                        self.path_migrated(&primary);
                     }
                 }
             }
