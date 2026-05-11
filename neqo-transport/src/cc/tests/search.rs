@@ -400,7 +400,7 @@ fn search_exits_when_delivery_rate_slows_down() {
 
     // Finally keep sending but only ack a quarter of the bytes sent. Eventually SEARCH should
     // detect an exit based on the flattening delivery rate.
-    for i in 1..=4 {
+    for i in 1..=2 {
         search.on_packet_sent(pn, bytes_this_round);
         now += INITIAL_RTT;
         let result = search.on_packets_acked(
@@ -411,16 +411,20 @@ fn search_exits_when_delivery_rate_slows_down() {
             &mut CongestionControlStats::default(),
             now,
         );
-        if i == 4 {
+        if i < 2 {
+            assert_eq!(
+                result, None,
+                "SEARCH doesn't immediately exit when delivery slows down"
+            );
+            pn += 1;
+            bytes_this_round += bytes_this_round / 4;
+        } else {
             assert_eq!(
                 result,
                 Some(bytes_this_round),
-                "Because of slowing delivery rate should have eventually exited Slow Start with current cwnd"
+                "Once slow down is not just intermittent SEARCH exits"
             );
-            break;
         }
-        pn += 1;
-        bytes_this_round += bytes_this_round / 4;
     }
 }
 
