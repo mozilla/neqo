@@ -170,7 +170,7 @@ impl Http3ServerHandler {
         self.base_handler.webtransport_session_accept(
             conn,
             stream_id,
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
             accept,
             now,
         )
@@ -188,7 +188,7 @@ impl Http3ServerHandler {
         self.base_handler.connect_udp_session_accept(
             conn,
             stream_id,
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
             accept,
             now,
         )
@@ -249,8 +249,8 @@ impl Http3ServerHandler {
             conn,
             session_id,
             stream_type,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
+            self.events.clone().into(),
         )
     }
 
@@ -402,7 +402,7 @@ impl Http3ServerHandler {
                         Http3StreamType::Http,
                         stream_id,
                         Rc::clone(self.base_handler.qpack_encoder()),
-                        Box::new(self.events.clone()),
+                        self.events.clone().into(),
                     )),
                     Box::new(RecvMessage::new(
                         &RecvMessageInfo {
@@ -412,7 +412,7 @@ impl Http3ServerHandler {
                             first_frame_type: Some(first_frame_type),
                         },
                         Rc::clone(self.base_handler.qpack_decoder()),
-                        Box::new(self.events.clone()),
+                        self.events.clone().into(),
                         None,
                         PriorityHandler::new(false, Priority::default()),
                     )),
@@ -427,8 +427,8 @@ impl Http3ServerHandler {
                 self.base_handler.webtransport_create_stream_remote(
                     StreamId::from(session_id),
                     stream_id,
-                    Box::new(self.events.clone()),
-                    Box::new(self.events.clone()),
+                    self.events.clone().into(),
+                    self.events.clone().into(),
                 )?;
                 let res = self
                     .base_handler

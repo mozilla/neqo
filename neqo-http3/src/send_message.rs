@@ -19,7 +19,7 @@ use neqo_transport::{Connection, StreamId};
 
 use crate::{
     BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
-    SendStream, SendStreamEvents, Stream,
+    SendStream, SendStreamEvents as _, SendStreamEventsImpl, Stream,
     frames::HFrame,
     headers_checks::{headers_valid, is_interim, trailers_valid},
 };
@@ -116,7 +116,7 @@ pub struct SendMessage {
     stream_type: Http3StreamType,
     stream: BufferedStream,
     encoder: Rc<RefCell<qpack::Encoder>>,
-    conn_events: Box<dyn SendStreamEvents>,
+    conn_events: SendStreamEventsImpl,
 }
 
 impl SendMessage {
@@ -125,7 +125,7 @@ impl SendMessage {
         stream_type: Http3StreamType,
         stream_id: StreamId,
         encoder: Rc<RefCell<qpack::Encoder>>,
-        conn_events: Box<dyn SendStreamEvents>,
+        conn_events: SendStreamEventsImpl,
     ) -> Self {
         qdebug!("Create a request stream_id={stream_id}");
         Self {
@@ -314,7 +314,7 @@ impl HttpSendStream for SendMessage {
         Ok(())
     }
 
-    fn set_new_listener(&mut self, conn_events: Box<dyn SendStreamEvents>) {
+    fn set_new_listener(&mut self, conn_events: SendStreamEventsImpl) {
         self.stream_type = Http3StreamType::ExtendedConnect;
         self.conn_events = conn_events;
     }

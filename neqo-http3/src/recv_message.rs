@@ -18,8 +18,9 @@ use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
-    MessageType, Priority, PushId, ReceiveOutput, RecvStream, Res, Stream,
+    CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents as _,
+    MessageType, Priority, PushId, ReceiveOutput, RecvStream, RecvStreamEvents as _,
+    RecvStreamEventsImpl, Res, Stream,
     frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, hframe::HFrameType},
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
@@ -79,7 +80,7 @@ pub struct RecvMessage {
     message_type: MessageType,
     stream_type: Http3StreamType,
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
-    conn_events: Box<dyn HttpRecvStreamEvents>,
+    conn_events: RecvStreamEventsImpl,
     push_handler: Option<Rc<RefCell<PushController>>>,
     stream_id: StreamId,
     priority_handler: PriorityHandler,
@@ -96,7 +97,7 @@ impl RecvMessage {
     pub fn new(
         message_info: &RecvMessageInfo,
         qpack_decoder: Rc<RefCell<qpack::Decoder>>,
-        conn_events: Box<dyn HttpRecvStreamEvents>,
+        conn_events: RecvStreamEventsImpl,
         push_handler: Option<Rc<RefCell<PushController>>>,
         priority_handler: PriorityHandler,
     ) -> Self {
@@ -499,7 +500,7 @@ impl HttpRecvStream for RecvMessage {
         Ok(())
     }
 
-    fn set_new_listener(&mut self, conn_events: Box<dyn HttpRecvStreamEvents>) {
+    fn set_new_listener(&mut self, conn_events: RecvStreamEventsImpl) {
         self.state = RecvMessageState::WaitingForData {
             frame_reader: FrameReader::new(),
         };

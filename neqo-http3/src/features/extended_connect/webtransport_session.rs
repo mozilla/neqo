@@ -15,9 +15,10 @@ use neqo_common::{Bytes, Encoder, Role, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
+    Error, ExtendedConnectEventsImpl, Http3StreamInfo, Http3StreamType, RecvStream, Res,
+    SendStream,
     features::extended_connect::{
-        CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+        CloseReason, ExtendedConnectEvents as _, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
@@ -61,7 +62,7 @@ impl Protocol for Session {
         ExtendedConnectType::WebTransport
     }
 
-    fn session_start(&mut self, events: &mut Box<dyn ExtendedConnectEvents>) -> Res<()> {
+    fn session_start(&mut self, events: &mut ExtendedConnectEventsImpl) -> Res<()> {
         // > WebTransport endpoints SHOULD buffer streams and
         // > datagrams until they can be associated with an
         // > established session.
@@ -94,7 +95,7 @@ impl Protocol for Session {
     fn read_control_stream(
         &mut self,
         conn: &mut Connection,
-        events: &mut Box<dyn ExtendedConnectEvents>,
+        events: &mut ExtendedConnectEventsImpl,
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>> {
@@ -137,7 +138,7 @@ impl Protocol for Session {
     fn add_stream(
         &mut self,
         stream_id: StreamId,
-        events: &mut Box<dyn ExtendedConnectEvents>,
+        events: &mut ExtendedConnectEventsImpl,
         state: State,
     ) -> Res<()> {
         match state {
