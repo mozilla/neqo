@@ -13,8 +13,9 @@ use neqo_common::{qdebug, qlog::Qlog};
 use crate::{
     ConnectionParameters, SlowStart, Stats,
     cc::{
-        ClassicCongestionController, ClassicSlowStart, CongestionControl, CongestionController,
-        Cubic, HyStart, NewReno, Search,
+        ClassicCongestionController, ClassicSlowStart, CongestionControl,
+        CongestionControlImplementation, CongestionController as _, Cubic, HyStart, NewReno,
+        Search,
     },
     pace::Pacer,
     pmtud::Pmtud,
@@ -29,7 +30,7 @@ pub const PACING_BURST_SIZE: usize = 2;
 
 #[derive(Debug)]
 pub struct PacketSender {
-    cc: Box<dyn CongestionController>,
+    cc: CongestionControlImplementation,
     pacer: Pacer,
     qlog: Qlog,
 }
@@ -45,26 +46,40 @@ impl PacketSender {
                 conn_params.get_slow_start(),
             ) {
                 (CongestionControl::NewReno, SlowStart::Classic) => {
-                    Box::new(ClassicCongestionController::new(
-                        ClassicSlowStart::default(),
-                        NewReno::default(),
-                        pmtud,
-                        spurious_recovery,
-                    ))
+                    CongestionControlImplementation::ClassicNewReno(
+                        ClassicCongestionController::new(
+                            ClassicSlowStart::default(),
+                            NewReno::default(),
+                            pmtud,
+                            spurious_recovery,
+                        ),
+                    )
                 }
                 (CongestionControl::NewReno, SlowStart::HyStart) => {
-                    Box::new(ClassicCongestionController::new(
-                        HyStart::new(
-                            conn_params.pacing_enabled(),
-                            conn_params.get_hystart_css_baseline(),
+                    CongestionControlImplementation::HyStartNewReno(
+                        ClassicCongestionController::new(
+                            HyStart::new(
+                                conn_params.pacing_enabled(),
+                                conn_params.get_hystart_css_baseline(),
+                            ),
+                            NewReno::default(),
+                            pmtud,
+                            spurious_recovery,
                         ),
-                        NewReno::default(),
-                        pmtud,
-                        spurious_recovery,
-                    ))
+                    )
+                }
+                (CongestionControl::NewReno, SlowStart::Search) => {
+                    CongestionControlImplementation::SearchNewReno(
+                        ClassicCongestionController::new(
+                            Search::new(),
+                            NewReno::default(),
+                            pmtud,
+                            spurious_recovery,
+                        ),
+                    )
                 }
                 (CongestionControl::Cubic, SlowStart::Classic) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::ClassicCubic(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         Cubic::default(),
                         pmtud,
@@ -72,7 +87,7 @@ impl PacketSender {
                     ))
                 }
                 (CongestionControl::Cubic, SlowStart::HyStart) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::HyStartCubic(ClassicCongestionController::new(
                         HyStart::new(
                             conn_params.pacing_enabled(),
                             conn_params.get_hystart_css_baseline(),
@@ -82,16 +97,8 @@ impl PacketSender {
                         spurious_recovery,
                     ))
                 }
-                (CongestionControl::NewReno, SlowStart::Search) => {
-                    Box::new(ClassicCongestionController::new(
-                        Search::new(),
-                        NewReno::default(),
-                        pmtud,
-                        spurious_recovery,
-                    ))
-                }
                 (CongestionControl::Cubic, SlowStart::Search) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::SearchCubic(ClassicCongestionController::new(
                         Search::new(),
                         Cubic::default(),
                         pmtud,
