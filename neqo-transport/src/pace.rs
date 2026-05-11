@@ -40,7 +40,7 @@ impl Pacer {
     /// the case the congestion controller increases the congestion window.
     /// This value spaces packets over half the congestion window, which matches
     /// our current congestion controller, which double the window every RTT.
-    const SPEEDUP: usize = 2;
+    const SPEEDUP: u64 = 2;
 
     /// Create a new `Pacer`.  This takes the current time, the maximum burst size,
     /// and the packet size.
@@ -90,19 +90,26 @@ impl Pacer {
         // `deficit` can exceed 2 × MTU when `self.c` carries accumulated debt
         // from consecutive sub-granularity sends.  `saturating_mul` caps the
         // product safely regardless of the actual value.
-        let deficit = u64::try_from(packet - self.c).expect("packet is larger than current credit");
+        let Ok(deficit) = u64::try_from(packet - self.c) else {
+            qtrace!("[{self}] next {cwnd}/{rtt:?} deficit overflow");
+            return self.t;
+        };
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
-        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP as u64);
-        let w = Duration::from_nanos(rtt_ns.saturating_mul(deficit) / divisor);
+        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        let w_ns = rtt_ns.saturating_mul(deficit) / divisor;
 
         // If the increment is below the timer granularity, send immediately.
-        if w < GRANULARITY {
-            qtrace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w:?})");
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "GRANULARITY is 1ms, fits in u64"
+        )]
+        if w_ns < GRANULARITY.as_nanos() as u64 {
+            qtrace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w_ns}ns)");
             return self.t;
         }
 
-        let nxt = self.t + w;
-        qtrace!("[{self}] next {cwnd}/{rtt:?} wait {w:?} = {nxt:?}");
+        let nxt = self.t + Duration::from_nanos(w_ns);
+        qtrace!("[{self}] next {cwnd}/{rtt:?} wait {w_ns}ns = {nxt:?}");
         nxt
     }
 
@@ -118,7 +125,7 @@ impl Pacer {
     fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u64> {
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
         let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
-        let factor = (cwnd as u64).saturating_mul(Self::SPEEDUP as u64);
+        let factor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
         elapsed_ns.saturating_mul(factor).checked_div(rtt_ns)
     }
 
