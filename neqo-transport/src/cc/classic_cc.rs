@@ -121,13 +121,16 @@ pub trait SlowStart: Display + Debug {
     /// Enables a trait implementor to ingest info about sent packets.
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, _sent_bytes: usize) {}
 
+    /// This is needed by SEARCH to keep its cumulative byte counters in sync during app-limited
+    /// periods, when [`SlowStart::on_packets_acked`] is not called.
+    fn record_acked_bytes(&mut self, _new_acked_bytes: usize) {}
+
     /// Handle packets being acknowledged during slow start. Returns the congestion window in bytes
     /// that slow start should be exited with. If slow start isn't exited returns `None`.
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,
         largest_acked: packet::Number,
-        new_acked_bytes: usize,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
         now: Instant,
@@ -336,6 +339,10 @@ where
             new_acked += pkt.len();
         }
 
+        if self.current.phase.in_slow_start() {
+            self.slow_start.record_acked_bytes(new_acked);
+        }
+
         if is_app_limited {
             self.congestion_control.on_app_limited();
             qdebug!(
@@ -353,7 +360,6 @@ where
             if let Some(exit_cwnd) = self.slow_start.on_packets_acked(
                 rtt_est,
                 largest_packet_acked.pn(),
-                new_acked,
                 self.current.congestion_window,
                 cc_stats,
                 now,
@@ -2133,14 +2139,8 @@ mod tests {
         let mut cc_stats = CongestionControlStats::default();
 
         // Dirty HyStart state so current_round_min_rtt is non-None.
-        cc.slow_start.on_packets_acked(
-            &RttEstimate::new(RTT),
-            0,
-            0,
-            cc.cwnd(),
-            &mut cc_stats,
-            now(),
-        );
+        cc.slow_start
+            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats, now());
         assert!(cc.slow_start.current_round_min_rtt().is_some());
 
         cc.detect_persistent_congestion(

@@ -56,7 +56,6 @@ fn maybe_enter_css(
         hystart.on_packets_acked(
             &RttEstimate::new(base_rtt),
             i,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             cc_stats,
             now(),
@@ -73,14 +72,7 @@ fn maybe_enter_css(
 
     // Collect N_RTT_SAMPLE samples with new RTT and end second round
     for i in window_end + 1..=window_end2 {
-        hystart.on_packets_acked(
-            &RttEstimate::new(new_rtt),
-            i,
-            MIN_INITIAL_PACKET_SIZE,
-            INITIAL_CWND,
-            cc_stats,
-            now(),
-        );
+        hystart.on_packets_acked(&RttEstimate::new(new_rtt), i, INITIAL_CWND, cc_stats, now());
     }
 
     assert!(hystart.window_end().is_none());
@@ -117,7 +109,6 @@ fn round_tracking_lifecycle() {
         hystart.on_packets_acked(
             &RttEstimate::new(BASE_RTT),
             pn, // All < window_end
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -138,7 +129,6 @@ fn round_tracking_lifecycle() {
     hystart.on_packets_acked(
         &RttEstimate::new(BASE_RTT),
         window_end, // largest_acked=window_end, round ends
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
         &mut CongestionControlStats::default(),
         now(),
@@ -177,7 +167,6 @@ fn rtt_sample_collection_tracks_minimum() {
     hystart.on_packets_acked(
         &RttEstimate::new(BASE_RTT),
         0,
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
         &mut CongestionControlStats::default(),
         now(),
@@ -193,7 +182,6 @@ fn rtt_sample_collection_tracks_minimum() {
     hystart.on_packets_acked(
         &RttEstimate::new(LOW_RTT),
         1,
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
         &mut CongestionControlStats::default(),
         now(),
@@ -209,7 +197,6 @@ fn rtt_sample_collection_tracks_minimum() {
     hystart.on_packets_acked(
         &RttEstimate::new(HIGH_RTT),
         2,
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
         &mut CongestionControlStats::default(),
         now(),
@@ -236,7 +223,6 @@ fn rtt_sample_count_increments_per_ack() {
         hystart.on_packets_acked(
             &RttEstimate::new(BASE_RTT),
             i,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -257,7 +243,6 @@ fn css_entry_not_triggered_with_insufficient_samples() {
         hystart.on_packets_acked(
             &RttEstimate::new(BASE_RTT),
             i,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -273,7 +258,6 @@ fn css_entry_not_triggered_with_insufficient_samples() {
         hystart.on_packets_acked(
             &RttEstimate::new(HIGH_RTT),
             i,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -409,7 +393,6 @@ fn css_exit_after_n_rounds() {
             hystart.on_packets_acked(
                 &RttEstimate::new(HIGH_RTT),
                 i as u64,
-                MIN_INITIAL_PACKET_SIZE,
                 INITIAL_CWND,
                 &mut cc_stats,
                 now(),
@@ -420,7 +403,6 @@ fn css_exit_after_n_rounds() {
         let exit_slow_start = hystart.on_packets_acked(
             &RttEstimate::new(HIGH_RTT),
             new_window_end,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut cc_stats,
             now(),
@@ -464,7 +446,6 @@ fn css_back_to_slow_start_on_rtt_decrease() {
         hystart.on_packets_acked(
             &RttEstimate::new(LOWER_RTT),
             i as u64, // Less than window_end
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut cc_stats,
             now(),
@@ -497,7 +478,6 @@ fn css_exit_only_with_new_samples() {
         hystart.on_packets_acked(
             &RttEstimate::new(BASE_RTT),
             i,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -515,7 +495,6 @@ fn css_exit_only_with_new_samples() {
         hystart.on_packets_acked(
             &RttEstimate::new(HIGH_RTT),
             0,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -528,7 +507,6 @@ fn css_exit_only_with_new_samples() {
     hystart.on_packets_acked(
         &RttEstimate::new(LOW_RTT),
         0,
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
         &mut CongestionControlStats::default(),
         now(),
@@ -544,7 +522,6 @@ fn css_exit_only_with_new_samples() {
         hystart.on_packets_acked(
             &RttEstimate::new(LOW_RTT),
             0,
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -579,7 +556,6 @@ fn css_alternative_baseline() {
         hystart.on_packets_acked(
             &RttEstimate::new(CSS_ENTRY_RTT.checked_sub(Duration::from_micros(1)).unwrap()),
             i as u64, // Less than window_end
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -597,7 +573,6 @@ fn css_alternative_baseline() {
     hystart.on_packets_acked(
         &RttEstimate::new(below_threshold_rtt),
         0, // Less than window_end
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
         &mut CongestionControlStats::default(),
         now(),
@@ -639,7 +614,6 @@ fn css_exit_to_slow_start_restores_normal_growth() {
         hystart.on_packets_acked(
             &RttEstimate::new(LOWER_RTT),
             i as u64, // Less than window_end
-            MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),

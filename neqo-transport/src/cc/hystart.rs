@@ -229,7 +229,6 @@ impl SlowStart for HyStart {
         &mut self,
         rtt_est: &RttEstimate,
         largest_acked: packet::Number,
-        _new_acked_bytes: usize,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
         _now: Instant,

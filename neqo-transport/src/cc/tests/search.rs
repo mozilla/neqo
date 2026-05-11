@@ -21,6 +21,25 @@ use crate::{
 const INITIAL_RTT: Duration = Duration::from_millis(100);
 const HIGH_RTT: Duration = Duration::from_millis(200);
 
+/// Helper to call both [`Search::record_acked_bytes`] and [`Search::on_packets_acked`].
+fn ack(
+    search: &mut Search,
+    rtt_est: &RttEstimate,
+    largest_acked: u64,
+    new_acked_bytes: usize,
+    curr_cwnd: usize,
+    now: Instant,
+) -> Option<usize> {
+    search.record_acked_bytes(new_acked_bytes);
+    search.on_packets_acked(
+        rtt_est,
+        largest_acked,
+        curr_cwnd,
+        &mut CongestionControlStats::default(),
+        now,
+    )
+}
+
 /// Helper to create and initialize a SEARCH instance. Internally asserts that all fields are
 /// correctly initialized.
 ///
@@ -33,12 +52,12 @@ fn init_search(initial_rtt: Duration) -> (Search, Duration, Instant) {
 
     search.on_packet_sent(0, MIN_INITIAL_PACKET_SIZE);
     now += initial_rtt;
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &rtt_est,
         0,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -60,12 +79,12 @@ fn initialize_on_first_ack_only() {
 
     search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
     now += HIGH_RTT;
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(HIGH_RTT),
         1,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -96,12 +115,12 @@ fn update_bins_after_bin_end_passed() {
 
     search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
     now += bin_duration;
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         1,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -112,12 +131,12 @@ fn update_bins_after_bin_end_passed() {
     );
 
     search.on_packet_sent(2, MIN_INITIAL_PACKET_SIZE);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         2,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now + Duration::from_nanos(1),
     );
 
@@ -147,12 +166,12 @@ fn update_bins_skipped_bins_propagate_prev_value() {
     // move time by more than 2 bins, i.e. skip one
     now += 2 * bin_duration + Duration::from_nanos(1);
 
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         1,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -179,12 +198,12 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
     // which is used as the guard for resetting if passing more than that.
     now += 10 * bin_duration;
     search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         1,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -197,12 +216,12 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
     // a window.
     now += 11 * bin_duration;
     search.on_packet_sent(2, MIN_INITIAL_PACKET_SIZE);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         2,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -212,12 +231,12 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
     );
 
     search.on_packet_sent(3, MIN_INITIAL_PACKET_SIZE);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(HIGH_RTT),
         3,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -249,36 +268,36 @@ fn sent_and_acked_bytes_accumulate() {
 
     // 10ms pass, not enough to reach bin_end
     now += Duration::from_millis(10);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         1,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
     assert_eq!(search.curr_idx(), Some(0));
 
     // 10ms more pass, still not enough
     now += Duration::from_millis(10);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         2,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
     assert_eq!(search.curr_idx(), Some(0));
 
     // another 20ms pass, now bins get updated
     now += Duration::from_millis(20);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         3,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -296,12 +315,12 @@ fn prev_idx_and_fraction_calculation() {
     // Progress time so we have some space to look back for the test's sake.
     now += bin_duration * 5;
     search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &RttEstimate::new(INITIAL_RTT),
         1,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
     let curr_idx = search.curr_idx().unwrap();
@@ -327,12 +346,12 @@ fn sent_and_acked_byte_computation() {
     for pn in 0..20 {
         search.on_packet_sent(pn, 1000);
         now += bin_duration + Duration::from_nanos(1);
-        search.on_packets_acked(
+        ack(
+            &mut search,
             &RttEstimate::new(INITIAL_RTT),
             pn,
             1000,
             INITIAL_CWND,
-            &mut CongestionControlStats::default(),
             now,
         );
     }
@@ -364,12 +383,12 @@ fn search_exits_when_delivery_rate_slows_down() {
     while search.curr_idx() < Some(12) {
         search.on_packet_sent(pn, bytes_this_round);
         now += INITIAL_RTT;
-        search.on_packets_acked(
+        ack(
+            &mut search,
             &RttEstimate::new(INITIAL_RTT),
             pn,
             bytes_this_round,
             bytes_this_round,
-            &mut CongestionControlStats::default(),
             now,
         );
         pn += 1;
@@ -382,12 +401,12 @@ fn search_exits_when_delivery_rate_slows_down() {
     for _ in 1..=10 {
         search.on_packet_sent(pn, bytes_this_round);
         now += INITIAL_RTT;
-        let result = search.on_packets_acked(
+        let result = ack(
+            &mut search,
             &RttEstimate::new(INITIAL_RTT),
             pn,
             bytes_this_round,
             bytes_this_round,
-            &mut CongestionControlStats::default(),
             now,
         );
         pn += 1;
@@ -403,12 +422,12 @@ fn search_exits_when_delivery_rate_slows_down() {
     for i in 1..=2 {
         search.on_packet_sent(pn, bytes_this_round);
         now += INITIAL_RTT;
-        let result = search.on_packets_acked(
+        let result = ack(
+            &mut search,
             &RttEstimate::new(INITIAL_RTT),
             pn,
             bytes_this_round / 4,
             bytes_this_round,
-            &mut CongestionControlStats::default(),
             now,
         );
         if i < 2 {
@@ -441,12 +460,12 @@ fn inflated_rtt_is_guarded() {
     while search.curr_idx() < Some(28) {
         search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
         now += bin_duration + Duration::from_nanos(1);
-        search.on_packets_acked(
+        ack(
+            &mut search,
             &rtt_est,
             pn,
             MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
-            &mut CongestionControlStats::default(),
             now,
         );
         pn += 1;
@@ -471,14 +490,7 @@ fn no_sent_bytes() {
     // Advance to curr_idx >= 13 so prev_idx = curr_idx - 2 > W(10).
     while search.curr_idx() < Some(13) {
         now += bin_duration + Duration::from_nanos(1);
-        search.on_packets_acked(
-            &rtt_est,
-            pn,
-            0,
-            INITIAL_CWND,
-            &mut CongestionControlStats::default(),
-            now,
-        );
+        ack(&mut search, &rtt_est, pn, 0, INITIAL_CWND, now);
         pn += 1;
     }
 
@@ -501,12 +513,12 @@ fn warming_up() {
     while search.curr_idx() < Some(12) {
         search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
         now += bin_duration + Duration::from_nanos(1);
-        search.on_packets_acked(
+        ack(
+            &mut search,
             &rtt_est,
             pn,
             MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
-            &mut CongestionControlStats::default(),
             now,
         );
         pn += 1;
@@ -521,12 +533,12 @@ fn warming_up() {
     // One more bin crosses the boundary: prev_idx = 13 - 2 = 11 > W(10).
     search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
     now += bin_duration + Duration::from_nanos(1);
-    search.on_packets_acked(
+    ack(
+        &mut search,
         &rtt_est,
         pn,
         MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
-        &mut CongestionControlStats::default(),
         now,
     );
 
@@ -549,12 +561,12 @@ fn continue_when_delivery_rate_steady() {
     while search.curr_idx() < Some(13) {
         search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
         now += bin_duration + Duration::from_nanos(1);
-        search.on_packets_acked(
+        ack(
+            &mut search,
             &rtt_est,
             pn,
             MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
-            &mut CongestionControlStats::default(),
             now,
         );
         pn += 1;
@@ -565,12 +577,12 @@ fn continue_when_delivery_rate_steady() {
     for _ in 0..10 {
         search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
         now += bin_duration + Duration::from_nanos(1);
-        search.on_packets_acked(
+        ack(
+            &mut search,
             &rtt_est,
             pn,
             MIN_INITIAL_PACKET_SIZE,
             INITIAL_CWND,
-            &mut CongestionControlStats::default(),
             now,
         );
         pn += 1;

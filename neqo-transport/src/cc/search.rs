@@ -330,14 +330,11 @@ impl SlowStart for Search {
         &mut self,
         rtt_est: &RttEstimate,
         _largest_acked: packet::Number,
-        new_acked_bytes: usize,
         curr_cwnd: usize,
         _cc_stats: &mut CongestionControlStats,
         now: Instant,
     ) -> Option<usize> {
         let rtt = rtt_est.latest_rtt();
-        // Store delivered bytes on every ACK
-        self.acked_bytes = self.acked_bytes.saturating_add(new_acked_bytes);
 
         // Initialize on first ACK.
         if self.curr_idx.is_none() {
@@ -368,6 +365,10 @@ impl SlowStart for Search {
             Outcome::Exit(cwnd) => Some(cwnd),
             _ => None,
         }
+    }
+
+    fn record_acked_bytes(&mut self, new_acked_bytes: usize) {
+        self.acked_bytes = self.acked_bytes.saturating_add(new_acked_bytes);
     }
 
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {

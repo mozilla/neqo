@@ -32,7 +32,6 @@ impl SlowStart for ClassicSlowStart {
         &mut self,
         _rtt_est: &RttEstimate,
         _largest_acked: packet::Number,
-        _new_acked_bytes: usize,
         _curr_cwnd: usize,
         _cc_stats: &mut CongestionControlStats,
         _now: Instant,
