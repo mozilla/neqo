@@ -128,21 +128,18 @@ pub enum CongestionControlImplementation {
     HyStartCubic(ClassicCongestionController<HyStart, Cubic>),
 }
 
-/// Expand a method call on `self` into a match that delegates to each variant's inner value.
 macro_rules! dispatch {
-    ($self:ident.$method:ident($($arg:expr),* $(,)?)) => {
-        match $self {
-            Self::ClassicNewReno(v) => v.$method($($arg),*),
-            Self::HyStartNewReno(v) => v.$method($($arg),*),
-            Self::ClassicCubic(v) => v.$method($($arg),*),
-            Self::HyStartCubic(v) => v.$method($($arg),*),
-        }
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!(
+            [ClassicNewReno, HyStartNewReno, ClassicCubic, HyStartCubic]
+            $self . $method $args
+        )
     };
 }
 
 impl CongestionController for CongestionControlImplementation {
     fn set_qlog(&mut self, qlog: Qlog) {
-        dispatch!(self.set_qlog(qlog))
+        dispatch!(self.set_qlog(qlog));
     }
 
     fn cwnd(&self) -> usize {
@@ -176,7 +173,7 @@ impl CongestionController for CongestionControlImplementation {
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) {
-        dispatch!(self.on_packets_acked(acked_pkts, rtt_est, now, cc_stats))
+        dispatch!(self.on_packets_acked(acked_pkts, rtt_est, now, cc_stats));
     }
 
     fn on_packets_lost(
@@ -212,15 +209,15 @@ impl CongestionController for CongestionControlImplementation {
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
-        dispatch!(self.discard(pkt, now))
+        dispatch!(self.discard(pkt, now));
     }
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        dispatch!(self.on_packet_sent(pkt, now))
+        dispatch!(self.on_packet_sent(pkt, now));
     }
 
     fn discard_in_flight(&mut self, now: Instant) {
-        dispatch!(self.discard_in_flight(now))
+        dispatch!(self.discard_in_flight(now));
     }
 }
 
