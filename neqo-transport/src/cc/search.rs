@@ -215,9 +215,9 @@ impl Search {
     /// Widens intermittent results and returns `u64` to avoid saturation or overflow on 32-bit
     /// systems with large bandwidths.
     const fn compute_sent(&self, old: usize, new: usize, fraction: u64) -> u64 {
-        // NOTE: SEARCH draft-09 does forward interpolation here, i.e. `new + 1`/`old + 1`. That is
-        // a mistake in the draft and has been discussed with the SEARCH team. Subtracting
-        // is correct.
+        // NOTE: SEARCH draft-09 does forward interpolation here, i.e. `new + 1` or `old + 1`. That
+        // is a mistake in the draft and has been discussed with the SEARCH team. Subtracting is
+        // correct.
         let low_idx = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
             .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
             as u64;
