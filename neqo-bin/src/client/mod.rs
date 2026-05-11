@@ -644,9 +644,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http3::Handler::new(to_request, args.clone());
 
-                Runner::new(real_local, &mut socket, client, handler, &args)
-                    .run()
-                    .await?
+                Box::pin(Runner::new(real_local, &mut socket, client, handler, &args).run()).await?
             } else {
                 let client = http09::create_client(&args, real_local, remote_addr, &host, token)
                     .expect("failed to create client");
