@@ -2101,7 +2101,7 @@ impl Connection {
         Ok(())
     }
 
-    fn path_migrated(&mut self, path: &PathRef) {
+    fn path_migrated(&self, path: &PathRef) {
         let p = path.borrow();
         self.events
             .path_migrated(p.local_address(), p.remote_address());
