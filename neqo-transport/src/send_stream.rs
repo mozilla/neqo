@@ -3244,4 +3244,73 @@ mod tests {
         s.mark_as_acked(len_u64, 0, true);
         assert!(s.is_terminal());
     }
+
+    fn stream_with_priority(tx: TransmissionPriority, rx: RetransmissionPriority) -> SendStream {
+        let mut s = SendStream::new(
+            StreamId::from(0),
+            100,
+            connection_fc(100),
+            ConnectionEvents::default(),
+        );
+        s.set_priority(tx, rx);
+        s
+    }
+
+    fn stream_frames_written(s: &mut SendStream, priority: TransmissionPriority) -> usize {
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_stream_frame(priority, &mut builder, &mut tokens, &mut stats);
+        stats.stream
+    }
+
+    fn reset_frame_written(s: &mut SendStream, priority: TransmissionPriority) -> bool {
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats)
+    }
+
+    #[test]
+    fn set_priority_updates_effective_priority() {
+        let mut s = stream_with_priority(
+            TransmissionPriority::Low,
+            RetransmissionPriority::MuchHigher,
+        );
+        s.send(&[0x42; 10]).unwrap();
+
+        assert_eq!(stream_frames_written(&mut s, TransmissionPriority::Low), 1);
+        s.mark_as_lost(0, 10, false);
+        assert_eq!(
+            stream_frames_written(&mut s, TransmissionPriority::Normal),
+            0
+        );
+        assert_eq!(
+            stream_frames_written(
+                &mut s,
+                TransmissionPriority::Low + RetransmissionPriority::MuchHigher,
+            ),
+            1,
+        );
+    }
+
+    #[test]
+    fn reset_lost_uses_effective_priority() {
+        let mut s = stream_with_priority(
+            TransmissionPriority::Normal,
+            RetransmissionPriority::MuchHigher,
+        );
+        s.send(b"hello").unwrap();
+        s.reset(0);
+
+        assert!(reset_frame_written(&mut s, TransmissionPriority::Normal));
+        s.reset_lost();
+        assert!(!reset_frame_written(&mut s, TransmissionPriority::Normal));
+        assert!(reset_frame_written(
+            &mut s,
+            TransmissionPriority::Normal + RetransmissionPriority::MuchHigher,
+        ));
+    }
 }
