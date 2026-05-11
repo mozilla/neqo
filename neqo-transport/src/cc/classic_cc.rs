@@ -581,6 +581,10 @@ where
     }
 
     /// Whether a packet can be sent immediately as a result of entering recovery.
+    fn in_slow_start(&self) -> bool {
+        self.current.phase.in_slow_start()
+    }
+
     fn recovery_packet(&self) -> bool {
         self.current.phase == Phase::RecoveryStart
     }

@@ -86,6 +86,9 @@ pub trait CongestionController: Display + Debug {
     ) -> bool;
 
     #[must_use]
+    fn in_slow_start(&self) -> bool;
+
+    #[must_use]
     fn recovery_packet(&self) -> bool;
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant);

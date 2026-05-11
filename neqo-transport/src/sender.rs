@@ -124,9 +124,18 @@ impl PacketSender {
 
     /// Emit a `PacingRate` qlog metric.
     fn maybe_qlog_pacing_rate(&mut self, rtt: Duration, now: Instant) {
-        if let Some(rate) = Pacer::rate(self.cc.cwnd(), rtt) {
+        if let Some(rate) = self.pacer.rate(self.cc.cwnd(), rtt) {
             qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PacingRate(rate)], now);
         }
+    }
+
+    fn sync_pacing_speedup(&mut self) {
+        let speedup = if self.cc.in_slow_start() {
+            Pacer::SPEEDUP_SLOW_START
+        } else {
+            Pacer::SPEEDUP
+        };
+        self.pacer.set_speedup(speedup);
     }
 
     fn maybe_update_pacer_mtu(&mut self) {
@@ -149,6 +158,7 @@ impl PacketSender {
     ) {
         self.cc
             .on_packets_acked(acked_pkts, rtt_est, now, &mut stats.cc);
+        self.sync_pacing_speedup();
         self.maybe_qlog_pacing_rate(rtt_est.estimate(), now);
         self.pmtud_mut().on_packets_acked(acked_pkts, now, stats);
         self.maybe_update_pacer_mtu();
