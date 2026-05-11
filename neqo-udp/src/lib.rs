@@ -104,28 +104,36 @@ pub fn send_inner(
     Ok(())
 }
 
+#[cfg(unix)]
 fn is_emsgsize(e: &io::Error) -> bool {
-    e.raw_os_error().is_some_and(|e| {
-        #[cfg(unix)]
-        return e == libc::EMSGSIZE;
-        #[cfg(windows)]
-        // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
-        // segment size exceeds the supported limit.
-        return e == WinSock::WSAEMSGSIZE.0 || e == WinSock::WSAEINVAL.0;
-        #[cfg(not(any(unix, windows)))]
-        return false;
-    })
+    e.raw_os_error() == Some(libc::EMSGSIZE)
 }
 
+#[cfg(windows)]
+fn is_emsgsize(e: &io::Error) -> bool {
+    // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
+    // segment size exceeds the supported limit.
+    matches!(e.raw_os_error(), Some(c) if c == WinSock::WSAEMSGSIZE.0 || c == WinSock::WSAEINVAL.0)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn is_emsgsize(_: &io::Error) -> bool {
+    false
+}
+
+#[cfg(unix)]
 fn is_enobufs(e: &io::Error) -> bool {
-    e.raw_os_error().is_some_and(|e| {
-        #[cfg(unix)]
-        return e == libc::ENOBUFS;
-        #[cfg(windows)]
-        return e == WinSock::WSAENOBUFS.0;
-        #[cfg(not(any(unix, windows)))]
-        return false;
-    })
+    e.raw_os_error() == Some(libc::ENOBUFS)
+}
+
+#[cfg(windows)]
+fn is_enobufs(e: &io::Error) -> bool {
+    e.raw_os_error() == Some(WinSock::WSAENOBUFS.0)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn is_enobufs(_: &io::Error) -> bool {
+    false
 }
 
 #[cfg(unix)]
@@ -406,6 +414,14 @@ mod tests {
     #[cfg(windows)]
     fn is_emsgsize_false_for_other_windows_errors() {
         let err = io::Error::from_raw_os_error(WinSock::WSAEWOULDBLOCK.0);
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_enobufs_true_for_wsaenobufs() {
+        let err = io::Error::from_raw_os_error(WinSock::WSAENOBUFS.0);
+        assert!(is_enobufs(&err));
         assert!(!is_emsgsize(&err));
     }
 
