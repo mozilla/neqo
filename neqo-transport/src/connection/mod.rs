@@ -3849,7 +3849,7 @@ impl Connection {
         let (n, fin) = self.streams.get_recv_stream_mut(stream_id)?.read(data)?;
         if fin {
             // read() returning fin=true means the stream just transitioned to DataRead.
-            self.streams.note_recv_terminal();
+            self.streams.stream_ended();
         }
         Ok((n, fin))
     }
@@ -3861,7 +3861,7 @@ impl Connection {
         let stream = self.streams.get_recv_stream_mut(stream_id)?;
 
         stream.stop_sending(err);
-        self.streams.note_recv_terminal();
+        self.streams.stream_ended();
         Ok(())
     }
 

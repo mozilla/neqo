@@ -122,7 +122,7 @@ impl Streams {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.reset(*application_error_code, *final_size)?;
-                    // reset() transitions the stream to ResetRecvd (terminal).
+                    // reset() may transition the stream to ResetRecvd (terminal).
                     self.recv.note_terminal();
                 }
             }
@@ -319,8 +319,8 @@ impl Streams {
         self.recv.clear();
     }
 
-    /// Note that a recv stream has become terminal (e.g. the application read the FIN).
-    pub fn note_recv_terminal(&mut self) {
+    /// Note that a recv stream has ended (i.e., transitioned to a terminal state).
+    pub const fn stream_ended(&mut self) {
         self.recv.note_terminal();
     }
 
