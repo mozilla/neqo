@@ -114,8 +114,8 @@ pub enum MessageType {
 /// ```ignore
 /// // Once per enum, in the impl module:
 /// macro_rules! dispatch {
-///     ($self:ident . $method:ident ( $($arg:expr),* $(,)? )) => {
-///         neqo_common::dispatch!([Variant1, Variant2, Variant3] $self . $method ( $($arg),* ))
+///     ($self:ident . $method:ident $args:tt) => {
+///         neqo_common::dispatch!([Variant1, Variant2, Variant3] $self . $method $args)
 ///     };
 /// }
 ///
