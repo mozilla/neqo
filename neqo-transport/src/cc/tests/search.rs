@@ -216,12 +216,13 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
     // a window.
     now += 11 * bin_duration;
     search.on_packet_sent(2, MIN_INITIAL_PACKET_SIZE);
-    ack(
-        &mut search,
+    let mut cc_stats = CongestionControlStats::default();
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
         &RttEstimate::new(INITIAL_RTT),
         2,
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
+        &mut cc_stats,
         now,
     );
 
@@ -229,6 +230,8 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
         search.curr_idx().is_none(),
         "passing more than one window of bins should reset"
     );
+    assert_eq!(cc_stats.search_reset.count, 1);
+    assert_eq!(cc_stats.search_reset.max_passed_bins, Some(11));
 
     search.on_packet_sent(3, MIN_INITIAL_PACKET_SIZE);
     ack(
@@ -256,6 +259,21 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
         Some(now + new_bin_duration),
         "bin_end should be re-initialized with the new RTT"
     );
+
+    // Trigger a second reset with more skipped bins to verify max_passed_bins tracks the max.
+    now += 15 * new_bin_duration;
+    search.on_packet_sent(4, MIN_INITIAL_PACKET_SIZE);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(HIGH_RTT),
+        4,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+    assert!(search.curr_idx().is_none());
+    assert_eq!(cc_stats.search_reset.count, 2);
+    assert_eq!(cc_stats.search_reset.max_passed_bins, Some(15));
 }
 
 #[test]

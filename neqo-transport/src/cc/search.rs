@@ -135,7 +135,11 @@ impl Search {
         clippy::cast_possible_truncation,
         reason = "casting small usize to u32 for use in Duration::saturating_mul"
     )]
-    fn update_bins(&mut self, now: Instant) -> Option<usize> {
+    fn update_bins(
+        &mut self,
+        now: Instant,
+        cc_stats: &mut CongestionControlStats,
+    ) -> Option<usize> {
         let mut curr_idx = self.curr_idx?;
         let mut bin_end = self.bin_end?;
 
@@ -159,6 +163,13 @@ impl Search {
             qdebug!(
                 "SEARCH: update_bins: resetting because we skipped {passed_bins} bins (limit {})",
                 Self::W
+            );
+            cc_stats.search_reset.count += 1;
+            cc_stats.search_reset.max_passed_bins = Some(
+                cc_stats
+                    .search_reset
+                    .max_passed_bins
+                    .map_or(passed_bins, |c| c.max(passed_bins)),
             );
             self.reset();
             return None;
@@ -390,7 +401,7 @@ impl SlowStart for Search {
             return None;
         }
 
-        let curr_idx = self.update_bins(now)?;
+        let curr_idx = self.update_bins(now, cc_stats)?;
 
         // NOTE: SEARCH draft-09 implements a drain-phase to gradually lower the congestion window
         // towards the approximated empty-buffer BDP. I think that could be counter-intuitive while

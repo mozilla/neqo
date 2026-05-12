@@ -158,6 +158,14 @@ pub struct CongestionEventStats {
     pub spurious: usize,
 }
 
+/// Tracks SEARCH reset occurrences: how many times SEARCH reset and the maximum number of bins
+/// skipped across all resets.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct SearchResetStats {
+    pub count: usize,
+    pub max_passed_bins: Option<usize>,
+}
+
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
@@ -191,6 +199,8 @@ pub struct CongestionControlStats {
     /// bytes ever reached. Can be used to tune the exit threshold. `None` means that the SEARCH
     /// check never ran.
     pub search_max_norm_diff: Option<usize>,
+    /// Records SEARCH reset occurrences.
+    pub search_reset: SearchResetStats,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal
@@ -200,6 +210,7 @@ pub struct CongestionControlStats {
     /// lifetime.
     pub cwnd: Option<usize>,
 }
+
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
