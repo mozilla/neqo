@@ -204,6 +204,12 @@ pub struct CongestionControlStats {
     /// Records the number of times per connection that SEARCH calculated zero bytes sent in the
     /// previous RTT. This exists to gain deeper understanding into app-limited behaviour.
     pub search_zero_sent_bytes: usize,
+    /// The `latest_rtt` from the first ACK that initialized SEARCH. Used to evaluate whether the
+    /// initial RTT sample (which sets `bin_duration`) is inflated relative to `min_rtt`.
+    pub search_first_rtt: Option<Duration>,
+    /// The `latest_rtt` from the second ACK processed by SEARCH. Together with `search_first_rtt`,
+    /// allows evaluating whether `min(first, second)` would be a better initialization value.
+    pub search_second_rtt: Option<Duration>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal

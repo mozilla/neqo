@@ -19,7 +19,9 @@ use crate::{
 };
 
 const INITIAL_RTT: Duration = Duration::from_millis(100);
+const LOW_RTT: Duration = Duration::from_millis(80);
 const HIGH_RTT: Duration = Duration::from_millis(200);
+const POST_RESET_RTT: Duration = Duration::from_millis(150);
 
 /// Helper to call both [`Search::record_acked_bytes`] and [`Search::on_packets_acked`].
 fn ack(
@@ -677,4 +679,65 @@ fn continue_when_delivery_rate_steady() {
     search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
     search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
     assert_eq!(cc_stats.search_max_norm_diff, max);
+}
+
+#[test]
+fn first_and_second_rtt_stats() {
+    use crate::cc::classic_cc::SlowStart as _;
+
+    let mut search = Search::new();
+    let mut now = now();
+    let mut cc_stats = CongestionControlStats::default();
+
+    assert!(cc_stats.search_first_rtt.is_none());
+    assert!(cc_stats.search_second_rtt.is_none());
+
+    search.on_packet_sent(0, MIN_INITIAL_PACKET_SIZE);
+    now += INITIAL_RTT;
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(INITIAL_RTT),
+        0,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+
+    assert_eq!(cc_stats.search_first_rtt, Some(INITIAL_RTT));
+    assert!(cc_stats.search_second_rtt.is_none());
+
+    search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
+    now += LOW_RTT;
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(LOW_RTT),
+        1,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+
+    assert_eq!(cc_stats.search_first_rtt, Some(INITIAL_RTT));
+    assert_eq!(cc_stats.search_second_rtt, Some(LOW_RTT));
+
+    // After a reset, two subsequent ACKs with a distinct RTT must not overwrite either recorded
+    // value.
+    search.reset();
+
+    for pn in 2..=3 {
+        search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+        now += POST_RESET_RTT;
+        search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+        search.on_packets_acked(
+            &RttEstimate::new(POST_RESET_RTT),
+            pn,
+            INITIAL_CWND,
+            &mut cc_stats,
+            now,
+        );
+    }
+
+    // Assert that the recorded RTTs remain unchanged after the reset.
+    assert_eq!(cc_stats.search_first_rtt, Some(INITIAL_RTT));
+    assert_eq!(cc_stats.search_second_rtt, Some(LOW_RTT));
 }

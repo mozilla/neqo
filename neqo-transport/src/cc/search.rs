@@ -388,6 +388,13 @@ impl SlowStart for Search {
     ) -> Option<usize> {
         let rtt = rtt_est.latest_rtt();
 
+        // Guard on the stats fields so post-reset ACKs don't overwrite the initial samples.
+        if cc_stats.search_first_rtt.is_none() {
+            cc_stats.search_first_rtt = Some(rtt);
+        } else if cc_stats.search_second_rtt.is_none() {
+            cc_stats.search_second_rtt = Some(rtt);
+        }
+
         // Initialize on first ACK.
         if self.curr_idx.is_none() {
             self.initialize(rtt, now);
