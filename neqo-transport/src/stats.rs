@@ -362,6 +362,8 @@ pub struct Stats {
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
     pub rttvar: Duration,
+    /// The current minimum RTT observed on the primary path.
+    pub min_rtt: Duration,
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
 
