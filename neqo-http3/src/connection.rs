@@ -25,8 +25,8 @@ use strum::Display;
 
 use crate::{
     CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
-    Priority, PriorityHandler, ReceiveOutput, RecvStream as _, RecvStreamEvents, RecvStreamImpl, Res,
-    SendStream as _, SendStreamEvents, SendStreamImpl, Stream as _,
+    Priority, PriorityHandler, ReceiveOutput, RecvStream as _, RecvStreamEvents, RecvStreamImpl,
+    Res, SendStream as _, SendStreamEvents, SendStreamImpl, Stream as _,
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
@@ -710,8 +710,10 @@ impl Http3Connection {
         match stream_type {
             NewStreamType::Control => {
                 self.check_stream_exists(Http3StreamType::Control)?;
-                self.recv_streams
-                    .insert(stream_id, Box::new(ControlStreamRemote::new(stream_id).into()));
+                self.recv_streams.insert(
+                    stream_id,
+                    Box::new(ControlStreamRemote::new(stream_id).into()),
+                );
             }
 
             NewStreamType::Push(push_id) => {
@@ -722,7 +724,9 @@ impl Http3Connection {
                 self.check_stream_exists(Http3StreamType::Decoder)?;
                 self.recv_streams.insert(
                     stream_id,
-                    Box::new(DecoderRecvStream::new(stream_id, Rc::clone(&self.qpack_decoder)).into()),
+                    Box::new(
+                        DecoderRecvStream::new(stream_id, Rc::clone(&self.qpack_decoder)).into(),
+                    ),
                 );
             }
             NewStreamType::Encoder => {
@@ -730,7 +734,9 @@ impl Http3Connection {
                 self.check_stream_exists(Http3StreamType::Encoder)?;
                 self.recv_streams.insert(
                     stream_id,
-                    Box::new(EncoderRecvStream::new(stream_id, Rc::clone(&self.qpack_encoder)).into()),
+                    Box::new(
+                        EncoderRecvStream::new(stream_id, Rc::clone(&self.qpack_encoder)).into(),
+                    ),
                 );
             }
             NewStreamType::Http(_) => {
@@ -964,18 +970,21 @@ impl Http3Connection {
         self.add_streams(
             stream_id,
             Box::new(send_message.into()),
-            Box::new(RecvMessage::new(
-                &RecvMessageInfo {
-                    message_type: MessageType::Response,
-                    stream_type,
-                    stream_id,
-                    first_frame_type: None,
-                },
-                Rc::clone(&self.qpack_decoder),
-                recv_events,
-                push_handler,
-                PriorityHandler::new(false, request.priority),
-            ).into()),
+            Box::new(
+                RecvMessage::new(
+                    &RecvMessageInfo {
+                        message_type: MessageType::Response,
+                        stream_type,
+                        stream_id,
+                        first_frame_type: None,
+                    },
+                    Rc::clone(&self.qpack_decoder),
+                    recv_events,
+                    push_handler,
+                    PriorityHandler::new(false, request.priority),
+                )
+                .into(),
+            ),
         );
 
         // Call immediately send so that at least headers get sent. This will make Firefox faster,
@@ -1493,41 +1502,53 @@ impl Http3Connection {
             if local {
                 self.send_streams.insert(
                     stream_id,
-                    Box::new(WebTransportSendStream::new(
-                        stream_id,
-                        session_id,
-                        send_events,
-                        webtransport_session,
-                        true,
-                    ).into()),
+                    Box::new(
+                        WebTransportSendStream::new(
+                            stream_id,
+                            session_id,
+                            send_events,
+                            webtransport_session,
+                            true,
+                        )
+                        .into(),
+                    ),
                 );
             } else {
                 self.recv_streams.insert(
                     stream_id,
-                    Box::new(WebTransportRecvStream::new(
-                        stream_id,
-                        session_id,
-                        recv_events,
-                        webtransport_session,
-                    ).into()),
+                    Box::new(
+                        WebTransportRecvStream::new(
+                            stream_id,
+                            session_id,
+                            recv_events,
+                            webtransport_session,
+                        )
+                        .into(),
+                    ),
                 );
             }
         } else {
             self.add_streams(
                 stream_id,
-                Box::new(WebTransportSendStream::new(
-                    stream_id,
-                    session_id,
-                    send_events,
-                    Rc::clone(&webtransport_session),
-                    local,
-                ).into()),
-                Box::new(WebTransportRecvStream::new(
-                    stream_id,
-                    session_id,
-                    recv_events,
-                    webtransport_session,
-                ).into()),
+                Box::new(
+                    WebTransportSendStream::new(
+                        stream_id,
+                        session_id,
+                        send_events,
+                        Rc::clone(&webtransport_session),
+                        local,
+                    )
+                    .into(),
+                ),
+                Box::new(
+                    WebTransportRecvStream::new(
+                        stream_id,
+                        session_id,
+                        recv_events,
+                        webtransport_session,
+                    )
+                    .into(),
+                ),
             );
         }
         Ok(())

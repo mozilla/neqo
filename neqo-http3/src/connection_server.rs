@@ -397,25 +397,31 @@ impl Http3ServerHandler {
             ReceiveOutput::NewStream(NewStreamType::Http(first_frame_type)) => {
                 self.base_handler.add_streams(
                     stream_id,
-                    Box::new(SendMessage::new(
-                        MessageType::Response,
-                        Http3StreamType::Http,
-                        stream_id,
-                        Rc::clone(self.base_handler.qpack_encoder()),
-                        Box::new(self.events.clone()),
-                    ).into()),
-                    Box::new(RecvMessage::new(
-                        &RecvMessageInfo {
-                            message_type: MessageType::Request,
-                            stream_type: Http3StreamType::Http,
+                    Box::new(
+                        SendMessage::new(
+                            MessageType::Response,
+                            Http3StreamType::Http,
                             stream_id,
-                            first_frame_type: Some(first_frame_type),
-                        },
-                        Rc::clone(self.base_handler.qpack_decoder()),
-                        Box::new(self.events.clone()),
-                        None,
-                        PriorityHandler::new(false, Priority::default()),
-                    ).into()),
+                            Rc::clone(self.base_handler.qpack_encoder()),
+                            Box::new(self.events.clone()),
+                        )
+                        .into(),
+                    ),
+                    Box::new(
+                        RecvMessage::new(
+                            &RecvMessageInfo {
+                                message_type: MessageType::Request,
+                                stream_type: Http3StreamType::Http,
+                                stream_id,
+                                first_frame_type: Some(first_frame_type),
+                            },
+                            Rc::clone(self.base_handler.qpack_decoder()),
+                            Box::new(self.events.clone()),
+                            None,
+                            PriorityHandler::new(false, Priority::default()),
+                        )
+                        .into(),
+                    ),
                 );
                 let res = self
                     .base_handler

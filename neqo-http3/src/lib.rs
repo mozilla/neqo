@@ -165,11 +165,11 @@ mod stream_type_reader;
 use std::{cell::RefCell, fmt::Debug, rc::Rc, time::Instant};
 
 use buffered_send_stream::BufferedStream;
-use control_stream_remote::ControlStreamRemote;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
+use control_stream_remote::ControlStreamRemote;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
@@ -702,7 +702,12 @@ impl RecvStream for RecvStreamImpl {
         dispatch_recv_stream!(self.reset(close_type))
     }
 
-    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8], now: Instant) -> Res<(usize, bool)> {
+    fn read_data(
+        &mut self,
+        conn: &mut Connection,
+        buf: &mut [u8],
+        now: Instant,
+    ) -> Res<(usize, bool)> {
         dispatch_recv_stream!(self.read_data(conn, buf, now))
     }
 
@@ -786,7 +791,13 @@ impl SendStream for SendStreamImpl {
         dispatch_send_stream!(self.close(conn, now))
     }
 
-    fn close_with_message(&mut self, conn: &mut Connection, error: u32, message: &str, now: Instant) -> Res<()> {
+    fn close_with_message(
+        &mut self,
+        conn: &mut Connection,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
         dispatch_send_stream!(self.close_with_message(conn, error, message, now))
     }
 

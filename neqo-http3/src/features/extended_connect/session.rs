@@ -95,25 +95,31 @@ impl Session {
         let stream_event_listener = Rc::new(RefCell::new(HeaderListener::default()));
         let protocol = connect_type.new_protocol(session_id, role);
         Self {
-            control_stream_recv: Box::new(RecvMessage::new(
-                &RecvMessageInfo {
-                    message_type: MessageType::Response,
-                    stream_type: Http3StreamType::ExtendedConnect,
-                    stream_id: session_id,
-                    first_frame_type: None,
-                },
-                qpack_decoder,
-                Box::new(Rc::clone(&stream_event_listener)),
-                None,
-                PriorityHandler::new(false, Priority::default()),
-            ).into()),
-            control_stream_send: Box::new(SendMessage::new(
-                MessageType::Request,
-                Http3StreamType::ExtendedConnect,
-                session_id,
-                qpack_encoder,
-                Box::new(Rc::clone(&stream_event_listener)),
-            ).into()),
+            control_stream_recv: Box::new(
+                RecvMessage::new(
+                    &RecvMessageInfo {
+                        message_type: MessageType::Response,
+                        stream_type: Http3StreamType::ExtendedConnect,
+                        stream_id: session_id,
+                        first_frame_type: None,
+                    },
+                    qpack_decoder,
+                    Box::new(Rc::clone(&stream_event_listener)),
+                    None,
+                    PriorityHandler::new(false, Priority::default()),
+                )
+                .into(),
+            ),
+            control_stream_send: Box::new(
+                SendMessage::new(
+                    MessageType::Request,
+                    Http3StreamType::ExtendedConnect,
+                    session_id,
+                    qpack_encoder,
+                    Box::new(Rc::clone(&stream_event_listener)),
+                )
+                .into(),
+            ),
             stream_event_listener,
             id: session_id,
             state: State::Negotiating,
@@ -633,7 +639,12 @@ impl Protocol for ProtocolImpl {
         dispatch_protocol!(self.read_control_stream(conn, events, control_stream_recv, now))
     }
 
-    fn add_stream(&mut self, stream_id: StreamId, events: &mut Box<dyn ExtendedConnectEvents>, state: State) -> Res<()> {
+    fn add_stream(
+        &mut self,
+        stream_id: StreamId,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+        state: State,
+    ) -> Res<()> {
         dispatch_protocol!(self.add_stream(stream_id, events, state))
     }
 
@@ -661,7 +672,13 @@ impl Protocol for ProtocolImpl {
         dispatch_protocol!(self.datagram_capsule_support())
     }
 
-    fn write_datagram_capsule(&self, control_stream_send: &mut Box<SendStreamImpl>, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<()> {
+    fn write_datagram_capsule(
+        &self,
+        control_stream_send: &mut Box<SendStreamImpl>,
+        conn: &mut Connection,
+        buf: &[u8],
+        now: Instant,
+    ) -> Res<()> {
         dispatch_protocol!(self.write_datagram_capsule(control_stream_send, conn, buf, now))
     }
 }

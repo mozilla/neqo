@@ -67,8 +67,12 @@ pub(crate) enum ExtendedConnectType {
 impl ExtendedConnectType {
     pub(crate) fn new_protocol(self, session_id: StreamId, role: Role) -> ProtocolImpl {
         match self {
-            Self::WebTransport => ProtocolImpl::WebTransport(webtransport_session::Session::new(session_id, role)),
-            Self::ConnectUdp => ProtocolImpl::ConnectUdp(connect_udp_session::Session::new(session_id)),
+            Self::WebTransport => {
+                ProtocolImpl::WebTransport(webtransport_session::Session::new(session_id, role))
+            }
+            Self::ConnectUdp => {
+                ProtocolImpl::ConnectUdp(connect_udp_session::Session::new(session_id))
+            }
         }
     }
 }
