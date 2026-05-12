@@ -149,9 +149,10 @@ impl Http3State {
 /// - remote streams:
 ///   - all new incoming streams are registered with [`NewStreamHeadReader`]. This is triggered by
 ///     [`ConnectionEvent::NewStream`] and [`Http3Connection::add_new_stream`] is called.
-///   - reading from a [`NewStreamHeadReader`] stream, via the [`RecvStream::receive`] function,
-///     will decode a stream type. [`RecvStream::receive`] will return [`ReceiveOutput::NewStream`]
-///     when a stream type has been decoded.  After this point the stream:
+///   - reading from a [`NewStreamHeadReader`] stream, via the [`crate::RecvStream::receive`]
+///     function, will decode a stream type. [`crate::RecvStream::receive`] will return
+///     [`ReceiveOutput::NewStream`] when a stream type has been decoded.  After this point the
+///     stream:
 ///     - will be regegistered with the appropriate handler,
 ///     - will be canceled if is an unknown stream type or
 ///     - the connection will fail if it is unallowed stream type (receiving HTTP request on the
@@ -165,8 +166,8 @@ impl Http3State {
 /// ### Receiving data
 ///
 /// Reading from a stream is triggered by [`ConnectionEvent::RecvStreamReadable`] events for the
-/// stream. The receive handler is retrieved from `recv_streams` and its [`RecvStream::receive`]
-/// function is called.
+/// stream. The receive handler is retrieved from `recv_streams` and its
+/// [`crate::RecvStream::receive`] function is called.
 ///
 /// Receiving data on [`Http3StreamType::Http`] streams is also triggered by the
 /// [`Http3Connection::read_data`] function. [`ConnectionEvent::RecvStreamReadable`] events will
@@ -176,11 +177,11 @@ impl Http3State {
 /// consecutive `DATA` frames.
 ///
 /// On a [`Http3StreamType::WebTransport`] stream data will be read only by the
-/// `Http3Connection::read_data` function. The [`RecvStream::receive`] function only produces an
-/// [`Http3ClientEvent`] or [`Http3ServerEvent`] event.
+/// `Http3Connection::read_data` function. The [`crate::RecvStream::receive`] function only produces
+/// an [`Http3ClientEvent`] or [`Http3ServerEvent`] event.
 ///
-/// The [`RecvStream::receive`] and [`Http3Connection::read_data`] functions may detect that the
-/// stream is done, e.g. FIN received. In this case, the stream will be removed from the
+/// The [`crate::RecvStream::receive`] and [`Http3Connection::read_data`] functions may detect that
+/// the stream is done, e.g. FIN received. In this case, the stream will be removed from the
 /// `recv_stream` register, see [`Http3Connection::remove_recv_stream`].
 ///
 /// ### Sending data
@@ -206,19 +207,19 @@ impl Http3State {
 /// ### [`ControlStreamRemote`]
 ///
 /// The [`ControlStreamRemote`] handler uses [`FrameReader`] to read and decode frames received on
-/// the control frame. The [`RecvStream::receive`] implementation returns
+/// the control frame. The [`crate::RecvStream::receive`] implementation returns
 /// [`ReceiveOutput::ControlFrames`] with a list of control frames read (the list may be empty). The
 /// control frames are handled by [`Http3Connection`] and/or by [`Http3Client`] and
 /// [`Http3ServerHandler`].
 ///
 /// ### [`DecoderRecvStream`] and [`EncoderRecvStream`]
 ///
-/// The [`RecvStream::receive`] implementation of these handlers call corresponding
-/// [`RecvStream::receive`] functions of [`qpack::Encoder`] and [`qpack::Decoder`].
+/// The [`crate::RecvStream::receive`] implementation of these handlers call corresponding
+/// [`crate::RecvStream::receive`] functions of [`qpack::Encoder`] and [`qpack::Decoder`].
 ///
 /// [`DecoderRecvStream`] returns [`ReceiveOutput::UnblockedStreams`] that may contain a list of
 /// stream ids that are unblocked by receiving qpack decoder commands. [`Http3Connection`] will
-/// handle this output by calling [`RecvStream::receive`] for the listed stream ids.
+/// handle this output by calling [`crate::RecvStream::receive`] for the listed stream ids.
 ///
 /// [`EncoderRecvStream`] only returns [`ReceiveOutput::NoOutput`].
 ///
@@ -227,7 +228,7 @@ impl Http3State {
 /// ### [`NewStreamHeadReader`]
 ///
 /// A new incoming receiver stream registers a [`NewStreamHeadReader`] handler. This handler reads
-/// the first bytes of a stream to detect a stream type. The [`RecvStream::receive`] function
+/// the first bytes of a stream to detect a stream type. The [`crate::RecvStream::receive`] function
 /// returns [`ReceiveOutput::NoOutput`] if a stream type is still not known by reading the available
 /// stream data or [`ReceiveOutput::NewStream`]. The handling of the output is explained above.
 ///
@@ -269,8 +270,8 @@ impl Http3State {
 /// [`WebTransportRecvStream`]  handlers will be unregistered from the session if they are closed,
 /// reset, or canceled.
 ///
-/// The call to function [`RecvStream::receive`] may produce [`Http3ClientEvent::DataReadable`].
-/// Actual reading of data is done in the `read_data` function.
+/// The call to function [`crate::RecvStream::receive`] may produce
+/// [`Http3ClientEvent::DataReadable`]. Actual reading of data is done in the `read_data` function.
 ///
 /// [`Http3ServerEvent`]: crate::Http3ServerEvent
 /// [`Http3Server`]: crate::Http3Server
@@ -382,7 +383,7 @@ impl Http3Connection {
     }
 
     /// Inform an [`Http3Connection`] that a stream has data to send and that
-    /// [`SendStream::send`] should be called for the stream.
+    /// [`crate::SendStream::send`] should be called for the stream.
     pub(crate) fn stream_has_pending_data(&mut self, stream_id: StreamId) {
         self.streams_with_pending_data.insert(stream_id);
     }
@@ -471,7 +472,7 @@ impl Http3Connection {
         );
     }
 
-    /// The function calls [`RecvStream::receive`] for a stream. It also deals
+    /// The function calls [`crate::RecvStream::receive`] for a stream. It also deals
     /// with the outcome of a read by calling
     /// [`Http3Connection::handle_stream_manipulation_output`].
     fn stream_receive(
