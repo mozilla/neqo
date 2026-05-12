@@ -201,6 +201,9 @@ pub struct CongestionControlStats {
     pub search_max_norm_diff: Option<usize>,
     /// Records SEARCH reset occurrences.
     pub search_reset: SearchResetStats,
+    /// Records the number of times per connection that SEARCH calculated zero bytes sent in the
+    /// previous RTT. This exists to gain deeper understanding into app-limited behaviour.
+    pub search_zero_sent_bytes: usize,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal

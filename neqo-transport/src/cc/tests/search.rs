@@ -558,6 +558,13 @@ fn no_sent_bytes() {
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
         Outcome::ZeroSent,
     );
+
+    // Verify the stat is recorded through the full on_packets_acked path.
+    let mut cc_stats = CongestionControlStats::default();
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(0);
+    search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
+    assert_eq!(cc_stats.search_zero_sent_bytes, 1);
 }
 
 #[test]

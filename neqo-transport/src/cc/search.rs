@@ -413,6 +413,10 @@ impl SlowStart for Search {
         // drain-target in telemetry for further analysis.
         //
         // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#section-3.2-17>
+        //
+        // The match below handles the different outcomes of the SEARCH evaluation, recording stats
+        // where applicable and mapping the outcomes to this functions `None` or `Some(cwnd)` return
+        // values.
         match self.evaluate(rtt, curr_idx, curr_cwnd) {
             Outcome::Exit(cwnd) => {
                 self.record_target_cwnd_estimates(curr_idx, rtt, cc_stats);
@@ -434,7 +438,11 @@ impl SlowStart for Search {
                 );
                 None
             }
-            _ => None,
+            Outcome::ZeroSent => {
+                cc_stats.search_zero_sent_bytes += 1;
+                None
+            }
+            Outcome::WarmingUp => None,
         }
     }
 
