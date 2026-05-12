@@ -10,7 +10,7 @@ env:
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
   TRANSFER_SIZE: 33554432 # 32 MiB
-  PERF_OPT: record -F2999 --call-graph fp -g
+  PERF_OPT: record -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
