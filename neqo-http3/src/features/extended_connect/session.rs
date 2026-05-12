@@ -551,7 +551,7 @@ pub(crate) trait Protocol: Debug + Display {
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
-        control_stream_recv: &mut Box<RecvStreamImpl>,
+        control_stream_recv: &mut RecvStreamImpl,
         now: Instant,
     ) -> Res<Option<State>>;
 
@@ -594,7 +594,7 @@ pub(crate) trait Protocol: Debug + Display {
     /// Write a datagram as an HTTP DATAGRAM Capsule to the control stream.
     fn write_datagram_capsule(
         &self,
-        _control_stream_send: &mut Box<SendStreamImpl>,
+        _control_stream_send: &mut SendStreamImpl,
         _conn: &mut Connection,
         _buf: &[u8],
         _now: Instant,
@@ -633,7 +633,7 @@ impl Protocol for ProtocolImpl {
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
-        control_stream_recv: &mut Box<RecvStreamImpl>,
+        control_stream_recv: &mut RecvStreamImpl,
         now: Instant,
     ) -> Res<Option<State>> {
         dispatch_protocol!(self.read_control_stream(conn, events, control_stream_recv, now))
@@ -674,7 +674,7 @@ impl Protocol for ProtocolImpl {
 
     fn write_datagram_capsule(
         &self,
-        control_stream_send: &mut Box<SendStreamImpl>,
+        control_stream_send: &mut SendStreamImpl,
         conn: &mut Connection,
         buf: &[u8],
         now: Instant,

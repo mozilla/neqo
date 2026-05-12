@@ -713,7 +713,7 @@ impl RecvStream for RecvStreamImpl {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         match self {
-            Self::Http(v) => RecvStream::http_stream(v),
+            Self::Http(v) => v.http_stream(),
             Self::ExtendedConnect(v) => RecvStream::http_stream(v),
             _ => None,
         }

@@ -52,14 +52,14 @@ impl Protocol for Session {
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
-        control_stream_recv: &mut Box<RecvStreamImpl>,
+        control_stream_recv: &mut RecvStreamImpl,
         now: Instant,
     ) -> Res<Option<State>> {
         loop {
             let (capsule, fin) = self
                 .frame_reader
                 .receive::<Capsule>(
-                    &mut StreamReaderRecvStreamWrapper::new(conn, &mut **control_stream_recv),
+                    &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
                     now,
                 )
                 .map_err(|_| Error::HttpGeneralProtocolStream)?;
@@ -124,7 +124,7 @@ impl Protocol for Session {
 
     fn write_datagram_capsule(
         &self,
-        control_stream_send: &mut Box<SendStreamImpl>,
+        control_stream_send: &mut SendStreamImpl,
         conn: &mut Connection,
         buf: &[u8],
         now: Instant,
