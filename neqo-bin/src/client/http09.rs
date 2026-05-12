@@ -226,6 +226,10 @@ impl super::Client for Connection {
     fn has_events(&self) -> bool {
         Provider::has_events(self)
     }
+
+    fn on_path_unavailable(&mut self, local: SocketAddr, remote: SocketAddr, now: Instant) {
+        self.on_path_unavailable(local, remote, now);
+    }
 }
 
 impl<'b> Handler<'b> {

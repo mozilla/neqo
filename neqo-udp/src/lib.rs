@@ -21,6 +21,8 @@ use std::{
 use log::{Level, log_enabled};
 use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+#[cfg(windows)]
+use windows::Win32::Networking::WinSock;
 
 /// Receive buffer size
 ///
@@ -96,6 +98,7 @@ pub fn send_inner(
     Ok(())
 }
 
+#[must_use]
 #[expect(
     clippy::unnecessary_map_or,
     reason = "Clippy ignores the #[cfg] attribute."
@@ -108,15 +111,44 @@ fn is_emsgsize(e: &io::Error) -> bool {
         }
         #[cfg(windows)]
         {
-            e == windows::Win32::Networking::WinSock::WSAEMSGSIZE.0
+            e == WinSock::WSAEMSGSIZE.0
                 // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
                 // segment size exceeds the supported limit.
-                || e == windows::Win32::Networking::WinSock::WSAEINVAL.0
+                || e == WinSock::WSAEINVAL.0
         }
         #[cfg(not(any(unix, windows)))]
         {
             false
         }
+    })
+}
+
+/// Returns `true` if the error represents a transient network-level send failure.
+/// These errors should be reported to the QUIC engine rather than treated as fatal.
+///
+/// On Linux these errors are rarely returned for UDP (the kernel drops silently);
+/// on BSD-derived systems (macOS, iOS, FreeBSD) and Windows they can surface during
+/// a network change or when a path is transiently unavailable.
+#[must_use]
+pub fn is_network_error(e: &io::Error) -> bool {
+    e.raw_os_error().is_some_and(|code| {
+        #[cfg(unix)]
+        return matches!(
+            code,
+            libc::ENETUNREACH
+                | libc::EHOSTUNREACH
+                | libc::ENETDOWN
+                | libc::ECONNREFUSED
+                | libc::EADDRNOTAVAIL
+        );
+        #[cfg(windows)]
+        return code == WinSock::WSAENETUNREACH.0
+            || code == WinSock::WSAEHOSTUNREACH.0
+            || code == WinSock::WSAENETDOWN.0
+            || code == WinSock::WSAECONNREFUSED.0
+            || code == WinSock::WSAEADDRNOTAVAIL.0;
+        #[cfg(not(any(unix, windows)))]
+        return false;
     })
 }
 
@@ -381,29 +413,73 @@ mod tests {
     #[test]
     #[cfg(windows)]
     fn is_emsgsize_true_for_wsaemsgsize() {
-        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEMSGSIZE.0);
+        let err = io::Error::from_raw_os_error(WinSock::WSAEMSGSIZE.0);
         assert!(is_emsgsize(&err));
     }
 
     #[test]
     #[cfg(windows)]
     fn is_emsgsize_true_for_wsaeinval() {
-        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEINVAL.0);
+        let err = io::Error::from_raw_os_error(WinSock::WSAEINVAL.0);
         assert!(is_emsgsize(&err));
     }
 
     #[test]
     #[cfg(windows)]
     fn is_emsgsize_false_for_other_windows_errors() {
-        let err =
-            io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEWOULDBLOCK.0);
+        let err = io::Error::from_raw_os_error(WinSock::WSAEWOULDBLOCK.0);
         assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_network_error_true_and_disjoint_from_is_emsgsize_windows() {
+        for &code in &[
+            WinSock::WSAENETUNREACH.0,
+            WinSock::WSAEHOSTUNREACH.0,
+            WinSock::WSAENETDOWN.0,
+            WinSock::WSAECONNREFUSED.0,
+            WinSock::WSAEADDRNOTAVAIL.0,
+        ] {
+            let err = io::Error::from_raw_os_error(code);
+            assert!(is_network_error(&err));
+            assert!(!is_emsgsize(&err));
+        }
+        assert!(!is_network_error(&io::Error::from_raw_os_error(
+            WinSock::WSAEMSGSIZE.0
+        )));
+        assert!(!is_network_error(&io::Error::from_raw_os_error(
+            WinSock::WSAEWOULDBLOCK.0
+        )));
     }
 
     #[test]
     fn is_emsgsize_false_for_non_os_error() {
         let err = io::Error::other("test error");
         assert!(!is_emsgsize(&err));
+        assert!(!is_network_error(&err));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn is_network_error_true_and_disjoint_from_is_emsgsize() {
+        for &code in &[
+            libc::ENETUNREACH,
+            libc::EHOSTUNREACH,
+            libc::ENETDOWN,
+            libc::ECONNREFUSED,
+            libc::EADDRNOTAVAIL,
+        ] {
+            let err = io::Error::from_raw_os_error(code);
+            assert!(is_network_error(&err));
+            assert!(!is_emsgsize(&err));
+        }
+        assert!(!is_network_error(&io::Error::from_raw_os_error(
+            libc::EMSGSIZE
+        )));
+        assert!(!is_network_error(&io::Error::from_raw_os_error(
+            libc::EAGAIN
+        )));
     }
 
     #[test]

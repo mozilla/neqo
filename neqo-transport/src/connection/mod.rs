@@ -2100,6 +2100,20 @@ impl Connection {
         Ok(())
     }
 
+    /// Called when a UDP send for a datagram on this connection fails with a network error that
+    /// indicates that the path may have become unavailable.
+    ///
+    /// Schedules a `PATH_CHALLENGE` liveness re-probe for the affected path. If that path
+    /// was the primary and another valid path is available, immediately falls back to it.
+    /// If no valid path remains after liveness probing exhausts, the connection will
+    /// close with [`Error::NoAvailablePath`].
+    pub fn on_path_unavailable(&mut self, local: SocketAddr, remote: SocketAddr, now: Instant) {
+        qinfo!("[{self}] Send error on path {local}->{remote}");
+        if self.paths.on_path_unavailable(local, remote, now) {
+            self.loss_recovery.migrate();
+        }
+    }
+
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
         let spa: Option<(tparams::PreferredAddress, ConnectionIdEntry<Srt>)> = if matches!(
             self.conn_params.get_preferred_address(),
