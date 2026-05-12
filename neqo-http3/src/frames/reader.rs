@@ -75,6 +75,7 @@ pub struct StreamReaderRecvStreamWrapper<'a> {
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
+    #[cfg_attr(fuzzing, expect(private_interfaces, reason = "OK for fuzzing."))]
     pub fn new(conn: &'a mut Connection, recv_stream: &'a mut dyn RecvStream) -> Self {
         Self { recv_stream, conn }
     }

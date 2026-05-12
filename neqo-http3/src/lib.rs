@@ -656,7 +656,7 @@ impl CloseType {
     }
 }
 
-// --- Concrete stream implementations (Box still needed for HashMap storage) ---
+// --- Concrete stream implementations (boxed to avoid moving large values on HashMap rehash) ---
 
 use features::extended_connect::{
     session::Session as ExtConnSession,
