@@ -268,6 +268,7 @@ impl RecvMessage {
         Ok(())
     }
 
+    #[inline(never)] // avoid LTO-induced bloat in `RecvStreamImpl` dispatch
     fn receive_internal(
         &mut self,
         conn: &mut Connection,
