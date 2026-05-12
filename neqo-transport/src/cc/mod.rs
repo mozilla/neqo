@@ -20,12 +20,16 @@ mod classic_slow_start;
 mod cubic;
 mod hystart;
 mod new_reno;
+mod search;
 
 pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};
 pub use new_reno::NewReno;
+#[cfg(test)]
+pub use search::Outcome;
+pub use search::Search;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CongestionTrigger {
@@ -109,6 +113,8 @@ pub enum SlowStart {
     Classic,
     #[strum(serialize = "hystart")]
     HyStart,
+    #[strum(serialize = "search")]
+    Search,
 }
 
 /// A concrete congestion controller, dispatching across all combinations of
@@ -123,15 +129,19 @@ pub enum CongestionControlImplementation {
     #[strum(to_string = "{0}")]
     HyStartNewReno(ClassicCongestionController<HyStart, NewReno>),
     #[strum(to_string = "{0}")]
+    SearchNewReno(ClassicCongestionController<Search, NewReno>),
+    #[strum(to_string = "{0}")]
     ClassicCubic(ClassicCongestionController<ClassicSlowStart, Cubic>),
     #[strum(to_string = "{0}")]
     HyStartCubic(ClassicCongestionController<HyStart, Cubic>),
+    #[strum(to_string = "{0}")]
+    SearchCubic(ClassicCongestionController<Search, Cubic>),
 }
 
 macro_rules! dispatch {
     ($self:ident . $method:ident $args:tt) => {
         neqo_common::dispatch!(
-            [ClassicNewReno, HyStartNewReno, ClassicCubic, HyStartCubic]
+            [ClassicNewReno, HyStartNewReno, SearchNewReno, ClassicCubic, HyStartCubic, SearchCubic]
             $self . $method $args
         )
     };
