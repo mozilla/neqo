@@ -234,7 +234,7 @@ impl Http3State {
 /// ### [`SendMessage`] and [`RecvMessage`]
 ///
 /// [`RecvMessage::receive`] only returns [`ReceiveOutput::NoOutput`]. It also have an event
-/// listener of type [`HttpRecvStreamEvents`]. The listener is called when headers are ready, or
+/// listener of type [`RecvStreamEventsImpl`]. The listener is called when headers are ready, or
 /// data is ready, etc.
 ///
 /// For example for [`Http3StreamType::Http`] stream the listener will produce
@@ -248,7 +248,7 @@ impl Http3State {
 /// and [`RecvMessage`] handler to handle parsing and sending of HTTP part of
 /// the control stream.  When HTTP headers are exchanged,
 /// [`extended_connect::session::Session`] will take over handling of stream
-/// data. [`extended_connect::session::Session`] sets a [`HttpRecvStreamEvents`]
+/// data. [`extended_connect::session::Session`] sets a [`RecvStreamEventsImpl`]
 /// listener as the [`RecvMessage`] event listener.
 ///
 /// `neqo_http3` implements the WebTransport and MASQUE connect-udp HTTP
