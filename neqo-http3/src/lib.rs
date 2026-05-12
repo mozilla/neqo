@@ -165,6 +165,7 @@ mod stream_type_reader;
 use std::{cell::RefCell, fmt::Debug, rc::Rc, time::Instant};
 
 use buffered_send_stream::BufferedStream;
+use control_stream_remote::ControlStreamRemote;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
@@ -184,7 +185,7 @@ pub use server_events::{
 };
 #[cfg(fuzzing)]
 pub use settings::HSettings;
-use stream_type_reader::NewStreamType;
+use stream_type_reader::{NewStreamHeadReader, NewStreamType};
 use thiserror::Error;
 
 use crate::{features::extended_connect, priority::PriorityHandler};
@@ -654,6 +655,169 @@ impl CloseType {
         matches!(self, Self::ResetApp(_))
     }
 }
+
+// --- Concrete stream implementations (Box still needed for HashMap storage) ---
+
+use features::extended_connect::{
+    session::Session as ExtConnSession,
+    webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
+};
+use qpack_decoder_receiver::DecoderRecvStream;
+use qpack_encoder_receiver::EncoderRecvStream;
+use recv_message::RecvMessage;
+use send_message::SendMessage;
+
+macro_rules! dispatch_recv_stream {
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!(
+            [Http, Control, QpackDecoder, QpackEncoder, NewStreamHead, ExtendedConnect, WebTransport]
+            $self . $method $args
+        )
+    };
+}
+
+#[derive(Debug)]
+pub(crate) enum RecvStreamImpl {
+    Http(RecvMessage),
+    Control(ControlStreamRemote),
+    QpackDecoder(DecoderRecvStream),
+    QpackEncoder(EncoderRecvStream),
+    NewStreamHead(NewStreamHeadReader),
+    ExtendedConnect(Rc<RefCell<ExtConnSession>>),
+    WebTransport(WebTransportRecvStream),
+}
+
+impl Stream for RecvStreamImpl {
+    fn stream_type(&self) -> Http3StreamType {
+        dispatch_recv_stream!(self.stream_type())
+    }
+}
+
+impl RecvStream for RecvStreamImpl {
+    fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
+        dispatch_recv_stream!(self.receive(conn, now))
+    }
+
+    fn reset(&mut self, close_type: CloseType) -> Res<()> {
+        dispatch_recv_stream!(self.reset(close_type))
+    }
+
+    fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8], now: Instant) -> Res<(usize, bool)> {
+        dispatch_recv_stream!(self.read_data(conn, buf, now))
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
+        match self {
+            Self::Http(v) => RecvStream::http_stream(v),
+            Self::ExtendedConnect(v) => RecvStream::http_stream(v),
+            _ => None,
+        }
+    }
+
+    fn extended_connect_session(&self) -> Option<Rc<RefCell<ExtConnSession>>> {
+        match self {
+            Self::ExtendedConnect(v) => v.extended_connect_session(),
+            _ => None,
+        }
+    }
+
+    fn stats(&mut self, conn: &mut Connection) -> Res<recv_stream::Stats> {
+        match self {
+            Self::WebTransport(v) => v.stats(conn),
+            _ => Err(Error::Unavailable),
+        }
+    }
+}
+
+neqo_common::impl_from_variants!(RecvStreamImpl {
+    Http(RecvMessage),
+    Control(ControlStreamRemote),
+    QpackDecoder(DecoderRecvStream),
+    QpackEncoder(EncoderRecvStream),
+    NewStreamHead(NewStreamHeadReader),
+    ExtendedConnect(Rc<RefCell<ExtConnSession>>),
+    WebTransport(WebTransportRecvStream),
+});
+
+macro_rules! dispatch_send_stream {
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!(
+            [Http, ExtendedConnect, WebTransport]
+            $self . $method $args
+        )
+    };
+}
+
+#[derive(Debug)]
+pub(crate) enum SendStreamImpl {
+    Http(SendMessage),
+    ExtendedConnect(Rc<RefCell<ExtConnSession>>),
+    WebTransport(WebTransportSendStream),
+}
+
+impl Stream for SendStreamImpl {
+    fn stream_type(&self) -> Http3StreamType {
+        dispatch_send_stream!(self.stream_type())
+    }
+}
+
+impl SendStream for SendStreamImpl {
+    fn send(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        dispatch_send_stream!(self.send(conn, now))
+    }
+
+    fn has_data_to_send(&self) -> bool {
+        dispatch_send_stream!(self.has_data_to_send())
+    }
+
+    fn stream_writable(&self) {
+        dispatch_send_stream!(self.stream_writable());
+    }
+
+    fn done(&self) -> bool {
+        dispatch_send_stream!(self.done())
+    }
+
+    fn send_data(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<usize> {
+        dispatch_send_stream!(self.send_data(conn, buf, now))
+    }
+
+    fn close(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        dispatch_send_stream!(self.close(conn, now))
+    }
+
+    fn close_with_message(&mut self, conn: &mut Connection, error: u32, message: &str, now: Instant) -> Res<()> {
+        dispatch_send_stream!(self.close_with_message(conn, error, message, now))
+    }
+
+    fn handle_stop_sending(&mut self, close_type: CloseType) {
+        dispatch_send_stream!(self.handle_stop_sending(close_type));
+    }
+
+    fn http_stream(&mut self) -> Option<&mut dyn HttpSendStream> {
+        match self {
+            Self::Http(v) => v.http_stream(),
+            _ => None,
+        }
+    }
+
+    fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<()> {
+        dispatch_send_stream!(self.send_data_atomic(conn, buf, now))
+    }
+
+    fn stats(&mut self, conn: &mut Connection) -> Res<send_stream::Stats> {
+        match self {
+            Self::WebTransport(v) => v.stats(conn),
+            _ => Err(Error::Unavailable),
+        }
+    }
+}
+
+neqo_common::impl_from_variants!(SendStreamImpl {
+    Http(SendMessage),
+    ExtendedConnect(Rc<RefCell<ExtConnSession>>),
+    WebTransport(WebTransportSendStream),
+});
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]

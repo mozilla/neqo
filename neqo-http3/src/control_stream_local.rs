@@ -14,7 +14,7 @@ use neqo_common::qtrace;
 use neqo_transport::{Connection, StreamId, StreamType};
 use rustc_hash::FxHashMap as HashMap;
 
-use crate::{BufferedStream, Error, Http3StreamType, RecvStream, Res, frames::HFrame};
+use crate::{BufferedStream, Error, Http3StreamType, RecvStream as _, RecvStreamImpl, Res, Stream as _, frames::HFrame};
 
 pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
 
@@ -46,7 +46,7 @@ impl ControlStreamLocal {
     pub fn send(
         &mut self,
         conn: &mut Connection,
-        recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
+        recv_conn: &mut HashMap<StreamId, Box<RecvStreamImpl>>,
         now: Instant,
     ) -> Res<()> {
         self.stream.send_buffer(conn, now)?;
@@ -56,7 +56,7 @@ impl ControlStreamLocal {
     fn send_priority_update(
         &mut self,
         conn: &mut Connection,
-        recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
+        recv_conn: &mut HashMap<StreamId, Box<RecvStreamImpl>>,
         now: Instant,
     ) -> Res<()> {
         // send all necessary priority updates

@@ -70,13 +70,12 @@ impl StreamReader for StreamReaderConnectionWrapper<'_> {
 }
 
 pub struct StreamReaderRecvStreamWrapper<'a> {
-    recv_stream: &'a mut Box<dyn RecvStream>,
+    recv_stream: &'a mut dyn RecvStream,
     conn: &'a mut Connection,
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
-    #[cfg_attr(fuzzing, expect(private_interfaces, reason = "OK for fuzzing."))]
-    pub fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
+    pub fn new(conn: &'a mut Connection, recv_stream: &'a mut dyn RecvStream) -> Self {
         Self { recv_stream, conn }
     }
 }

@@ -17,7 +17,7 @@ use neqo_transport::{
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput, Res,
+    ReceiveOutput, Res, SendStream as _,
     connection::{Http3Connection, Http3State, SessionAcceptAction},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -403,7 +403,7 @@ impl Http3ServerHandler {
                         stream_id,
                         Rc::clone(self.base_handler.qpack_encoder()),
                         Box::new(self.events.clone()),
-                    )),
+                    ).into()),
                     Box::new(RecvMessage::new(
                         &RecvMessageInfo {
                             message_type: MessageType::Request,
@@ -415,7 +415,7 @@ impl Http3ServerHandler {
                         Box::new(self.events.clone()),
                         None,
                         PriorityHandler::new(false, Priority::default()),
-                    )),
+                    ).into()),
                 );
                 let res = self
                     .base_handler
