@@ -322,10 +322,10 @@ impl Paths {
     }
 
     /// A `PATH_RESPONSE` was received.
-    /// Returns `true` if migration occurred.
+    /// Returns `Some` with the new primary path if migration occurred.
     /// If PMTUD is enabled and migration occurs, it will be started on the new primary path.
     #[must_use]
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant, stats: &mut Stats) -> bool {
+    pub fn path_response(&mut self, response: [u8; 8], now: Instant, stats: &mut Stats) -> Option<PathRef> {
         // TODO(mt) consider recording an RTT measurement here as we don't train
         // RTT for non-primary paths.
         for p in &self.paths {
@@ -340,12 +340,12 @@ impl Paths {
                     if self.pmtud {
                         primary.borrow_mut().pmtud_mut().start(now, stats);
                     }
-                    return true;
+                    return Some(primary);
                 }
                 break;
             }
         }
-        false
+        None
     }
 
     /// Retire all of the connection IDs prior to the indicated sequence number.
