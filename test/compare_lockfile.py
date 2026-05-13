@@ -12,7 +12,7 @@ This script provides a detailed comparison of all package versions between
 our Cargo.lock and Firefox/Gecko's Cargo.lock, identifying matches and
 mismatches while accounting for 999-version patches.
 
-Usage: Run from the workspace root (not inside test/).
+Usage: uv run --project test compare-lockfile
 """
 
 import sys
@@ -113,7 +113,7 @@ def filter_neqo_only_mismatches(
 ) -> tuple[list, list, set[str]]:
     """Filter mismatches for neqo-only packages where our version is ahead.
 
-    These are expected since update-lockfile.py updates neqo-only deps to latest.
+    These are expected since update-lockfile updates neqo-only deps to latest.
     Also filters transitive cases: packages whose version in our lockfile is only
     pulled in by neqo-only (or workspace) crates.
 
