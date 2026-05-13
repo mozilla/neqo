@@ -325,7 +325,12 @@ impl Paths {
     /// Returns `Some` with the new primary path if migration occurred.
     /// If PMTUD is enabled and migration occurs, it will be started on the new primary path.
     #[must_use]
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant, stats: &mut Stats) -> Option<PathRef> {
+    pub fn path_response(
+        &mut self,
+        response: [u8; 8],
+        now: Instant,
+        stats: &mut Stats,
+    ) -> Option<PathRef> {
         // TODO(mt) consider recording an RTT measurement here as we don't train
         // RTT for non-primary paths.
         for p in &self.paths {
