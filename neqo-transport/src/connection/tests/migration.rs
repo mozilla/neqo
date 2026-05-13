@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, qdebug};
+use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
@@ -31,8 +31,9 @@ use super::{
     zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator, ConnectionIdRef,
-    ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
+    CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
+    MIN_INITIAL_PACKET_SIZE,
     cid::ConnectionIdManager,
     connection::tests::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
@@ -434,6 +435,11 @@ fn migrate_immediate() {
     client
         .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now)
         .unwrap();
+    assert!(client.events().any(|e| matches!(
+        e,
+        ConnectionEvent::PathMigrated { local, remote }
+        if local == DEFAULT_ADDR_V4 && remote == DEFAULT_ADDR_V4
+    )));
 
     let client1 = send_something(&mut client, now);
     assert_v4_path(&client1, true); // Contains PATH_CHALLENGE.
@@ -447,6 +453,11 @@ fn migrate_immediate() {
     // The server accepts the first packet and migrates (but probes).
     let server1 = server.process(Some(client1), now).dgram().unwrap();
     assert_v4_path(&server1, true);
+    assert!(
+        server
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::PathMigrated { .. }))
+    );
     let server2 = server.process_output(now).dgram().unwrap();
     assert_v6_path(&server2, true);
 
@@ -655,6 +666,11 @@ fn migration(mut client: Connection) {
 
     // Once the client receives the probe response, it migrates to the new path.
     client.process_input(resp, now);
+    assert!(client.events().any(|e| matches!(
+        e,
+        ConnectionEvent::PathMigrated { local, remote }
+        if local == DEFAULT_ADDR_V4 && remote == DEFAULT_ADDR_V4
+    )));
     assert_eq!(client.stats().frame_rx.path_challenge, 1);
     let migrate_client = send_something(&mut client, now);
     assert_v4_path(&migrate_client, true); // Responds to server probe.
