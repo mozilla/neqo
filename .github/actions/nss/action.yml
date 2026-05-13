@@ -1,0 +1,560 @@
+name: Install NSS
+description: Install NSS
+
+inputs:
+  minimum-version:
+    description: "Minimum required version of NSS. If not provided, reads from version-file."
+    required: false
+    default: ""
+  version-file:
+    description: "Path to file containing the minimum NSS version (relative to workspace root)"
+    required: false
+    default: "neqo-crypto/min_version.txt"
+  target:
+    description: "Target for cross-compilation"
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Determine minimum NSS version
+      id: min-version
+      shell: bash
+      env:
+        MIN_VERSION_INPUT: ${{ inputs.minimum-version }}
+        VERSION_FILE: ${{ inputs.version-file }}
+      run: |
+        if [ -n "$MIN_VERSION_INPUT" ]; then
+          echo "minimum=$MIN_VERSION_INPUT" >> "$GITHUB_OUTPUT"
+        elif [ -f "$VERSION_FILE" ]; then
+          echo "minimum=$(cat "$VERSION_FILE")" >> "$GITHUB_OUTPUT"
+        else
+          echo "::error::No minimum-version provided and version file '$VERSION_FILE' not found"
+          exit 1
+        fi
+
+    - name: Install system NSS (Linux)
+      shell: bash
+      if: ${{ runner.os == 'Linux' && inputs.target == '' && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+        sudo apt-get install -y --no-install-recommends libnss3-dev
+
+    - name: Install system NSS (MacOS)
+      shell: bash
+      if: ${{ runner.os == 'MacOS' && inputs.target == '' }}
+      run: |
+        [ "$BREW_UPDATED" ] || brew update && echo "BREW_UPDATED=1" >> "$GITHUB_ENV"
+        brew install nss
+
+    - name: Check system NSS version
+      id: system_nss
+      env:
+        MIN_VERSION: ${{ steps.min-version.outputs.minimum }}
+      shell: bash
+      if: inputs.target == ''
+      run: |
+        if ! pkg-config --atleast-version "$MIN_VERSION" nss; then
+          echo -n "System NSS needs ${MIN_VERSION}, got "
+          pkg-config --modversion nss 2>/dev/null || echo "pkg-config error"
+          exit 0
+        fi
+        echo "System NSS is suitable: $NSS_VERSION"
+        echo "suitable=1" >> "$GITHUB_OUTPUT"
+
+    - name: Use sccache
+      # Apparently the action can't be installed twice in the same workflow, so check if
+      # it's already installed by checking if the SCCACHE_ENABLED environment variable is set
+      # (which every "use" of this action needs to therefore set)
+      #
+      # Also, only enable sscache on our self-hosted runner, because the GitHub cache limit
+      # is too small for this to be effective there.
+      if: ${{ env.SCCACHE_ENABLED != '1' && !steps.system_nss.outputs.suitable && runner.environment == 'self-hosted' && !contains(runner.name, 'CodSpeed') }}
+      uses: mozilla-actions/sccache-action@7d986dd989559c6ecdb630a3fd2557667be217ad # v0.0.9
+
+    - name: Enable sscache
+      if: ${{ !steps.system_nss.outputs.suitable && runner.environment == 'self-hosted' && !contains(runner.name, 'CodSpeed') }}
+      env:
+        RUNNER_ENVIRONMENT: ${{ runner.environment }}
+        RUNNER_OS: ${{ runner.os }}
+      shell: bash
+      run: |
+        echo "SCCACHE_ENABLED=1" >> "$GITHUB_ENV"
+        if [ "$RUNNER_OS" != "Windows" ]; then
+          # TODO: Figure out how to make this work on Windows
+          echo "SCCACHE_CC=sccache cc" >> "$GITHUB_ENV"
+          echo "SCCACHE_CXX=sccache c++" >> "$GITHUB_ENV"
+        fi
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> "$GITHUB_ENV"
+        echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+    - name: Retrieve NSS
+      id: nss
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      shell: bash
+      run: |
+        # Versions and checksums are defined in nss-versions.env next to this action.
+        source "$GITHUB_ACTION_PATH/nss-versions.env"
+        NSS_TAG="${NSS_VERSION//./_}"
+        NSS_URL="https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"
+        echo "Retrieving NSS $NSS_VERSION from $NSS_URL"
+        curl -L -o nss.tar.gz "$NSS_URL"
+        if command -v sha256sum &>/dev/null; then
+          echo "$NSS_SHA256  nss.tar.gz" | sha256sum -c
+        else
+          echo "$NSS_SHA256  nss.tar.gz" | shasum -a 256 -c
+        fi
+        tar xzf nss.tar.gz --strip-components=1
+        rm nss.tar.gz
+        echo "version=$NSS_VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Retrieve NSPR
+      id: nspr
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      shell: bash
+      run: |
+        # Versions and checksums are defined in nss-versions.env next to this action.
+        source "$GITHUB_ACTION_PATH/nss-versions.env"
+        NSPR_URL="https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz"
+        echo "Retrieving NSPR $NSPR_VERSION from $NSPR_URL"
+        curl -L -o nspr.tar.gz "$NSPR_URL"
+        if command -v sha256sum &>/dev/null; then
+          echo "$NSPR_SHA256  nspr.tar.gz" | sha256sum -c
+        else
+          echo "$NSPR_SHA256  nspr.tar.gz" | shasum -a 256 -c
+        fi
+        tar xzf nspr.tar.gz --strip-components=1
+        rm nspr.tar.gz
+        echo "version=$NSPR_VERSION" >> "$GITHUB_OUTPUT"
+
+    - name: Store Ubuntu release code name (Linux)
+      id: ubuntu_release
+      shell: bash
+      if: ${{ runner.os == 'Linux' && !steps.system_nss.outputs.suitable }}
+      run: |
+        # Store Ubuntu release codename for use in cache key.
+        . /etc/os-release
+        echo "codename=-$UBUNTU_CODENAME" >> "$GITHUB_OUTPUT"
+
+    # Use restore-only here so PRs don't create redundant caches. PRs restore
+    # from main; only main saves new caches. This reduces churn and evictions.
+    # Downside: PRs that change NSS version/build will rebuild on every CI run.
+    - name: Restore NSS cache
+      id: cache
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      with:
+        path: dist
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
+
+    - name: Check if build is needed
+      id: check_build
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      env:
+        CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+      shell: bash
+      run: |
+        if [ "$CACHE_HIT" != "true" ]; then
+          echo "Building NSS from source"
+          echo "build_nss=1" >> "$GITHUB_OUTPUT"
+        else
+          echo "Using cached prebuilt NSS"
+        fi
+
+    - name: Install build dependencies (Linux)
+      shell: bash
+      if: ${{ runner.os == 'Linux' && steps.check_build.outputs.build_nss && (runner.environment != 'self-hosted' || contains(runner.name, 'CodSpeed')) }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: sudo apt-get install -y --no-install-recommends gyp ninja-build
+
+    - name: Install build dependencies (MacOS)
+      shell: bash
+      if: ${{ runner.os == 'MacOS' && steps.check_build.outputs.build_nss }}
+      run: |
+        brew install ninja
+        echo "gyp-next>=0.22.0" > req.txt
+        python3 -m pip install --break-system-packages -r req.txt
+
+    - name: Install build dependencies (Windows)
+      shell: bash
+      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
+      run: | # zizmor: ignore[github-env]
+        # shellcheck disable=SC2028
+        {
+          echo C:/msys64/usr/bin
+          echo C:/msys64/mingw64/bin
+        } >> "$GITHUB_PATH"
+        mkdir -p "$HOME/bin"
+        curl -o "$HOME/bin/nsinstall.py" -sSf https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/config/nsinstall.py
+        echo "#! /usr/bin/env python3" | cat - "$HOME/bin/nsinstall.py" > "$HOME/bin/nsinstall"
+        chmod +x "$HOME/bin/nsinstall"
+        mkdir -p "$HOME/bin/mozfile"
+        for file in __init__.py mozfile.py; do
+          curl -o "$HOME/bin/mozfile/$file" -sSf "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main/testing/mozbase/mozfile/mozfile/$file"
+        done
+        echo "$HOME/bin" >> "$GITHUB_PATH"
+        echo "gyp-next>=0.22.0" > req.txt
+        python3 -m pip install -r req.txt
+
+    - name: Set up MSVC (Windows)
+      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
+      uses: ilammy/msvc-dev-cmd@v1 # zizmor: ignore[unpinned-uses]
+      # TODO: Would like to pin this, but the Mozilla org allowlist requires "ilammy/msvc-dev-cmd@v1*"
+      # uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      with:
+        arch: ${{ runner.arch == 'ARM64' && 'amd64_arm64' || 'amd64' }}
+
+    - name: Set up build environment (Windows)
+      shell: bash
+      if: ${{ runner.os == 'Windows' && steps.check_build.outputs.build_nss }}
+      run: |
+        {
+          echo "GYP_MSVS_OVERRIDE_PATH=$VSINSTALLDIR"
+          echo "GYP_MSVS_VERSION=2022"
+          echo "BASH=$SHELL"
+        } >> "$GITHUB_ENV"
+        # See https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+        rm /usr/bin/link.exe || true
+
+    - name: Set up environment
+      shell: bash
+      if: ${{ !steps.system_nss.outputs.suitable }}
+      env:
+        NSS_DIR: ${{ github.workspace }}/nss
+        RUNNER_OS: ${{ runner.os }}
+        WORKSPACE: ${{ github.workspace }}
+      run: | # zizmor: ignore[github-env] We need to write to GITHUB_PATH on Windows.
+        NSS_OUT="$WORKSPACE/dist/Release"
+        {
+          echo "LD_LIBRARY_PATH=$NSS_OUT/lib"
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$NSS_OUT/lib"
+          echo "NSS_DIR=$NSS_DIR"
+          echo "NSS_PREBUILT=1"
+        } >> "$GITHUB_ENV"
+        if [ "$RUNNER_OS" == "Windows" ]; then
+          echo "$NSS_OUT/lib" >> "$GITHUB_PATH"
+        fi
+
+    - name: Build
+      shell: bash
+      if: ${{ steps.check_build.outputs.build_nss }}
+      env:
+        TARGET_PLATFORM: ${{ inputs.target }}
+        RUNNER_OS: ${{ runner.os }}
+        RUNNER_ARCH: ${{ runner.arch }}
+      run: |
+        # We want to do an optimized build for accurate CPU profiling, but
+        # we also want debug symbols and frame pointers for that, which the normal optimized NSS
+        # build process doesn't provide.
+        [ "$RUNNER_OS" != "Windows" ] && export CFLAGS="-ggdb3 -fno-omit-frame-pointer"
+        if [[ $TARGET_PLATFORM == *-android* ]]; then
+          # TODO: The application-services version below must be updated when
+          # NSS versions change, as the build script references library names
+          # that may change across NSS releases.
+          VERSION="v149.0"
+          for file in build-nss-android.sh build-android-common.sh; do
+            curl -o "$file" -sSf "https://raw.githubusercontent.com/mozilla/application-services/refs/tags/$VERSION/libs/$file"
+            chmod +x "$file"
+          done
+          # See https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#android
+          ANDROID_NDK_VERSION=$(basename "$ANDROID_NDK" | cut -d. -f1)
+          # See https://github.com/mozilla/application-services/blob/46cacda811da094653dc8e93158956f4cd57e87a/libs/build-all.sh#L89-L102
+          # It figures that NSPR would require monkey-patching to build on Android.
+          sed -i'' 's/if test -z "$android_ndk" ; then/$as_echo "#define ANDROID 1" >>confdefs.h\n    ;;\nunreachable)\n    if test -z "$android_ndk" ; then/g' nspr/configure
+          ./build-nss-android.sh "$(pwd)" "/tmp/dist" "$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64" "$TARGET_PLATFORM" "$ANDROID_NDK_VERSION"
+          # Manually move the temporary build directory to the final location, which is what neqo-crypto expects.
+          find /tmp/tmp.* > tmp
+          CERTUTIL="$(grep certutil tmp)"
+          TARGET_DIR="$(dirname $(dirname $CERTUTIL))"
+          mkdir -p "dist/Release"
+          cp -vaL "$TARGET_DIR"/* "dist/Release/"
+          NSPR_H="$(grep nspr.h tmp)"
+          INCLUDE_DIR="$(dirname $NSPR_H)"
+          mkdir -p "dist/Release/include/nspr"
+          cp -vaL "$INCLUDE_DIR"/* "dist/Release/include/nspr"
+          CHACHA="$(grep chacha20poly1305.h tmp)"
+          PRIVATE_DIR="$(dirname $(dirname $CHACHA))"
+          mkdir -p "dist/private"
+          cp -vaL "$PRIVATE_DIR"/* "dist/private/"
+          UTILRENAME="$(grep utilrename.h tmp)"
+          PUBLIC_DIR="$(dirname $(dirname $(dirname $UTILRENAME)))"
+          mkdir -p "dist/public"
+          cp -vaL "$PUBLIC_DIR"/* "dist/"
+          LIBNSPR4="$(grep lib/libnspr4.a tmp)"
+          LIB_DIR="$(dirname $LIBNSPR4)"
+          mkdir -p "dist/Release/lib"
+          cp -vaL "$LIB_DIR"/* "dist/Release/lib"
+        else
+          [ "$SCCACHE_CC" ] && [ "$SCCACHE_CXX" ] && export CC="$SCCACHE_CC" CXX="$SCCACHE_CXX"
+          NSS_EXTRA=""
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            # The NSPR Makefile tries to compile a resource file (nspr.rc) via rc.exe, which fails
+            # because rc.exe's preprocessor cannot parse ARM64-specific constructs in NSPR's headers.
+            # Since we build statically (--static), the resource file is not needed and we can safely
+            # skip it by clearing the RES variable in the Makefile template.
+            sed -i'' 's/^RES=.*/RES=/' nspr/pr/src/Makefile.in
+            if [ "$RUNNER_ARCH" == "ARM64" ]; then
+              # NSPR's configure detects CPU_ARCH via `uname -m`. On Windows ARM64 runners the
+              # shell is x64-emulated, so uname returns x86_64. Without correction, configure's
+              # i*86|x86_64 case runs without USE_64 set, emitting -D_X86_=1 and -arch:IA32.
+              # Setting USE_64=1 forces the i*86|x86_64 case to emit -D_AMD64_=1 instead,
+              # giving _winnt.cfg its correct 64-bit branch (pointer and word sizes matching
+              # ARM64's LLP64 ABI) and skipping ntmisc.c's x86 inline asm blocks (error C4235).
+              sed -i'' 's/CPU_ARCH=`uname -m`/CPU_ARCH=aarch64; USE_64=1/g' nspr/configure
+              # On ARM64 Windows MSVC, the Win32 Interlocked functions are not exported
+              # from ARM64 kernel32.lib; they are only available as compiler intrinsics.
+              # _winnt.h is included transitively by all NSPR Windows source files via
+              # primpl.h -> prosdep.h, so patching it here covers every caller:
+              # - The _MD_ATOMIC_* macros use InterlockedIncrement/Decrement/Exchange/
+              #   ExchangeAdd: replace their bodies with the _Interlocked intrinsic variants.
+              # - InterlockedCompareExchange is called directly in ntio.c, prmwait.c, and
+              #   possibly others: add a #define after <windows.h> so the preprocessor
+              #   rewrites every call site to the intrinsic without enumerating files.
+              # prcpucfg.h is installed from _winnt.cfg during the NSPR build.
+              # ARM64 Windows uses the same LLP64 memory model as x64 (64-bit
+              # pointers, 32-bit long), so extending the x64 condition suffices.
+              patch nspr/pr/include/md/_winnt.cfg << 'PATCH'
+        --- a/pr/include/md/_winnt.cfg
+        +++ b/pr/include/md/_winnt.cfg
+        @@ -70,3 +70,3 @@
+
+        -#elif defined(_M_X64) || defined(_M_AMD64) || defined(_AMD64_)
+        +#elif defined(_M_X64) || defined(_M_AMD64) || defined(_AMD64_) || defined(_M_ARM64) || defined(_ARM64_)
+
+        PATCH
+              patch nspr/pr/include/md/_winnt.h << 'PATCH'
+        --- a/pr/include/md/_winnt.h
+        +++ b/pr/include/md/_winnt.h
+        @@ -1,2 +1,3 @@
+         #include <windows.h>
+        +#define InterlockedCompareExchange _InterlockedCompareExchange
+         #include <winsock.h>
+        @@ -1,4 +1,4 @@
+         #else /* non-x86 processors */
+        -#define _MD_ATOMIC_INCREMENT(x)       InterlockedIncrement((PLONG)x)
+        -#define _MD_ATOMIC_ADD(ptr,val)    (InterlockedExchangeAdd((PLONG)ptr, (LONG)val) + val)
+        -#define _MD_ATOMIC_DECREMENT(x)       InterlockedDecrement((PLONG)x)
+        +#define _MD_ATOMIC_INCREMENT(x)       _InterlockedIncrement((PLONG)x)
+        +#define _MD_ATOMIC_ADD(ptr,val)    (_InterlockedExchangeAdd((PLONG)ptr, (LONG)val) + val)
+        +#define _MD_ATOMIC_DECREMENT(x)       _InterlockedDecrement((PLONG)x)
+        @@ -1,2 +1,2 @@
+         #endif /* x86 */
+        -#define _MD_ATOMIC_SET(x,y)           InterlockedExchange((PLONG)x, (LONG)y)
+        +#define _MD_ATOMIC_SET(x,y)           _InterlockedExchange((PLONG)x, (LONG)y)
+        PATCH
+              # NSS config.gypi has no ARM64 MSVC block, so gyp's GetArch() defaults to
+              # "x86" and ninja uses environment.x86 and HostX86\x86\cl.exe regardless of
+              # --target=arm64. Adding the ARM64 block sets msvs_configuration_platform to
+              # 'ARM64', making GetArch() return "arm64".
+              patch "$NSS_DIR/coreconf/config.gypi" << 'PATCH'
+        --- a/coreconf/config.gypi
+        +++ b/coreconf/config.gypi
+        @@ -586,2 +586,15 @@
+                               '_AMD64_',
+        +                    ],
+        +                    'AdditionalOptions': [ '/EHsc' ],
+        +                  },
+        +                },
+        +              }],
+        +              [ 'target_arch=="arm64"', {
+        +                'msvs_configuration_platform': 'ARM64',
+        +                'msvs_settings': {
+        +                  'VCCLCompilerTool': {
+        +                    'PreprocessorDefinitions': [
+        +                      'WIN64',
+        +                      '_ARM64_',
+        +                      '__ARM_FEATURE_CRYPTO',
+                             ],
+        PATCH
+              # MSVC does not support __attribute__; replace the aligned(16) on the K256
+              # constant array with MSVC's __declspec(align(16)) equivalent.
+              patch "$NSS_DIR/lib/freebl/sha256-armv8.c" << 'PATCH'
+        --- a/lib/freebl/sha256-armv8.c
+        +++ b/lib/freebl/sha256-armv8.c
+        @@ -9,1 +9,7 @@
+         #endif
+        +
+        +#ifdef _MSC_VER
+        +#define SHA_ALIGN16 __declspec(align(16))
+        +#else
+        +#define SHA_ALIGN16 __attribute__((aligned(16)))
+        +#endif
+        PATCH
+              patch "$NSS_DIR/lib/freebl/sha256-armv8.c" << 'PATCH'
+        --- a/lib/freebl/sha256-armv8.c
+        +++ b/lib/freebl/sha256-armv8.c
+        @@ -23,3 +23,3 @@
+         /* SHA-256 constants, K256. */
+        -static const PRUint32 __attribute__((aligned(16))) K256[64] = {
+        +static const SHA_ALIGN16 PRUint32 K256[64] = {
+             0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5,
+        PATCH
+              # sha_fast.h defines SHA_HW_t as PRUint64 on 64-bit platforms, except
+              # __aarch64__ (GCC/Clang). Add _M_ARM64 (MSVC) to the exclusion, so
+              # SHA_HW_t remains PRUint32. The ARM HW SHA-1 path (sha1-armv8.c)
+              # does vld1q_u32(&H[0]) expecting 4 contiguous 32-bit hash state
+              # values; with PRUint64, H[] has 8-byte stride and vld1q_u32 loads
+              # {A_lo, A_hi, B_lo, B_hi} instead of {A, B, C, D}.
+              patch "$NSS_DIR/lib/freebl/sha_fast.h" << 'PATCH'
+        --- a/lib/freebl/sha_fast.h
+        +++ b/lib/freebl/sha_fast.h
+        @@ -10,3 +10,3 @@
+        -#if defined(IS_64) && !defined(__sparc) && !defined(__aarch64__)
+        +#if defined(IS_64) && !defined(__sparc) && !defined(__aarch64__) && !defined(_M_ARM64)
+         typedef PRUint64 SHA_HW_t;
+         #define SHA1_USING_64_BIT 1
+        PATCH
+              # aes-armv8.c guards its body with __clang__||__GNUC__; extend to MSVC.
+              # All NEON AES intrinsics (vaeseq_u8 etc.) are available in MSVC ARM64.
+              # Also add a no-op __builtin_assume_aligned compat (MSVC has no equivalent).
+              patch "$NSS_DIR/lib/freebl/aes-armv8.c" << 'PATCH'
+        --- a/lib/freebl/aes-armv8.c
+        +++ b/lib/freebl/aes-armv8.c
+        @@ -7,6 +7,7 @@
+
+        -#if ((defined(__clang__) ||                                         \
+        +#if (((defined(__clang__) ||                                         \
+               (defined(__GNUC__) && defined(__GNUC_MINOR__) &&              \
+                (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ > 8)))) && \
+        -     defined(IS_LITTLE_ENDIAN))
+        +     defined(IS_LITTLE_ENDIAN)) || \
+        +     (defined(_MSC_VER) && defined(_M_ARM64)))
+
+        @@ -18,2 +19,6 @@
+
+        +#ifdef _MSC_VER
+        +#define __builtin_assume_aligned(ptr, align) (ptr)
+        +#endif
+        +
+         SECStatus
+        PATCH
+              # ghash-aarch64.c guards its body with __aarch64__ && (__clang__||__GNUC__).
+              # Extend to MSVC ARM64, add __builtin_bswap64 compat, and remove
+              # (poly64_t) casts on vget_low_p64 results. GCC/Clang vmull_p64 takes
+              # poly64_t scalars; MSVC takes poly64x1_t vectors. vget_low_p64 returns
+              # poly64x1_t, and MSVC rejects C-style casts to union types.
+              patch "$NSS_DIR/lib/freebl/ghash-aarch64.c" << 'PATCH'
+        --- a/lib/freebl/ghash-aarch64.c
+        +++ b/lib/freebl/ghash-aarch64.c
+        @@ -11,4 +11,4 @@
+         /* old gcc doesn't support some poly64x2_t intrinsic */
+        -#if defined(__aarch64__) && defined(IS_LITTLE_ENDIAN) && \
+        -    (defined(__clang__) || defined(__GNUC__) && __GNUC__ > 6)
+        +#if (defined(__aarch64__) || defined(_M_ARM64)) && defined(IS_LITTLE_ENDIAN) && \
+        +    (defined(__clang__) || (defined(__GNUC__) && __GNUC__ > 6) || defined(_MSC_VER))
+
+        @@ -16,2 +16,7 @@
+
+        +#ifdef _MSC_VER
+        +#include <intrin.h>
+        +#define __builtin_bswap64(x) _byteswap_uint64(x)
+        +#endif
+        +
+         PRBool
+        @@ -50,4 +55,4 @@
+                 z_low = vreinterpretq_u8_p128(
+        -            vmull_p64((poly64_t)vget_low_p64(vreinterpretq_p64_u64(ci)),
+        -                      (poly64_t)vget_low_p64(vreinterpretq_p64_u64(h))));
+        +            vmull_p64(vget_low_p64(vreinterpretq_p64_u64(ci)),
+        +                      vget_low_p64(vreinterpretq_p64_u64(h))));
+                 z_high = vreinterpretq_u8_p128(
+        @@ -57,4 +62,4 @@
+                 t_low = vreinterpretq_u8_p128(
+        -            vmull_p64((poly64_t)vget_low_p64(vreinterpretq_p64_u64(ci)),
+        -                      (poly64_t)vget_low_p64(t1)));
+        +            vmull_p64(vget_low_p64(vreinterpretq_p64_u64(ci)),
+        +                      vget_low_p64(t1)));
+                 t_high = vreinterpretq_u8_p128(vmull_high_p64(vreinterpretq_p64_u64(ci), t1));
+        @@ -70,4 +75,4 @@
+                            vreinterpretq_u64_p128(
+        -                           vmull_p64((poly64_t)vget_low_p64(vreinterpretq_p64_u8(z_high)),
+        -                                     (poly64_t)vget_low_p64(p))));
+        +                           vmull_p64(vget_low_p64(vreinterpretq_p64_u8(z_high)),
+        +                                     vget_low_p64(p))));
+             }
+        PATCH
+              # gcm.h uses __aarch64__ to include arm_neon.h and declare uint64x2_t
+              # struct members. Extend both checks to also match MSVC's _M_ARM64.
+              patch "$NSS_DIR/lib/freebl/gcm.h" << 'PATCH'
+        --- a/lib/freebl/gcm.h
+        +++ b/lib/freebl/gcm.h
+        @@ -29,3 +29,3 @@
+
+        -#ifdef __aarch64__
+        +#if defined(__aarch64__) || defined(_M_ARM64)
+         #include <arm_neon.h>
+        @@ -84,3 +84,3 @@
+             __m128i x, h;
+        -#elif defined(__aarch64__)
+        +#elif defined(__aarch64__) || defined(_M_ARM64)
+             uint64x2_t x, h;
+        PATCH
+              # blinit.c uses __aarch64__ to guard ARM64 feature detection. MSVC uses
+              # _M_ARM64 instead. The Windows path inside CheckARMSupport() already
+              # uses IsProcessorFeaturePresent(PF_ARM_V8_CRYPTO_INSTRUCTIONS_AVAILABLE).
+              patch "$NSS_DIR/lib/freebl/blinit.c" << 'PATCH'
+        --- a/lib/freebl/blinit.c
+        +++ b/lib/freebl/blinit.c
+        @@ -19,3 +19,3 @@
+
+        -#if defined(_WIN64) && defined(__aarch64__)
+        +#if defined(_WIN64) && (defined(__aarch64__) || defined(_M_ARM64))
+         #include <windows.h>
+        @@ -188,3 +188,3 @@
+
+        -#if defined(__aarch64__)
+        +#if defined(__aarch64__) || defined(_M_ARM64)
+
+        @@ -565,3 +565,3 @@
+             CheckX86CPUSupport();
+        -#elif (defined(__aarch64__) || defined(__arm__))
+        +#elif (defined(__aarch64__) || defined(__arm__) || defined(_M_ARM64))
+             CheckARMSupport();
+        PATCH
+
+              # NSS's coreconf/msvc.sh only handles ia32 and x64; it exits with an error
+              # for arm64. Setting VSPATH to any non-empty value causes msvc.sh to skip
+              # its own discovery and print "Assuming env setup is already done", relying
+              # on the environment already configured by ilammy/msvc-dev-cmd (amd64_arm64).
+              # Use ${VSINSTALLDIR:-1} so the bypass is guaranteed even if VSINSTALLDIR
+              # is somehow not exported into this shell.
+              export VSPATH="${VSINSTALLDIR:-1}"
+              # Use --target (not -Dtarget_arch) so build.sh sets its own
+              # target_arch variable, which suppresses auto-detection at line
+              # 160. With -Dtarget_arch= the auto-detected value is appended
+              # after ours and overrides it (gyp uses the last -D value).
+              NSS_EXTRA="--target=arm64"
+            fi
+          fi
+          # shellcheck disable=SC2086
+          $NSS_DIR/build.sh -g -v -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 --opt --static $NSS_EXTRA
+          if [ "$RUNNER_OS" == "Windows" ] && [ "$RUNNER_ARCH" == "ARM64" ]; then
+            echo "::group::Verify NSS DLLs load on ARM64"
+            NSS_LIB="$GITHUB_WORKSPACE/dist/Release/lib"
+            python3 -c "
+        import ctypes, sys, os
+        lib = os.environ.get('NSS_LIB', r'$NSS_LIB')
+        for dll in ['freebl3.dll', 'softokn3.dll']:
+            path = os.path.join(lib, dll)
+            print(f'Loading {path}...', end=' ')
+            try:
+                ctypes.WinDLL(path)
+                print('OK')
+            except Exception as e:
+                print(f'FAILED: {e}')
+                sys.exit(1)
+        "
+            echo "::endgroup::"
+          fi
+        fi
+
+    - name: Save NSS cache
+      if: ${{ steps.check_build.outputs.build_nss && github.event_name != 'pull_request' }}
+      uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+      with:
+        path: dist
+        key: nss-${{ inputs.target || runner.os }}${{ steps.ubuntu_release.outputs.codename }}-${{ runner.arch }}-${{ steps.nss.outputs.version }}-${{ steps.nspr.outputs.version }}
