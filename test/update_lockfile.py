@@ -11,9 +11,9 @@ Update Cargo.lock to align with Gecko's versions.
 This script compares our Cargo.lock with Firefox/Gecko's Cargo.lock and runs
 cargo update commands to align versions. Crate versions that Gecko patches
 with 999-versions are skipped, since those patches are Gecko-specific and
-compare-lockfile.py already treats them as matches.
+compare-lockfile already treats them as matches.
 
-Usage: Run from the workspace root (not inside test/).
+Usage: uv run --project test update-lockfile [--update-neqo-only]
 """
 
 import argparse
@@ -37,19 +37,56 @@ from lockfile_utils import (
 )
 
 
+def _cargo_update_specs(
+    specs: list[str],
+    original_content: str,
+    original_duplicates: dict,
+    lockfile_path: Path,
+) -> set[tuple[str, str]]:
+    """Run cargo update for the given name@version specs.
+
+    Returns the set of (name, version) entries present after the update,
+    or the original set (after reverting) if the update would introduce
+    duplicate dependencies.
+    """
+    result = subprocess.run(
+        ["cargo", "update"] + [arg for s in specs for arg in ["-p", s]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return set()
+
+    new_lock = load_lockfile("Cargo.lock")
+    new_duplicates = get_duplicate_packages(new_lock)
+    regressed = {
+        name
+        for name, vers in new_duplicates.items()
+        if len(vers) > len(original_duplicates.get(name, []))
+    }
+    if regressed:
+        lockfile_path.write_text(original_content, encoding="utf-8")
+        return set()
+
+    return {
+        (pkg["name"], pkg["version"])
+        for pkg in new_lock.get("package", [])
+    }
+
+
 def update_neqo_only_packages(packages: list[str]) -> dict[str, tuple[str, str]]:
     """Update all neqo-only packages together to their latest versions.
 
-    Updates all packages at once, which allows transitive dependencies to unify.
-    For example, if both enumset and serde_with need darling, updating them together
-    allows them to share a single darling version.
+    Tries all packages at once first (allows transitive deps to unify), then
+    falls back to updating each package individually so that packages which
+    would introduce duplicates are skipped while the rest still get updated.
 
     Returns a dict of package name -> (old_version, new_version) for updated packages.
     """
     if not packages:
         return {}
 
-    # Snapshot the lockfile for reliable revert.
     lockfile_path = Path("Cargo.lock")
     original_content = lockfile_path.read_text(encoding="utf-8")
     original_lock = load_lockfile("Cargo.lock")
@@ -60,41 +97,37 @@ def update_neqo_only_packages(packages: list[str]) -> dict[str, tuple[str, str]]
     }
     original_duplicates = get_duplicate_packages(original_lock)
 
-    # Update all packages at once.
-    result = subprocess.run(
-        ["cargo", "update"] + [arg for p in packages for arg in ["-p", p]],
-        capture_output=True,
-        text=True,
-        check=False,
+    # Use name@version to avoid ambiguity when a package has multiple versions.
+    specs = [f"{name}@{ver}" for name, ver in original_versions]
+
+    # Try batch update first; fall back to per-package if it introduces duplicates.
+    new_versions = _cargo_update_specs(
+        specs, original_content, original_duplicates, lockfile_path
     )
-    if result.returncode != 0:
-        print(f"cargo update failed: {result.stderr.strip()}", file=sys.stderr)
-        return {}
-
-    # Check for new or worsened duplicate packages.
-    new_lock = load_lockfile("Cargo.lock")
-    new_duplicates = get_duplicate_packages(new_lock)
-    regressed = {
-        name
-        for name, vers in new_duplicates.items()
-        if len(vers) > len(original_duplicates.get(name, []))
-    }
-    if regressed:
-        print("  Update would introduce duplicate dependencies:")
-        for name in sorted(regressed):
-            print(f"    {name}: {', '.join(new_duplicates[name])}")
+    if not new_versions:
+        # Restore original and retry one spec at a time.
         lockfile_path.write_text(original_content, encoding="utf-8")
-        print("  Reverted to original lockfile")
-        return {}
+        current_content = original_content
+        current_duplicates = original_duplicates
+        new_versions = {
+            (pkg["name"], pkg["version"])
+            for pkg in original_lock.get("package", [])
+        }
+        for spec in specs:
+            name, ver = spec.split("@", 1)
+            if (name, ver) not in new_versions:
+                continue  # Already moved by a transitive update; skip.
+            result_versions = _cargo_update_specs(
+                [spec], current_content, current_duplicates, lockfile_path
+            )
+            if result_versions:
+                current_content = lockfile_path.read_text(encoding="utf-8")
+                current_duplicates = get_duplicate_packages(load_lockfile("Cargo.lock"))
+                new_versions = result_versions
 
-    # Collect updated packages.
-    new_versions = {
-        (pkg["name"], pkg["version"])
-        for pkg in new_lock.get("package", [])
-        if pkg["name"] in packages
-    }
+    new_versions_for_pkgs = {(n, v) for n, v in new_versions if n in packages}
     updated = {}
-    for name, new_ver in new_versions - original_versions:
+    for name, new_ver in new_versions_for_pkgs - original_versions:
         old = [v for n, v in original_versions if n == name]
         if old:
             updated[name] = (old[0], new_ver)
@@ -252,7 +285,7 @@ def apply_version_updates(
     graph = build_dependency_graph(version_updates)
     updated = []
     downgraded = []
-    failed = {}
+    failed: dict[tuple[str, str], tuple[str, str]] = {}
 
     made_progress = True
     while made_progress:
@@ -375,7 +408,7 @@ def main():
 
     # Optionally update neqo-only packages to latest.
     if args.update_neqo_only:
-        run_neqo_only_updates(neqo_or_workspace & common, our_pkgs)
+        run_neqo_only_updates(neqo_only & common, our_pkgs)
 
     if not version_updates:
         print("\nAll shared packages aligned with Gecko versions")

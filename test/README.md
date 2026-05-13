@@ -50,3 +50,42 @@ The `upload_test.sh` script automates testing network conditions for `neqo-clien
 ## Visualize log file
 
 Run `./mozlog-neqo-cwnd.py upload.log` to view the logs with matplotlib and python.
+
+## Cargo.lock alignment tools
+
+Two scripts help keep `Cargo.lock` aligned with Firefox/Gecko's lockfile.
+Both must be run from the **workspace root** (not inside `test/`).
+Dependencies are managed via `test/pyproject.toml` and resolved automatically by `uv`.
+
+### Compare versions
+
+```shell
+uv run --project test compare-lockfile
+```
+
+Fetches Gecko's `Cargo.lock` and reports which packages match, which differ,
+and whether mismatches are production-affecting or dev/build-only.
+
+### Update versions
+
+```shell
+uv run --project test update-lockfile
+```
+
+Runs `cargo update --precise` to align shared dependencies with Gecko's pinned
+versions.  Pass `--update-neqo-only` to also bump neqo-exclusive packages to
+their latest available versions:
+
+```shell
+uv run --project test update-lockfile --update-neqo-only
+```
+
+Set `GITHUB_TOKEN` (or `GITHUB_API_TOKEN`) in the environment to avoid GitHub
+API rate limits when fetching Gecko metadata.
+
+### Linting and type checking
+
+```shell
+uv run --project test --group dev ruff check test/
+uv run --project test --group dev mypy --config-file test/pyproject.toml test/
+```
