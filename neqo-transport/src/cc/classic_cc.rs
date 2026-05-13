@@ -118,9 +118,13 @@ pub trait WindowAdjustment: Display + Debug {
 /// (`ssthresh`) is set on exit and they can influence how fast the exponential congestion window
 /// growth rate during slow start is.
 pub trait SlowStart: Display + Debug {
-    /// Enables a trait implementor to track RTT rounds via the next packet numer that is to be sent
-    /// out.
-    fn on_packet_sent(&mut self, sent_pn: packet::Number);
+    /// Enables a trait implementor to ingest info about sent packets.
+    fn on_packet_sent(&mut self, _sent_pn: packet::Number, _sent_bytes: usize) {}
+
+    /// This is needed by SEARCH to keep its cumulative byte counters in sync during app-limited
+    /// periods, when [`SlowStart::on_packets_acked`] is not called.
+    fn record_acked_bytes(&mut self, _new_acked_bytes: usize) {}
+
     /// Handle packets being acknowledged during slow start. Returns the congestion window in bytes
     /// that slow start should be exited with. If slow start isn't exited returns `None`.
     fn on_packets_acked(
@@ -129,6 +133,7 @@ pub trait SlowStart: Display + Debug {
         largest_acked: packet::Number,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
+        now: Instant,
     ) -> Option<usize>;
 
     /// Calculates the congestion window increase in bytes during slow start. The default
@@ -138,7 +143,8 @@ pub trait SlowStart: Display + Debug {
     }
 
     /// Resets slow start state. Is used after persistent congestion so slow start algorithms
-    /// perform cleanly in non-initial slow starts.
+    /// perform cleanly in non-initial slow starts. Can also be used by the implementing algorithm
+    /// for internal state reset when needed.
     fn reset(&mut self) {}
 }
 
@@ -229,6 +235,11 @@ impl<S, T> ClassicCongestionController<S, T> {
     pub const fn max_datagram_size(&self) -> usize {
         self.pmtud.plpmtu()
     }
+
+    #[cfg(test)]
+    pub const fn cwnd_initial(&self) -> usize {
+        cwnd_initial(self.pmtud.plpmtu())
+    }
 }
 
 impl<S, T> CongestionController for ClassicCongestionController<S, T>
@@ -259,11 +270,6 @@ where
 
     fn cwnd_min(&self) -> usize {
         self.max_datagram_size() * 2
-    }
-
-    #[cfg(test)]
-    fn cwnd_initial(&self) -> usize {
-        cwnd_initial(self.pmtud.plpmtu())
     }
 
     fn pmtud(&self) -> &Pmtud {
@@ -333,6 +339,10 @@ where
             new_acked += pkt.len();
         }
 
+        if self.current.phase.in_slow_start() {
+            self.slow_start.record_acked_bytes(new_acked);
+        }
+
         if is_app_limited {
             self.congestion_control.on_app_limited();
             qdebug!(
@@ -352,6 +362,7 @@ where
                 largest_packet_acked.pn(),
                 self.current.congestion_window,
                 cc_stats,
+                now,
             ) {
                 qdebug!("Exited slow start by algorithm");
                 self.current.congestion_window = exit_cwnd;
@@ -556,7 +567,7 @@ where
 
         // Pass next packet number to send into slow start algorithm during slow start.
         if self.current.phase.in_slow_start() {
-            self.slow_start.on_packet_sent(pkt.pn());
+            self.slow_start.on_packet_sent(pkt.pn(), pkt.len());
         }
 
         if !self.app_limited() {
@@ -2129,7 +2140,7 @@ mod tests {
 
         // Dirty HyStart state so current_round_min_rtt is non-None.
         cc.slow_start
-            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats);
+            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats, now());
         assert!(cc.slow_start.current_round_min_rtt().is_some());
 
         cc.detect_persistent_congestion(

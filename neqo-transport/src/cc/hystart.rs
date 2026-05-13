@@ -7,7 +7,7 @@
 use std::{
     cmp::{max, min},
     fmt::Display,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{qdebug, qtrace};
@@ -190,7 +190,7 @@ impl HyStart {
 }
 
 impl SlowStart for HyStart {
-    fn on_packet_sent(&mut self, sent_pn: packet::Number) {
+    fn on_packet_sent(&mut self, sent_pn: packet::Number, _sent_bytes: usize) {
         self.maybe_set_window_end(sent_pn);
     }
 
@@ -231,6 +231,7 @@ impl SlowStart for HyStart {
         largest_acked: packet::Number,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
+        _now: Instant,
     ) -> Option<usize> {
         self.collect_rtt_sample(rtt_est.latest_rtt());
 

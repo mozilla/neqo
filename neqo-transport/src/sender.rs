@@ -13,8 +13,9 @@ use neqo_common::{qdebug, qlog::Qlog};
 use crate::{
     ConnectionParameters, SlowStart, Stats,
     cc::{
-        ClassicCongestionController, ClassicSlowStart, CongestionControl, CongestionController,
-        Cubic, HyStart, NewReno,
+        ClassicCongestionController, ClassicSlowStart, CongestionControl,
+        CongestionControlImplementation, CongestionController as _, Cubic, HyStart, NewReno,
+        Search,
     },
     pace::Pacer,
     pmtud::Pmtud,
@@ -29,7 +30,7 @@ pub const PACING_BURST_SIZE: usize = 2;
 
 #[derive(Debug)]
 pub struct PacketSender {
-    cc: Box<dyn CongestionController>,
+    cc: CongestionControlImplementation,
     pacer: Pacer,
     qlog: Qlog,
 }
@@ -45,26 +46,40 @@ impl PacketSender {
                 conn_params.get_slow_start(),
             ) {
                 (CongestionControl::NewReno, SlowStart::Classic) => {
-                    Box::new(ClassicCongestionController::new(
-                        ClassicSlowStart::default(),
-                        NewReno::default(),
-                        pmtud,
-                        spurious_recovery,
-                    ))
+                    CongestionControlImplementation::ClassicNewReno(
+                        ClassicCongestionController::new(
+                            ClassicSlowStart::default(),
+                            NewReno::default(),
+                            pmtud,
+                            spurious_recovery,
+                        ),
+                    )
                 }
                 (CongestionControl::NewReno, SlowStart::HyStart) => {
-                    Box::new(ClassicCongestionController::new(
-                        HyStart::new(
-                            conn_params.pacing_enabled(),
-                            conn_params.get_hystart_css_baseline(),
+                    CongestionControlImplementation::HyStartNewReno(
+                        ClassicCongestionController::new(
+                            HyStart::new(
+                                conn_params.pacing_enabled(),
+                                conn_params.get_hystart_css_baseline(),
+                            ),
+                            NewReno::default(),
+                            pmtud,
+                            spurious_recovery,
                         ),
-                        NewReno::default(),
-                        pmtud,
-                        spurious_recovery,
-                    ))
+                    )
+                }
+                (CongestionControl::NewReno, SlowStart::Search) => {
+                    CongestionControlImplementation::SearchNewReno(
+                        ClassicCongestionController::new(
+                            Search::new(),
+                            NewReno::default(),
+                            pmtud,
+                            spurious_recovery,
+                        ),
+                    )
                 }
                 (CongestionControl::Cubic, SlowStart::Classic) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::ClassicCubic(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
                         Cubic::default(),
                         pmtud,
@@ -72,11 +87,19 @@ impl PacketSender {
                     ))
                 }
                 (CongestionControl::Cubic, SlowStart::HyStart) => {
-                    Box::new(ClassicCongestionController::new(
+                    CongestionControlImplementation::HyStartCubic(ClassicCongestionController::new(
                         HyStart::new(
                             conn_params.pacing_enabled(),
                             conn_params.get_hystart_css_baseline(),
                         ),
+                        Cubic::default(),
+                        pmtud,
+                        spurious_recovery,
+                    ))
+                }
+                (CongestionControl::Cubic, SlowStart::Search) => {
+                    CongestionControlImplementation::SearchCubic(ClassicCongestionController::new(
+                        Search::new(),
                         Cubic::default(),
                         pmtud,
                         spurious_recovery,
@@ -214,5 +237,63 @@ impl PacketSender {
     #[must_use]
     pub fn recovery_packet(&self) -> bool {
         self.cc.recovery_packet()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use test_fixture::now;
+
+    use super::PacketSender;
+    use crate::{ConnectionParameters, SlowStart, cc::CongestionControl, pmtud::Pmtud};
+
+    #[test]
+    fn packet_sender_creation_and_display() {
+        let now = now();
+        let cases = [
+            (
+                CongestionControl::NewReno,
+                SlowStart::Classic,
+                "ClassicSlowStart/NewReno",
+            ),
+            (
+                CongestionControl::NewReno,
+                SlowStart::HyStart,
+                "HyStart++/NewReno",
+            ),
+            (
+                CongestionControl::NewReno,
+                SlowStart::Search,
+                "SEARCH/NewReno",
+            ),
+            (
+                CongestionControl::Cubic,
+                SlowStart::Classic,
+                "ClassicSlowStart/Cubic",
+            ),
+            (
+                CongestionControl::Cubic,
+                SlowStart::HyStart,
+                "HyStart++/Cubic",
+            ),
+            (CongestionControl::Cubic, SlowStart::Search, "SEARCH/Cubic"),
+        ];
+        for (cc, ss, expected_prefix) in cases {
+            let params = ConnectionParameters::default()
+                .congestion_control(cc)
+                .slow_start(ss);
+            let sender = PacketSender::new(
+                &params,
+                Pmtud::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(1500)),
+                now,
+            );
+            let description = sender.cc.to_string();
+            assert!(
+                description.starts_with(expected_prefix),
+                "expected prefix {expected_prefix:?}, got {description:?}",
+            );
+        }
     }
 }
