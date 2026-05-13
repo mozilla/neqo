@@ -107,6 +107,31 @@ pub enum MessageType {
     Response,
 }
 
+/// Dispatch a method call on an enum to its variants' inner values.
+///
+/// The variant list is given once in a local wrapper; method bodies stay clean:
+///
+/// ```ignore
+/// // Once per enum, in the impl module:
+/// macro_rules! dispatch {
+///     ($self:ident . $method:ident $args:tt) => {
+///         neqo_common::dispatch!([Variant1, Variant2, Variant3] $self . $method $args)
+///     };
+/// }
+///
+/// impl SomeTrait for MyEnum {
+///     fn method(&self) -> T { dispatch!(self.method()) }
+/// }
+/// ```
+#[macro_export]
+macro_rules! dispatch {
+    ([$($variant:ident),+ $(,)?] $self:ident . $method:ident $args:tt) => {
+        match $self {
+            $( Self::$variant(v) => v.$method $args, )+
+        }
+    };
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
