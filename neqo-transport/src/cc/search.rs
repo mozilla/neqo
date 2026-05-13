@@ -21,13 +21,14 @@ use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::Congesti
 pub enum Outcome {
     /// Evaluation ran and slow start should be exited with the provided cwnd.
     Exit(usize),
-    /// Evaluation ran and slow start should be continued.
-    Continue,
+    /// Evaluation ran and slow start should be continued. Provides the normalized difference
+    /// between sent and acked bytes, which can be used in metrics to tune the exit threshold.
+    Continue(usize),
     /// Not enough data to run SEARCH evaluation (expected early in the connection or after reset).
     WarmingUp,
-    /// Can't run SEARCH evaluation because RTT inflated past the point where there is enough
-    /// data to look back one RTT.
-    RttInflated,
+    /// Can't run SEARCH evaluation because RTT inflated past the point where there isn't enough
+    /// data to look back one RTT. Provides the number of bins that SEARCH tried to look back.
+    RttInflated(usize),
     /// Haven't sent data for the last RTT thus can't evaluate.
     ZeroSent,
 }
@@ -54,6 +55,8 @@ pub struct Search {
     acked_bytes: usize,
     /// Tracking amount of sent bytes on this connection. Is incremented on every sent packet.
     sent_bytes: usize,
+    /// The RTT used to initialize SEARCH (set in [`Self::initialize`]).
+    initial_rtt: Option<Duration>,
 }
 
 impl Display for Search {
@@ -95,6 +98,7 @@ impl Search {
             bin_duration: Duration::from_millis(0),
             acked_bytes: 0,
             sent_bytes: 0,
+            initial_rtt: None,
         }
     }
 
@@ -104,6 +108,7 @@ impl Search {
         reason = "casting small constant usize to u32 for use in Duration::div"
     )]
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
+        self.initial_rtt = Some(initial_rtt);
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
         self.bin_duration =
             initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE as u32 / Self::W as u32;
@@ -130,7 +135,11 @@ impl Search {
         clippy::cast_possible_truncation,
         reason = "casting small usize to u32 for use in Duration::saturating_mul"
     )]
-    fn update_bins(&mut self, now: Instant) -> Option<usize> {
+    fn update_bins(
+        &mut self,
+        now: Instant,
+        cc_stats: &mut CongestionControlStats,
+    ) -> Option<usize> {
         let mut curr_idx = self.curr_idx?;
         let mut bin_end = self.bin_end?;
 
@@ -155,6 +164,9 @@ impl Search {
                 "SEARCH: update_bins: resetting because we skipped {passed_bins} bins (limit {})",
                 Self::W
             );
+            cc_stats.search_reset.count += 1;
+            cc_stats.search_reset.max_passed_bins =
+                cc_stats.search_reset.max_passed_bins.max(Some(passed_bins));
             self.reset();
             return None;
         }
@@ -245,7 +257,7 @@ impl Search {
         }
         if curr_idx - prev_idx >= Self::EXTRA_BINS {
             qdebug!("SEARCH: evaluate: not enough data for SEARCH evaluation (RTT inflated)");
-            return Outcome::RttInflated;
+            return Outcome::RttInflated(curr_idx - prev_idx);
         }
 
         let curr_delv = self.compute_delv(curr_idx - Self::W, curr_idx);
@@ -266,13 +278,54 @@ impl Search {
                 "SEARCH: evaluate: norm_diff {norm_diff} < THRESH {} --> continue",
                 Self::THRESH
             );
-            return Outcome::Continue;
+            return Outcome::Continue(norm_diff);
         }
         qdebug!(
             "SEARCH: evaluate: norm_diff {norm_diff} >= THRESH {} --> exit",
             Self::THRESH
         );
         Outcome::Exit(curr_cwnd)
+    }
+
+    /// Converts an RTT duration to the number of bins it spans (rounded up).
+    fn rtt_to_bins(&self, rtt: Duration) -> usize {
+        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
+        let bin_ns = u64::try_from(self.bin_duration.as_nanos()).unwrap_or(u64::MAX);
+        usize::try_from(rtt_ns.div_ceil(bin_ns)).unwrap_or(usize::MAX)
+    }
+
+    /// SEARCH suggests a drain-phase to slowly converge towards a BDP estimate. We're currently not
+    /// implementing this, but do record the calculated targets for evaluation in this function.
+    ///
+    /// The draft specifies using the initial rtt to approximate an 'empty-buffer BDP'.
+    ///
+    /// In addition also record an estimate using the current rtt to approximate BDP with full
+    /// buffers. This should estimate the upper end of the CUBIC curve during congestion avoidance.
+    fn record_target_cwnd_estimates(
+        &self,
+        curr_idx: usize,
+        rtt: Duration,
+        cc_stats: &mut CongestionControlStats,
+    ) {
+        // Only compute estimates if we have an initial RTT. This is a pure precaution, since we
+        // should always have an initial RTT before this method is called.
+        let Some(initial_rtt) = self.initial_rtt else {
+            return;
+        };
+        let initial_rtt_bins = self.rtt_to_bins(initial_rtt);
+        let initial_rtt_cong_idx = curr_idx.saturating_sub(initial_rtt_bins);
+        let empty_buffer_target = self.compute_delv(initial_rtt_cong_idx, curr_idx);
+
+        cc_stats.search_empty_buffer_target = Some(empty_buffer_target);
+
+        // Only compute full_buffer_target when the current RTT fits within the acked_bins
+        // circular buffer (W + 1 slots). Beyond that, modulo indexing reads overwritten entries.
+        let current_rtt_bins = self.rtt_to_bins(rtt);
+        if current_rtt_bins <= Self::W {
+            let current_rtt_cong_idx = curr_idx.saturating_sub(current_rtt_bins);
+            let full_buffer_target = self.compute_delv(current_rtt_cong_idx, curr_idx);
+            cc_stats.search_full_buffer_target = Some(full_buffer_target);
+        }
     }
 
     #[cfg(test)]
@@ -331,10 +384,17 @@ impl SlowStart for Search {
         rtt_est: &RttEstimate,
         _largest_acked: packet::Number,
         curr_cwnd: usize,
-        _cc_stats: &mut CongestionControlStats,
+        cc_stats: &mut CongestionControlStats,
         now: Instant,
     ) -> Option<usize> {
         let rtt = rtt_est.latest_rtt();
+
+        // Guard on the stats fields so post-reset ACKs don't overwrite the initial samples.
+        if cc_stats.search_first_rtt.is_none() {
+            cc_stats.search_first_rtt = Some(rtt);
+        } else {
+            cc_stats.search_second_rtt.get_or_insert(rtt);
+        }
 
         // Initialize on first ACK.
         if self.curr_idx.is_none() {
@@ -349,7 +409,7 @@ impl SlowStart for Search {
             return None;
         }
 
-        let curr_idx = self.update_bins(now)?;
+        let curr_idx = self.update_bins(now, cc_stats)?;
 
         // NOTE: SEARCH draft-09 implements a drain-phase to gradually lower the congestion window
         // towards the approximated empty-buffer BDP. I think that could be counter-intuitive while
@@ -358,12 +418,33 @@ impl SlowStart for Search {
         // draft-09 undershoots CUBIC's cwnd range in my testing.
         //
         // For now I recommend just exiting slow start without the drain-phase and capturing the
-        // drain-target in telemetry for further analysis (TODO).
+        // drain-target in telemetry for further analysis.
         //
         // <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09#section-3.2-17>
+        //
+        // The match below handles the different outcomes of the SEARCH evaluation, recording stats
+        // where applicable and mapping the outcomes to this functions `None` or `Some(cwnd)` return
+        // values.
         match self.evaluate(rtt, curr_idx, curr_cwnd) {
-            Outcome::Exit(cwnd) => Some(cwnd),
-            _ => None,
+            Outcome::Exit(cwnd) => {
+                self.record_target_cwnd_estimates(curr_idx, rtt, cc_stats);
+                Some(cwnd)
+            }
+            Outcome::RttInflated(lookback_bins) => {
+                cc_stats.search_lookback_bins_needed = cc_stats
+                    .search_lookback_bins_needed
+                    .max(Some(lookback_bins));
+                None
+            }
+            Outcome::Continue(norm_diff) => {
+                cc_stats.search_max_norm_diff = cc_stats.search_max_norm_diff.max(Some(norm_diff));
+                None
+            }
+            Outcome::ZeroSent => {
+                cc_stats.search_zero_sent_bytes += 1;
+                None
+            }
+            Outcome::WarmingUp => None,
         }
     }
 

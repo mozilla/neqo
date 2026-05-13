@@ -19,7 +19,9 @@ use crate::{
 };
 
 const INITIAL_RTT: Duration = Duration::from_millis(100);
+const LOW_RTT: Duration = Duration::from_millis(80);
 const HIGH_RTT: Duration = Duration::from_millis(200);
+const POST_RESET_RTT: Duration = Duration::from_millis(150);
 
 /// Helper to call both [`Search::record_acked_bytes`] and [`Search::on_packets_acked`].
 fn ack(
@@ -216,12 +218,13 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
     // a window.
     now += 11 * bin_duration;
     search.on_packet_sent(2, MIN_INITIAL_PACKET_SIZE);
-    ack(
-        &mut search,
+    let mut cc_stats = CongestionControlStats::default();
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
         &RttEstimate::new(INITIAL_RTT),
         2,
-        MIN_INITIAL_PACKET_SIZE,
         INITIAL_CWND,
+        &mut cc_stats,
         now,
     );
 
@@ -229,6 +232,8 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
         search.curr_idx().is_none(),
         "passing more than one window of bins should reset"
     );
+    assert_eq!(cc_stats.search_reset.count, 1);
+    assert_eq!(cc_stats.search_reset.max_passed_bins, Some(11));
 
     search.on_packet_sent(3, MIN_INITIAL_PACKET_SIZE);
     ack(
@@ -256,6 +261,21 @@ fn reset_and_reinitialize_on_too_many_skipped_bins() {
         Some(now + new_bin_duration),
         "bin_end should be re-initialized with the new RTT"
     );
+
+    // Trigger a second reset with more skipped bins to verify max_passed_bins tracks the max.
+    now += 15 * new_bin_duration;
+    search.on_packet_sent(4, MIN_INITIAL_PACKET_SIZE);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(HIGH_RTT),
+        4,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+    assert!(search.curr_idx().is_none());
+    assert_eq!(cc_stats.search_reset.count, 2);
+    assert_eq!(cc_stats.search_reset.max_passed_bins, Some(15));
 }
 
 #[test]
@@ -419,32 +439,42 @@ fn search_exits_when_delivery_rate_slows_down() {
 
     // Finally keep sending but only ack a quarter of the bytes sent. Eventually SEARCH should
     // detect an exit based on the flattening delivery rate.
-    for i in 1..=2 {
-        search.on_packet_sent(pn, bytes_this_round);
-        now += INITIAL_RTT;
-        let result = ack(
-            &mut search,
-            &RttEstimate::new(INITIAL_RTT),
-            pn,
-            bytes_this_round / 4,
-            bytes_this_round,
-            now,
-        );
-        if i < 2 {
-            assert_eq!(
-                result, None,
-                "SEARCH doesn't immediately exit when delivery slows down"
-            );
-            pn += 1;
-            bytes_this_round += bytes_this_round / 4;
-        } else {
-            assert_eq!(
-                result,
-                Some(bytes_this_round),
-                "Once slow down is not just intermittent SEARCH exits"
-            );
-        }
-    }
+    search.on_packet_sent(pn, bytes_this_round);
+    now += INITIAL_RTT;
+    let result = ack(
+        &mut search,
+        &RttEstimate::new(INITIAL_RTT),
+        pn,
+        bytes_this_round / 4,
+        bytes_this_round,
+        now,
+    );
+    assert_eq!(
+        result, None,
+        "SEARCH doesn't immediately exit when delivery slows down"
+    );
+    pn += 1;
+    bytes_this_round += bytes_this_round / 4;
+
+    // Pass a persistent `cc_stats` to `on_packets_acked` to verify stats are recorded on exit.
+    let mut cc_stats = CongestionControlStats::default();
+    search.on_packet_sent(pn, bytes_this_round);
+    now += INITIAL_RTT;
+    search.record_acked_bytes(bytes_this_round / 4);
+    let result = search.on_packets_acked(
+        &RttEstimate::new(INITIAL_RTT),
+        pn,
+        bytes_this_round,
+        &mut cc_stats,
+        now,
+    );
+    assert_eq!(
+        result,
+        Some(bytes_this_round),
+        "Once slow down is not just intermittent SEARCH exits"
+    );
+    assert!(cc_stats.search_empty_buffer_target.is_some());
+    assert!(cc_stats.search_full_buffer_target.is_some());
 }
 
 #[test]
@@ -475,8 +505,39 @@ fn inflated_rtt_is_guarded() {
     let high_rtt = Duration::from_millis(600);
     assert_eq!(
         search.evaluate_test(high_rtt, curr_idx, INITIAL_CWND),
-        Outcome::RttInflated,
+        Outcome::RttInflated(17),
     );
+
+    // Verify the stat is recorded through the full on_packets_acked path.
+    let mut cc_stats = CongestionControlStats::default();
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(high_rtt),
+        pn,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+    assert_eq!(cc_stats.search_lookback_bins_needed, Some(17));
+
+    // A lower RTT that still triggers RttInflated should not overwrite the max.
+    // curr_idx is now 29. With 525ms RTT: bins_last_rtt = floor(525/35) = 15,
+    // prev_idx = 29 - 15 = 14 > W(10), curr_idx - prev_idx = 15 >= EXTRA_BINS(15) → RttInflated.
+    pn += 1;
+    let lower_rtt = Duration::from_millis(525);
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(lower_rtt),
+        pn,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+    assert_eq!(cc_stats.search_lookback_bins_needed, Some(17));
 }
 
 #[test]
@@ -499,6 +560,13 @@ fn no_sent_bytes() {
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
         Outcome::ZeroSent,
     );
+
+    // Verify the stat is recorded through the full on_packets_acked path.
+    let mut cc_stats = CongestionControlStats::default();
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(0);
+    search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
+    assert_eq!(cc_stats.search_zero_sent_bytes, 1);
 }
 
 #[test]
@@ -546,7 +614,7 @@ fn warming_up() {
     // Now the SEARCH checks should run.
     assert_eq!(
         search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-        Outcome::Continue,
+        Outcome::Continue(0),
     );
 }
 
@@ -590,7 +658,86 @@ fn continue_when_delivery_rate_steady() {
         let curr_idx = search.curr_idx().unwrap();
         assert_eq!(
             search.evaluate_test(INITIAL_RTT, curr_idx, INITIAL_CWND),
-            Outcome::Continue,
+            Outcome::Continue(0),
         );
     }
+
+    // Verify the stat is recorded and tracks the running max.
+    // Ack less than sent to create a non-zero norm_diff.
+    let mut cc_stats = CongestionControlStats::default();
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE / 4);
+    search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
+    let max = cc_stats.search_max_norm_diff;
+    assert!(max > Some(0));
+
+    // A subsequent steady round should not overwrite the max.
+    pn += 1;
+    search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+    now += bin_duration + Duration::from_nanos(1);
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
+    assert_eq!(cc_stats.search_max_norm_diff, max);
+}
+
+#[test]
+fn first_and_second_rtt_stats() {
+    use crate::cc::classic_cc::SlowStart as _;
+
+    let mut search = Search::new();
+    let mut now = now();
+    let mut cc_stats = CongestionControlStats::default();
+
+    assert!(cc_stats.search_first_rtt.is_none());
+    assert!(cc_stats.search_second_rtt.is_none());
+
+    search.on_packet_sent(0, MIN_INITIAL_PACKET_SIZE);
+    now += INITIAL_RTT;
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(INITIAL_RTT),
+        0,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+
+    assert_eq!(cc_stats.search_first_rtt, Some(INITIAL_RTT));
+    assert!(cc_stats.search_second_rtt.is_none());
+
+    search.on_packet_sent(1, MIN_INITIAL_PACKET_SIZE);
+    now += LOW_RTT;
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+    search.on_packets_acked(
+        &RttEstimate::new(LOW_RTT),
+        1,
+        INITIAL_CWND,
+        &mut cc_stats,
+        now,
+    );
+
+    assert_eq!(cc_stats.search_first_rtt, Some(INITIAL_RTT));
+    assert_eq!(cc_stats.search_second_rtt, Some(LOW_RTT));
+
+    // After a reset, two subsequent ACKs with a distinct RTT must not overwrite either recorded
+    // value.
+    search.reset();
+
+    for pn in 2..=3 {
+        search.on_packet_sent(pn, MIN_INITIAL_PACKET_SIZE);
+        now += POST_RESET_RTT;
+        search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE);
+        search.on_packets_acked(
+            &RttEstimate::new(POST_RESET_RTT),
+            pn,
+            INITIAL_CWND,
+            &mut cc_stats,
+            now,
+        );
+    }
+
+    // Assert that the recorded RTTs remain unchanged after the reset.
+    assert_eq!(cc_stats.search_first_rtt, Some(INITIAL_RTT));
+    assert_eq!(cc_stats.search_second_rtt, Some(LOW_RTT));
 }
