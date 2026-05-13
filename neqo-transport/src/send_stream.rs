@@ -685,7 +685,8 @@ pub struct SendStream {
     state: State,
     conn_events: ConnectionEvents,
     priority: TransmissionPriority,
-    retransmission_priority: RetransmissionPriority,
+    /// Cached result of `priority + retransmission`, recomputed in `set_priority`.
+    effective_priority: TransmissionPriority,
     retransmission_offset: u64,
     sendorder: Option<SendOrder>,
     bytes_sent: u64,
@@ -708,7 +709,7 @@ impl SendStream {
             },
             conn_events,
             priority: TransmissionPriority::default(),
-            retransmission_priority: RetransmissionPriority::default(),
+            effective_priority: TransmissionPriority::default() + RetransmissionPriority::default(),
             retransmission_offset: 0,
             sendorder: None,
             bytes_sent: 0,
@@ -751,13 +752,13 @@ impl SendStream {
         self.fair
     }
 
-    pub const fn set_priority(
+    pub fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
     ) {
         self.priority = transmission;
-        self.retransmission_priority = retransmission;
+        self.effective_priority = transmission + retransmission;
     }
 
     #[must_use]
@@ -909,7 +910,7 @@ impl SendStream {
     ) {
         let retransmission = if priority == self.priority {
             false
-        } else if priority == self.priority + self.retransmission_priority {
+        } else if priority == self.effective_priority {
             true
         } else {
             return;
@@ -994,7 +995,7 @@ impl SendStream {
             State::ResetSent {
                 ref mut priority, ..
             } => {
-                *priority = Some(self.priority + self.retransmission_priority);
+                *priority = Some(self.effective_priority);
             }
             State::ResetRecvd { .. } => (),
             _ => unreachable!(),
@@ -3252,5 +3253,74 @@ mod tests {
 
         s.mark_as_acked(len_u64, 0, true);
         assert!(s.is_terminal());
+    }
+
+    fn stream_with_priority(tx: TransmissionPriority, rx: RetransmissionPriority) -> SendStream {
+        let mut s = SendStream::new(
+            StreamId::from(0),
+            100,
+            connection_fc(100),
+            ConnectionEvents::default(),
+        );
+        s.set_priority(tx, rx);
+        s
+    }
+
+    fn stream_frames_written(s: &mut SendStream, priority: TransmissionPriority) -> usize {
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_stream_frame(priority, &mut builder, &mut tokens, &mut stats);
+        stats.stream
+    }
+
+    fn reset_frame_written(s: &mut SendStream, priority: TransmissionPriority) -> bool {
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats)
+    }
+
+    #[test]
+    fn set_priority_updates_effective_priority() {
+        let mut s = stream_with_priority(
+            TransmissionPriority::Low,
+            RetransmissionPriority::MuchHigher,
+        );
+        s.send(&[0x42; 10]).unwrap();
+
+        assert_eq!(stream_frames_written(&mut s, TransmissionPriority::Low), 1);
+        s.mark_as_lost(0, 10, false);
+        assert_eq!(
+            stream_frames_written(&mut s, TransmissionPriority::Normal),
+            0
+        );
+        assert_eq!(
+            stream_frames_written(
+                &mut s,
+                TransmissionPriority::Low + RetransmissionPriority::MuchHigher,
+            ),
+            1,
+        );
+    }
+
+    #[test]
+    fn reset_lost_uses_effective_priority() {
+        let mut s = stream_with_priority(
+            TransmissionPriority::Normal,
+            RetransmissionPriority::MuchHigher,
+        );
+        s.send(b"hello").unwrap();
+        s.reset(0);
+
+        assert!(reset_frame_written(&mut s, TransmissionPriority::Normal));
+        s.reset_lost();
+        assert!(!reset_frame_written(&mut s, TransmissionPriority::Normal));
+        assert!(reset_frame_written(
+            &mut s,
+            TransmissionPriority::Normal + RetransmissionPriority::MuchHigher,
+        ));
     }
 }

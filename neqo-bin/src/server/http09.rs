@@ -232,7 +232,8 @@ impl super::HttpServer for HttpServer {
                     }
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamCreatable { .. }
-                    | ConnectionEvent::SendStreamComplete { .. } => (),
+                    | ConnectionEvent::SendStreamComplete { .. }
+                    | ConnectionEvent::PathMigrated { .. } => (),
                     e => qwarn!("unhandled event {e:?}"),
                 }
             }
