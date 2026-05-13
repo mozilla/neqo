@@ -186,11 +186,11 @@ pub struct CongestionControlStats {
     /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
     pub hystart_css_rounds_finished: usize,
     /// Drain-phase target estimate for the BDP with empty buffers. None if we haven't exited slow
-    /// start through SEARCH.
-    pub search_empty_buffer_target: Option<usize>,
+    /// start through SEARCH. Is `u64` because Firefox uses it as such.
+    pub search_empty_buffer_target: Option<u64>,
     /// Drain-phase target estimate for the BDP with full buffers. None if we haven't exited slow
-    /// start through SEARCH.
-    pub search_full_buffer_target: Option<usize>,
+    /// start through SEARCH. Is `u64` because Firefox uses it as such.
+    pub search_full_buffer_target: Option<u64>,
     /// Records the maximum value of lookback bins needed due to RTT inflation. Fires whenever
     /// SEARCH can't run because there is not enough data for lookback. Is `None` if SEARCH never
     /// ran into this issue.
