@@ -943,4 +943,31 @@ mod tests {
             decoder_h.decode_header_block(&table, 1000, 0).unwrap_err()
         );
     }
+
+    /// Truncated input for each header-block prefix type must propagate as
+    /// `Error::Decompression`. Each byte sets the maximum value for its prefix's
+    /// integer field, forcing a continuation byte that is not present.
+    #[test]
+    fn decode_truncated_for_each_prefix() {
+        const TRUNCATED_PREFIXES: &[u8] = &[
+            0xFF, // HEADER_FIELD_INDEX_STATIC
+            0xBF, // HEADER_FIELD_INDEX_DYNAMIC
+            0x1F, // HEADER_FIELD_INDEX_DYNAMIC_POST
+            0x5F, // HEADER_FIELD_LITERAL_NAME_REF_STATIC
+            0x4F, // HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC
+            0x3F, // HEADER_FIELD_LITERAL_NAME_LITERAL
+            0x07, // HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST
+        ];
+        let mut table = HeaderTable::new(false);
+        fill_table(&mut table);
+        for &prefix in TRUNCATED_PREFIXES {
+            let buf = [0x00, 0x00, prefix];
+            let mut decoder_h = HeaderDecoder::new(&buf);
+            assert_eq!(
+                Error::Decompression,
+                decoder_h.decode_header_block(&table, 1000, 0).unwrap_err(),
+                "prefix {prefix:#04x}"
+            );
+        }
+    }
 }
