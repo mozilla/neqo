@@ -216,6 +216,10 @@ fn packet_without_frames() {
 }
 
 /// Test that the stack permits a packet containing only padding.
+#[cfg_attr(
+    feature = "disable-encryption",
+    ignore = "null AEAD accepts the modified packet, so the client stays in WaitInitial rather than WaitVersion"
+)]
 #[test]
 fn packet_with_only_padding() {
     let mut client = new_client::<CountingConnectionIdGenerator>(
