@@ -83,7 +83,8 @@ runs:
         while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
         any_failures=0
         TMP=/data/local/tmp
-        [ -e "$WD/test-fixture/db" ] && adb push "test-fixture/db" "$TMP/"
+        NSS_DB=$(cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
+        adb push "$NSS_DB" "$TMP/db"
         [ "$LD_LIBRARY_PATH" ] && adb push "$LD_LIBRARY_PATH" "$TMP/"
         for test in $(find $WD/target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
           adb push "$test" "$TMP/"

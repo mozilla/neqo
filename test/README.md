@@ -9,7 +9,7 @@
 1. Start neqo-server
 
    ```shell
-   ./target/release/neqo-server --db ./test-fixture/db
+   ./target/release/neqo-server
    ```
 
 1. Start neqo-client and specify parameters to start the upload test
