@@ -22,8 +22,8 @@ use crate::{
         NO_PREFIX,
     },
     qpack_send_buf::Encoder as _,
-    reader::{ReceiverBufferWrapper, parse_utf8},
-    table::HeaderTable,
+    reader::{LiteralReader, ReceiverBufferWrapper, parse_utf8},
+    table::{ADDITIONAL_TABLE_ENTRY_SIZE, HeaderTable},
 };
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -210,47 +210,42 @@ impl<'a> HeaderDecoder<'a> {
             return Ok(HeaderDecoderResult::Blocked(self.req_insert_cnt));
         }
         let mut h: Vec<Header> = Vec::new();
+        let mut remaining = LiteralReader::MAX_LEN;
 
         while !self.buf.done() {
             let b = Error::map_error(self.buf.peek(), Error::Decompression)?;
-            if HEADER_FIELD_INDEX_STATIC.cmp_prefix(b) {
-                h.push(Error::map_error(
-                    self.read_indexed_static(),
-                    Error::Decompression,
-                )?);
+            let header = if HEADER_FIELD_INDEX_STATIC.cmp_prefix(b) {
+                Error::map_error(self.read_indexed_static(), Error::Decompression)?
             } else if HEADER_FIELD_INDEX_DYNAMIC.cmp_prefix(b) {
-                h.push(Error::map_error(
-                    self.read_indexed_dynamic(table),
-                    Error::Decompression,
-                )?);
+                Error::map_error(self.read_indexed_dynamic(table), Error::Decompression)?
             } else if HEADER_FIELD_INDEX_DYNAMIC_POST.cmp_prefix(b) {
-                h.push(Error::map_error(
-                    self.read_indexed_dynamic_post(table),
-                    Error::Decompression,
-                )?);
+                Error::map_error(self.read_indexed_dynamic_post(table), Error::Decompression)?
             } else if HEADER_FIELD_LITERAL_NAME_REF_STATIC.cmp_prefix(b) {
-                h.push(Error::map_error(
+                Error::map_error(
                     self.read_literal_with_name_ref_static(),
                     Error::Decompression,
-                )?);
+                )?
             } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.cmp_prefix(b) {
-                h.push(Error::map_error(
+                Error::map_error(
                     self.read_literal_with_name_ref_dynamic(table),
                     Error::Decompression,
-                )?);
+                )?
             } else if HEADER_FIELD_LITERAL_NAME_LITERAL.cmp_prefix(b) {
-                h.push(Error::map_error(
-                    self.read_literal_with_name_literal(),
-                    Error::Decompression,
-                )?);
+                Error::map_error(self.read_literal_with_name_literal(), Error::Decompression)?
             } else if HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.cmp_prefix(b) {
-                h.push(Error::map_error(
+                Error::map_error(
                     self.read_literal_with_name_ref_dynamic_post(table),
                     Error::Decompression,
-                )?);
+                )?
             } else {
                 unreachable!("All prefixes are covered");
-            }
+            };
+            remaining = remaining
+                .checked_sub(
+                    header.name().len() + header.value().len() + ADDITIONAL_TABLE_ENTRY_SIZE,
+                )
+                .ok_or(Error::Decompression)?;
+            h.push(header);
         }
 
         qtrace!("[{self}] done decoding header block");
@@ -393,7 +388,10 @@ impl<'a> HeaderDecoder<'a> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
-    use super::{HeaderDecoder, HeaderDecoderResult, HeaderEncoder, HeaderTable};
+    use super::{
+        ADDITIONAL_TABLE_ENTRY_SIZE, HeaderDecoder, HeaderDecoderResult, HeaderEncoder,
+        HeaderTable, LiteralReader,
+    };
     use crate::Error;
 
     const INDEX_STATIC_TEST: &[(u64, &[u8], &str, &str)] = &[
@@ -922,6 +920,24 @@ mod tests {
             0xff, 0x01, 0x7f, 0x80, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x01, 0x02,
             0x03,
         ]);
+        assert_eq!(
+            Error::Decompression,
+            decoder_h.decode_header_block(&table, 1000, 0).unwrap_err()
+        );
+    }
+
+    /// A header block that references the same static table entry many times must be
+    /// rejected before exhausting memory.
+    #[test]
+    fn header_list_size_limit() {
+        let table = HeaderTable::new(false);
+        // 0xC0 = HEADER_FIELD_INDEX_STATIC with index 0 (:authority, "").
+        let entry_size = ":authority".len() + ADDITIONAL_TABLE_ENTRY_SIZE;
+        let reps = LiteralReader::MAX_LEN / entry_size + 1;
+        // Prefix: required_insert_cnt=0, base_delta=0 (2 bytes: 0x00, 0x00)
+        let mut buf = vec![0x00u8, 0x00];
+        buf.resize(buf.len() + reps, 0xC0);
+        let mut decoder_h = HeaderDecoder::new(&buf);
         assert_eq!(
             Error::Decompression,
             decoder_h.decode_header_block(&table, 1000, 0).unwrap_err()
