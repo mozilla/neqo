@@ -582,7 +582,7 @@ impl CryptoDxState {
                 next_secret,
                 self.version.label_prefix(),
             )?,
-            hpkey: self.hpkey.clone(),
+            hpkey: self.hpkey.try_clone()?,
             used_pn: pn..pn,
             min_pn: pn,
             invocations,
