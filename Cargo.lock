@@ -899,8 +899,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.9.0"
-source = "git+https://github.com/mozilla/nss-rs?rev=0.9.0#0ea3df78a294136cab1e11b50d1e60e6582c1395"
+version = "0.9.1"
+source = "git+https://github.com/mozilla/nss-rs?rev=0.9.1#080bbe888e65d6653a7b51aefff685562e143e9d"
 dependencies = [
  "bindgen",
  "enum-map",

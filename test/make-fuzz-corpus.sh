@@ -37,8 +37,9 @@ minimize_corpus() {
 }
 
 # First, let's run the test suite to generate initial fuzzing corpora.
-# This will have failing tests, ignore them.
+# Compile first so we fail loudly on build errors, then run ignoring test failures.
 echo "Generating new fuzzing corpora under $TMP..."
+cargo test --no-run --quiet --locked --features build-fuzzing-corpus
 RUST_BACKTRACE=0 NEQO_CORPUS=$TMP \
     cargo test --quiet --locked --features build-fuzzing-corpus --no-fail-fast || true
 
@@ -69,6 +70,18 @@ for fuzzer in $(cargo fuzz list); do
 
     echo
     generated="$TMP/$fuzzer"
+
+    # If an OSS-Fuzz corpus directory is provided, merge it into the generated
+    # corpus so it goes through the same coverage-based filtering below.
+    # Set OSS_FUZZ_CORPUS to a directory containing per-fuzzer subdirectories.
+    if [ -n "${OSS_FUZZ_CORPUS:-}" ] && [ -d "${OSS_FUZZ_CORPUS}/corpus_libFuzzer_neqo_${fuzzer}_latest" ]; then
+        oss_dir="${OSS_FUZZ_CORPUS}/corpus_libFuzzer_neqo_${fuzzer}_latest"
+        mkdir -p "$generated"
+        oss_count=$(find "$oss_dir" -type f | wc -l | tr -d ' ')
+        echo "$fuzzer fuzzer: Merging $oss_count OSS-Fuzz samples..."
+        "target/$TRIPLE/debug/$fuzzer" -detect_leaks=0 -merge=1 "$generated" "$oss_dir"
+    fi
+
     if [ ! -d "$generated" ]; then
         echo "$fuzzer fuzzer: WARNING, test suite generated no corpus"
         continue

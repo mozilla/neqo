@@ -83,7 +83,7 @@ jobs:
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
+          tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
@@ -94,11 +94,6 @@ jobs:
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check
-        run: |
-          # shellcheck disable=SC2086
-          cargo check $BUILD_TYPE --locked --all-targets --features ci
 
       - name: Run tests and determine coverage
         env:
@@ -115,13 +110,13 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
-          else
-            if [ -n "$CAREFUL" ]; then
-              TRIPLE="--target $(rustc --print host-tuple)"
-            fi
-            cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
+          elif [ -n "$CAREFUL" ]; then
+            cargo careful test $BUILD_TYPE --locked --target "$(rustc --print host-tuple)"
           fi
+          # Run tests across all meaningful feature combinations.
+          # shellcheck disable=SC2086
+          cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture
 
       - name: Run client/server transfer
         run: |
