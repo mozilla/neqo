@@ -17,7 +17,8 @@ use neqo_transport::{
     version,
 };
 use nss::{
-    AllowZeroRtt, AuthenticationStatus, ZeroRttCheckResult, ZeroRttChecker, generate_ech_keys,
+    AllowZeroRtt, AuthenticationStatus, RecordProtectionOps as _, ZeroRttCheckResult,
+    ZeroRttChecker, generate_ech_keys,
 };
 use test_fixture::{
     CountingConnectionIdGenerator, assertions, datagram, default_client,
@@ -439,12 +440,12 @@ fn bad_client_initial() {
 
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
-    let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
+    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (fixed_header, pn) = header_protection::remove(&hp, header, payload);
     let payload = &payload[(fixed_header.len() - header.len())..];
 
     let mut plaintext_buf = vec![0; dgram.len()];
-    let plaintext = aead
+    let plaintext = aead_dec
         .decrypt(pn, &fixed_header, payload, &mut plaintext_buf)
         .unwrap();
 
@@ -459,13 +460,16 @@ fn bad_client_initial() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + PN_LEN).unwrap())
+        .encode_varint(u64::try_from(payload_enc.len() + aead_enc.expansion() + PN_LEN).unwrap())
         .encode_byte(u8::try_from(pn >> 8).unwrap())
         .encode_byte(u8::try_from(pn & 0xff).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();
-    ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
-    let v = aead
+    ciphertext.resize(
+        header_enc.len() + payload_enc.len() + aead_enc.expansion(),
+        0,
+    );
+    let v = aead_enc
         .encrypt(
             pn,
             header_enc.as_ref(),
@@ -537,7 +541,7 @@ fn bad_client_initial_connection_close() {
 
     let dgram = client.process_output(now()).dgram().expect("a datagram");
     let (header, d_cid, s_cid, payload) = decode_initial_header(&dgram, Role::Client).unwrap();
-    let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
+    let (aead, _, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (_, pn) = header_protection::remove(&hp, header, payload);
 
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);
