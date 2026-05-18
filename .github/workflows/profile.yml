@@ -82,7 +82,6 @@ jobs:
 
       - name: Run benchmark with perf
         env:
-          NSS_DB_PATH: ${{ github.workspace }}/test-fixture/db
           BENCH: ${{ matrix.bench.bench }}
         run: |
           # shellcheck disable=SC2086
@@ -191,8 +190,6 @@ jobs:
         run: sudo sysctl -w kernel.perf_event_paranoid=-1
 
       - name: Record server perf
-        env:
-          NSS_DB_PATH: ${{ github.workspace }}/test-fixture/db
         run: |
           # shellcheck disable=SC2086
           perf $PERF_OPT -o "$BENCH_NAME.server.perf" -- $SERVER_CMD &
@@ -201,8 +198,6 @@ jobs:
 
       - name: Record client perf
         working-directory: /tmp
-        env:
-          NSS_DB_PATH: ${{ github.workspace }}/test-fixture/db
         run: |
           # shellcheck disable=SC2086
           perf $PERF_OPT -o "$BENCH_NAME.client.perf" -- $CLIENT_CMD || true

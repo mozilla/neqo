@@ -295,7 +295,7 @@ fn now() -> Instant {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
+    use std::{fs, path::PathBuf, time::SystemTime};
 
     use crate::{client, server};
 
@@ -331,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_qlog_file() {
-        nss::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
+        test_fixture::fixture_init();
 
         let temp_dir = TempDir::new();
 

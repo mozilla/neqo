@@ -188,7 +188,8 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
 def _sudo_nice_env() -> list[str]:
     """Prefix for elevated-priority subprocesses: sudo resets env, so restore
     the vars that neqo binaries need to find NSS libraries and certificates."""
-    env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "NSS_DB_PATH") if k in os.environ}
+    # TODO: Remove NSS_DB_PATH once baseline uses nss-rs >= 0.11.0
+    env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "TEST_FIXTURE_DB", "NSS_DB_PATH") if k in os.environ}
     env_args = [f"{k}={v}" for k, v in env_vars.items()]
     return ["sudo", "nice", "-n", "-20"] + (["env"] + env_args if env_args else [])
 

@@ -21,6 +21,7 @@ neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
 neqo-http3 = { path = "../neqo-http3", features = ["draft-29"] }
 neqo-transport = { path = "../neqo-transport", features = ["draft-29"] }
 nss = { workspace = true }
+nss-test-fixture = { workspace = true }
 qlog = { workspace = true }
 
 [features]

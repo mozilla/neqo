@@ -46,6 +46,7 @@ neqo-http3 = { path = "./../neqo-http3" }
 neqo-transport = { path = "./../neqo-transport" }
 neqo-udp = { path = "./../neqo-udp" }
 nss = { workspace = true }
+nss-test-fixture = { workspace = true }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
 rustc-hash = { workspace = true }
@@ -58,6 +59,7 @@ criterion = { version = "4", package = "codspeed-criterion-compat", default-feat
         "async_tokio",
 ] }
 neqo-bin = { path = ".", features = ["draft-29"] }
+test-fixture = { path = "../test-fixture" }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]

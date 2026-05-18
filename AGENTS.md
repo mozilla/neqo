@@ -144,11 +144,11 @@ cargo test --locked --features ci
 
 3. **Feature flags**: The `ci` feature exists for CI-specific functionality. The `gecko` feature is for Firefox integration (excluded from some checks). The `bench` feature enables benchmarks.
 
-4. **Test utilities**: Use `test-fixture` crate for common test setup (NSS database, connection creation, assertions). NSS_DB_PATH defaults to `test-fixture/db`.
+4. **Test utilities**: Use `test-fixture` crate for common test setup (connection creation, assertions). NSS initialization is handled automatically via `fixture_init()`.
 
 5. **Logging**: Use `RUST_LOG` env var for debug output (e.g., `RUST_LOG=debug`) via the logging macros in `neqo-common/src/log.rs`.
 
-6. **NSS Database**: Tests require NSS database at `test-fixture/db` (committed to repo). Client/server tools can use it with `--db ./test-fixture/db`.
+6. **NSS Database**: Tests use the NSS database from the `nss-rs` dependency automatically. The `neqo-server` binary defaults to this database; override with `--db`.
 
 ## Common Failure Scenarios
 
