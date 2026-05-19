@@ -208,9 +208,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: Re-enable openbsd once OpenBSD > 7.8 ships; nss-3.101 (the version in 7.8) is too old.
-        # TODO: Re-enable NetBSD once NetBSD > 10.1 ships with NSS >= 3.121.
-        os: [freebsd] # NSS package on 'solaris' is too old.
+        # TODO: Re-enable openbsd once vmactions/openbsd-vm supports OpenBSD > 7.8; nss-3.116 (in 7.8) is too old, and snapshot packages require a newer base system.
+        # NSS package on 'solaris' is too old (3.110, need >= 3.121).
+        os: [freebsd, netbsd]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
