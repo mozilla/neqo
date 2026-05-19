@@ -725,13 +725,6 @@ impl CryptoDxState {
     }
 
     #[must_use]
-    #[cfg(not(feature = "disable-encryption"))]
-    pub fn expansion(&self) -> usize {
-        self.aead.expansion()
-    }
-
-    #[must_use]
-    #[cfg(feature = "disable-encryption")]
     pub fn expansion(&self) -> usize {
         self.aead.expansion()
     }
@@ -778,15 +771,6 @@ impl CryptoDxState {
     /// Get the amount of extra padding packets protected with this profile need.
     /// This is the difference between the size of the header protection sample
     /// and the AEAD expansion.
-    #[cfg(not(feature = "disable-encryption"))]
-    pub fn extra_padding(&self) -> usize {
-        hp::Key::SAMPLE_SIZE.saturating_sub(self.expansion())
-    }
-
-    /// Get the amount of extra padding packets protected with this profile need.
-    /// This is the difference between the size of the header protection sample
-    /// and the AEAD expansion.
-    #[cfg(feature = "disable-encryption")]
     pub fn extra_padding(&self) -> usize {
         hp::Key::SAMPLE_SIZE.saturating_sub(self.expansion())
     }
