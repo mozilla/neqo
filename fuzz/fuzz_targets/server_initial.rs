@@ -7,6 +7,7 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     use neqo_common::{Datagram, Encoder, Role};
     use neqo_transport::{ConnectionParameters, Version, packet::MIN_INITIAL_PACKET_SIZE};
+    use nss::RecordProtectionOps as _;
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN,
         header_protection::{self, decode_initial_header, initial_aead_and_hp},
@@ -25,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
     let Some((header, d_cid, s_cid, payload)) = decode_initial_header(&si, Role::Server) else {
         return;
     };
-    let (aead, hp) = initial_aead_and_hp(d_cid, Role::Server);
+    let (aead, _, hp) = initial_aead_and_hp(d_cid, Role::Server);
     let (_, pn) = header_protection::remove(&hp, header, payload);
 
     let mut payload_enc = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE);

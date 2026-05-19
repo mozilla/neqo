@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -539,7 +539,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture",
+ "test-fixture 0.28.1",
 ]
 
 [[package]]
@@ -764,7 +764,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -785,13 +785,15 @@ dependencies = [
  "quinn-udp",
  "rustc-hash",
  "strum",
+ "test-fixture 0.1.0",
+ "test-fixture 0.28.1",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -801,14 +803,14 @@ dependencies = [
  "qlog",
  "sha1",
  "strum",
- "test-fixture",
+ "test-fixture 0.28.1",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -823,13 +825,13 @@ dependencies = [
  "rustc-hash",
  "sfv",
  "strum",
- "test-fixture",
+ "test-fixture 0.28.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -837,13 +839,13 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "static_assertions",
- "test-fixture",
+ "test-fixture 0.28.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -859,13 +861,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture",
+ "test-fixture 0.28.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.27.0"
+version = "0.28.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -899,8 +901,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.9.0"
-source = "git+https://github.com/mozilla/nss-rs?rev=0.9.0#0ea3df78a294136cab1e11b50d1e60e6582c1395"
+version = "0.12.0"
+source = "git+https://github.com/mozilla/nss-rs?rev=0.12.0#58acbd20074861add940d5eaa13082fb2ec0100a"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -1278,7 +1280,16 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.27.0"
+version = "0.1.0"
+source = "git+https://github.com/mozilla/nss-rs?rev=0.12.0#58acbd20074861add940d5eaa13082fb2ec0100a"
+dependencies = [
+ "log",
+ "nss-rs",
+]
+
+[[package]]
+name = "test-fixture"
+version = "0.28.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -1286,6 +1297,7 @@ dependencies = [
  "neqo-transport",
  "nss-rs",
  "qlog",
+ "test-fixture 0.1.0",
 ]
 
 [[package]]

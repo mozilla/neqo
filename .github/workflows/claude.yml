@@ -21,5 +21,6 @@ jobs:
       pull-requests: write # Required to post review comments.
       issues: read # Required to read issue context via MCP tools.
       actions: read # Required to read workflow run context via MCP tools.
+      discussions: read # Required to read discussion context via MCP tools.
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

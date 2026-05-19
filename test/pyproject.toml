@@ -1,0 +1,29 @@
+[project]
+name = "neqo-lockfile-tools"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "packaging",
+    "tomlkit",
+]
+
+[project.scripts]
+compare-lockfile = "compare_lockfile:main"
+update-lockfile = "update_lockfile:main"
+
+[tool.hatch.build.targets.wheel]
+include = [
+    "compare_lockfile.py",
+    "update_lockfile.py",
+    "lockfile_utils.py",
+]
+
+[dependency-groups]
+dev = ["mypy", "ruff"]
+
+[tool.mypy]
+exclude = "mozlog"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

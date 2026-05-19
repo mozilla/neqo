@@ -1,10 +1,12 @@
-.ansible/
-.DS_Store
-.envrc
 *.qlog
 *.sqlog
 *~
+.DS_Store
+.ansible/
+.envrc
+.venv/
 /.vscode/
 /lcov.info
 /mutants.out*/
 /target/
+__pycache__/
