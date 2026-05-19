@@ -16,7 +16,7 @@ use std::{
 use enum_map::Enum;
 use log::debug;
 use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qtrace, qwarn};
-use nss::random;
+use nss::{Mode, RecordProtectionOps as _, random};
 use strum::{EnumIter, FromRepr};
 
 use crate::{
@@ -169,7 +169,7 @@ impl Builder<Vec<u8>> {
         encoder.encode_vec(1, scid);
         debug_assert_ne!(token.len(), 0);
         encoder.encode(token);
-        let tag = retry::use_aead(version, |aead| {
+        let tag = retry::use_aead(version, Mode::Encrypt, |aead| {
             let mut buf = vec![0; aead.expansion()];
             Ok(aead.encrypt(0, encoder.as_ref(), &[], &mut buf)?.to_vec())
         })?;
@@ -784,7 +784,7 @@ impl<'a> Public<'a> {
         let mut encoder = Encoder::with_capacity(self.data.len());
         encoder.encode_vec(1, odcid);
         encoder.encode(header);
-        retry::use_aead(version, |aead| {
+        retry::use_aead(version, Mode::Decrypt, |aead| {
             let mut buf = vec![0; expansion];
             Ok(aead.decrypt(0, encoder.as_ref(), tag, &mut buf)?.is_empty())
         })
@@ -1164,7 +1164,7 @@ mod tests {
     #[test]
     fn sample_server_initial() {
         fixture_init();
-        let mut prot = CryptoDxState::test_default();
+        let mut prot = CryptoDxState::test_default_write();
 
         // The spec uses PN=1, but our crypto refuses to skip packet numbers.
         // So burn an encryption:
@@ -1251,7 +1251,7 @@ mod tests {
         builder.pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder
-            .build(&mut CryptoDxState::test_default())
+            .build(&mut CryptoDxState::test_default_write())
             .expect("build");
         assert_eq!(packet.as_ref(), SAMPLE_SHORT);
     }
@@ -1335,7 +1335,7 @@ mod tests {
     #[test]
     fn build_two() {
         fixture_init();
-        let mut prot = CryptoDxState::test_default();
+        let mut prot = CryptoDxState::test_default_write();
         let mut builder = Builder::long(
             Encoder::default(),
             Type::Handshake,
@@ -1386,7 +1386,9 @@ mod tests {
         );
         builder.pn(0, 1);
         builder.encode([1, 2, 3]);
-        let packet = builder.build(&mut CryptoDxState::test_default()).unwrap();
+        let packet = builder
+            .build(&mut CryptoDxState::test_default_write())
+            .unwrap();
         assert_eq!(packet.as_ref(), EXPECTED);
     }
 
@@ -1453,7 +1455,9 @@ mod tests {
         builder.pn(0, 1);
         builder.enable_padding(true);
         assert!(builder.pad());
-        let encoder = builder.build(&mut CryptoDxState::test_default()).unwrap();
+        let encoder = builder
+            .build(&mut CryptoDxState::test_default_write())
+            .unwrap();
         let encoder_copy = encoder.clone();
 
         let limit_second = LIMIT - encoder.len();
@@ -1480,7 +1484,7 @@ mod tests {
         const MTU: usize = 1280;
         const FIRST_QUIC_PACKET: usize = 1236;
         fixture_init();
-        let crypto = CryptoDxState::test_default();
+        let crypto = CryptoDxState::test_default_write();
 
         let mut encoder = Encoder::default();
         encoder.pad_to(FIRST_QUIC_PACKET, 0);
@@ -1537,7 +1541,7 @@ mod tests {
         // Building should trigger the debug_assert in debug mode, returning
         // internal error in release mode.
         assert_eq!(
-            builder.build(&mut CryptoDxState::test_default()),
+            builder.build(&mut CryptoDxState::test_default_write()),
             Err(Error::Internal)
         );
     }

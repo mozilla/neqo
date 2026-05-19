@@ -31,13 +31,13 @@ runs:
         sudo apt-get install -y --no-install-recommends clang lld
 
     - name: Install Rust
-      uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
       with:
         version: stable
         token: ${{ inputs.token }}
 
     - name: Install NSS
-      uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
       with:
         minimum-version: ${{ inputs.nss-minimum-version }}
         token: ${{ inputs.token }}
@@ -99,7 +99,9 @@ runs:
             cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
           done
         fi
-        cp -r neqo/test-fixture dist/
+        NSS_DB=$(cd neqo && cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
+        mkdir -p dist/test-fixture
+        cp -r "$NSS_DB" dist/test-fixture/
 
     - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:

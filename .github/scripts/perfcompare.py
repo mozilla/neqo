@@ -113,8 +113,20 @@ def kill_port(port: int) -> None:
         )
 
 
+def kill_servers() -> None:
+    """Kill any lingering server processes from any known implementation."""
+    for impl_config in IMPLS.values():
+        tag = _tag(impl_config.server_cmd)
+        subprocess.run(
+            ["sudo", "pkill", "-9", tag],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+
 def setup(cfg):
     """Create temp dir with cert/key and test files, set MTU."""
+    kill_servers()
     kill_port(cfg.port)
     tmp = Path(tempfile.mkdtemp())
     (tmp / "out").mkdir()
@@ -162,8 +174,12 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
                 stderr=subprocess.DEVNULL,
             )
     finally:
-        sh(["pkill", "-u", str(os.getuid()), tag])
-        proc.wait()
+        sh(["sudo", "pkill", tag])
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            sh(["sudo", "pkill", "-9", tag])
+            proc.wait(timeout=5)
     os.chdir(cfg.workspace)
     out = tmp / "out" / str(cfg.size)
     return out.exists() and out.stat().st_size >= cfg.size
@@ -172,7 +188,8 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
 def _sudo_nice_env() -> list[str]:
     """Prefix for elevated-priority subprocesses: sudo resets env, so restore
     the vars that neqo binaries need to find NSS libraries and certificates."""
-    env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "NSS_DB_PATH") if k in os.environ}
+    # TODO: Remove NSS_DB_PATH once baseline uses nss-rs >= 0.11.0
+    env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "TEST_FIXTURE_DB", "NSS_DB_PATH") if k in os.environ}
     env_args = [f"{k}={v}" for k, v in env_vars.items()]
     return ["sudo", "nice", "-n", "-20"] + (["env"] + env_args if env_args else [])
 
@@ -202,7 +219,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--prepare",
         f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2",
         "--conclude",
-        f"pkill {tag}",
+        f"pkill -9 {tag}",
     ]
     if md:
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
@@ -233,7 +250,11 @@ def perf(cfg, scmd, ccmd, name):
     client_cmd = perf_cmd(cfg.client_set, f"{name}.client.perf", ccmd)
     sh(client_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     sh(["sudo", "pkill", tag])
-    proc.wait()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        sh(["sudo", "pkill", "-9", tag])
+        proc.wait(timeout=5)
 
 
 def process(cfg, name, bold):
@@ -384,6 +405,8 @@ def main():
     try:
         steps = run(cfg, tmp)
     finally:
+        kill_servers()
+        kill_port(cfg.port)
         shutil.rmtree(tmp, ignore_errors=True)
 
     (cfg.workspace / "steps.md").write_text("".join(steps), encoding="utf-8")

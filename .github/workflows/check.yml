@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+        uses: mozilla/actions/toolchains@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
 
   check:
     name: Run checks
@@ -79,26 +79,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful ' || '' }}
+          tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check
-        run: |
-          # shellcheck disable=SC2086
-          cargo check $BUILD_TYPE --locked --all-targets --features ci
 
       - name: Run tests and determine coverage
         env:
@@ -115,13 +110,13 @@ jobs:
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
-          else
-            if [ -n "$CAREFUL" ]; then
-              TRIPLE="--target $(rustc --print host-tuple)"
-            fi
-            cargo $CAREFUL test $BUILD_TYPE --locked --features ci $TRIPLE
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
+          elif [ -n "$CAREFUL" ]; then
+            cargo careful test $BUILD_TYPE --locked --target "$(rustc --print host-tuple)"
           fi
+          # Run tests across all meaningful feature combinations.
+          # shellcheck disable=SC2086
+          cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default
 
       - name: Run client/server transfer
         run: |
@@ -173,7 +168,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: stable
           tools: cargo-hack
@@ -213,9 +208,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: Re-enable openbsd once OpenBSD > 7.8 ships; nss-3.101 (the version in 7.8) is too old.
-        # TODO: Re-enable NetBSD once NetBSD > 10.1 ships with NSS >= 3.121.
-        os: [freebsd] # NSS package on 'solaris' is too old.
+        # TODO: Re-enable openbsd once vmactions/openbsd-vm supports OpenBSD > 7.8; nss-3.116 (in 7.8) is too old, and snapshot packages require a newer base system.
+        # NSS package on 'solaris' is too old (3.110, need >= 3.121).
+        os: [freebsd, netbsd]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

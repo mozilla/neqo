@@ -43,14 +43,14 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+    - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
         token: ${{ inputs.github-token }}
 
-    - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+    - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
       if: ${{ inputs.minimum-nss-version != '' }}
       with:
         minimum-version: ${{ inputs.minimum-nss-version }}
@@ -83,7 +83,8 @@ runs:
         while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
         any_failures=0
         TMP=/data/local/tmp
-        [ -e "$WD/test-fixture/db" ] && adb push "test-fixture/db" "$TMP/"
+        NSS_DB=$(cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
+        adb push "$NSS_DB" "$TMP/db"
         [ "$LD_LIBRARY_PATH" ] && adb push "$LD_LIBRARY_PATH" "$TMP/"
         for test in $(find $WD/target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
           adb push "$test" "$TMP/"

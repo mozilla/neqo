@@ -948,6 +948,7 @@ impl Connection {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
             v.rttvar = p.rtt().rttvar();
+            v.min_rtt = p.rtt().minimum();
         }
         v
     }
@@ -2096,8 +2097,15 @@ impl Connection {
             .migrate(&path, force, now, &mut self.stats.borrow_mut())
         {
             self.loss_recovery.migrate();
+            self.path_migrated(&path);
         }
         Ok(())
+    }
+
+    fn path_migrated(&self, path: &PathRef) {
+        let p = path.borrow();
+        self.events
+            .path_migrated(p.local_address(), p.remote_address());
     }
 
     fn migrate_to_preferred_address(&mut self, now: Instant) -> Res<()> {
@@ -2164,8 +2172,12 @@ impl Connection {
         }
 
         if self.ensure_permanent(path, now).is_ok() {
+            let was_primary = path.borrow().is_primary();
             self.paths
                 .handle_migration(path, remote, now, &mut self.stats.borrow_mut());
+            if !was_primary {
+                self.path_migrated(path);
+            }
         } else {
             qinfo!(
                 "[{self}] {} Peer migrated, but no connection ID available",
@@ -3376,11 +3388,11 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                if self
-                    .paths
-                    .path_response(data, now, &mut self.stats.borrow_mut())
+                if let Some(primary) =
+                    self.paths
+                        .path_response(data, now, &mut self.stats.borrow_mut())
                 {
-                    // This PATH_RESPONSE enabled migration; tell loss recovery.
+                    self.path_migrated(&primary);
                     self.loss_recovery.migrate();
                 }
             }
