@@ -1,0 +1,15 @@
+name: SBOM
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  sbom:
+    uses: mozilla/actions/.github/workflows/sbom.yml@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+    permissions:
+      actions: read # Required by anchore/sbom-action to read workflow run context.
+      contents: write # Required to upload the SBOM as a release asset.
