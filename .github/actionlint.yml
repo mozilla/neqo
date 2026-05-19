@@ -4,3 +4,4 @@ self-hosted-runner:
   labels:
     - moonshot
     - moonshot-exp
+    - codspeed-macro

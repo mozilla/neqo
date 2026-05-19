@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 //! An [HTTP 0.9](https://www.w3.org/Protocols/HTTP/AsImplemented.html) client implementation.
 
 use std::{
@@ -21,17 +19,17 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, qdebug, qinfo, qwarn, Datagram};
-use neqo_crypto::{AuthenticationStatus, ResumptionToken};
+use http::Uri as Url;
+use neqo_common::{Datagram, event::Provider, qdebug, qinfo, qwarn};
 use neqo_transport::{
     CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
     Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId, StreamType,
 };
+use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
-use url::Url;
 
-use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::STREAM_IO_BUFFER_SIZE;
+use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use crate::{STREAM_IO_BUFFER_SIZE, now};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -73,7 +71,7 @@ impl super::Handler for Handler<'_> {
 
             match event {
                 ConnectionEvent::AuthenticationNeeded => {
-                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    client.authenticated(AuthenticationStatus::Ok, now());
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
                     self.read(client, stream_id)?;
@@ -115,8 +113,8 @@ impl super::Handler for Handler<'_> {
             return Ok(false);
         }
 
-        if self.args.resume && self.token.is_none() {
-            self.token = client.take_resumption_token(Instant::now());
+        if (self.args.resume || self.args.save_token.is_some()) && self.token.is_none() {
+            self.token = client.take_resumption_token(now());
         }
 
         Ok(true)
@@ -152,11 +150,11 @@ pub fn create_client(
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(alpn),
-        Instant::now(),
+        now(),
     )?;
 
     if let Some(tok) = resumption_token {
-        client.enable_resumption(Instant::now(), tok)?;
+        client.enable_resumption(now(), tok)?;
     }
 
     let ciphers = args.get_ciphers();
@@ -270,11 +268,18 @@ impl<'b> Handler<'b> {
         match client.stream_create(StreamType::BiDi) {
             Ok(client_stream_id) => {
                 qinfo!("Created stream {client_stream_id} for {url}");
+                client
+                    .stream_keep_alive(client_stream_id, true)
+                    .expect("keep-alive on new stream");
                 let req = format!("GET {}\r\n", url.path());
-                _ = client
+                if client
                     .stream_send(client_stream_id, req.as_bytes())
-                    .unwrap();
-                client.stream_close_send(client_stream_id).unwrap();
+                    .is_err()
+                {
+                    qwarn!("Failed to send request on stream {client_stream_id}");
+                    return false;
+                }
+                _ = client.stream_close_send(client_stream_id); // Stream may be closed; ignore errors.
                 let out_file =
                     get_output_file(&url, self.args.output_dir.as_ref(), &mut self.all_paths);
                 self.streams.insert(client_stream_id, out_file);
@@ -340,11 +345,13 @@ impl<'b> Handler<'b> {
                 )?;
 
                 if fin_recvd {
-                    if let Some(mut out_file) = maybe_out_file.take() {
-                        out_file.flush()?;
-                    } else {
-                        qinfo!("<FIN[{stream_id}]>");
-                    }
+                    maybe_out_file.take().map_or_else(
+                        || {
+                            qinfo!("<FIN[{stream_id}]>");
+                            Ok(())
+                        },
+                        |mut out_file| out_file.flush(),
+                    )?;
                     self.streams.remove(&stream_id);
                     self.download_urls(client);
                 }

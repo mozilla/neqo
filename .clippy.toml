@@ -1,5 +1,6 @@
 disallowed-methods = [
-    { path = "std::slice::from_raw_parts", reason = "see null_safe_slice" }
+    { path = "std::slice::from_raw_parts", reason = "see null_safe_slice" },
+    { path = "std::time::Instant::now", reason = "time should be provided externally" }
 ]
 disallowed-macros = [
     { path = "std::dbg" }
@@ -9,3 +10,4 @@ allow-unwrap-in-tests = true
 allow-dbg-in-tests = true
 avoid-breaking-exported-api = false # We have one consumer and can afford to break the API.
 pass-by-value-size-limit = 32
+doc-valid-idents = ["HyStart", "CHokepoint", ".."]

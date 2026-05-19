@@ -6,16 +6,17 @@
 
 // Collecting a list of events relevant to whoever is using the Connection.
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{cell::RefCell, collections::VecDeque, net::SocketAddr, num::NonZeroU64, rc::Rc};
 
 use neqo_common::event::Provider as EventProvider;
-use neqo_crypto::ResumptionToken;
+use nss::ResumptionToken;
 
 use crate::{
+    AppError, Stats,
     connection::State,
     quic_datagrams::DatagramTracking,
+    scone::Bitrate,
     stream_id::{StreamId, StreamType},
-    AppError, Stats,
 };
 
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
@@ -78,6 +79,14 @@ pub enum ConnectionEvent {
         outcome: OutgoingDatagramOutcome,
     },
     IncomingDatagramDropped,
+    /// An update was received to SCONE throughput advice.
+    /// The value is the approximate rate in bits per second; None = unknown.
+    SconeUpdated(Option<NonZeroU64>),
+    /// A path migration completed; the connection is now sending on this path.
+    PathMigrated {
+        local: SocketAddr,
+        remote: SocketAddr,
+    },
 }
 
 #[derive(Debug, Default, Clone)]
@@ -127,9 +136,12 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_complete(&self, stream_id: StreamId) {
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
-
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. } if *x == stream_id.as_u64()));
+        self.remove(|evt| {
+            matches!(evt,
+                ConnectionEvent::SendStreamWritable { stream_id: x } |
+                ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+                if *x == stream_id)
+        });
 
         self.insert(ConnectionEvent::SendStreamComplete { stream_id });
     }
@@ -161,6 +173,11 @@ impl ConnectionEvents {
     pub fn recv_stream_complete(&self, stream_id: StreamId) {
         // If stopped, no longer readable.
         self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
+    }
+
+    pub fn scone_updated(&self, scone: Bitrate) {
+        self.remove(|evt| matches!(evt, ConnectionEvent::SconeUpdated(_)));
+        self.insert(ConnectionEvent::SconeUpdated(Option::from(scone)));
     }
 
     // The number of datagrams in the events queue is limited to max_queued_datagrams.
@@ -202,6 +219,10 @@ impl ConnectionEvents {
                 .borrow_mut()
                 .push_back(ConnectionEvent::OutgoingDatagramOutcome { id: *id, outcome });
         }
+    }
+
+    pub fn path_migrated(&self, local: SocketAddr, remote: SocketAddr) {
+        self.insert(ConnectionEvent::PathMigrated { local, remote });
     }
 
     fn insert(&self, event: ConnectionEvent) {
@@ -255,8 +276,10 @@ mod tests {
     #[test]
     fn event_culling() {
         let mut evts = ConnectionEvents::default();
+        assert!(!evts.has_events());
 
         evts.client_0rtt_rejected();
+        assert!(evts.has_events());
         evts.client_0rtt_rejected();
         assert_eq!(evts.events().count(), 1);
         assert_eq!(evts.events().count(), 0);

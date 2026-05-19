@@ -3,13 +3,12 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    branches: ["main"]
-  merge_group:
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  RUSTUP_TOOLCHAIN: stable
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -27,69 +26,44 @@ jobs:
     name: Determine bench matrix
     runs-on: ubuntu-24.04
     outputs:
-      benches: ${{ steps.benches.outputs.benches }}
+      benches: ${{ steps.matrix.outputs.benches }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - id: benches
-        run: |
-          # Create a GitHub matrix where each entry is a bench with its
-          # associated crate and benchmarking mode taken from the Cargo
-          # metadata.
-          {
-            echo -n "benches=["
-            first=true
-            while IFS=: read -r crate manifest_path; do
-              dir=$(dirname "$manifest_path")
-              if [ -e "$dir/benches" ]; then
-                for bench in "$dir/benches"/*.rs; do
-                  bench=$(basename -s .rs "$bench")
-                  # Set measurement mode from Cargo.toml metadata, default to "instrumentation".
-                  # The following jq pipeline:
-                  # - Selects the package with name == $crate
-                  # - Looks up .metadata.bench[$bench].codspeed.mode for the benchmark
-                  # - If not set, defaults to "instrumentation"
-                  mode=$(cargo metadata --no-deps --format-version 1 | jq -r --arg crate "$crate" --arg bench "$bench" '.packages[] | select(.name == $crate) | .metadata.bench[$bench].codspeed.mode // "instrumentation"')
-                  # FIXME: Always use "instrumentation" mode to eliminate CI VM effects.
-                  mode="instrumentation"
-                  if [ "$first" = true ]; then
-                    first=false
-                  else
-                    echo -n ","
-                  fi
-                  echo -n "{\"crate\":\"$crate\",\"bench\":\"$bench\",\"mode\":\"$mode\"}"
-                done
-              fi
-            done < <(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | .name + ":" + .manifest_path')
-            echo -n "]"
-          } >> "${GITHUB_OUTPUT}"
+      - id: matrix
+        uses: ./.github/actions/bench-matrix
 
   benchmarks:
-    name: Run bench
-    runs-on: ubuntu-24.04
+    name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
+    runs-on: ${{ matrix.bench.runner }}
+    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
+    # environment: codspeed
+    needs: bench-matrix
+    if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
+      fail-fast: false
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
-    needs: bench-matrix
-
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: stable
           tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
-      - uses: ./.github/actions/nss
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
+      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build bench
         env:
@@ -99,8 +73,8 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@4348f634fa7309fe23aac9502e88b999ec90a164 # v4.3.1
+        uses: CodSpeedHQ/action@3194d9a39c4d46684cb44bf7207fc56626aad8fd # v4.15.1
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
-          token: ${{ secrets.CODSPEED_TOKEN }}
+          token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]

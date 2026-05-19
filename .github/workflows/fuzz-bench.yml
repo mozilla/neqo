@@ -2,7 +2,6 @@ name: Fuzz & Bench
 on:
   workflow_dispatch:
   pull_request:
-    branches: ["main"]
   merge_group:
 
 concurrency:
@@ -23,22 +22,29 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: nightly
-          tools: ${{ matrix.check == 'fuzz' && 'cargo-fuzz' || ''}}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+      - name: Install cargo-fuzz
+        if: ${{ matrix.check == 'fuzz' }}
+        # cargo-fuzz must be compiled from source so it targets the native toolchain;
+        # binstall provides prebuilt binaries that may target a different architecture.
+        run: cargo install cargo-fuzz
 
-      - uses: ./.github/actions/nss
+      - id: nss-version
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
+      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - if: ${{ matrix.check == 'fuzz' }}
         env:

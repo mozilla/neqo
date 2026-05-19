@@ -13,8 +13,9 @@ use super::{
     connect, connect_force_idle, default_client, default_server, send_something,
 };
 use crate::{
+    AppError, CloseReason, ERROR_APPLICATION_CLOSE, Error,
+    stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
-    AppError, CloseReason, Error, ERROR_APPLICATION_CLOSE,
 };
 
 fn assert_draining(c: &Connection, expected: &Error) {
@@ -105,7 +106,7 @@ fn bad_tls_version() {
     client
         .crypto
         .tls_mut()
-        .set_option(neqo_crypto::Opt::Tls13CompatMode, true)
+        .set_option(nss::Opt::Tls13CompatMode, true)
         .unwrap();
     let mut server = default_server();
 
@@ -211,7 +212,10 @@ fn stateless_reset_client() {
     let mut client = default_client();
     let mut server = default_server();
     server
-        .set_local_tparam(StatelessResetToken, TransportParameter::Bytes(vec![77; 16]))
+        .set_local_tparam(
+            StatelessResetToken,
+            TransportParameter::Bytes(vec![77; Srt::LEN]),
+        )
         .unwrap();
     connect_force_idle(&mut client, &mut server);
 

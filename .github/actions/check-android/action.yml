@@ -1,38 +1,38 @@
-name: 'CI VM'
-description: 'Run main CI steps in VMs for VM-only platforms.'
+name: "Android checks"
+description: "Run Android build and test steps using the Android SDK/NDK and emulator."
 
 inputs:
   target:
-    description: 'Rust target to build for.'
+    description: "Rust target to build for."
     required: true
   working-directory:
-    description: 'Working directory.'
-    default: '.'
+    description: "Working directory."
+    default: "."
   ndk-version:
-    description: 'NDK version to install.'
+    description: "NDK version to install."
     # https://searchfox.org/mozilla-central/search?q=NDK_VERSION =&path=python/mozboot/mozboot/android.py
-    default: '27.2.12479018'
+    default: "27.2.12479018"
   api-level:
-    description: 'Android API level to use.'
+    description: "Android API level to use."
     # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
     # However, NSS requires an API >= 23 for a few symbols.
-    default: '23'
+    default: "23"
   minimum-nss-version:
-    description: 'If NSS is required, the minimum version required.'
-    default: ''
+    description: "If NSS is required, the minimum version required."
+    default: ""
   github-token:
-    description: 'A Github PAT'
+    description: "A Github PAT"
     required: true
 
 runs:
   using: composite
   steps:
-    - uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
+    - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
       with:
         distribution: zulu
         java-version: 23
 
-    - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+    - uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4.0.1
       with:
         accept-android-sdk-licenses: true
         log-accepted-android-sdk-licenses: false
@@ -43,18 +43,19 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: ./.github/actions/rust
+    - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
         token: ${{ inputs.github-token }}
 
-    - uses: ./.github/actions/nss
+    - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
       if: ${{ inputs.minimum-nss-version != '' }}
       with:
         minimum-version: ${{ inputs.minimum-nss-version }}
         target: ${{ inputs.target }}
+        token: ${{ inputs.github-token }}
 
     - shell: bash
       env:
@@ -63,7 +64,11 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && cargo ndk --platform "$API_LEVEL" --target "$TARGET" test --no-run
 
+    # FIXME: Enable emulator testing for aarch64 once Google ships Android
+    # emulator binaries for ARM64 Linux hosts.
+    # See https://issuetracker.google.com/issues/242699119
     - shell: bash
+      if: ${{ !startsWith(inputs.target, 'aarch64') }}
       env:
         TARGET: ${{ inputs.target }}
         API_LEVEL: ${{ inputs.api-level }}
@@ -78,7 +83,8 @@ runs:
         while [ -z "$(adb shell getprop sys.boot_completed | tr -d '\r')" ]; do sleep 1; done
         any_failures=0
         TMP=/data/local/tmp
-        [ -e "$WD/test-fixture/db" ] && adb push "test-fixture/db" "$TMP/"
+        NSS_DB=$(cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
+        adb push "$NSS_DB" "$TMP/db"
         [ "$LD_LIBRARY_PATH" ] && adb push "$LD_LIBRARY_PATH" "$TMP/"
         for test in $(find $WD/target/$TARGET/debug/deps/ -type f -executable ! -name "*.so" -name "*-*"); do
           adb push "$test" "$TMP/"
@@ -91,7 +97,8 @@ runs:
         EOF
         chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
 
-    - uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
+    - uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+      if: ${{ !startsWith(inputs.target, 'aarch64') }}
       with:
         api-level: ${{ inputs.api-level }}
         arch: ${{ startsWith(inputs.target, 'x86_64') && 'x86_64' || (startsWith(inputs.target, 'i686') && 'x86' || (startsWith(inputs.target, 'aarch64') && 'arm64-v8a')) }}

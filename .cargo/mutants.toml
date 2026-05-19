@@ -1,0 +1,11 @@
+# cargo-mutants configuration
+# https://mutants.rs/configuration.html
+
+# Files where mutating the source would not affect any test outcome
+# because the file only contains test assertion helpers; a passing test
+# suite by definition never executes the panic paths of these helpers,
+# so every mutation looks "missed" without indicating an actual gap in
+# coverage. See https://github.com/mozilla/neqo/issues/3367.
+exclude_globs = [
+    "test-fixture/src/assertions.rs",
+]

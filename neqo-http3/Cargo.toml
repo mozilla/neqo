@@ -20,32 +20,41 @@ workspace = true
 
 [dependencies]
 enumset = { workspace = true }
+http = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
-neqo-crypto = { path = "./../neqo-crypto" }
-neqo-qpack = { path = "./../neqo-qpack" }
-neqo-transport = { path = "./../neqo-transport" }
+neqo-qpack = { path = "./../neqo-qpack", default-features = false }
+neqo-transport = { path = "./../neqo-transport", default-features = false }
+nss = { workspace = true }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
 strum = { workspace = true }
 thiserror = { workspace = true }
-url = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
-neqo-http3 = { path = ".", features = ["draft-29"] }
+neqo-http3 = { path = ".", default-features = false, features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
 bench = [
         "neqo-common/bench",
-        "neqo-crypto/bench",
         "neqo-qpack/bench",
         "neqo-transport/bench",
+        "test-fixture/bench",
         "log/release_max_level_info",
 ]
-disable-encryption = ["neqo-transport/disable-encryption", "neqo-crypto/disable-encryption"]
+blapi = ["neqo-transport/blapi"]
+default = ["blapi"]
+build-fuzzing-corpus = [
+        "neqo-common/build-fuzzing-corpus",
+        "neqo-transport/disable-encryption",
+        "nss/disable-encryption",
+        "nss/disable-random",
+        "test-fixture/disable-random",
+]
+disable-encryption = ["neqo-transport/disable-encryption", "nss/disable-encryption"]
 draft-29 = ["neqo-transport/draft-29"]
 
 [package.metadata.cargo-machete]
@@ -55,10 +64,22 @@ ignored = ["criterion", "log"]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options
 bench = false
 
-[package.metadata.bench.streams]
-codspeed.mode = "walltime" # Use "walltime" mode for "streams" bench with codspeed.
+[[package.metadata.bench]]
+name = "streams_simulated"
+codspeed.mode = "simulation"
+codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
+
+[[package.metadata.bench]]
+name = "streams_walltime"
+codspeed.mode = "walltime"
+codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[bench]]
-name = "streams"
+name = "streams_walltime"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "streams_simulated"
 harness = false
 required-features = ["bench"]

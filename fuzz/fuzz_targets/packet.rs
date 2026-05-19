@@ -7,11 +7,11 @@ use libfuzzer_sys::fuzz_target;
 fuzz_target!(|data: &[u8]| {
     use std::sync::OnceLock;
 
-    use neqo_transport::{packet, RandomConnectionIdGenerator};
+    use neqo_transport::{RandomConnectionIdGenerator, packet};
 
     static DECODER: OnceLock<RandomConnectionIdGenerator> = OnceLock::new();
     let decoder = DECODER.get_or_init(|| RandomConnectionIdGenerator::new(20));
-    neqo_crypto::init().unwrap();
+    nss::init().unwrap();
 
     // Run the fuzzer
     _ = packet::Public::decode(&mut data.to_vec(), decoder);

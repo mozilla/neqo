@@ -1,24 +1,24 @@
-name: 'QUIC Interop Runner Action'
-description: 'Run the QUIC Interop Runner tests.'
-author: 'mxinden'
+name: "QUIC Interop Runner Action"
+description: "Run the QUIC Interop Runner tests."
+author: "mxinden"
 
 inputs:
   client:
-    description: 'client implementations (comma-separated)'
+    description: "client implementations (comma-separated)"
     required: false
-    default: ''
+    default: ""
   server:
-    description: 'server implementations (comma-separated)'
+    description: "server implementations (comma-separated)"
     required: false
-    default: ''
+    default: ""
   test:
-    description: 'test cases (comma-separatated)'
+    description: "test cases (comma-separated)"
     required: false
-    default: 'onlyTests'
+    default: "onlyTests"
   implementations:
     description: 'Modified "implementations.json" data'
     required: false
-    default: ''
+    default: ""
 
 outputs:
   result:
@@ -29,10 +29,10 @@ runs:
   using: "composite"
   steps:
     - name: Checkout quic-interop/quic-interop-runner repository
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
-        repository: 'quic-interop/quic-interop-runner'
-        path: 'quic-interop-runner'
+        repository: "quic-interop/quic-interop-runner"
+        path: "quic-interop-runner"
         persist-credentials: false
 
     - name: Enable IPv6 support
@@ -48,10 +48,10 @@ runs:
 
     - name: Checkout linuxquic repository
       if: ${{ inputs.server == 'linuxquic' || inputs.client == 'linuxquic' }}
-      uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       with:
-        repository: 'lxin/quic'
-        path: 'linuxquic'
+        repository: "lxin/quic"
+        path: "linuxquic"
         persist-credentials: false
 
     - name: Install Linux QUIC module
@@ -63,11 +63,14 @@ runs:
         cd ../ && rm -r linuxquic
       shell: bash
 
-    - uses: actions/setup-python@82c7e631bb3cdc910f68e0081d67478d79c6982d # v5.1.0
+    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      # FIXME: Turning caching on causes this error:
+      # `Failed to save: <h2>Our services aren't available right now</h2><p>We're working to restore all services as soon as possible. Please check back soon.</p>`
+      # Since this happens for *each* parallel QNS run, it's simply too noisy.
       with:
         python-version: 3.12
-        cache: 'pip'
-        cache-dependency-path: 'quic-interop-runner/requirements.txt'
+        # cache: 'pip'
+        # cache-dependency-path: 'quic-interop-runner/requirements.txt'
 
     - name: Install Python packages
       run: |
@@ -85,7 +88,7 @@ runs:
       run: |
         cd quic-interop-runner
         if [ -n "$IMPLEMENTATIONS" ]; then
-          echo "$IMPLEMENTATIONS" > implementations.json
+          echo "$IMPLEMENTATIONS" > implementations_quic.json
         fi
         ARGS="--log-dir ../logs --json ../result.json"
         if [ -n "$CLIENT" ]; then
@@ -124,11 +127,11 @@ runs:
         exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: ${{ always() }}
       id: upload-logs
       with:
-        name: '${{ inputs.client }} vs. ${{ inputs.server }} logs'
+        name: "${{ inputs.client }} vs. ${{ inputs.server }} logs"
         path: logs
         compression-level: 9
 
@@ -137,14 +140,14 @@ runs:
       env:
         ARTIFACT_URL: ${{ steps.upload-logs.outputs.artifact-url }}
       run: |
-        jq ". + {log_url: \"$ARTIFACT_URL\"}" < result.json  > result.json.tmp
+        jq --arg url "$ARTIFACT_URL" '. + {log_url: $url}' < result.json > result.json.tmp
         mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       if: ${{ always() }}
       with:
-        name: '${{ inputs.client }} vs. ${{ inputs.server }} results'
+        name: "${{ inputs.client }} vs. ${{ inputs.server }} results"
         path: |
           result.json
           summary.txt

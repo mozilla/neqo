@@ -1,16 +1,19 @@
-name: 'CI VM'
-description: 'Run main CI steps in VMs for VM-only platforms.'
+name: "CI VM"
+description: "Run main CI steps in VMs for VM-only platforms."
 
 inputs:
   working-directory:
-    description: 'Working directory.'
-    default: '.'
+    description: "Working directory."
+    default: "."
   platform:
-    description: 'Platform to run the checks on.'
-    default: ''
+    description: "Platform to run the checks on."
+    default: ""
   codecov-token:
-    description: 'Codecov token, if Codecov upload is desired.'
-    default: ''
+    description: "Codecov token, if Codecov upload is desired."
+    default: ""
+  bindgen-args:
+    description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
+    default: ""
 
 runs:
   using: composite
@@ -21,20 +24,20 @@ runs:
         WD: ${{ inputs.working-directory }}
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
+        BINDGEN_ARGS: ${{ inputs.bindgen-args }}
       run: |
         cat <<EOF > prepare.sh
           # This executes as root
           set -ex
           pwd
           case "$PLATFORM" in
-            freebsd)    pkg install -y curl llvm nss pkgconf
+            freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt llvm-19.1.7p3 nss pkgconf # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
-            netbsd)     /usr/sbin/pkg_add pkgin && pkgin -y install curl clang nss pkgconf
-                        ;;
-            solaris)    pkg install clang-libs nss pkg-config
+            netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
+            solaris)    pkg refresh && pkg install clang-libs nss pkg-config
                         ;;
             *)          echo "Unsupported OS: $PLATFORM"
                         exit 1
@@ -53,30 +56,45 @@ runs:
           cd "$WD"
           pwd
           case "$PLATFORM" in
-            freebsd)    sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
+                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+                        export PATH="\$HOME/.cargo/bin:\$PATH"
+                        ;;
+            *)          sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
                         . "\$HOME/.cargo/env"
-                        ;;
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm19/lib
-                        export LLVM_COV=/usr/local/llvm19/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm19/bin/llvm-profdata
-                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on OpenBSD
-                        ;;
-            netbsd)     sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
-                        . "\$HOME/.cargo/env"
-                        # FIXME: Why do we need to set this on NetBSD?
-                        export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
-                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on NetBSD
-                        ;;
-            solaris)    curl --output rust.sh -s https://raw.githubusercontent.com/psumbera/solaris-rust/refs/heads/main/sh.rust-web-install
-                        chmod a+x rust.sh
-                        ls -lt
-                        source ./rust.sh || true # This does not exit with zero on success
-                        export LIBCLANG_PATH="/usr/lib/amd64"
-                        [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on Solaris
                         ;;
           esac
+          case "$PLATFORM" in
+            netbsd)     # FIXME: Why do we need to set this on NetBSD?
+                        export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
+                        ;;
+            solaris)    export LIBCLANG_PATH="/usr/lib/amd64"
+                        ;;
+          esac
+          case "$PLATFORM" in
+            freebsd)    ;;
+            *)          [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on this platform
+                        ;;
+          esac
+          # Embed at script-generation time; single quotes protect | from shell interpretation.
+          BINDGEN_ARGS='$BINDGEN_ARGS'
+          # Generate bindings first if requested (before build, so we can bootstrap)
+          if [ -n "$BINDGEN_ARGS" ]; then
+            # Solaris doesn't have a system package for bindgen
+            [ "$PLATFORM" = "solaris" ] && cargo install bindgen-cli --locked
+            echo "$BINDGEN_ARGS" | xargs bindgen src/bindings/bsd.h > "$PLATFORM.rs"
+            # Compare generated bindings with committed bindings.
+            # If different, exit early — there's no point compiling with stale
+            # bindings. The check-bindings job will detect the drift and handle it.
+            if ! diff -q "src/bindings/$PLATFORM.rs" "$PLATFORM.rs" > /dev/null 2>&1; then
+              echo "::warning::Bindings for $PLATFORM differ from committed version"
+              exit 0
+            fi
+          fi
+
           cargo version
-          cargo check --locked --all-targets $WORKSPACE \$EXCLUDE
+          cargo check --locked --all-targets $WORKSPACE \${EXCLUDE:-}
           case "$PLATFORM" in
             openbsd)    # clippy fails on OpenBSD, because libfuzzer-sys is not supported.
                         ;;
@@ -102,45 +120,68 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
         curl -o "$WD/rustup.sh" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs
-        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG GITHUB_ACTIONS RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
+        echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@966989c456d41351f095a421f60e71342d3bce41 # v1.2.1
+      uses: vmactions/freebsd-vm@d1e65811565151536c0c894fff74f06351ed26e6 # v1.4.5
       with:
         usesh: true
+        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@0d65352eee1508bab7cb12d130536d3a556be487 # v1.1.8
+      uses: vmactions/openbsd-vm@d7d892b7b9ba97ed2747b0fc201be65037d64c3e # v1.4.0
       with:
         usesh: true
+        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@d0228be27fbaba19418cc1b332609a895cf16561 # v1.1.9
+      uses: vmactions/netbsd-vm@eb3ba840926911ccf17dc9de235335cb27a02ba0 # v1.3.8
       with:
         usesh: true
+        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@58cbd70c6e051860f9b8f65908cc582938fbbdba # v1.1.5
+      uses: vmactions/solaris-vm@c20562b2c69737b06be9e828915761703e487373 # v1.3.3
       with:
         release: "11.4-gcc"
         usesh: true
+        disable-cache: true
+        copyback: true
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
-    - if: ${{ inputs.codecov-token != '' }}
-      uses: codecov/codecov-action@fdcc8476540edceab3de004e990f80d881c6cc00 # v5.5.0
+    - id: check-coverage
+      shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
+
+    - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
+      uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
       with:
         files: codecov.json
+        working-directory: ${{ inputs.working-directory }}
         fail_ci_if_error: false
         token: ${{ inputs.codecov-token }}
         verbose: true
+        flags: ${{ inputs.platform }}
+
+    - if: ${{ always() && inputs.bindgen-args != '' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: bindings-${{ inputs.platform }}
+        path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs
+        if-no-files-found: error

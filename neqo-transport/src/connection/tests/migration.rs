@@ -17,31 +17,33 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, Datagram, Decoder};
+use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug};
 use test_fixture::{
+    DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, new_neqo_qlog, now, DEFAULT_ADDR, DEFAULT_ADDR_V4,
+    fixture_init, new_neqo_qlog, now,
 };
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    connect_fail, connect_force_idle, connect_rtt_idle, default_client, default_server,
-    maybe_authenticate, new_client, new_server, send_something, zero_len_cid_client,
-    CountingConnectionIdGenerator,
+    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
+    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
+    zero_len_cid_client,
 };
 use crate::{
-    cid::LOCAL_ACTIVE_CID_LIMIT,
+    CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
+    MIN_INITIAL_PACKET_SIZE,
+    cid::ConnectionIdManager,
     connection::tests::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
     },
     frame::FrameType,
     packet,
-    path::MAX_PATH_PROBES,
+    path::Path,
     pmtud::Pmtud,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
-    CloseReason, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator, ConnectionIdRef,
-    ConnectionParameters, EmptyConnectionIdGenerator, Error, MIN_INITIAL_PACKET_SIZE,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -433,6 +435,11 @@ fn migrate_immediate() {
     client
         .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now)
         .unwrap();
+    assert!(client.events().any(|e| matches!(
+        e,
+        ConnectionEvent::PathMigrated { local, remote }
+        if local == DEFAULT_ADDR_V4 && remote == DEFAULT_ADDR_V4
+    )));
 
     let client1 = send_something(&mut client, now);
     assert_v4_path(&client1, true); // Contains PATH_CHALLENGE.
@@ -446,6 +453,11 @@ fn migrate_immediate() {
     // The server accepts the first packet and migrates (but probes).
     let server1 = server.process(Some(client1), now).dgram().unwrap();
     assert_v4_path(&server1, true);
+    assert!(
+        server
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::PathMigrated { .. }))
+    );
     let server2 = server.process_output(now).dgram().unwrap();
     assert_v6_path(&server2, true);
 
@@ -498,7 +510,7 @@ fn migrate_immediate_fail() {
     assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
-    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
+    for _ in 0..Path::MAX_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -578,7 +590,7 @@ fn migrate_same_fail() {
     assert_path_challenge_min_len(&client, &probe, now);
 
     // -1 because first PATH_CHALLENGE already sent above
-    for _ in 0..MAX_PATH_PROBES * 2 - 1 {
+    for _ in 0..Path::MAX_PROBES * 2 - 1 {
         let cb = client.process_output(now).callback();
         assert_ne!(cb, Duration::new(0, 0));
         now += cb;
@@ -618,9 +630,9 @@ fn migrate_same_fail() {
 /// This gets the connection ID from a datagram using the default
 /// connection ID generator/decoder.
 pub fn get_cid(d: &Datagram) -> ConnectionIdRef<'_> {
-    let gen = CountingConnectionIdGenerator::default();
+    let r#gen = CountingConnectionIdGenerator::default();
     assert_eq!(d[0] & 0x80, 0); // Only support short packets for now.
-    gen.decode_cid(&mut Decoder::from(&d[1..])).unwrap()
+    r#gen.decode_cid(&mut Decoder::from(&d[1..])).unwrap()
 }
 
 fn migration(mut client: Connection) {
@@ -654,6 +666,11 @@ fn migration(mut client: Connection) {
 
     // Once the client receives the probe response, it migrates to the new path.
     client.process_input(resp, now);
+    assert!(client.events().any(|e| matches!(
+        e,
+        ConnectionEvent::PathMigrated { local, remote }
+        if local == DEFAULT_ADDR_V4 && remote == DEFAULT_ADDR_V4
+    )));
     assert_eq!(client.stats().frame_rx.path_challenge, 1);
     let migrate_client = send_something(&mut client, now);
     assert_v4_path(&migrate_client, true); // Responds to server probe.
@@ -948,35 +965,47 @@ fn preferred_address_client() {
 #[test]
 fn migration_invalid_state() {
     let mut client = default_client();
-    assert!(client
-        .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
-        .is_err());
+    assert!(
+        client
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
+            .is_err()
+    );
 
     let mut server = default_server();
-    assert!(server
-        .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
-        .is_err());
+    assert!(
+        server
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
+            .is_err()
+    );
     connect_force_idle(&mut client, &mut server);
 
-    assert!(server
-        .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
-        .is_err());
+    assert!(
+        server
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
+            .is_err()
+    );
 
     client.close(now(), 0, "closing");
-    assert!(client
-        .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
-        .is_err());
+    assert!(
+        client
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
+            .is_err()
+    );
     let close = client.process_output(now()).dgram();
 
     let dgram = server.process(close, now()).dgram();
-    assert!(server
-        .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
-        .is_err());
+    assert!(
+        server
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
+            .is_err()
+    );
 
     client.process_input(dgram.unwrap(), now());
-    assert!(client
-        .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
-        .is_err());
+    assert!(
+        client
+            .migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR), false, now())
+            .is_err()
+    );
 }
 
 #[test]
@@ -1059,7 +1088,7 @@ impl crate::connection::test_internal::FrameWriter for RetireAll {
             .encode_varint(SEQNO)
             .encode_varint(SEQNO) // Retire Prior To
             .encode_vec(1, &cid)
-            .encode(&[0x7f; 16]);
+            .encode([0x7f; 16]);
     }
 }
 
@@ -1093,7 +1122,7 @@ fn retire_all() {
     );
     assert_eq!(
         client.stats().frame_tx.retire_connection_id,
-        retire_cid_before + LOCAL_ACTIVE_CID_LIMIT
+        retire_cid_before + ConnectionIdManager::ACTIVE_LIMIT
     );
 
     assert_ne!(get_cid(&retire), original_cid);

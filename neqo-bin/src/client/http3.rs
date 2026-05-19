@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 //! An HTTP 3 client implementation.
 
 use std::{
@@ -21,18 +19,21 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{event::Provider, hex, qdebug, qerror, qinfo, qwarn, Datagram};
-use neqo_crypto::{AuthenticationStatus, ResumptionToken};
+use http::Uri as Url;
+use neqo_common::{Datagram, event::Provider, hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,
     OutputBatch, RandomConnectionIdGenerator, StreamId,
 };
+use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
-use url::Url;
 
-use super::{get_output_file, qlog_new, Args, CloseState, Res};
-use crate::{send_data::SendData, STREAM_IO_BUFFER_SIZE};
+use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use crate::{
+    STREAM_IO_BUFFER_SIZE, now,
+    send_data::{SendData, SendResult},
+};
 
 pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
@@ -84,7 +85,7 @@ pub fn create_client(
         local_addr,
         remote_addr,
         args.shared.quic_parameters.get(args.shared.alpn.as_str()),
-        Instant::now(),
+        now(),
     )?;
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -102,10 +103,10 @@ pub fn create_client(
     let qlog = qlog_new(args, hostname, client.connection_id())?;
     client.set_qlog(qlog);
     if let Some(ech) = &args.ech {
-        client.enable_ech(ech)?;
+        client.enable_ech(&ech.0)?;
     }
     if let Some(token) = resumption_token {
-        client.enable_resumption(Instant::now(), token)?;
+        client.enable_resumption(now(), token)?;
     }
 
     Ok(client)
@@ -173,7 +174,7 @@ impl super::Handler for Handler {
         while let Some(event) = client.next_event() {
             match event {
                 Http3ClientEvent::AuthenticationNeeded => {
-                    client.authenticated(AuthenticationStatus::Ok, Instant::now());
+                    client.authenticated(AuthenticationStatus::Ok, now());
                 }
                 Http3ClientEvent::HeaderReady {
                     stream_id,
@@ -197,11 +198,8 @@ impl super::Handler for Handler {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => loop {
-                            let (sz, fin) = client.read_data(
-                                Instant::now(),
-                                stream_id,
-                                &mut self.read_buffer,
-                            )?;
+                            let (sz, fin) =
+                                client.read_data(now(), stream_id, &mut self.read_buffer)?;
 
                             handler.process_data_readable(
                                 stream_id,
@@ -231,7 +229,7 @@ impl super::Handler for Handler {
                             qwarn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => {
-                            handler.process_data_writable(client, stream_id, Instant::now());
+                            handler.process_data_writable(client, stream_id, now());
                         }
                     }
                 }
@@ -251,6 +249,12 @@ impl super::Handler for Handler {
                     qwarn!("Unhandled event {event:?}");
                 }
             }
+        }
+
+        // Fallback in case the connection closes before NEW_TOKEN arrives.
+        let args = &self.url_handler.args;
+        if (args.resume || args.save_token.is_some()) && self.token.is_none() {
+            self.token = client.take_resumption_token(now());
         }
 
         Ok(self.url_handler.done())
@@ -305,11 +309,13 @@ impl StreamHandler for DownloadStreamHandler {
         }
 
         if fin {
-            if let Some(mut out_file) = self.out_file.take() {
-                out_file.flush()?;
-            } else {
-                qdebug!("<FIN[{stream_id}]>");
-            }
+            self.out_file.take().map_or_else(
+                || {
+                    qdebug!("<FIN[{stream_id}]>");
+                    Ok(())
+                },
+                |mut out_file| out_file.flush(),
+            )?;
         }
 
         Ok(())
@@ -343,7 +349,7 @@ impl StreamHandler for UploadStreamHandler {
             if parsed == self.data.len() {
                 qinfo!(
                     "Stream ID: {stream_id:?}, Upload time: {:?}",
-                    Instant::now().duration_since(self.start)
+                    now().duration_since(self.start)
                 );
             }
             Ok(())
@@ -359,11 +365,14 @@ impl StreamHandler for UploadStreamHandler {
         stream_id: StreamId,
         now: Instant,
     ) {
-        let done = self
+        match self
             .data
-            .send(|chunk| client.send_data(stream_id, chunk, now).unwrap());
-        if done {
-            client.stream_close_send(stream_id, now).unwrap();
+            .send(|chunk| client.send_data(stream_id, chunk, now))
+        {
+            SendResult::StreamClosed => qwarn!("Stream {stream_id} is closed"),
+            // Stream may be closed; ignore errors.
+            SendResult::Done => _ = client.stream_close_send(stream_id, now),
+            SendResult::MoreData => {}
         }
     }
 }
@@ -400,7 +409,7 @@ impl UrlHandler {
             .url_queue
             .pop_front()
             .expect("download_next called with empty queue");
-        let now = Instant::now();
+        let now = now();
         match client.fetch(
             now,
             &self.args.method,
@@ -418,7 +427,7 @@ impl UrlHandler {
                             self.args.output_dir.as_ref(),
                             &mut self.all_paths,
                         );
-                        client.stream_close_send(client_stream_id, now).unwrap();
+                        _ = client.stream_close_send(client_stream_id, now); // Stream may be closed; ignore errors.
                         Box::new(DownloadStreamHandler { out_file })
                     }
                     "POST" => Box::new(UploadStreamHandler {

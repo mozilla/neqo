@@ -15,12 +15,10 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{qdebug, Dscp, Ecn};
+use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
 use crate::{ecn, packet};
-
-pub const MAX_PTO_COUNTS: usize = 16;
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -136,6 +134,92 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlowStartExitReason {
+    /// Exited due to a congestion event (loss or ECN).
+    CongestionEvent,
+    /// Exited due to a heuristic algorithm (e.g., HyStart++).
+    Heuristic,
+}
+
+/// Congestion event counters.
+///
+/// `loss` and `ecn` are mutually exclusive triggers (their sum equals the total number of
+/// congestion events). `spurious` is an orthogonal category that applies to a subset of
+/// loss-triggered congestion events.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct CongestionEventStats {
+    /// Congestion events triggered by packet loss.
+    pub loss: usize,
+    /// Congestion events triggered by ECN-CE marks.
+    pub ecn: usize,
+    /// Congestion events later found to be spurious, due to packets which were initially
+    /// considered lost but later got acknowledged.
+    pub spurious: usize,
+}
+
+/// Tracks SEARCH reset occurrences: how many times SEARCH reset and the maximum number of bins
+/// skipped across all resets.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct SearchResetStats {
+    pub count: usize,
+    pub max_passed_bins: Option<usize>,
+}
+
+/// Congestion Control stats
+#[derive(Default, Clone, PartialEq)]
+pub struct CongestionControlStats {
+    /// Congestion event counters. Includes trigger type and other qualifier flags.
+    pub congestion_events: CongestionEventStats,
+    /// The congestion window size (in bytes) when we exited slow start.
+    /// None if we haven't exited slow start or if we re-entered after spurious congestion.
+    /// When exiting via congestion event, this is the cwnd AFTER the reduction.
+    pub slow_start_exit_cwnd: Option<usize>,
+    /// The reason slow start was exited. None if we haven't exited slow start or if we re-entered
+    /// after spurious congestion.
+    pub slow_start_exit_reason: Option<SlowStartExitReason>,
+    /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
+    /// HyStart++ is enabled. Higher values indicate that HyStart++ had many spurious CSS
+    /// entries, spending more time throttling slow start growth.
+    pub hystart_css_entries: usize,
+    /// Number of CSS (Conservative Slow Start) rounds completed. Only meaningful when HyStart++ is
+    /// enabled. Higher values indicate the heuristic spent more time throttling slow start growth.
+    pub hystart_css_rounds_finished: usize,
+    /// Drain-phase target estimate for the BDP with empty buffers. None if we haven't exited slow
+    /// start through SEARCH. Is `u64` because Firefox uses it as such.
+    pub search_empty_buffer_target: Option<u64>,
+    /// Drain-phase target estimate for the BDP with full buffers. None if we haven't exited slow
+    /// start through SEARCH. Is `u64` because Firefox uses it as such.
+    pub search_full_buffer_target: Option<u64>,
+    /// Records the maximum value of lookback bins needed due to RTT inflation. Fires whenever
+    /// SEARCH can't run because there is not enough data for lookback. Is `None` if SEARCH never
+    /// ran into this issue.
+    pub search_lookback_bins_needed: Option<usize>,
+    /// Records the maximum non-exiting value that the normalized difference between sent and acked
+    /// bytes ever reached. Can be used to tune the exit threshold. `None` means that the SEARCH
+    /// check never ran.
+    pub search_max_norm_diff: Option<usize>,
+    /// Records SEARCH reset occurrences.
+    pub search_reset: SearchResetStats,
+    /// Records the number of times per connection that SEARCH calculated zero bytes sent in the
+    /// previous RTT. This exists to gain deeper understanding into app-limited behaviour.
+    pub search_zero_sent_bytes: usize,
+    /// The `latest_rtt` from the first ACK that initialized SEARCH. Used to evaluate whether the
+    /// initial RTT sample (which sets `bin_duration`) is inflated relative to `min_rtt`.
+    pub search_first_rtt: Option<Duration>,
+    /// The `latest_rtt` from the second ACK processed by SEARCH. Together with `search_first_rtt`,
+    /// allows evaluating whether `min(first, second)` would be a better initialization value.
+    pub search_second_rtt: Option<Duration>,
+    /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
+    /// congestion reduction (with fast convergence applied). `None` if no congestion event has
+    /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal
+    /// congestion window in metrics.
+    pub w_max: Option<f64>,
+    /// The current congestion window size (in bytes). Updated throughout the connection
+    /// lifetime.
+    pub cwnd: Option<usize>,
+}
+
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
@@ -234,7 +318,7 @@ impl DerefMut for DscpCount {
 }
 
 /// Connection statistics
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Stats {
     pub info: String,
 
@@ -264,10 +348,10 @@ pub struct Stats {
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,
-    /// Number of times a path MTU changed unexpectedly.
-    pub pmtud_change: usize,
     /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
+    /// The peer's `max_udp_payload_size` transport parameter.
+    pub pmtud_peer_max_udp_payload: Option<usize>,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
 
@@ -278,12 +362,14 @@ pub struct Stats {
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
     pub rttvar: Duration,
+    /// The current minimum RTT observed on the primary path.
+    pub min_rtt: Duration,
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
 
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.
-    pub pto_counts: [usize; MAX_PTO_COUNTS],
+    pub pto_counts: [usize; Self::MAX_PTO_COUNTS],
 
     /// Count frames received.
     pub frame_rx: FrameStats,
@@ -295,6 +381,8 @@ pub struct Stats {
     pub incoming_datagram_dropped: usize,
 
     pub datagram_tx: DatagramStats,
+
+    pub cc: CongestionControlStats,
 
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
@@ -325,6 +413,8 @@ pub struct Stats {
 }
 
 impl Stats {
+    pub const MAX_PTO_COUNTS: usize = 16;
+
     pub fn init(&mut self, info: String) {
         self.info = info;
     }
@@ -344,7 +434,7 @@ impl Stats {
     /// When preconditions are violated.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);
-        if count >= MAX_PTO_COUNTS {
+        if count >= Self::MAX_PTO_COUNTS {
             // We can't move this count any further, so stop.
             return;
         }
@@ -369,14 +459,27 @@ impl Debug for Stats {
             "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
             self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
         )?;
+        writeln!(f, "  cc:")?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} change {} iface_mtu {} pmtu",
+            "    ce_loss {} ce_ecn {} ce_spurious {}",
+            self.cc.congestion_events.loss,
+            self.cc.congestion_events.ecn,
+            self.cc.congestion_events.spurious,
+        )?;
+        writeln!(
+            f,
+            "    final_cwnd {:?} ss_exit_cwnd {:?} ss_exit_reason {:?}",
+            self.cc.cwnd, self.cc.slow_start_exit_cwnd, self.cc.slow_start_exit_reason
+        )?;
+        writeln!(
+            f,
+            "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
             self.pmtud_tx,
             self.pmtud_ack,
             self.pmtud_lost,
-            self.pmtud_change,
             self.pmtud_iface_mtu,
+            self.pmtud_peer_max_udp_payload,
             self.pmtud_pmtu
         )?;
         writeln!(f, "  resumed: {}", self.resumed)?;
@@ -417,4 +520,91 @@ impl Debug for StatsCell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.stats.borrow().fmt(f)
     }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use neqo_common::Ecn;
+
+    use super::{EcnCount, EcnTransitions, Stats, StatsCell};
+    use crate::packet;
+
+    #[test]
+    fn stats_init_sets_info() {
+        let mut stats = Stats::default();
+        stats.init("conn-1".into());
+        assert!(format!("{stats:?}").contains("conn-1"));
+    }
+
+    #[test]
+    fn stats_cell_debug() {
+        let cell = StatsCell::default();
+        cell.borrow_mut().init("cell-test".into());
+        assert!(format!("{cell:?}").contains("cell-test"));
+    }
+
+    #[test]
+    fn ecn_count_deref_mut_and_deref() {
+        let mut counts = EcnCount::default();
+        // Write through DerefMut, read through Deref.
+        counts[packet::Type::Short][Ecn::Ect0] = 7;
+        assert_eq!(counts[packet::Type::Short][Ecn::Ect0], 7);
+    }
+
+    #[test]
+    fn ecn_count_debug_nonempty() {
+        let mut counts = EcnCount::default();
+        counts[packet::Type::Short][Ecn::Ce] = 3;
+        let s = format!("{counts:?}");
+        assert!(s.contains("Short"));
+    }
+
+    #[test]
+    fn ecn_transitions_deref_mut_and_deref() {
+        let mut trans = EcnTransitions::default();
+        trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
+        assert_eq!(trans[Ecn::Ect0][Ecn::Ce], Some((packet::Type::Short, 42)));
+    }
+}
+
+#[test]
+fn debug() {
+    let stats = Stats::default();
+    assert_eq!(
+        format!("{stats:?}"),
+        "stats for\u{0020}
+  rx: 0 drop 0 dup 0 saved 0
+  tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
+  cc:
+    ce_loss 0 ce_ecn 0 ce_spurious 0
+    final_cwnd None ss_exit_cwnd None ss_exit_reason None
+  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
+  resumed: false
+  frames rx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  frames tx:
+    crypto 0 done 0 token 0 close 0
+    ack 0 (max 0) ping 0 padding 0
+    stream 0 reset 0 stop 0
+    max: stream 0 data 0 stream_data 0
+    blocked: stream 0 data 0 stream_data 0
+    datagram 0
+    ncid 0 rcid 0 pchallenge 0 presponse 0
+    ack_frequency 0
+  ecn:
+    tx:
+    acked:
+    rx:
+    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
+    mark transitions:
+  dscp: \n"
+    );
 }

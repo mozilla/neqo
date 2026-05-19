@@ -51,12 +51,8 @@ fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
     }
 
     if found {
-        if next[0].is_none() {
-            next[0] = Some(Box::new(make_huffman_tree(prefix << 1, len + 1)));
-        }
-        if next[1].is_none() {
-            next[1] = Some(Box::new(make_huffman_tree((prefix << 1) + 1, len + 1)));
-        }
+        next[0].get_or_insert_with(|| Box::new(make_huffman_tree(prefix << 1, len + 1)));
+        next[1].get_or_insert_with(|| Box::new(make_huffman_tree((prefix << 1) + 1, len + 1)));
     }
 
     HuffmanDecoderNode { next, value: None }

@@ -9,16 +9,16 @@
 use std::{cell::RefCell, rc::Rc};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
-use neqo_crypto::AuthenticationStatus;
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent, WebTransportRequest,
     WebTransportServerEvent,
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
+use nss::AuthenticationStatus;
 use test_fixture::{
-    anti_replay, exchange_packets, fixture_init, now, CountingConnectionIdGenerator, DEFAULT_ADDR,
-    DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME,
+    CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+    DEFAULT_SERVER_NAME, anti_replay, exchange_packets, fixture_init, now,
 };
 
 fn connect() -> (Http3Client, Http3Server) {
@@ -466,7 +466,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None).unwrap();
+    wt_server_session.send_datagram(b"PING", None, now).unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()

@@ -9,8 +9,7 @@
 use std::env;
 
 fn main() {
-    let target = env::var("TARGET").unwrap();
-    if target.contains("windows") {
+    if env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
         println!("cargo:rustc-link-lib=winmm");
     }
 

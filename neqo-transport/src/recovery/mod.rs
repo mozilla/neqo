@@ -6,10 +6,7 @@
 
 // Tracking of sent packets and detecting their loss.
 
-// #[cfg(feature = "bench")]
 pub mod sent;
-// #[cfg(not(feature = "bench"))]
-// mod sent;
 mod token;
 
 use std::{
@@ -54,8 +51,6 @@ pub const FAST_PTO_SCALE: u8 = 100;
 pub struct SendProfile {
     /// The limit on the size of the packet.
     limit: usize,
-    /// Whether this is a PTO, and what space the PTO is for.
-    pto: Option<PacketNumberSpace>,
     /// What spaces should be probed.
     probe: PacketNumberSpaceSet,
     /// Whether pacing is active.
@@ -70,7 +65,6 @@ impl SendProfile {
         // ACK-only packets are still limited in size.
         Self {
             limit: max(ACK_ONLY_SIZE_LIMIT - 1, limit),
-            pto: None,
             probe: PacketNumberSpaceSet::empty(),
             paced: false,
         }
@@ -81,18 +75,16 @@ impl SendProfile {
         // When pacing, we still allow ACK frames to be sent.
         Self {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
-            pto: None,
             probe: PacketNumberSpaceSet::empty(),
             paced: true,
         }
     }
 
     #[must_use]
-    pub fn new_pto(pn_space: PacketNumberSpace, mtu: usize, probe: PacketNumberSpaceSet) -> Self {
+    pub fn new_pto(mtu: usize, probe: PacketNumberSpaceSet) -> Self {
         debug_assert!(mtu > ACK_ONLY_SIZE_LIMIT);
         Self {
             limit: mtu,
-            pto: Some(pn_space),
             probe,
             paced: false,
         }
@@ -106,13 +98,11 @@ impl SendProfile {
         self.probe.contains(space)
     }
 
-    /// Determine whether an ACK-only packet should be sent for the given packet
-    /// number space.
-    /// Send only ACKs either: when the space available is too small, or when a PTO
-    /// exists for a later packet number space (which should get the most space).
+    /// Determine whether an ACK-only packet should be sent. Returns true if the congestion window
+    /// is too small to send data frames.
     #[must_use]
-    pub fn ack_only(&self, space: PacketNumberSpace) -> bool {
-        self.limit < ACK_ONLY_SIZE_LIMIT || self.pto.is_some_and(|sp| space < sp)
+    pub const fn ack_only(&self) -> bool {
+        self.limit < ACK_ONLY_SIZE_LIMIT
     }
 
     #[must_use]
@@ -291,7 +281,7 @@ impl LossRecoverySpace {
     /// Remove all tracked packets from the space.
     /// This is called by a client when 0-RTT packets are dropped, when a Retry is received
     /// and when keys are dropped.
-    fn remove_ignored(&mut self) -> impl Iterator<Item = sent::Packet> {
+    fn remove_ignored(&mut self) -> impl Iterator<Item = sent::Packet> + use<> {
         self.in_flight_outstanding = 0;
         std::mem::take(&mut self.sent_packets).drain_all()
     }
@@ -340,26 +330,28 @@ impl LossRecoverySpace {
             .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
         {
             // Packets sent before now - loss_delay are deemed lost.
-            if packet.time_sent() + loss_delay <= now {
+            let trigger = if packet.time_sent() + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {loss_delay:?}",
                     packet.pn(),
                     packet.time_sent()
                 );
+                sent::LossTrigger::TimeThreshold
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
                 qtrace!(
                     "lost={}, is >= {PACKET_THRESHOLD} from largest acked {largest_acked:?}",
                     packet.pn()
                 );
+                sent::LossTrigger::ReorderingThreshold
             } else {
                 if largest_acked.is_some() {
                     self.first_ooo_time = Some(packet.time_sent());
                 }
                 // No more packets can be declared lost after this one.
                 break;
-            }
+            };
 
-            if packet.declare_lost(now) {
+            if packet.declare_lost(now, trigger) {
                 lost_packets.push(packet.clone());
             }
         }
@@ -381,7 +373,7 @@ impl LossRecoverySpaces {
     pub fn drop_space(
         &mut self,
         space: PacketNumberSpace,
-    ) -> impl IntoIterator<Item = sent::Packet> {
+    ) -> impl IntoIterator<Item = sent::Packet> + use<> {
         let sp = self.spaces[space].take();
         assert_ne!(
             space,
@@ -467,7 +459,7 @@ impl PtoState {
         (self.packets > 0).then(|| {
             self.packets -= 1;
             // This is a PTO, so ignore the limit.
-            SendProfile::new_pto(self.space, mtu, self.probe)
+            SendProfile::new_pto(mtu, self.probe)
         })
     }
 
@@ -561,7 +553,7 @@ impl Loss {
 
     /// Record an RTT sample.
     fn rtt_sample(
-        &self,
+        &mut self,
         rtt: &mut RttEstimate,
         send_time: Instant,
         now: Instant,
@@ -573,7 +565,7 @@ impl Loss {
             RttSource::Ack
         };
         if let Some(sample) = now.checked_duration_since(send_time) {
-            rtt.update(&self.qlog, sample, ack_delay, source, now);
+            rtt.update(&mut self.qlog, sample, ack_delay, source, now);
         }
     }
 
@@ -582,7 +574,12 @@ impl Loss {
     }
 
     /// Prime the Handshake space PTO timer when stuck in Initial space.
-    fn maybe_prime_handshake_pto(&mut self, now: Instant) {
+    fn maybe_prime_handshake_pto(&mut self, now: Instant, has_handshake_keys: bool) {
+        // Only prime if we actually have Handshake TX keys to send probes.
+        if !has_handshake_keys {
+            return;
+        }
+
         // Only prime if we're in Initial space.
         let Some(pto) = self
             .pto_state
@@ -593,10 +590,10 @@ impl Loss {
         };
 
         // Only prime if we've received Initial ACKs (proving the peer is alive).
-        if !self
+        if self
             .spaces
             .get(PacketNumberSpace::Initial)
-            .is_some_and(|space| space.largest_acked.is_some())
+            .is_none_or(|space| space.largest_acked.is_none())
         {
             return;
         }
@@ -699,6 +696,9 @@ impl Loss {
             &mut self.stats.borrow_mut(),
         );
 
+        if self.pto_state.is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+        }
         self.pto_state = None;
 
         (acked_packets, lost)
@@ -707,6 +707,9 @@ impl Loss {
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+        if self.pto_state.is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+        }
         self.pto_state = None;
         let mut dropped = self
             .spaces
@@ -725,11 +728,11 @@ impl Loss {
         self.confirmed_time = Some(now);
         // Up until now, the ApplicationData space has been ignored for PTO.
         // So maybe fire a PTO.
-        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData) {
-            if pto < now {
-                let probes = enum_set!(PacketNumberSpace::ApplicationData);
-                self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
-            }
+        if let Some(pto) = self.pto_time(rtt, PacketNumberSpace::ApplicationData)
+            && pto < now
+        {
+            let probes = enum_set!(PacketNumberSpace::ApplicationData);
+            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
         }
     }
 
@@ -754,6 +757,9 @@ impl Loss {
         // We just made progress, so discard PTO count.
         // The spec says that clients should not do this until confirming that
         // the server has completed address validation, but ignore that.
+        if self.pto_state.is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+        }
         self.pto_state = None;
 
         if space == PacketNumberSpace::Handshake {
@@ -853,8 +859,9 @@ impl Loss {
 
         if let Some(st) = &mut self.pto_state {
             st.count_pto(&mut self.stats.borrow_mut());
-            qlog::metrics_updated(&self.qlog, &[qlog::Metric::PtoCount(st.count())], now);
+            qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PtoCount(st.count())], now);
         }
+        qlog::loss_timer_set(&mut self.qlog, now);
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -866,10 +873,13 @@ impl Loss {
         primary_path: &PathRef,
         now: Instant,
         lost: &mut Vec<sent::Packet>,
+        has_handshake_keys: bool,
     ) {
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
+        // The spaces for which packets should be marked for retransmission.
+        let mut retransmit = PacketNumberSpaceSet::default();
         for pn_space in PacketNumberSpace::iter() {
             let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
                 continue;
@@ -879,45 +889,68 @@ impl Loss {
                 continue;
             }
             qdebug!("[{self}] PTO timer fired for {pn_space:?}");
-            let Some(space) = self.spaces.get_mut(pn_space) else {
-                continue;
-            };
-            let mut size = 0;
-            let mtu = primary_path.borrow().plpmtu();
-            lost.extend(
-                space
-                    .pto_packets()
-                    // Do not consider all packets for retransmission on PTO. On
-                    // a high bandwidth delay connection, that would be a lot of
-                    // `sent::Packet`s to clone.
-                    //
-                    // Given that we are sending at most `MAX_PTO_PACKET_COUNT`
-                    // packets on PTO, consider as many packets for
-                    // retransmission as would fit into those PTO packets.
-                    .take_while(move |p| {
-                        size += p.len();
-                        size <= MAX_PTO_PACKET_COUNT * mtu
-                    })
-                    .cloned(),
-            );
+            retransmit.insert(pn_space);
+            // When Handshake PTO fires, also retransmit Initial CRYPTO data.
+            // This handles lost Initial CRYPTO that hasn't triggered its own
+            // PTO because `last_ack_eliciting` keeps advancing with each new
+            // Initial send.
+            if pn_space == PacketNumberSpace::Handshake {
+                retransmit.insert(PacketNumberSpace::Initial);
+            }
             pto_space = pto_space.or(Some(pn_space));
         }
 
         // This has to happen outside the loop. Increasing the PTO count here causes the
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
-        if let Some(pn_space) = pto_space {
-            qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
-            self.fire_pto(pn_space, allow_probes, now);
+        let Some(pn_space) = pto_space else {
+            return;
+        };
 
-            // Maybe prime the Handshake PTO when PTO fires in Initial space.
-            if pn_space == PacketNumberSpace::Initial {
-                self.maybe_prime_handshake_pto(now);
-            }
+        // Collect packets for retransmission.
+        let mtu = primary_path.borrow().plpmtu();
+        let mut size = 0;
+        for space in PacketNumberSpace::iter().filter(|s| retransmit.contains(*s)) {
+            let Some(s) = self.spaces.get_mut(space) else {
+                continue;
+            };
+            lost.extend(
+                s.pto_packets()
+                    .take_while(|p| {
+                        size += p.len();
+                        size <= MAX_PTO_PACKET_COUNT * mtu
+                    })
+                    .cloned(),
+            );
+        }
+
+        qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
+        self.fire_pto(pn_space, allow_probes, now);
+
+        // Maybe prime the Handshake PTO when PTO fires in Initial space.
+        if pn_space == PacketNumberSpace::Initial {
+            self.maybe_prime_handshake_pto(now, has_handshake_keys);
         }
     }
 
-    pub fn timeout(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
+    pub fn timeout(
+        &mut self,
+        primary_path: &PathRef,
+        now: Instant,
+        has_handshake_keys: bool,
+    ) -> Vec<sent::Packet> {
         qtrace!("[{self}] timeout {now:?}");
+        let timer_type = {
+            let path = primary_path.borrow();
+            if self
+                .earliest_loss_time(path.rtt())
+                .is_some_and(|t| t <= now)
+            {
+                qlog::LossTimerType::Ack
+            } else {
+                qlog::LossTimerType::Pto
+            }
+        };
+        qlog::loss_timer_expired(&mut self.qlog, timer_type, now);
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
@@ -943,7 +976,7 @@ impl Loss {
         }
         self.stats.borrow_mut().lost += lost_packets.len();
 
-        self.maybe_fire_pto(primary_path, now, &mut lost_packets);
+        self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets
     }
 
@@ -954,11 +987,6 @@ impl Loss {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
-        #[allow(
-            clippy::allow_attributes,
-            clippy::return_and_then,
-            reason = "TODO: False positive on nightly; function isn't returning Option or Result"
-        )]
         if let Some(profile) = self
             .pto_state
             .as_mut()
@@ -981,7 +1009,7 @@ impl Loss {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
-                SendProfile::new_pto(PacketNumberSpace::Initial, mtu, PacketNumberSpaceSet::all())
+                SendProfile::new_pto(mtu, PacketNumberSpaceSet::all())
             } else {
                 SendProfile::new_limited(limit)
             }
@@ -1006,17 +1034,20 @@ mod tests {
     };
 
     use neqo_common::qlog::Qlog;
-    use test_fixture::{now, DEFAULT_ADDR};
+    use test_fixture::{DEFAULT_ADDR, now};
 
-    use super::{LossRecoverySpace, PacketNumberSpace, PtoState, SendProfile, FAST_PTO_SCALE};
+    use super::{
+        ACK_ONLY_SIZE_LIMIT, FAST_PTO_SCALE, LossRecoverySpace, MIN_OUTSTANDING_UNACK,
+        PacketNumberSpace, PtoState, SendProfile,
+    };
     use crate::{
+        ConnectionParameters, Token as Srt,
         cid::{ConnectionId, ConnectionIdEntry},
         ecn, packet,
         path::{Path, PathRef},
-        recovery::{self, sent, MAX_PTO_PACKET_COUNT},
+        recovery::{self, MAX_PTO_PACKET_COUNT, sent},
         stats::{Stats, StatsCell},
         tracking::PacketNumberSpaceSet,
-        ConnectionParameters,
     };
 
     // Shorthand for a time in milliseconds.
@@ -1054,7 +1085,7 @@ mod tests {
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
-            self.lr.timeout(&self.path, now)
+            self.lr.timeout(&self.path, now, true)
         }
 
         pub fn next_timeout(&self) -> Option<Instant> {
@@ -1087,7 +1118,7 @@ mod tests {
             );
             path.make_permanent(
                 None,
-                ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), [0; 16]),
+                ConnectionIdEntry::new(0, ConnectionId::from(&[1, 2, 3]), Srt::default()),
             );
             path.set_primary(true, now());
             path.rtt_mut().set_initial(TEST_RTT);
@@ -1124,12 +1155,12 @@ mod tests {
         let rtt = p.rtt();
         println!(
             "rtts: {:?} {:?} {:?} {:?}",
-            rtt.latest(),
+            rtt.latest_rtt(),
             rtt.estimate(),
             rtt.rttvar(),
             rtt.minimum(),
         );
-        assert_eq!(rtt.latest(), latest_rtt, "latest RTT");
+        assert_eq!(rtt.latest_rtt(), latest_rtt, "latest RTT");
         assert_eq!(rtt.estimate(), smoothed_rtt, "smoothed RTT");
         assert_eq!(rtt.rttvar(), rttvar, "RTT variance");
         assert_eq!(rtt.minimum(), min_rtt, "min RTT");
@@ -1588,7 +1619,6 @@ mod tests {
         let expected_pto = pn_time(2) + default_pto;
         lr.discard(PacketNumberSpace::Handshake, expected_pto);
         let profile = lr.send_profile(now());
-        assert!(profile.pto.is_some());
         assert!(!profile.should_probe(PacketNumberSpace::Initial));
         assert!(!profile.should_probe(PacketNumberSpace::Handshake));
         assert!(profile.should_probe(PacketNumberSpace::ApplicationData));
@@ -1622,8 +1652,7 @@ mod tests {
         let expected_pto = now() + handshake_pto;
         assert_eq!(lr.pto_time(PacketNumberSpace::Initial), Some(expected_pto));
         let profile = lr.send_profile(now());
-        assert!(profile.ack_only(PacketNumberSpace::Initial));
-        assert!(profile.pto.is_none());
+        assert!(profile.ack_only());
         assert!(!profile.should_probe(PacketNumberSpace::Initial));
         assert!(!profile.should_probe(PacketNumberSpace::Handshake));
         assert!(!profile.should_probe(PacketNumberSpace::ApplicationData));
@@ -1670,16 +1699,17 @@ mod tests {
         let now = expected_pto;
         let lost = lr.timeout(now);
         assert_eq!(2, lost.len());
-        assert!(lost
-            .iter()
-            .any(|x| x.packet_type() == packet::Type::Initial));
-        assert!(lost
-            .iter()
-            .any(|x| x.packet_type() == packet::Type::Handshake));
+        assert!(
+            lost.iter()
+                .any(|x| x.packet_type() == packet::Type::Initial)
+        );
+        assert!(
+            lost.iter()
+                .any(|x| x.packet_type() == packet::Type::Handshake)
+        );
 
         // The resulting send profile should probe spaces where packets were "lost".
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_some());
         assert!(profile.should_probe(PacketNumberSpace::Initial));
         assert!(profile.should_probe(PacketNumberSpace::Handshake));
         assert!(!profile.should_probe(PacketNumberSpace::ApplicationData));
@@ -1697,14 +1727,16 @@ mod tests {
             now,
         );
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_some());
         assert!(profile.should_probe(PacketNumberSpace::Initial));
         assert!(!profile.should_probe(PacketNumberSpace::Handshake)); // changed
         assert!(!profile.should_probe(PacketNumberSpace::ApplicationData));
 
         assert_eq!(2, MAX_PTO_PACKET_COUNT); // because we're relying on that...
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_none());
+        // After probing enough, all probe bits should be cleared.
+        assert!(!profile.should_probe(PacketNumberSpace::Initial));
+        assert!(!profile.should_probe(PacketNumberSpace::Handshake));
+        assert!(!profile.should_probe(PacketNumberSpace::ApplicationData));
     }
 
     /// Confirm that a PTO in two spaces leads to probes in both, staggered.
@@ -1733,7 +1765,6 @@ mod tests {
         let now = initial_pto;
         let _lost = lr.timeout(now);
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_some());
         assert!(profile.should_probe(PacketNumberSpace::Initial));
         assert!(!profile.should_probe(PacketNumberSpace::Handshake));
         assert!(!profile.should_probe(PacketNumberSpace::ApplicationData));
@@ -1765,14 +1796,12 @@ mod tests {
         let now = app_pto;
         let _lost = lr.timeout(now);
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_some());
         assert!(profile.should_probe(PacketNumberSpace::Initial));
         assert!(!profile.should_probe(PacketNumberSpace::Handshake));
         assert!(profile.should_probe(PacketNumberSpace::ApplicationData));
 
         // This is the second and the Initial space still hasn't been probed.
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_some());
         assert!(profile.should_probe(PacketNumberSpace::Initial));
         assert!(!profile.should_probe(PacketNumberSpace::Handshake));
         assert!(profile.should_probe(PacketNumberSpace::ApplicationData));
@@ -1780,15 +1809,33 @@ mod tests {
         // The PTO is now done.
         assert_eq!(2, MAX_PTO_PACKET_COUNT); // because we're relying on that...
         let profile = lr.send_profile(now);
-        assert!(profile.pto.is_none());
+        // After probing enough, all probe bits should be cleared.
+        assert!(!profile.should_probe(PacketNumberSpace::Initial));
+        assert!(!profile.should_probe(PacketNumberSpace::Handshake));
+        assert!(!profile.should_probe(PacketNumberSpace::ApplicationData));
     }
 
     fn assert_no_handshake_last_ack_eliciting(lr: &Fixture) {
-        assert!(lr
-            .spaces
-            .get(PacketNumberSpace::Handshake)
-            .and_then(|s| s.last_ack_eliciting)
-            .is_none());
+        assert!(
+            lr.spaces
+                .get(PacketNumberSpace::Handshake)
+                .and_then(|s| s.last_ack_eliciting)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn maybe_prime_handshake_pto_no_keys() {
+        let mut lr = Fixture::default();
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Initial);
+        lr.pto_state = Some(PtoState::new(PacketNumberSpace::Initial, probe_set));
+        lr.spaces
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .largest_acked = Some(0);
+
+        lr.maybe_prime_handshake_pto(now(), false);
+        assert_no_handshake_last_ack_eliciting(&lr);
     }
 
     #[test]
@@ -1797,7 +1844,7 @@ mod tests {
         assert!(lr.pto_state.is_none());
 
         // Verify nothing changes - the Handshake space should not be primed afterwards.
-        lr.maybe_prime_handshake_pto(now());
+        lr.maybe_prime_handshake_pto(now(), true);
         assert_no_handshake_last_ack_eliciting(&lr);
     }
 
@@ -1809,7 +1856,7 @@ mod tests {
         lr.pto_state = Some(PtoState::new(PacketNumberSpace::Handshake, probe_set));
 
         // Verify nothing changes - the Handshake space should not be primed afterwards.
-        lr.maybe_prime_handshake_pto(now());
+        lr.maybe_prime_handshake_pto(now(), true);
         assert_no_handshake_last_ack_eliciting(&lr);
     }
 
@@ -1828,7 +1875,249 @@ mod tests {
         lr.spaces.drop_space(PacketNumberSpace::Handshake);
 
         // Verify Handshake space still doesn't exist afterwards.
-        lr.maybe_prime_handshake_pto(now());
+        lr.maybe_prime_handshake_pto(now(), true);
         assert!(lr.spaces.get(PacketNumberSpace::Handshake).is_none());
+    }
+
+    #[test]
+    fn loss_display() {
+        let lr = Fixture::default();
+        assert_eq!(lr.to_string(), "recovery::Loss");
+    }
+
+    #[test]
+    fn pto_state_count() {
+        let probe_set = PacketNumberSpaceSet::only(PacketNumberSpace::Initial);
+        let mut pto = PtoState::new(PacketNumberSpace::Initial, probe_set);
+        assert_eq!(pto.count(), 1);
+        pto.pto(PacketNumberSpace::Initial, probe_set);
+        assert_eq!(pto.count(), 2);
+    }
+
+    #[test]
+    fn send_profile_ack_only() {
+        let profile = SendProfile::new_limited(1200);
+        assert!(!profile.ack_only());
+        assert_eq!(profile.limit(), 1200);
+        assert!(!profile.paced());
+
+        let paced = SendProfile::new_paced();
+        assert!(paced.ack_only());
+        assert!(paced.paced());
+
+        let pto = SendProfile::new_pto(
+            1200,
+            PacketNumberSpaceSet::only(PacketNumberSpace::Handshake),
+        );
+        // All spaces can send data frames during PTO (not just ACKs).
+        // This allows retransmission of lost CRYPTO in earlier spaces.
+        assert!(!pto.ack_only());
+        assert!(pto.should_probe(PacketNumberSpace::Handshake));
+        assert!(!pto.should_probe(PacketNumberSpace::Initial));
+    }
+
+    /// Test that Initial space can retransmit CRYPTO even when PTO fires for Handshake.
+    ///
+    /// RFC 9002 Section 6.2.4 requires sending probes in packet number spaces with
+    /// in-flight data. When the client has lost Initial CRYPTO data and PTO fires
+    /// for Handshake space (to prevent deadlocks), the client must still be able
+    /// to retransmit the lost Initial CRYPTO frames.
+    ///
+    /// Bug scenario (from QNS L1/C1 test failures):
+    /// 1. Client sends `ClientHello` split across Initial packets (e.g., pn=8, pn=9)
+    /// 2. Server receives pn=8 but pn=9 is lost/corrupted
+    /// 3. Server ACKs pn=8; client detects pn=9 as lost
+    /// 4. PTO fires for Handshake (primed to prevent deadlocks)
+    /// 5. BUG: `ack_only(Initial)` returns true, blocking CRYPTO retransmission
+    /// 6. Client cannot complete handshake, times out
+    #[test]
+    fn initial_crypto_retransmit_allowed_during_handshake_pto() {
+        // When PTO fires for Handshake but Initial space has lost CRYPTO data,
+        // the Initial space should NOT be restricted to ACK-only.
+        let pto = SendProfile::new_pto(
+            1200,
+            PacketNumberSpaceSet::only(PacketNumberSpace::Handshake),
+        );
+        assert!(
+            !pto.ack_only(),
+            "Initial space must be able to send CRYPTO frames even when PTO is for Handshake"
+        );
+    }
+
+    /// Set up a qlog-instrumented fixture with a PTO already fired.
+    /// Returns the log contents and the PTO expiry time for use in follow-on
+    /// operations (e.g., acknowledging packets to trigger Cancelled).
+    fn fire_pto_log() -> (Fixture, test_fixture::SharedVec, Instant) {
+        let (log, contents) = test_fixture::new_neqo_qlog();
+        let mut lr = Fixture::default();
+        lr.lr.set_qlog(log);
+        lr.on_packet_sent(
+            sent::Packet::new(
+                packet::Type::Initial,
+                0,
+                now(),
+                true,
+                recovery::Tokens::new(),
+                ON_SENT_SIZE,
+            ),
+            now(),
+        );
+        let pto = lr.next_timeout().expect("PTO timer armed");
+        lr.timeout(pto);
+        (lr, contents, pto)
+    }
+
+    fn send_non_ack_eliciting(lrs: &mut LossRecoverySpace, pkt_type: packet::Type) {
+        lrs.on_packet_sent(sent::Packet::new(
+            pkt_type,
+            0,
+            now(),
+            false,
+            recovery::Tokens::new(),
+            ON_SENT_SIZE,
+        ));
+    }
+
+    /// Non-ACK-eliciting packets in Initial/Handshake spaces set the PTO baseline,
+    /// but non-ACK-eliciting packets in `ApplicationData` space do not.
+    #[test]
+    fn pto_baseline_set_for_non_app_data_only() {
+        let mut lrs_init = LossRecoverySpace::new(PacketNumberSpace::Initial);
+        assert!(lrs_init.last_ack_eliciting.is_none());
+        send_non_ack_eliciting(&mut lrs_init, packet::Type::Initial);
+        assert!(
+            lrs_init.last_ack_eliciting.is_some(),
+            "Initial space must set PTO baseline for non-ack-eliciting packet"
+        );
+
+        let mut lrs_app = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        send_non_ack_eliciting(&mut lrs_app, packet::Type::Short);
+        assert!(
+            lrs_app.last_ack_eliciting.is_none(),
+            "ApplicationData must not set PTO baseline for non-ack-eliciting packet"
+        );
+    }
+
+    fn app_data_largest_acked_sent_time(lr: &Fixture) -> Option<Instant> {
+        lr.spaces
+            .get(PacketNumberSpace::ApplicationData)?
+            .largest_acked_sent_time
+    }
+
+    /// A duplicate ACK for the current largest acknowledged packet must not update the sent-time.
+    #[test]
+    fn duplicate_ack_does_not_update_largest_acked_sent_time() {
+        let mut lr = setup_lr(3); // sends 0..=2 and acks 0
+
+        ack(&mut lr, 2, TEST_RTT);
+        let first_sent_time = app_data_largest_acked_sent_time(&lr);
+        assert!(first_sent_time.is_some());
+
+        ack(&mut lr, 2, TEST_RTT);
+        assert_eq!(
+            app_data_largest_acked_sent_time(&lr),
+            first_sent_time,
+            "duplicate ACK must not update largest_acked_sent_time"
+        );
+    }
+
+    /// At the exact PTO expiry deadline, probing should not yet fire; one nanosecond past it
+    /// should.
+    #[test]
+    fn should_probe_exact_boundary() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        let t = now();
+        let pto = ms(100);
+
+        // Add exactly MIN_OUTSTANDING_UNACK packets → n_pto = 2.
+        add_sent(&mut lrs, (MIN_OUTSTANDING_UNACK - 1) as u64);
+        assert_eq!(lrs.sent_packets.len(), MIN_OUTSTANDING_UNACK);
+
+        lrs.last_ack_eliciting = Some(t);
+
+        // At exactly t + pto*2: not yet past the deadline, should NOT probe.
+        assert!(!lrs.should_probe(pto, t + pto * 2));
+        // One nanosecond past the deadline: should probe.
+        assert!(lrs.should_probe(pto, t + pto * 2 + Duration::from_nanos(1)));
+    }
+
+    /// `ack_only` is true only when `limit < ACK_ONLY_SIZE_LIMIT`, not at the limit itself.
+    #[test]
+    fn ack_only_boundary() {
+        assert!(SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT - 1).ack_only());
+        // At the limit itself: limit == ACK_ONLY_SIZE_LIMIT → NOT ack_only.
+        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT).ack_only());
+        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT + 1).ack_only());
+    }
+
+    /// `drop_0rtt` returns packets that were in-flight in the `ApplicationData` space.
+    #[test]
+    fn drop_0rtt_returns_sent_packets() {
+        let mut lr = Fixture::default();
+        pace(&mut lr, 2);
+        let path = Rc::clone(&lr.path);
+        let dropped = lr.drop_0rtt(&path, now());
+        assert_eq!(
+            dropped.len(),
+            2,
+            "drop_0rtt must return all in-flight ApplicationData-space packets"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "discarding application space")]
+    fn discard_application_data_panics() {
+        let mut lr = Fixture::default();
+        lr.discard(PacketNumberSpace::ApplicationData, now());
+    }
+
+    /// `drop_0rtt` returns empty when packets have already been acknowledged.
+    #[test]
+    fn drop_0rtt_already_acked() {
+        let mut lr = setup_lr(2); // sends packets 0..=1 and ACKs packet 0
+        ack(&mut lr, 1, TEST_RTT); // ACK packet 1 — sets largest_acked
+        let path = Rc::clone(&lr.path);
+        assert!(lr.drop_0rtt(&path, now()).is_empty());
+    }
+
+    #[test]
+    fn loss_timer_set_on_pto() {
+        let (_, contents, _) = fire_pto_log();
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""event_type":"set""#),
+            "Expected loss_timer_updated Set event in qlog: {log}"
+        );
+        assert!(
+            log.contains(r#""timer_type":"pto""#),
+            "Expected timer_type pto in qlog: {log}"
+        );
+    }
+
+    #[test]
+    fn loss_timer_expired_on_timeout() {
+        let (_, contents, _) = fire_pto_log();
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""event_type":"expired""#),
+            "Expected loss_timer_updated Expired event in qlog: {log}"
+        );
+    }
+
+    #[test]
+    fn loss_timer_cancelled_on_ack() {
+        let (mut lr, contents, pto) = fire_pto_log();
+        lr.on_ack_received(
+            PacketNumberSpace::Initial,
+            vec![0..=0],
+            None,
+            Duration::ZERO,
+            pto + TEST_RTT,
+        );
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""event_type":"cancelled""#),
+            "Expected loss_timer_updated Cancelled event in qlog: {log}"
+        );
     }
 }

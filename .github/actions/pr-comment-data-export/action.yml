@@ -1,5 +1,5 @@
-name: 'Export data for PR comment'
-description: 'Exports the neccessary data to post a PR comment securely.'
+name: "Export data for PR comment"
+description: "Exports the necessary data to post a PR comment securely."
 
 # This action might be running off of a fork and would thus not have write
 # permissions on the origin repository. In order to allow a separate
@@ -8,13 +8,13 @@ description: 'Exports the neccessary data to post a PR comment securely.'
 
 inputs:
   name:
-    description: 'A unique name for the artifact used for exporting.'
+    description: "A unique name for the artifact used for exporting."
     required: true
   contents:
-    description: 'A filename with a comment (in Markdown) to be added to the PR.'
+    description: "A filename with a comment (in Markdown) to be added to the PR."
     required: true
   log-md:
-    description: 'A Markdown string to append to the PR comment.'
+    description: "A Markdown string to append to the PR comment."
     required: false
 
 runs:
@@ -34,7 +34,7 @@ runs:
         echo "$EVENT_NUMBER" > comment-data/pr-number
         echo "$LOG_MD" > comment-data/log-md
     - if: ${{ github.event_name == 'pull_request' }}
-      uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.name }}
         path: comment-data

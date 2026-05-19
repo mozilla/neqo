@@ -12,9 +12,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, qwarn, Buffer, Role};
+use neqo_common::{Buffer, Role, qtrace, qwarn};
 
 use crate::{
+    ConnectionEvents, Error, Res,
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
     packet,
@@ -30,7 +31,6 @@ use crate::{
         },
         TransportParametersHandler,
     },
-    ConnectionEvents, Error, Res,
 };
 
 pub type SendOrder = i64;

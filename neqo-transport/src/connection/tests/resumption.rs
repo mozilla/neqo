@@ -7,7 +7,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{Datagram, Decoder, Role};
-use neqo_crypto::{AeadTrait as _, AuthenticationStatus};
+use nss::{AuthenticationStatus, RecordProtectionOps as _};
 use test_fixture::{
     assertions,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
@@ -15,13 +15,13 @@ use test_fixture::{
 };
 
 use super::{
-    connect, connect_with_rtt, default_client, default_server, exchange_ticket, get_tokens,
-    new_client, resumed_server, send_something, AT_LEAST_PTO,
+    AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
+    get_tokens, new_client, resumed_server, send_something,
 };
 use crate::{
+    ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State, Version,
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
-    ConnectionParameters, Error, State, Version, DEFAULT_INITIAL_RTT, MIN_INITIAL_PACKET_SIZE,
 };
 
 #[test]
@@ -108,11 +108,11 @@ fn ticket_rtt(rtt: Duration) -> Duration {
         decode_initial_header(&server_initial, Role::Server).unwrap();
 
     // Now decrypt the packet.
-    let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
+    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
     let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
-    let mut plaintext = aead
+    let mut plaintext = aead_dec
         .decrypt(pn, &header, &payload[pn_len..], &mut buf)
         .unwrap()
         .to_owned();
@@ -130,7 +130,8 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     // And rebuild a packet.
     let mut packet = header.clone();
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
-    aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
+    aead_enc
+        .encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
     header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let si = Datagram::new(

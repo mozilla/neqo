@@ -9,14 +9,15 @@
 use std::{
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use clap::Parser;
+use clap::{Parser, builder::TypedValueParser as _};
 use neqo_transport::{
-    tparams::PreferredAddress, CongestionControlAlgorithm, ConnectionParameters, StreamType,
-    Version, DEFAULT_INITIAL_RTT,
+    CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, StreamType, Version,
+    tparams::PreferredAddress,
 };
+use strum::VariantNames as _;
 use thiserror::Error;
 
 pub mod client;
@@ -122,9 +123,17 @@ pub struct QuicParameters {
     /// The initial round-trip time, in milliseconds.
     pub initial_rtt_ms: u64,
 
-    #[arg(long = "cc", default_value = "cubic")]
-    /// The congestion controller to use.
-    pub congestion_control: CongestionControlAlgorithm,
+    #[arg(long = "cc", default_value = "cubic",
+        value_parser = clap::builder::PossibleValuesParser::new(CongestionControl::VARIANTS)
+            .map(|s| s.parse::<CongestionControl>().unwrap()))]
+    /// The congestion control algorithm to use.
+    pub congestion_control: CongestionControl,
+
+    #[arg(long = "ss", default_value = "classic",
+        value_parser = clap::builder::PossibleValuesParser::new(SlowStart::VARIANTS)
+            .map(|s| s.parse::<SlowStart>().unwrap()))]
+    /// The slow start algorithm to use.
+    pub slow_start: SlowStart,
 
     #[arg(long = "no-pacing")]
     /// Whether to disable pacing.
@@ -157,7 +166,8 @@ impl Default for QuicParameters {
             idle_timeout: 30,
             initial_rtt_ms: u64::try_from(DEFAULT_INITIAL_RTT.as_millis())
                 .expect("this value will always be less than u64::MAX"),
-            congestion_control: CongestionControlAlgorithm::Cubic,
+            congestion_control: CongestionControl::Cubic,
+            slow_start: SlowStart::Classic,
             no_pacing: false,
             no_pmtud: false,
             preferred_address_v4: None,
@@ -234,7 +244,8 @@ impl QuicParameters {
             .max_streams(StreamType::UniDi, self.max_streams_uni)
             .idle_timeout(Duration::from_secs(self.idle_timeout))
             .initial_rtt(Duration::from_millis(self.initial_rtt_ms))
-            .cc_algorithm(self.congestion_control)
+            .congestion_control(self.congestion_control)
+            .slow_start(self.slow_start)
             .pacing(!self.no_pacing)
             .pmtud(!self.no_pmtud)
             .sni_slicing(!self.no_sni_slicing);
@@ -274,11 +285,17 @@ pub enum Error {
     Argument(&'static str),
 }
 
+/// Wrapper for [`Instant::now()`] to manage the `disallowed_methods` override.
+fn now() -> Instant {
+    #![expect(clippy::disallowed_methods, reason = "This program uses the time")]
+    Instant::now()
+}
+
 #[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{fs, path::PathBuf, str::FromStr as _, time::SystemTime};
+    use std::{fs, path::PathBuf, time::SystemTime};
 
     use crate::{client, server};
 
@@ -314,7 +331,7 @@ mod tests {
 
     #[tokio::test]
     async fn write_qlog_file() {
-        neqo_crypto::init_db(PathBuf::from_str("../test-fixture/db").unwrap()).unwrap();
+        test_fixture::fixture_init();
 
         let temp_dir = TempDir::new();
 

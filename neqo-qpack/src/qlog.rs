@@ -10,17 +10,17 @@ use std::time::Instant;
 
 use neqo_common::{hex, qlog::Qlog};
 use qlog::events::{
-    qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
     EventData, RawInfo,
+    qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
 };
 
 pub fn qpack_read_insert_count_increment_instruction(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     increment: u64,
     data: &[u8],
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             let raw = RawInfo {
                 length: Some(8),

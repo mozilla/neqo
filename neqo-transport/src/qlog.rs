@@ -11,23 +11,32 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{hex, qinfo, qlog::Qlog, Decoder, Ecn};
+use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
 use qlog::events::{
-    connectivity::{ConnectionStarted, ConnectionState, ConnectionStateUpdated},
-    quic::{
-        AckedRanges, ErrorSpace, MetricsUpdated, PacketDropped, PacketHeader, PacketLost,
-        PacketReceived, PacketSent, QuicFrame, StreamType, VersionInformation,
+    ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
+    connectivity::{
+        ConnectionClosed, ConnectionClosedTrigger, ConnectionStarted, ConnectionState,
+        ConnectionStateUpdated, MtuUpdated, TransportOwner,
     },
-    EventData, RawInfo,
+    quic::{
+        AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, ErrorSpace,
+        LossTimerEventType, LossTimerUpdated, MetricsUpdated, PacketDropped, PacketDroppedTrigger,
+        PacketHeader, PacketLost, PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace,
+        PacketReceived, PacketSent, PacketsAcked, QuicFrame, RecoveryParametersSet, StreamType,
+        TimerType, VersionInformation,
+    },
 };
 use smallvec::SmallVec;
 
 use crate::{
+    CloseReason,
+    cc::{CWND_INITIAL_PKTS, CongestionControl, Cubic, PERSISTENT_CONG_THRESH},
     connection::State,
     frame::{CloseError, Frame},
     packet::{self, metadata::Direction},
     path::PathRef,
     recovery::sent,
+    rtt::{DEFAULT_INITIAL_RTT, GRANULARITY},
     stream_id::StreamType as NeqoStreamType,
     tparams::{
         TransportParameterId::{
@@ -38,16 +47,18 @@ use crate::{
         },
         TransportParametersHandler,
     },
+    tracking::PacketNumberSpace,
     version::{self, Version},
 };
 
-pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
+    qlog.add_event_at(
         || {
             let remote = tph.remote();
             #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
             let ev_data =
                 EventData::TransportParametersSet(qlog::events::quic::TransportParametersSet {
+                    owner: Some(TransportOwner::Remote),
                     original_destination_connection_id: remote
                         .get_bytes(OriginalDestinationConnectionId)
                         .map(hex),
@@ -89,16 +100,16 @@ pub fn connection_tparams_set(qlog: &Qlog, tph: &TransportParametersHandler, now
     );
 }
 
-pub fn server_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-pub fn client_connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
+pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     connection_started(qlog, path, now);
 }
 
-fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
-    qlog.add_event_data_with_instant(
+fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+    qlog.add_event_at(
         || {
             let p = path.deref().borrow();
             let ev_data = EventData::ConnectionStarted(ConnectionStarted {
@@ -107,8 +118,8 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
                 } else {
                     Some("ipv6".into())
                 },
-                src_ip: format!("{}", p.local_address().ip()),
-                dst_ip: format!("{}", p.remote_address().ip()),
+                src_ip: p.local_address().ip().to_string(),
+                dst_ip: p.remote_address().ip().to_string(),
                 protocol: Some("QUIC".into()),
                 src_port: p.local_address().port().into(),
                 dst_port: p.remote_address().port().into(),
@@ -122,39 +133,29 @@ fn connection_started(qlog: &Qlog, path: &PathRef, now: Instant) {
     );
 }
 
-#[allow(
-    clippy::allow_attributes,
-    clippy::similar_names,
-    reason = "FIXME: 'new and now are similar' hits on MSRV <1.91."
-)]
-pub fn connection_state_updated(qlog: &Qlog, new: &State, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn connection_state_updated(
+    qlog: &mut Qlog,
+    old_state: &State,
+    new_state: &State,
+    now: Instant,
+) {
+    qlog.add_event_at(
         || {
-            let ev_data = EventData::ConnectionStateUpdated(ConnectionStateUpdated {
-                old: None,
-                new: match new {
-                    State::Init | State::WaitInitial => ConnectionState::Attempted,
-                    State::WaitVersion | State::Handshaking => ConnectionState::HandshakeStarted,
-                    State::Connected => ConnectionState::HandshakeCompleted,
-                    State::Confirmed => ConnectionState::HandshakeConfirmed,
-                    State::Closing { .. } => ConnectionState::Closing,
-                    State::Draining { .. } => ConnectionState::Draining,
-                    State::Closed { .. } => ConnectionState::Closed,
-                },
-            });
-
-            Some(ev_data)
+            Some(EventData::ConnectionStateUpdated(ConnectionStateUpdated {
+                old: Some(old_state.into()),
+                new: new_state.into(),
+            }))
         },
         now,
     );
 }
 
 pub fn client_version_information_initiated(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     version_config: &version::Config,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(
@@ -173,13 +174,13 @@ pub fn client_version_information_initiated(
 }
 
 pub fn client_version_information_negotiated(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     client: &[Version],
     server: &[version::Wire],
     chosen: Version,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(
@@ -197,12 +198,12 @@ pub fn client_version_information_negotiated(
 }
 
 pub fn server_version_information_failed(
-    qlog: &Qlog,
+    qlog: &mut Qlog,
     server: &[Version],
     client: version::Wire,
     now: Instant,
 ) {
-    qlog.add_event_data_with_instant(
+    qlog.add_event_at(
         || {
             Some(EventData::VersionInformation(VersionInformation {
                 client_versions: Some(vec![format!("{client:02x}")]),
@@ -219,8 +220,8 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
+    qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
@@ -257,20 +258,21 @@ pub fn packet_io(qlog: &Qlog, meta: packet::MetaData, now: Instant) {
         now,
     );
 }
-
-pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant) {
-    qlog.add_event_data_with_instant(
+pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
+    qlog.add_event_at(
         || {
             let header =
-                PacketHeader::with_type(public_packet.packet_type().into(), None, None, None, None);
+                PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(public_packet.len() as u64),
+                length: Some(decrypt_err.len() as u64),
                 ..Default::default()
             };
 
             let ev_data = EventData::PacketDropped(PacketDropped {
                 header: Some(header),
                 raw: Some(raw),
+                details: Some(decrypt_err.error.to_string()),
+                trigger: Some(PacketDroppedTrigger::DecryptionFailure),
                 ..Default::default()
             });
 
@@ -280,14 +282,20 @@ pub fn packet_dropped(qlog: &Qlog, public_packet: &packet::Public, now: Instant)
     );
 }
 
-pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
+pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
     qlog.add_event_with_stream(|stream| {
         for pkt in pkts {
             let header =
                 PacketHeader::with_type(pkt.packet_type().into(), Some(pkt.pn()), None, None, None);
 
+            let trigger = pkt
+                .loss_info()
+                .map(|info| PacketLostTrigger::from(info.trigger))
+                .or_else(|| pkt.pto_fired().then_some(PacketLostTrigger::PtoExpired));
+
             let ev_data = EventData::PacketLost(PacketLost {
                 header: Some(header),
+                trigger,
                 ..Default::default()
             });
 
@@ -297,26 +305,108 @@ pub fn packets_lost(qlog: &Qlog, pkts: &[sent::Packet], now: Instant) {
     });
 }
 
+pub fn recovery_parameters_set(
+    qlog: &mut Qlog,
+    plpmtu: usize,
+    cc: CongestionControl,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            let loss_reduction_factor = match cc {
+                CongestionControl::NewReno => 0.5,
+                CongestionControl::Cubic => {
+                    f32::from(u8::try_from(Cubic::BETA_USIZE_DIVIDEND).expect("fits"))
+                        / f32::from(u8::try_from(Cubic::BETA_USIZE_DIVISOR).expect("fits"))
+                }
+            };
+            Some(EventData::RecoveryParametersSet(RecoveryParametersSet {
+                reordering_threshold: Some(
+                    u16::try_from(crate::recovery::PACKET_THRESHOLD).expect("fits"),
+                ),
+                time_threshold: Some(9.0 / 8.0),
+                timer_granularity: Some(u16::try_from(GRANULARITY.as_millis()).expect("fits")),
+                initial_rtt: Some(DEFAULT_INITIAL_RTT.as_secs_f32() * 1000.0),
+                max_datagram_size: Some(u32::try_from(plpmtu).expect("MTU fits in u32")),
+                initial_congestion_window: Some(
+                    u64::try_from(CWND_INITIAL_PKTS * plpmtu).expect("fits"),
+                ),
+                minimum_congestion_window: Some(
+                    u32::try_from(2 * plpmtu).expect("MTU fits in u32"),
+                ),
+                loss_reduction_factor: Some(loss_reduction_factor),
+                persistent_congestion_threshold: Some(
+                    u16::try_from(PERSISTENT_CONG_THRESH).expect("fits"),
+                ),
+            }))
+        },
+        now,
+    );
+}
+
+pub fn connection_closed(qlog: &mut Qlog, close_reason: &CloseReason, now: Instant) {
+    qlog.add_event_at(
+        || Some(EventData::ConnectionClosed(close_reason.into())),
+        now,
+    );
+}
+
+pub fn packets_acked(
+    qlog: &mut Qlog,
+    space: PacketNumberSpace,
+    acked_pkts: &[sent::Packet],
+    now: Instant,
+) {
+    if acked_pkts.is_empty() {
+        return;
+    }
+    qlog.add_event_at(
+        || {
+            let packet_number_space = Some(QlogPacketNumberSpace::from(space));
+            let packet_numbers = Some(acked_pkts.iter().map(sent::Packet::pn).collect::<Vec<_>>());
+            Some(EventData::PacketsAcked(PacketsAcked {
+                packet_number_space,
+                packet_numbers,
+            }))
+        },
+        now,
+    );
+}
+
+pub fn mtu_updated(qlog: &mut Qlog, old_mtu: usize, new_mtu: usize, done: bool, now: Instant) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::MtuUpdated(MtuUpdated {
+                old: Some(u16::try_from(old_mtu).expect("MTU fits in u16")),
+                new: u16::try_from(new_mtu).expect("MTU fits in u16"),
+                done: Some(done),
+            }))
+        },
+        now,
+    );
+}
+
+#[derive(Clone, Copy)]
 #[expect(dead_code, reason = "TODO: Construct all variants.")]
 pub enum Metric {
     MinRtt(Duration),
     SmoothedRtt(Duration),
     LatestRtt(Duration),
     RttVariance(Duration),
-    MaxAckDelay(u64),
     PtoCount(usize),
     CongestionWindow(usize),
     BytesInFlight(usize),
     SsThresh(usize),
     PacketsInFlight(u64),
-    InRecovery(bool),
     PacingRate(u64),
 }
 
-pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
-    debug_assert!(!updated_metrics.is_empty());
-
-    qlog.add_event_data_with_instant(
+pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
+    qlog: &mut Qlog,
+    updated_metrics: M,
+    now: Instant,
+) {
+    qlog.add_event_at(
         || {
             let mut min_rtt: Option<f32> = None;
             let mut smoothed_rtt: Option<f32> = None;
@@ -336,22 +426,35 @@ pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
                     Metric::LatestRtt(v) => latest_rtt = Some(v.as_secs_f32() * 1000.0),
                     Metric::RttVariance(v) => rtt_variance = Some(v.as_secs_f32() * 1000.0),
                     Metric::PtoCount(v) => {
-                        pto_count = Some(u16::try_from(*v).expect("fits in u16"));
+                        pto_count = Some(u16::try_from(v).expect("fits in u16"));
                     }
                     Metric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(*v).expect("fits in u64"));
+                        congestion_window = Some(u64::try_from(v).expect("fits in u64"));
                     }
                     Metric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(*v).expect("fits in u64"));
+                        bytes_in_flight = Some(u64::try_from(v).expect("fits in u64"));
                     }
                     Metric::SsThresh(v) => {
-                        ssthresh = Some(u64::try_from(*v).expect("fits in u64"));
+                        ssthresh = Some(u64::try_from(v).expect("fits in u64"));
                     }
-                    Metric::PacketsInFlight(v) => packets_in_flight = Some(*v),
-                    Metric::PacingRate(v) => pacing_rate = Some(*v),
-                    _ => (),
+                    Metric::PacketsInFlight(v) => packets_in_flight = Some(v),
+                    Metric::PacingRate(v) => pacing_rate = Some(v),
                 }
             }
+
+            debug_assert!(
+                min_rtt.is_some()
+                    || smoothed_rtt.is_some()
+                    || latest_rtt.is_some()
+                    || rtt_variance.is_some()
+                    || pto_count.is_some()
+                    || congestion_window.is_some()
+                    || bytes_in_flight.is_some()
+                    || ssthresh.is_some()
+                    || packets_in_flight.is_some()
+                    || pacing_rate.is_some(),
+                "metrics_updated called with no metrics"
+            );
 
             let ev_data = EventData::MetricsUpdated(MetricsUpdated {
                 min_rtt,
@@ -364,9 +467,106 @@ pub fn metrics_updated(qlog: &Qlog, updated_metrics: &[Metric], now: Instant) {
                 ssthresh,
                 packets_in_flight,
                 pacing_rate,
+                ..Default::default()
             });
 
             Some(ev_data)
+        },
+        now,
+    );
+}
+
+/// Trigger for a `recovery:congestion_state_updated` qlog event.
+#[derive(Clone, Copy)]
+pub enum CongestionStateTrigger {
+    /// The congestion state change was triggered by an ECN mark.
+    Ecn,
+    /// The congestion state change was triggered by persistent congestion.
+    PersistentCongestion,
+}
+
+impl From<CongestionStateTrigger> for CongestionStateUpdatedTrigger {
+    fn from(value: CongestionStateTrigger) -> Self {
+        match value {
+            CongestionStateTrigger::Ecn => Self::Ecn,
+            CongestionStateTrigger::PersistentCongestion => Self::PersistentCongestion,
+        }
+    }
+}
+
+pub fn congestion_state_updated(
+    qlog: &mut Qlog,
+    old_state: &'static str,
+    new_state: &'static str,
+    trigger: Option<CongestionStateTrigger>,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::CongestionStateUpdated(CongestionStateUpdated {
+                old: Some(old_state.to_owned()),
+                new: new_state.to_owned(),
+                trigger: trigger.map(Into::into),
+            }))
+        },
+        now,
+    );
+}
+
+/// The type of loss recovery timer that fired or was updated.
+#[derive(Clone, Copy)]
+pub enum LossTimerType {
+    /// The reordering/loss-detection timer (ACK-based).
+    Ack,
+    /// The Probe Timeout timer.
+    Pto,
+}
+
+/// Emit a `loss_timer_updated` Set event.
+///
+/// Only the PTO timer has explicit set/cancel lifecycle in neqo. The
+/// loss-detection (Ack) timer is derived lazily from packet state on every
+/// call to [`crate::recovery::Loss::next_timeout`] and has no single arm or
+/// cancel point to instrument.
+pub fn loss_timer_set(qlog: &mut Qlog, now: Instant) {
+    loss_timer_updated(qlog, LossTimerEventType::Set, Some(TimerType::Pto), now);
+}
+
+pub fn loss_timer_expired(qlog: &mut Qlog, timer_type: LossTimerType, now: Instant) {
+    loss_timer_updated(
+        qlog,
+        LossTimerEventType::Expired,
+        Some(timer_type.into()),
+        now,
+    );
+}
+
+/// Emit a `loss_timer_updated` Cancelled event.
+///
+/// See [`loss_timer_set`] for why only `TimerType::Pto` is used here.
+pub fn loss_timer_cancelled(qlog: &mut Qlog, now: Instant) {
+    loss_timer_updated(
+        qlog,
+        LossTimerEventType::Cancelled,
+        Some(TimerType::Pto),
+        now,
+    );
+}
+
+fn loss_timer_updated(
+    qlog: &mut Qlog,
+    event_type: LossTimerEventType,
+    timer_type: Option<TimerType>,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::LossTimerUpdated(LossTimerUpdated {
+                timer_type,
+                packet_number_space: None,
+                event_type,
+                delta: None,
+            }))
         },
         now,
     );
@@ -446,7 +646,7 @@ impl From<Frame<'_>> for QuicFrame {
             },
             Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
-                    ty: Some(qlog::TokenType::Retry),
+                    ty: None,
                     details: None,
                     raw: Some(RawInfo {
                         data: Some(hex(token)),
@@ -482,10 +682,7 @@ impl From<Frame<'_>> for QuicFrame {
                 stream_type,
                 maximum_streams,
             } => Self::MaxStreams {
-                stream_type: match stream_type {
-                    NeqoStreamType::BiDi => StreamType::Bidirectional,
-                    NeqoStreamType::UniDi => StreamType::Unidirectional,
-                },
+                stream_type: stream_type.into(),
                 maximum: maximum_streams,
             },
             Frame::DataBlocked { data_limit } => Self::DataBlocked { limit: data_limit },
@@ -500,10 +697,7 @@ impl From<Frame<'_>> for QuicFrame {
                 stream_type,
                 stream_limit,
             } => Self::StreamsBlocked {
-                stream_type: match stream_type {
-                    NeqoStreamType::BiDi => StreamType::Bidirectional,
-                    NeqoStreamType::UniDi => StreamType::Unidirectional,
-                },
+                stream_type: stream_type.into(),
                 limit: stream_limit,
             },
             Frame::NewConnectionId {
@@ -532,12 +726,9 @@ impl From<Frame<'_>> for QuicFrame {
                 frame_type,
                 reason_phrase,
             } => Self::ConnectionClose {
-                error_space: match error_code {
-                    CloseError::Transport(_) => Some(ErrorSpace::TransportError),
-                    CloseError::Application(_) => Some(ErrorSpace::ApplicationError),
-                },
+                error_space: Some((&error_code).into()),
                 error_code: Some(error_code.code()),
-                error_code_value: Some(0),
+                error_code_value: Some(error_code.code()),
                 reason: Some(reason_phrase),
                 trigger_frame_type: Some(frame_type),
             },
@@ -555,6 +746,109 @@ impl From<Frame<'_>> for QuicFrame {
     }
 }
 
+impl From<&State> for ConnectionState {
+    fn from(state: &State) -> Self {
+        match state {
+            State::Init | State::WaitInitial => Self::Attempted,
+            State::WaitVersion | State::Handshaking => Self::HandshakeStarted,
+            State::Connected => Self::HandshakeCompleted,
+            State::Confirmed => Self::HandshakeConfirmed,
+            State::Closing { .. } => Self::Closing,
+            State::Draining { .. } => Self::Draining,
+            State::Closed { .. } => Self::Closed,
+        }
+    }
+}
+
+impl From<PacketNumberSpace> for QlogPacketNumberSpace {
+    fn from(space: PacketNumberSpace) -> Self {
+        match space {
+            PacketNumberSpace::Initial => Self::Initial,
+            PacketNumberSpace::Handshake => Self::Handshake,
+            PacketNumberSpace::ApplicationData => Self::ApplicationData,
+        }
+    }
+}
+
+impl From<NeqoStreamType> for StreamType {
+    fn from(stream_type: NeqoStreamType) -> Self {
+        match stream_type {
+            NeqoStreamType::BiDi => Self::Bidirectional,
+            NeqoStreamType::UniDi => Self::Unidirectional,
+        }
+    }
+}
+
+impl From<&CloseError> for ErrorSpace {
+    fn from(error: &CloseError) -> Self {
+        match error {
+            CloseError::Transport(_) => Self::TransportError,
+            CloseError::Application(_) => Self::ApplicationError,
+        }
+    }
+}
+
+impl From<&CloseReason> for ConnectionClosed {
+    fn from(close_reason: &CloseReason) -> Self {
+        let (connection_code, application_code, trigger) = match close_reason {
+            CloseReason::Transport(e) if *e == crate::Error::IdleTimeout => {
+                (None, None, Some(ConnectionClosedTrigger::IdleTimeout))
+            }
+            CloseReason::Transport(e) if *e == crate::Error::StatelessReset => {
+                (None, None, Some(ConnectionClosedTrigger::StatelessReset))
+            }
+            CloseReason::Transport(e) if *e == crate::Error::VersionNegotiation => {
+                (None, None, Some(ConnectionClosedTrigger::VersionMismatch))
+            }
+            CloseReason::Transport(e) if *e == crate::Error::None => {
+                (None, None, Some(ConnectionClosedTrigger::Clean))
+            }
+            CloseReason::Transport(crate::Error::Peer(code)) => (
+                Some(ConnectionErrorCode::Value(*code)),
+                None,
+                Some(ConnectionClosedTrigger::Error),
+            ),
+            CloseReason::Application(code)
+            | CloseReason::Transport(crate::Error::PeerApplication(code)) => (
+                None,
+                Some(ApplicationErrorCode::Value(*code)),
+                Some(ConnectionClosedTrigger::Application),
+            ),
+            CloseReason::Transport(e) => (
+                Some(ConnectionErrorCode::Value(e.code())),
+                None,
+                Some(ConnectionClosedTrigger::Error),
+            ),
+        };
+        Self {
+            owner: None,
+            connection_code,
+            application_code,
+            internal_code: None,
+            reason: None,
+            trigger,
+        }
+    }
+}
+
+impl From<LossTimerType> for TimerType {
+    fn from(value: LossTimerType) -> Self {
+        match value {
+            LossTimerType::Ack => Self::Ack,
+            LossTimerType::Pto => Self::Pto,
+        }
+    }
+}
+
+impl From<sent::LossTrigger> for PacketLostTrigger {
+    fn from(value: sent::LossTrigger) -> Self {
+        match value {
+            sent::LossTrigger::TimeThreshold => Self::TimeThreshold,
+            sent::LossTrigger::ReorderingThreshold => Self::ReorderingThreshold,
+        }
+    }
+}
+
 impl From<packet::Type> for qlog::events::quic::PacketType {
     fn from(value: packet::Type) -> Self {
         match value {
@@ -566,5 +860,32 @@ impl From<packet::Type> for qlog::events::quic::PacketType {
             packet::Type::VersionNegotiation => Self::VersionNegotiation,
             packet::Type::OtherVersion => Self::Unknown,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_fixture::new_neqo_qlog;
+
+    use super::{Metric, metrics_updated};
+
+    /// Verify that `metrics_updated` records all metric variants, including
+    /// `SsThresh`, when qlog is enabled.
+    #[test]
+    fn metrics_updated_all_variants() {
+        let (mut qlog, contents) = new_neqo_qlog();
+        let now = test_fixture::now();
+        metrics_updated(
+            &mut qlog,
+            [Metric::CongestionWindow(10_000), Metric::SsThresh(5_000)],
+            now,
+        );
+        drop(qlog);
+        let output = contents.to_string();
+        assert!(
+            output.contains("congestion_window"),
+            "missing congestion_window"
+        );
+        assert!(output.contains("ssthresh"), "missing ssthresh");
     }
 }

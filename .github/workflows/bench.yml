@@ -2,21 +2,12 @@ name: cargo bench
 on:
   workflow_call:
   pull_request:
-    branches: ["main"]
-  merge_group:
   workflow_dispatch:
-    inputs:
-      bencher:
-        type: choice
-        description: Which benchmarking testbed to run on.
-        required: true
-        default: on-prem
-        options:
-          - on-prem
-          - gcp
 env:
   CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   PERF_OPT: record -F2999 --call-graph fp -g
   SCCACHE_CACHE_SIZE: 128G
@@ -24,7 +15,8 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
-  WORKSPACE: ${{ github.workspace}}
+  WORKSPACE: ${{ github.workspace }}
+  BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -34,123 +26,138 @@ permissions:
   contents: read
 
 jobs:
-  bench:
-    name: cargo bench
-    runs-on: ${{ inputs.bencher == 'gcp' && format('cirun-gcp-bencher--{0}', github.run_id) || 'self-hosted' }}
+  build:
+    name: Build bench binaries
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: 'recursive'
+          submodules: "recursive"
+          persist-credentials: false
+
+      - id: nss-version
+        uses: ./neqo/.github/actions/minimum-version
+      - uses: ./neqo/.github/actions/build-neqo
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: bench-build
+          benches: "true"
+          baseline-ref: origin/${{ env.BASE_REF }}
+          nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
+
+  bench:
+    name: cargo bench
+    runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
+    needs: [build]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout mozilla/neqo
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: mozilla/neqo
+          path: neqo
           persist-credentials: false
           clean: false
       - run: |
           cd neqo
-          git fetch --no-tags --depth=1 origin main
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
 
       - name: Set PATH and environment
         run: |
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: ./neqo/.github/actions/rust
+        uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: flamegraph, samply
           token: ${{ secrets.GITHUB_TOKEN }}
-          workspaces: |
-            neqo
+          sccache: true
 
-      - name: Get minimum NSS version
-        id: nss-version
-        run: |
-          cd neqo
-          cat neqo-crypto/min_version.txt > versions.txt
-          git show origin/main:neqo-crypto/min_version.txt >> versions.txt
-          # Use the maximum version from both branches.
-          echo "minimum=$(sort -u versions.txt | tail -n1)" >> "$GITHUB_OUTPUT"
-
-      - name: Install NSS
-        id: nss
-        uses: ./neqo/.github/actions/nss
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          name: bench-build
+          path: dist
 
-      - name: Build neqo
+      - name: Set up build artifacts
         run: |
-          # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
-          export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
-          echo "RUSTFLAGS=$RUSTFLAGS" >> "$GITHUB_ENV"
-          mkdir -p binaries/neqo-main
-          mkdir -p binaries/neqo
-          cd neqo
-          git checkout origin/main
-          cargo build --locked --release --bin neqo-client --bin neqo-server
-          cp target/release/neqo-client ../binaries/neqo-main/
-          cp target/release/neqo-server ../binaries/neqo-main/
-          git checkout -
-          cargo build --locked --release --bin neqo-client --bin neqo-server
-          cp target/release/neqo-client ../binaries/neqo/
-          cp target/release/neqo-server ../binaries/neqo/
+          chmod +x dist/neqo/* dist/neqo-baseline/*
+          mkdir -p binaries/neqo binaries/neqo-baseline
+          cp dist/neqo/* binaries/neqo/
+          cp dist/neqo-baseline/* binaries/neqo-baseline/
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
+            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db" # TODO: Remove once baseline uses nss-rs >= 0.11.0
+          } >> "$GITHUB_ENV"
 
-      # Disable turboboost, hyperthreading and use performance governor.
-      # Also creates "cpu23", "cpu2" and "cpu3" CPU sets for use with cset.
-      # On the bencher, logical cores 2 and 3 have been isolated for use by the benchmarks.
+      # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
       - name: Prepare machine
-        run: sudo /root/bin/prep.sh
+        id: cpu-tuning
+        uses: ./neqo/.github/actions/cpu-tuning
+        with:
+          mtu: ${{ env.MTU }}
 
       - name: Run cargo bench
         env:
-          NSS_DB_PATH: ${{ github.workspace }}/neqo/test-fixture/db
+          BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          sudo ip link set dev lo mtu "$MTU"
+          # TODO: Remove NSS_DB_PATH once baseline uses nss-rs >= 0.11.0
+          bench_exec() { sudo nice -n -20 env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" "NSS_DB_PATH=$NSS_DB_PATH" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          filter_cset() { grep -v '^cset' || test $? = 1; }
+          shopt -s extglob nullglob
+
+          # Kill any stale processes from previous runs that may be holding port 4433.
+          sudo fuser -k 4433/udp 4433/tcp 2>/dev/null || true
+
           cd neqo
+          # Fix any root-owned files left by a previous run before removing them
+          sudo chown -R "$(id -u)" target/criterion 2>/dev/null || true
           rm -rf target/criterion
-          git checkout origin/main
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches-main.txt
-          BENCHES_MAIN=$(grep Executable benches-main.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
-          # Run the builds from the main branch first, to establish a baseline.
-          for BENCH in $BENCHES_MAIN; do
-            cp "$BENCH" ../binaries/neqo-main/
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --save-baseline main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results-main.txt
+          # Run the baseline builds first, to establish a baseline.
+          for BENCH in ../dist/neqo-baseline/!(neqo-client|neqo-server); do
+            bench_exec "$BENCH" -- --bench --save-baseline baseline --noplot | filter_cset | tee -a ../results-baseline.txt
           done
-          # Copy the main branch results to a separate directory for bencher.dev.
-          cp -r target/criterion ../criterion-main
-          git checkout -
-          cargo bench --locked --workspace --features bench --no-run 2>&1 | tee benches.txt
-          BENCHES=$(grep Executable benches.txt | cut -d\( -f2 | cut -d\) -f1 | tr -s '\n' ' ')
           # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
           # (Perf seems to introduce some variability in the results.)
-          for BENCH in $BENCHES; do
-            cp "$BENCH" ../binaries/neqo/
-            # shellcheck disable=SC2086
+          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
             # --baseline-lenient allows us to add new benchmarks in pull requests.
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              $BENCH -- --bench --baseline-lenient main --noplot | { grep -v '^cset' || test $? = 1; } | tee -a ../results.txt
+            bench_exec "$BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
           done
-          for BENCH in $BENCHES; do
-            NAME=$(basename "$BENCH" | cut -d- -f1)
-            # shellcheck disable=SC2086
-            nice -n -20 setarch --addr-no-randomize cset proc --set=cpu23 --exec \
-              perf -- $PERF_OPT -o "../$NAME.perf" $BENCH --bench --noplot --discard-baseline | { grep -v '^cset' || test $? = 1; }
+          sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
+          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
+            BIN_NAME=$(basename "$BENCH")
+            VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+            if [ -n "$VARIANTS" ]; then
+              while IFS= read -r VARIANT; do
+                SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
+                # shellcheck disable=SC2086
+                bench_exec perf -- $PERF_OPT -o "../$SAFE_NAME.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
+              done <<< "$VARIANTS"
+            else
+              # shellcheck disable=SC2086
+              bench_exec perf -- $PERF_OPT -o "../$BIN_NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+            fi
           done
-          cp -r target/criterion ../criterion
+          # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
+          sudo chown -R "$(id -u)" target/criterion ../*.perf
 
-      # Re-enable turboboost, hyperthreading and use powersave governor. Remove all CPU sets.
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
-        if: success() || failure() || cancelled()
-        run: |
-          sudo /root/bin/unprep.sh
-          # In case the previous test failed:
-          sudo ip link set dev lo mtu 65536
+        if: always()
+        uses: ./neqo/.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Post-process perf data
         run: |
@@ -165,33 +172,36 @@ jobs:
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: ${{ inputs.bencher == 'gcp' && 'GCP' || 'On-prem' }}
+          TESTBED: "On-prem"
         run: |
-          SHA=$(cd neqo && git log origin/main -1 --format=%H)
-          echo "$SHA" > main-sha.txt
+          SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
+          echo "$SHA" > baseline-sha.txt
+          python3 neqo/.github/scripts/format-bench-results.py results.txt
+          # Build final markdown output
           {
             echo "### Benchmark results"
             echo
-            echo "Performance differences relative to $SHA."
+            if [ -s significant-results.md ]; then
+              echo "Significant performance differences relative to $SHA."
+              cat significant-results.md
+            else
+              echo "No significant performance differences relative to $SHA."
+            fi
             echo
-            sed -E -e 's/^                 //gi' \
-                  -e '/cset:.*last message/d' \
-                  -e '/Criterion.rs ERROR: Error in Gnuplot:.*$/d' \
-                  -e 's/((change|time|thrpt):[^%]*% )([^%]*%)(.*)/\1<b>\3<\/b>\4/gi' results.txt |\
-              perl -p0e 's/(Change within noise threshold\.|No change in performance detected\.|Performance has regressed\.|Performance has improved\.)\n([a-zA-Z0-9][^F][^\s]*[\-\/])/$1\n\n$2/g' |\
-              perl -p -0777 -e 's/(.*?)\n(.*?)(((No change|Change within|Performance has).*?)(\nFound .*?)?)?\n\n/<details><summary>$1: $4<\/summary><pre>\n$2$6<\/pre><\/details>\n/gs' |\
-              sed -E -e 's/(Performance has regressed.)/:broken_heart: <b>\1<\/b>/gi' \
-                    -e 's/(Performance has improved.)/:green_heart: <b>\1<\/b>/gi' \
-                    -e 's/^ +((<\/pre>|Found).*)/\1/gi' \
-                    -e 's/^<details>(.*Performance has.*)/<details open>\1/gi'
-          } >> results.md
+            echo "<details><summary>All results</summary>"
+            echo
+            cat all-bench-results.md
+            echo
+            echo "</details>"
+          } > results.md
+          rm -f all-bench-results.md significant-results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
         id: export_samply
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
@@ -202,7 +212,7 @@ jobs:
 
       - name: Export performance data
         id: export_perf
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
@@ -211,9 +221,7 @@ jobs:
             *.md
             event.json
             results.*
-            results-main.*
-            criterion
-            criterion-main
+            results-baseline.*
           compression-level: 9
 
       - name: Export PR comment data
@@ -238,4 +246,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries comment-data criterion criterion-main "$COMPARE_TMP" || true
+          rm -r -- binaries dist comment-data || true

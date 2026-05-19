@@ -8,22 +8,22 @@ use std::{cmp::max, time::Duration};
 
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
-    connection::{ConnectionIdManager, Role, LOCAL_ACTIVE_CID_LIMIT},
+    CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
+    connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
     stream_id::StreamType,
     tparams::{
         PreferredAddress, TransportParameter,
         TransportParameterId::{
-            self, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, InitialMaxData,
+            ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout, InitialMaxData,
             InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
-            MinAckDelay,
+            MinAckDelay, PreferredAddress as PreferredAddressTp, Scone,
         },
         TransportParametersHandler,
     },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
     version::{self, Version},
-    CongestionControlAlgorithm, Res, DEFAULT_INITIAL_RTT,
 };
 
 /// Maximum number of bidirectional streams that the remote can open.
@@ -76,8 +76,6 @@ pub const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * C
 /// - 40ms rtt and 2.1 GBit/s
 /// - 100ms rtt and 0.8 GBit/s
 ///
-/// Keep in sync with [`crate::send_stream::MAX_SEND_BUFFER_SIZE`].
-///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#name-max_stream_data-frames>.
 pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
 /// Limit for the maximum amount of bytes active on the connection, i.e. limit
@@ -108,7 +106,9 @@ pub enum PreferredAddressConfig {
 #[derive(Debug, Clone)]
 pub struct ConnectionParameters {
     versions: version::Config,
-    cc_algorithm: CongestionControlAlgorithm,
+    congestion_control: CongestionControl,
+    slow_start: SlowStart,
+    hystart_css_baseline: HyStartCssBaseline,
     /// Initial connection-level flow control limit.
     max_data: u64,
     /// Initial flow control limit for receiving data on bidirectional streams that the peer
@@ -152,13 +152,20 @@ pub struct ConnectionParameters {
     mlkem: bool,
     /// Whether to randomize the packet number of the first Initial packet.
     randomize_first_pn: bool,
+    /// Whether to send the SCONE transport parameter.
+    scone: bool,
+    /// Whether to recover from spurious congestion events by restoring prior Congestion Controller
+    /// state. Detection and metrics are always active regardless of this setting.
+    spurious_recovery: bool,
 }
 
 impl Default for ConnectionParameters {
     fn default() -> Self {
         Self {
             versions: version::Config::default(),
-            cc_algorithm: CongestionControlAlgorithm::Cubic,
+            congestion_control: CongestionControl::Cubic,
+            slow_start: SlowStart::Classic,
+            hystart_css_baseline: HyStartCssBaseline::CurrentRoundMinRtt,
             max_data: INITIAL_LOCAL_MAX_DATA,
             max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
                 .expect("usize fits in u64"),
@@ -184,6 +191,8 @@ impl Default for ConnectionParameters {
             sni_slicing: true,
             mlkem: true,
             randomize_first_pn: true,
+            scone: false,
+            spurious_recovery: true,
         }
     }
 }
@@ -202,7 +211,7 @@ impl ConnectionParameters {
         &self.versions
     }
 
-    pub(crate) fn get_versions_mut(&mut self) -> &mut version::Config {
+    pub(crate) const fn get_versions_mut(&mut self) -> &mut version::Config {
         &mut self.versions
     }
 
@@ -217,13 +226,35 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub const fn get_cc_algorithm(&self) -> CongestionControlAlgorithm {
-        self.cc_algorithm
+    pub const fn get_congestion_control(&self) -> CongestionControl {
+        self.congestion_control
     }
 
     #[must_use]
-    pub const fn cc_algorithm(mut self, v: CongestionControlAlgorithm) -> Self {
-        self.cc_algorithm = v;
+    pub const fn congestion_control(mut self, v: CongestionControl) -> Self {
+        self.congestion_control = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_slow_start(&self) -> SlowStart {
+        self.slow_start
+    }
+
+    #[must_use]
+    pub const fn slow_start(mut self, v: SlowStart) -> Self {
+        self.slow_start = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_hystart_css_baseline(&self) -> HyStartCssBaseline {
+        self.hystart_css_baseline
+    }
+
+    #[must_use]
+    pub const fn hystart_css_baseline(mut self, v: HyStartCssBaseline) -> Self {
+        self.hystart_css_baseline = v;
         self
     }
 
@@ -451,7 +482,6 @@ impl ConnectionParameters {
         self.pmtud_iface_mtu
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
     #[must_use]
     pub const fn pmtud_iface_mtu(mut self, pmtud_iface_mtu: bool) -> Self {
         self.pmtud_iface_mtu = pmtud_iface_mtu;
@@ -491,6 +521,28 @@ impl ConnectionParameters {
         self
     }
 
+    #[must_use]
+    pub const fn scone_enabled(&self) -> bool {
+        self.scone
+    }
+
+    #[must_use]
+    pub const fn scone(mut self, scone: bool) -> Self {
+        self.scone = scone;
+        self
+    }
+
+    #[must_use]
+    pub const fn spurious_recovery_enabled(&self) -> bool {
+        self.spurious_recovery
+    }
+
+    #[must_use]
+    pub const fn spurious_recovery(mut self, spurious_recovery: bool) -> Self {
+        self.spurious_recovery = spurious_recovery;
+        self
+    }
+
     /// # Errors
     /// When a connection ID cannot be obtained.
     /// # Panics
@@ -504,13 +556,16 @@ impl ConnectionParameters {
         // default parameters
         tps.local_mut().set_integer(
             ActiveConnectionIdLimit,
-            u64::try_from(LOCAL_ACTIVE_CID_LIMIT)?,
+            u64::try_from(ConnectionIdManager::ACTIVE_LIMIT)?,
         );
         if self.disable_migration {
             tps.local_mut().set_empty(DisableMigration);
         }
         if self.grease {
             tps.local_mut().set_empty(GreaseQuicBit);
+        }
+        if self.scone {
+            tps.local_mut().set_empty(Scone);
         }
         tps.local_mut().set_integer(
             MaxAckDelay,
@@ -536,25 +591,76 @@ impl ConnectionParameters {
         tps.local_mut()
             .set_integer(InitialMaxStreamsUni, self.max_streams_uni);
         tps.local_mut().set_integer(
-            TransportParameterId::IdleTimeout,
+            IdleTimeout,
             u64::try_from(self.idle_timeout.as_millis()).unwrap_or(0),
         );
-        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address {
-            if role == Role::Server {
-                let (cid, srt) = cid_manager.preferred_address_cid()?;
-                tps.local_mut().set(
-                    TransportParameterId::PreferredAddress,
-                    TransportParameter::PreferredAddress {
-                        v4: preferred.ipv4(),
-                        v6: preferred.ipv6(),
-                        cid,
-                        srt,
-                    },
-                );
-            }
+        if let PreferredAddressConfig::Address(preferred) = &self.preferred_address
+            && role == Role::Server
+        {
+            let (cid, srt) = cid_manager.preferred_address_cid()?;
+            tps.local_mut().set(
+                PreferredAddressTp,
+                TransportParameter::PreferredAddress {
+                    v4: preferred.ipv4(),
+                    v6: preferred.ipv6(),
+                    cid,
+                    srt,
+                },
+            );
         }
         tps.local_mut()
             .set_integer(MaxDatagramFrameSize, self.datagram_size);
         Ok(tps)
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grease_default() {
+        let params = ConnectionParameters::default();
+        assert!(params.is_greasing());
+        let params = params.grease(false);
+        assert!(!params.is_greasing());
+    }
+
+    #[test]
+    fn pmtud_iface_mtu() {
+        let params = ConnectionParameters::default().pmtud_iface_mtu(true);
+        assert!(params.pmtud_iface_mtu_enabled());
+        let params = params.pmtud_iface_mtu(false);
+        assert!(!params.pmtud_iface_mtu_enabled());
+    }
+
+    #[test]
+    fn sni_slicing_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().sni_slicing_enabled());
+        assert!(
+            !ConnectionParameters::default()
+                .sni_slicing(false)
+                .sni_slicing_enabled()
+        );
+    }
+
+    #[test]
+    fn scone_enabled() {
+        // Default is false; verify builder can toggle it.
+        assert!(!ConnectionParameters::default().scone_enabled());
+        assert!(ConnectionParameters::default().scone(true).scone_enabled());
+    }
+
+    #[test]
+    fn spurious_recovery_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().spurious_recovery_enabled());
+        assert!(
+            !ConnectionParameters::default()
+                .spurious_recovery(false)
+                .spurious_recovery_enabled()
+        );
     }
 }

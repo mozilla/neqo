@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Datagram, Dscp, Ecn, Tos};
+use neqo_common::{Datagram, Dscp, Ecn, Tos, qinfo, qtrace};
 use neqo_transport::Output;
 
 use super::Node;
@@ -51,6 +51,8 @@ struct Stats {
 }
 
 impl Stats {
+    // Const constructor for compile-time initialization in TailDrop::new().
+    // Could derive Default if const was not required.
     const fn new() -> Self {
         Self {
             received: 0,
@@ -347,18 +349,17 @@ impl Debug for TailDrop {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::{
-        cell::RefCell,
-        rc::Rc,
-        time::{Duration, Instant},
+    use std::{cell::RefCell, rc::Rc, time::Duration};
+
+    use neqo_common::{Encoder, qinfo};
+
+    use crate::{
+        now,
+        sim::{Node as _, network::TailDrop, rng::Random},
     };
 
-    use neqo_common::{qinfo, Encoder};
-
-    use crate::sim::{network::TailDrop, rng::Random, Node as _};
-
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
-        let mut enc = Encoder::new();
+        let mut enc = Encoder::default();
         enc.encode_uint(8, u64::try_from(used).unwrap());
         enc.encode_uint(8, u64::try_from(capacity).unwrap());
         enc.encode_uint(8, u64::try_from(trials).unwrap());
@@ -368,7 +369,7 @@ mod test {
         )));
         // We use only the capacity of these config parameters.
         let mut td = TailDrop::new(1, capacity, true, Duration::from_secs(2));
-        td.init(rng, Instant::now());
+        td.init(rng, now());
         let mut successes = 0;
         for _ in 0..trials {
             successes += usize::from(td.should_mark(used));

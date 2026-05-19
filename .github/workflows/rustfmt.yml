@@ -1,9 +1,6 @@
 name: Format
 on:
-  push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
   merge_group:
   workflow_dispatch:
 
@@ -16,16 +13,4 @@ permissions:
 
 jobs:
   format:
-    name: Format
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/rust
-        with:
-          version: nightly
-          components: rustfmt
-          token: ${{ secrets.GITHUB_TOKEN }}
-      - run: cargo fmt --all -- --check
+    uses: mozilla/actions/.github/workflows/rustfmt.yml@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3

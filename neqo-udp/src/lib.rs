@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(all(coverage_nightly, test), feature(coverage_attribute))]
 #![expect(
     clippy::missing_errors_doc,
     reason = "Functions simply delegate to tokio and quinn-udp."
@@ -18,8 +18,8 @@ use std::{
     slice::{self, ChunksMut},
 };
 
-use log::{log_enabled, Level};
-use neqo_common::{qdebug, qtrace, Datagram, DatagramBatch, Tos};
+use log::{Level, log_enabled};
+use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 
 /// Receive buffer size
@@ -40,9 +40,9 @@ const RECV_BUF_SIZE: usize = u16::MAX as usize;
 /// - Linux/Android: use segmentation offloading via GRO
 /// - Windows: use segmentation offloading via URO (caveat see <https://github.com/quinn-rs/quinn/issues/2041>)
 /// - Apple: no segmentation offloading available, use multiple buffers
-#[cfg(not(all(apple, feature = "fast-apple-datapath")))]
+#[cfg(not(apple))]
 const NUM_BUFS: usize = 1;
-#[cfg(all(apple, feature = "fast-apple-datapath"))]
+#[cfg(apple)]
 // Value approximated based on neqo-bin "Download" benchmark only.
 const NUM_BUFS: usize = 16;
 
@@ -58,7 +58,7 @@ impl Default for RecvBuf {
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &DatagramBatch,
+    d: &datagram::Batch,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
@@ -72,13 +72,12 @@ pub fn send_inner(
         Ok(()) => {}
         Err(e) if is_emsgsize(&e) => {
             qdebug!(
-                "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {}",
+                "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {e}",
                 d.data().len(),
                 d.num_datagrams(),
                 d.datagram_size().get(),
                 d.source(),
-                d.destination(),
-                e
+                d.destination()
             );
             return Ok(());
         }
@@ -230,18 +229,34 @@ pub struct Socket<S> {
 impl<S: SocketRef> Socket<S> {
     /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
+        let state = UdpSocketState::new((&socket).into())?;
         Ok(Self {
-            state: UdpSocketState::new((&socket).into())?,
+            state,
             inner: socket,
         })
     }
 
-    /// Send a [`Datagram`] on the given [`Socket`].
-    pub fn send(&self, d: &DatagramBatch) -> io::Result<()> {
+    /// Enable the Apple fast UDP datapath (`sendmsg_x`/`recvmsg_x`) for this
+    /// socket.
+    ///
+    /// # Safety
+    ///
+    /// `sendmsg_x` and `recvmsg_x` are private Apple APIs. Quinn-udp resolves
+    /// them at runtime via `dlsym` and falls back to standard `sendmsg`/`recvmsg`
+    /// if they are unavailable, so this will not crash on unsupported OS versions.
+    /// The `unsafe` contract is inherited from [`quinn_udp::UdpSocketState::set_apple_fast_path`].
+    #[cfg(apple)]
+    pub unsafe fn enable_apple_fast_path(&self) {
+        // SAFETY: Caller ensures the APIs are available on this OS version.
+        unsafe { self.state.set_apple_fast_path() }
+    }
+
+    /// Send a [`datagram::Batch`] on the given [`Socket`].
+    pub fn send(&self, d: &datagram::Batch) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
-    // TODO: Not used in neqo, but Gecko calls it. Needs a test to call it.
+    /// Returns the maximum number of GSO segments supported by this socket.
     pub fn max_gso_segments(&self) -> usize {
         self.state.max_gso_segments()
     }
@@ -272,7 +287,7 @@ mod tests {
         clippy::unwrap_in_result,
         reason = "OK in tests."
     )]
-    use std::env;
+    use std::{env, num::NonZeroUsize};
 
     use neqo_common::{Dscp, Ecn};
 
@@ -309,7 +324,7 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram: DatagramBatch = Datagram::new(
+        let datagram: datagram::Batch = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
@@ -349,6 +364,55 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[cfg(unix)]
+    fn is_emsgsize_true_for_emsgsize() {
+        let err = io::Error::from_raw_os_error(libc::EMSGSIZE);
+        assert!(is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn is_emsgsize_false_for_other_errors() {
+        let err = io::Error::from_raw_os_error(libc::EAGAIN);
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_emsgsize_true_for_wsaemsgsize() {
+        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEMSGSIZE.0);
+        assert!(is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_emsgsize_true_for_wsaeinval() {
+        let err = io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEINVAL.0);
+        assert!(is_emsgsize(&err));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn is_emsgsize_false_for_other_windows_errors() {
+        let err =
+            io::Error::from_raw_os_error(windows::Win32::Networking::WinSock::WSAEWOULDBLOCK.0);
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    fn is_emsgsize_false_for_non_os_error() {
+        let err = io::Error::other("test error");
+        assert!(!is_emsgsize(&err));
+    }
+
+    #[test]
+    fn max_gso_segments_returns_at_least_one() -> Result<(), io::Error> {
+        let s = socket()?;
+        assert!(s.max_gso_segments() >= 1);
+        Ok(())
+    }
+
     /// Expect [`Socket::recv`] to handle multiple [`Datagram`]s on GRO read.
     #[test]
     #[cfg_attr(
@@ -356,17 +420,15 @@ mod tests {
         ignore = "GRO not available"
     )]
     fn many_datagrams_through_gso_gro() -> Result<(), io::Error> {
-        use std::num::NonZeroUsize;
-
         const SEGMENT_SIZE: usize = 128;
 
         let sender = socket()?;
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let max_gso_segments = sender.state.max_gso_segments();
+        let max_gso_segments = sender.max_gso_segments();
         let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
-        let batch = DatagramBatch::new(
+        let batch = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect0)),
@@ -403,15 +465,21 @@ mod tests {
         let receiver = Socket::new(std::net::UdpSocket::bind("127.0.0.1:0")?)?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        // Send oversized datagram and expect `EMSGSIZE` error to be ignored.
-        let oversized_datagram = Datagram::new(
+        // Send oversized batch and expect `EMSGSIZE` error to be ignored.
+        //
+        // Use two segments to ensure quinn-udp's `effective_segment_size()` returns `Some`,
+        // which sets `UDP_SEND_MSG_SIZE` on Windows. With a single segment,
+        // `effective_segment_size()` returns `None`, and Windows silently truncates
+        // the oversized datagram instead of returning `EMSGSIZE`.
+        let segment_size = u16::MAX as usize + 1;
+        let oversized_batch = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
-            vec![0; u16::MAX as usize + 1],
-        )
-        .into();
-        sender.send(&oversized_datagram)?;
+            NonZeroUsize::new(segment_size).unwrap(),
+            vec![0; segment_size * 2],
+        );
+        sender.send(&oversized_batch)?;
 
         let mut recv_buf = RecvBuf::default();
         match receiver.recv(receiver_addr, &mut recv_buf) {
@@ -438,6 +506,44 @@ mod tests {
             normal_datagram.data()
         );
 
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(apple)]
+    fn apple_fast_path() -> Result<(), io::Error> {
+        let socket = socket()?;
+        // SAFETY: Tests run on Apple OS versions that support sendmsg_x/recvmsg_x.
+        unsafe {
+            socket.enable_apple_fast_path();
+        }
+        assert!(socket.max_gso_segments() > 1);
+        Ok(())
+    }
+
+    #[test]
+    fn may_fragment_returns_bool() -> Result<(), io::Error> {
+        let s = socket()?;
+        // On platforms that set DONTFRAG (Linux, macOS), this should be false.
+        // On other platforms it may be true. Either way it must not panic.
+        let frag = s.may_fragment();
+        // On Linux and macOS, fragmentation is disabled via socket options.
+        #[cfg(apple)]
+        assert!(!frag, "may_fragment should be false on this platform");
+        #[cfg(target_os = "linux")]
+        assert!(!frag, "may_fragment should be false on Linux");
+        #[cfg(not(any(apple, target_os = "linux")))]
+        let _: bool = frag;
+        Ok(())
+    }
+
+    #[test]
+    fn max_gso_segments_is_consistent() -> Result<(), io::Error> {
+        let s = socket()?;
+        let a = s.max_gso_segments();
+        let b = s.max_gso_segments();
+        assert_eq!(a, b, "max_gso_segments should be deterministic");
+        assert!(a >= 1);
         Ok(())
     }
 }

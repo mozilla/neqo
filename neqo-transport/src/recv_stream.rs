@@ -17,11 +17,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qtrace, Buffer, Role};
+use neqo_common::{Buffer, Role, qtrace};
 use smallvec::SmallVec;
 use strum::Display;
 
 use crate::{
+    AppError, Error, Res,
     events::ConnectionEvents,
     fc::ReceiverFlowControl,
     frame::FrameType,
@@ -30,7 +31,6 @@ use crate::{
     send_stream::SendStreams,
     stats::FrameStats,
     stream_id::StreamId,
-    AppError, Error, Res,
 };
 
 #[derive(Debug, Default)]
@@ -563,10 +563,9 @@ impl RecvStream {
             mem::discriminant(&new_state)
         );
         qtrace!(
-            "RecvStream {} state {} -> {}",
+            "RecvStream {} state {} -> {new_state}",
             self.stream_id.as_u64(),
-            self.state,
-            new_state
+            self.state
         );
 
         match new_state {
@@ -767,13 +766,13 @@ impl RecvStream {
     /// Send a flow control update.
     /// This is used when a peer declares that they are blocked.
     /// This sends `MAX_STREAM_DATA` if there is any increase possible.
-    pub fn send_flowc_update(&mut self) {
+    pub const fn send_flowc_update(&mut self) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.send_flowc_update();
         }
     }
 
-    pub fn set_stream_max_data(&mut self, max_data: u64) {
+    pub const fn set_stream_max_data(&mut self, max_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.set_max_active(max_data);
         }
@@ -911,32 +910,30 @@ impl RecvStream {
             // Maybe send STOP_SENDING
             RecvStreamState::AbortReading {
                 frame_needed, err, ..
-            } => {
-                if *frame_needed
-                    && builder.write_varint_frame(&[
-                        FrameType::StopSending.into(),
-                        self.stream_id.as_u64(),
-                        *err,
-                    ])
-                {
-                    tokens.push(recovery::Token::Stream(StreamRecoveryToken::StopSending {
-                        stream_id: self.stream_id,
-                    }));
-                    stats.stop_sending += 1;
-                    *frame_needed = false;
-                }
+            } if *frame_needed
+                && builder.write_varint_frame(&[
+                    FrameType::StopSending.into(),
+                    self.stream_id.as_u64(),
+                    *err,
+                ]) =>
+            {
+                tokens.push(recovery::Token::Stream(StreamRecoveryToken::StopSending {
+                    stream_id: self.stream_id,
+                }));
+                stats.stop_sending += 1;
+                *frame_needed = false;
             }
             _ => {}
         }
     }
 
-    pub fn max_stream_data_lost(&mut self, maximum_data: u64) {
+    pub const fn max_stream_data_lost(&mut self, maximum_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.frame_lost(maximum_data);
         }
     }
 
-    pub fn stop_sending_lost(&mut self) {
+    pub const fn stop_sending_lost(&mut self) {
         if let RecvStreamState::AbortReading { frame_needed, .. } = &mut self.state {
             *frame_needed = true;
         }
@@ -1001,24 +998,18 @@ impl RecvStream {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{
-        cell::RefCell,
-        fmt::Debug,
-        ops::Range,
-        rc::Rc,
-        time::{Duration, Instant},
-    };
+    use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{qtrace, Encoder};
+    use neqo_common::{Encoder, qtrace};
+    use test_fixture::now;
 
     use super::RecvStream;
     use crate::{
+        ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
-        packet::{self, PACKET_LIMIT},
-        recovery,
+        packet, recovery,
         recv_stream::RxStreamOrderer,
         stats::FrameStats,
-        ConnectionEvents, Error, StreamId, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     const SESSION_WINDOW: usize = 1024;
@@ -1044,6 +1035,46 @@ mod tests {
                 break;
             }
         }
+    }
+
+    /// A buffer of exactly 4096 bytes has reached the extension limit and must not be extended.
+    #[test]
+    fn inbound_frame_no_extend_at_4096() {
+        let mut s = RxStreamOrderer::default();
+        // Fill to the extend threshold.
+        s.inbound_frame(0, &[0u8; 4096]);
+        assert_eq!(s.data_ranges[&0].len(), 4096);
+        // The next byte must not be merged; the threshold has been reached.
+        s.inbound_frame(4096, &[1u8]);
+        assert_eq!(
+            s.data_ranges.len(),
+            2,
+            "a 4096-byte buffer must not be extended further"
+        );
+    }
+
+    /// A buffer of 4095 bytes IS extended when the next frame is contiguous.
+    #[test]
+    fn inbound_frame_extends_below_4096() {
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[0u8; 4095]);
+        s.inbound_frame(4095, &[1u8]);
+        assert_eq!(s.data_ranges.len(), 1);
+        assert_eq!(s.data_ranges[&0].len(), 4096);
+    }
+
+    /// Reading exactly `available` bytes frees the range so the next read can proceed.
+    #[test]
+    fn read_exact_available_removes_range() {
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[1u8; 5]);
+        s.inbound_frame(5, &[2u8; 5]);
+
+        let mut buf = [0u8; 5];
+        assert_eq!(s.read(&mut buf), 5);
+        assert_eq!(buf, [1u8; 5]);
+        assert_eq!(s.read(&mut buf), 5);
+        assert_eq!(buf, [2u8; 5]);
     }
 
     #[test]
@@ -1486,13 +1517,13 @@ mod tests {
 
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         s.write_frame(
             &mut builder,
             &mut token,
             &mut FrameStats::default(),
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
 
@@ -1607,13 +1638,13 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         session_fc.borrow_mut().write_frames(
             &mut builder,
             &mut token,
             &mut FrameStats::default(),
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
 
@@ -1633,13 +1664,13 @@ mod tests {
         assert!(session_fc.borrow().frame_needed());
         // consume it
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         session_fc.borrow_mut().write_frames(
             &mut builder,
             &mut token,
             &mut FrameStats::default(),
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
 
@@ -1942,14 +1973,14 @@ mod tests {
 
         // Write the fc update frame
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         let mut stats = FrameStats::default();
         fc.borrow_mut().write_frames(
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_data, 0);
@@ -1957,7 +1988,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_stream_data, 1);
@@ -1982,7 +2013,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_data, 1);
@@ -1990,7 +2021,7 @@ mod tests {
             &mut builder,
             &mut token,
             &mut stats,
-            Instant::now(),
+            now(),
             Duration::from_millis(100),
         );
         assert_eq!(stats.max_stream_data, 1);

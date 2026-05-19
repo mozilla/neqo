@@ -1,0 +1,74 @@
+name: Find PR mutants
+on:
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  MUTANTS_ARGS: --no-shuffle --in-place --profile mutants -- --all-targets -- -Zunstable-options --fail-fast
+
+jobs:
+  mutants:
+    name: Find mutants
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: nss-version
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
+      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+        with:
+          version: nightly
+          tools: cargo-mutants
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate diff
+        env:
+          BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref }}
+        run: |
+          # Strip refs/heads/ prefix if present (merge_group events use full ref).
+          BASE_REF="${BASE_REF#refs/heads/}"
+          git diff "origin/${BASE_REF}.." > pr.diff
+
+      - name: Find mutants
+        run: |
+          # shellcheck disable=SC2086
+          # Exit codes: 0=success, 1=build/test failure (fail workflow),
+          # 2=missed, 3=timeout, 4=unviable (suppress, report in summary).
+          (cargo mutants --in-diff pr.diff $MUTANTS_ARGS 2>&1 \
+            || { ec=$?; [ $ec -ge 2 ] && [ $ec -le 4 ] && exit 0; exit $ec; }) | tee results.txt
+
+      - name: Post step summary
+        if: always()
+        run: |
+          {
+            echo "### Incremental Mutants"
+            echo "Mutants found in files changed by this PR."
+            echo "See https://mutants.rs/using-results.html for more information."
+            echo '```'
+            sed 's/\x1b\[[0-9;]*[mGKHF]//g' results.txt || true
+            echo '```'
+          } > "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: mutants.out
+          path: mutants.out

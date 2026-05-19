@@ -1,9 +1,6 @@
 name: CI
 on:
-  push:
-    branches: ["main"]
   pull_request:
-    branches: ["main"]
   merge_group:
   workflow_dispatch:
 
@@ -13,6 +10,8 @@ env:
   RUST_TEST_TIME_UNIT: 10,30
   RUST_TEST_TIME_INTEGRATION: 10,30
   RUST_TEST_TIME_DOCTEST: 10,30
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -32,19 +31,18 @@ jobs:
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: Cargo.toml
           persist-credentials: false
 
       - id: toolchains
-        run: |
-          msrv="$(grep rust-version Cargo.toml | tr -d '"' | cut -f3 -d\ )"
-          echo "toolchains=[\"$msrv\", \"stable\", \"nightly\"]" >> "$GITHUB_OUTPUT"
+        uses: mozilla/actions/toolchains@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
 
   check:
     name: Run checks
     needs: toolchains
+    # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
+    # environment: codecov
     strategy:
       fail-fast: false
       matrix:
@@ -62,63 +60,40 @@ jobs:
           - os: windows-2025
             rust-toolchain: stable
             type: release
-          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
-          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
-          # (except for testing, see
-          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
-          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
-          # use Rust 1.82.0 here for now.
-          - os: windows-2025
-            rust-toolchain: 1.82.0
-            type: debug
           # Also do some debug builds on the oldest OS versions.
-          # FIXME: NSS compile fails?
-          # - os: ubuntu-22.04
-          #   rust-toolchain: stable
-          #   type: debug
-          - os: macos-13
+          - os: ubuntu-22.04
+            rust-toolchain: stable
+            type: debug
+          - os: macos-14
             rust-toolchain: stable
             type: debug
           - os: windows-2022
             rust-toolchain: stable
-            type: debug
-        exclude:
-          # TODO: Remove once Neqo's MSRV is increased to 1.82.0. NSS build
-          # fails on Windows with Rust 1.81.0. Firefox does not use Rust 1.81.0
-          # (except for testing, see
-          # https://bugzilla.mozilla.org/show_bug.cgi?id=1968057#c1). Firefox
-          # uses Rust 1.82.0. Thus this is not worth fixing. Let's explicitly
-          # use Rust 1.82.0 here for now.
-          - os: windows-2025
-            rust-toolchain: 1.81.0
             type: debug
     env:
       BUILD_TYPE: ${{ matrix.type == 'release' && '--release' || '' }}
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: ${{ matrix.rust-toolchain }}
-          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }}
-          tools: ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }}
+          components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
+          tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
-
-      - uses: ./.github/actions/nss
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
+      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
-
-      - name: Check
-        run: |
-          # shellcheck disable=SC2086
-          cargo check $BUILD_TYPE --locked --all-targets --features ci
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests and determine coverage
         env:
@@ -128,20 +103,25 @@ jobs:
           RUST_TEST_TIME_INTEGRATION: 10,30
           RUST_TEST_TIME_DOCTEST: 10,30
           TOOLCHAIN: ${{ matrix.rust-toolchain }}
+          # FIXME: cargo-careful at the moment only works on amd64 Ubuntu
+          CAREFUL: ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'careful' || '' }}
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
-            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --features ci --codecov --output-path codecov.json
-          else
-            cargo test $BUILD_TYPE --locked --features ci
+            cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
+          elif [ -n "$CAREFUL" ]; then
+            cargo careful test $BUILD_TYPE --locked --target "$(rustc --print host-tuple)"
           fi
+          # Run tests across all meaningful feature combinations.
+          # shellcheck disable=SC2086
+          cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default
 
       - name: Run client/server transfer
         run: |
           # shellcheck disable=SC2086
-          cargo build $BUILD_TYPE --bin neqo-client --bin neqo-server
+          cargo build $BUILD_TYPE --locked --bin neqo-client --bin neqo-server
           "target/$BUILD_DIR/neqo-server" "$HOST:4433" &
           PID=$!
           # Give the server time to start.
@@ -162,19 +142,20 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # v5.5.1
+      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           files: codecov.json
           fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
+          token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
           verbose: true
+          flags: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || startsWith(matrix.os, 'macos') && 'macos' || 'windows' }}
         env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
         if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
 
       - name: Save simulation seeds artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -184,10 +165,10 @@ jobs:
     name: Ensure `Cargo.lock` contains all required dependencies
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: ./.github/actions/rust
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: stable
           tools: cargo-hack
@@ -198,17 +179,18 @@ jobs:
 
   check-android:
     name: Check Android
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        target: ['x86_64-linux-android', 'i686-linux-android'] # 'aarch64-linux-android' not currently working
+        target: ["x86_64-linux-android", "aarch64-linux-android"]
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - id: nss-version
-        run: echo "minimum=$(cat neqo-crypto/min_version.txt)" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
@@ -217,18 +199,24 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
+    # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
+    # environment: codecov
+    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
+    # Allow them to fail without aborting the merge queue.
+    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ freebsd, openbsd, netbsd ] # NSS package on 'solaris' is too old.
+        # TODO: Re-enable openbsd once vmactions/openbsd-vm supports OpenBSD > 7.8; nss-3.116 (in 7.8) is too old, and snapshot packages require a newer base system.
+        # NSS package on 'solaris' is too old (3.110, need >= 3.121).
+        os: [freebsd, netbsd]
     steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
-          codecov-token: ${{ secrets.CODECOV_TOKEN }}
+          codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
 

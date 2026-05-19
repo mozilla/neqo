@@ -15,16 +15,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qtrace, Buffer, Role, MAX_VARINT};
+use enum_map::EnumMap;
+use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace};
 
 use crate::{
+    Error, Res,
     connection::params::{MAX_LOCAL_MAX_DATA, MAX_LOCAL_MAX_STREAM_DATA},
     frame::FrameType,
     packet,
     recovery::{self, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
-    Error, Res,
 };
 
 /// Fraction of a flow control window after which a receiver sends a window
@@ -128,7 +129,7 @@ where
 
     /// Mark flow control as blocked.
     /// This only does something if the current limit exceeds the last reported blocking limit.
-    pub fn blocked(&mut self) {
+    pub const fn blocked(&mut self) {
         if self.limit >= self.blocked_at {
             self.blocked_at = self.limit + 1;
             self.blocked_frame = true;
@@ -144,14 +145,14 @@ where
     }
 
     /// Clear the need to send a blocked frame.
-    fn blocked_sent(&mut self) {
+    const fn blocked_sent(&mut self) {
         self.blocked_frame = false;
     }
 
     /// Mark a blocked frame as having been lost.
     /// Only send again if value of `self.blocked_at` hasn't increased since sending.
     /// That would imply that the limit has since increased.
-    pub fn frame_lost(&mut self, limit: u64) {
+    pub const fn frame_lost(&mut self, limit: u64) {
         if self.blocked_at == limit + 1 {
             self.blocked_frame = true;
         }
@@ -165,14 +166,14 @@ impl SenderFlowControl<()> {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        if let Some(limit) = self.blocked_needed() {
-            if builder.write_varint_frame(&[FrameType::DataBlocked.into(), limit]) {
-                stats.data_blocked += 1;
-                tokens.push(recovery::Token::Stream(StreamRecoveryToken::DataBlocked(
-                    limit,
-                )));
-                self.blocked_sent();
-            }
+        if let Some(limit) = self.blocked_needed()
+            && builder.write_varint_frame(&[FrameType::DataBlocked.into(), limit])
+        {
+            stats.data_blocked += 1;
+            tokens.push(recovery::Token::Stream(StreamRecoveryToken::DataBlocked(
+                limit,
+            )));
+            self.blocked_sent();
         }
     }
 }
@@ -184,21 +185,21 @@ impl SenderFlowControl<StreamId> {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        if let Some(limit) = self.blocked_needed() {
-            if builder.write_varint_frame(&[
+        if let Some(limit) = self.blocked_needed()
+            && builder.write_varint_frame(&[
                 FrameType::StreamDataBlocked.into(),
                 self.subject.as_u64(),
                 limit,
-            ]) {
-                stats.stream_data_blocked += 1;
-                tokens.push(recovery::Token::Stream(
-                    StreamRecoveryToken::StreamDataBlocked {
-                        stream_id: self.subject,
-                        limit,
-                    },
-                ));
-                self.blocked_sent();
-            }
+            ])
+        {
+            stats.stream_data_blocked += 1;
+            tokens.push(recovery::Token::Stream(
+                StreamRecoveryToken::StreamDataBlocked {
+                    stream_id: self.subject,
+                    limit,
+                },
+            ));
+            self.blocked_sent();
         }
     }
 }
@@ -276,7 +277,7 @@ where
 
     /// Retire some items and maybe send flow control
     /// update.
-    pub fn retire(&mut self, retired: u64) {
+    pub const fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
             return;
         }
@@ -289,7 +290,7 @@ where
 
     /// This function is called when `STREAM_DATA_BLOCKED` frame is received.
     /// The flow control will try to send an update if possible.
-    pub fn send_flowc_update(&mut self) {
+    pub const fn send_flowc_update(&mut self) {
         if self.retired + self.max_active > self.max_allowed {
             self.frame_pending = true;
         }
@@ -317,18 +318,18 @@ where
         self.max_active
     }
 
-    pub fn frame_lost(&mut self, maximum_data: u64) {
+    pub const fn frame_lost(&mut self, maximum_data: u64) {
         if maximum_data == self.max_allowed {
             self.frame_pending = true;
         }
     }
 
-    fn frame_sent(&mut self, new_max: u64) {
+    const fn frame_sent(&mut self, new_max: u64) {
         self.max_allowed = new_max;
         self.frame_pending = false;
     }
 
-    pub fn set_max_active(&mut self, max: u64) {
+    pub const fn set_max_active(&mut self, max: u64) {
         // If max_active has been increased, send an update immediately.
         self.frame_pending |= self.max_active < max;
         self.max_active = max;
@@ -375,9 +376,42 @@ where
             return;
         };
 
+        // Scale the max_active window down by
+        // [(F-1) / F]; where F=WINDOW_UPDATE_FRACTION.
+        //
+        // In the ideal case, each byte sent would trigger a flow control
+        // update.  However, in practice we only send updates every
+        // WINDOW_UPDATE_FRACTION of the window.  Thus, when not application
+        // limited, in a steady state transfer it takes 1 RTT after sending 1 /
+        // F bytes for the sender to receive the next update. The sender is
+        // effectively limited to [(F-1) / F] bytes per RTT.
+        //
+        // By calculating with this effective window instead of the full
+        // max_active, we account for the inherent delay between when the sender
+        // would ideally receive flow control updates and when they actually
+        // arrive due to our batched update strategy.
+        //
+        // Example with F=4 without adjustment:
+        //
+        // t=0         start sending
+        // t=RTT/4     sent 1/4 of window total
+        // t=RTT       sent 1 window total
+        //             sender blocked for RTT/4
+        // t=RTT+RTT/4 receive update for 1/4 of window
+        //
+        // Example with F=4 with adjustment:
+        //
+        // t=0         start sending
+        // t=RTT/4     sent 1/4 of window total
+        // t=RTT       sent 1 window total
+        // t=RTT+RTT/4 sent 1+1/4 window total; receive update for 1/4 of window (just in time)
+        let effective_window =
+            (self.max_active * (WINDOW_UPDATE_FRACTION - 1)) / (WINDOW_UPDATE_FRACTION);
+
         // Compute the amount of bytes we have received in excess
         // of what `max_active` might allow.
-        let window_bytes_expected = self.max_active * elapsed / rtt;
+        let window_bytes_expected = (effective_window * elapsed) / (rtt);
+
         let window_bytes_used = self.max_active - (self.max_allowed - self.retired);
         let Some(excess) = window_bytes_used.checked_sub(window_bytes_expected) else {
             // Used below expected. No auto-tuning needed.
@@ -385,25 +419,29 @@ where
         };
 
         let prev_max_active = self.max_active;
-        self.max_active = min(
+        let new_max_active = min(
             self.max_active + excess * WINDOW_INCREASE_MULTIPLIER,
             max_window,
         );
 
-        let increase = self.max_active - prev_max_active;
-        if increase > 0 {
-            qdebug!(
-                "Increasing max {subject} receive window by {} B, \
+        if new_max_active <= prev_max_active {
+            // Never decrease max_active, even if max_window is smaller.  This
+            // can happen if max_active was set manually.
+            return;
+        }
+
+        self.max_active = new_max_active;
+        qdebug!(
+            "Increasing max {subject} receive window by {} B, \
                 previous max_active: {} MiB, \
                 new max_active: {} MiB, \
                 last update: {:?}, \
                 rtt: {rtt:?}",
-                increase,
-                prev_max_active / 1024 / 1024,
-                self.max_active / 1024 / 1024,
-                now - max_allowed_sent_at,
-            );
-        }
+            new_max_active - prev_max_active,
+            prev_max_active / 1024 / 1024,
+            self.max_active / 1024 / 1024,
+            now - max_allowed_sent_at,
+        );
     }
 }
 
@@ -570,7 +608,7 @@ impl ReceiverFlowControl<StreamType> {
 
     /// Retire given amount of additional data.
     /// This function will send flow updates immediately.
-    pub fn add_retired(&mut self, count: u64) {
+    pub const fn add_retired(&mut self, count: u64) {
         self.retired += count;
         if count > 0 {
             self.send_flowc_update();
@@ -625,17 +663,15 @@ impl DerefMut for RemoteStreamLimit {
     }
 }
 
-pub struct RemoteStreamLimits {
-    bidirectional: RemoteStreamLimit,
-    unidirectional: RemoteStreamLimit,
-}
+pub struct RemoteStreamLimits(EnumMap<StreamType, RemoteStreamLimit>);
 
 impl RemoteStreamLimits {
     pub const fn new(local_max_stream_bidi: u64, local_max_stream_uni: u64, role: Role) -> Self {
-        Self {
-            bidirectional: RemoteStreamLimit::new(StreamType::BiDi, local_max_stream_bidi, role),
-            unidirectional: RemoteStreamLimit::new(StreamType::UniDi, local_max_stream_uni, role),
-        }
+        // Array order must match StreamType enum order: BiDi, UniDi
+        Self(EnumMap::from_array([
+            RemoteStreamLimit::new(StreamType::BiDi, local_max_stream_bidi, role),
+            RemoteStreamLimit::new(StreamType::UniDi, local_max_stream_uni, role),
+        ]))
     }
 }
 
@@ -643,50 +679,41 @@ impl Index<StreamType> for RemoteStreamLimits {
     type Output = RemoteStreamLimit;
 
     fn index(&self, index: StreamType) -> &Self::Output {
-        match index {
-            StreamType::BiDi => &self.bidirectional,
-            StreamType::UniDi => &self.unidirectional,
-        }
+        &self.0[index]
     }
 }
 
 impl IndexMut<StreamType> for RemoteStreamLimits {
     fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
-        match index {
-            StreamType::BiDi => &mut self.bidirectional,
-            StreamType::UniDi => &mut self.unidirectional,
-        }
+        &mut self.0[index]
     }
 }
 
 pub struct LocalStreamLimits {
-    bidirectional: SenderFlowControl<StreamType>,
-    unidirectional: SenderFlowControl<StreamType>,
+    limits: EnumMap<StreamType, SenderFlowControl<StreamType>>,
     role_bit: u64,
 }
 
 impl LocalStreamLimits {
     pub const fn new(role: Role) -> Self {
         Self {
-            bidirectional: SenderFlowControl::new(StreamType::BiDi, 0),
-            unidirectional: SenderFlowControl::new(StreamType::UniDi, 0),
+            // Array order must match StreamType enum order: BiDi, UniDi
+            limits: EnumMap::from_array([
+                SenderFlowControl::new(StreamType::BiDi, 0),
+                SenderFlowControl::new(StreamType::UniDi, 0),
+            ]),
             role_bit: StreamId::role_bit(role),
         }
     }
 
     pub fn take_stream_id(&mut self, stream_type: StreamType) -> Option<StreamId> {
-        let fc = match stream_type {
-            StreamType::BiDi => &mut self.bidirectional,
-            StreamType::UniDi => &mut self.unidirectional,
-        };
+        let fc = &mut self.limits[stream_type];
         if fc.available() > 0 {
             let new_stream = fc.used();
             fc.consume(1);
-            let type_bit = match stream_type {
-                StreamType::BiDi => 0,
-                StreamType::UniDi => 2,
-            };
-            Some(StreamId::from((new_stream << 2) + type_bit + self.role_bit))
+            Some(StreamId::from(
+                (new_stream << 2) + stream_type as u64 + self.role_bit,
+            ))
         } else {
             fc.blocked();
             None
@@ -698,19 +725,13 @@ impl Index<StreamType> for LocalStreamLimits {
     type Output = SenderFlowControl<StreamType>;
 
     fn index(&self, index: StreamType) -> &Self::Output {
-        match index {
-            StreamType::BiDi => &self.bidirectional,
-            StreamType::UniDi => &self.unidirectional,
-        }
+        &self.limits[index]
     }
 }
 
 impl IndexMut<StreamType> for LocalStreamLimits {
     fn index_mut(&mut self, index: StreamType) -> &mut Self::Output {
-        match index {
-            StreamType::BiDi => &mut self.bidirectional,
-            StreamType::UniDi => &mut self.unidirectional,
-        }
+        &mut self.limits[index]
     }
 }
 
@@ -729,18 +750,20 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{qdebug, Encoder, Role};
-    use neqo_crypto::random;
+    use neqo_common::{Encoder, Role, qdebug};
+    use nss::random;
 
-    use super::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
+    use super::{
+        AutoTuneSubject, LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits,
+        SenderFlowControl,
+    };
     use crate::{
+        ConnectionParameters, Error, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA, Res,
         connection::params::{MAX_LOCAL_MAX_DATA, MAX_LOCAL_MAX_STREAM_DATA},
         fc::WINDOW_UPDATE_FRACTION,
-        packet::{self, PACKET_LIMIT},
-        recovery,
+        packet, recovery,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
-        ConnectionParameters, Error, Res, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
     };
 
     #[test]
@@ -946,15 +969,21 @@ mod test {
 
     fn remote_stream_limits(role: Role, bidi: u64, unidi: u64) {
         let mut fc = RemoteStreamLimits::new(2, 1, role);
-        assert!(fc[StreamType::BiDi]
-            .is_new_stream(StreamId::from(bidi))
-            .unwrap());
-        assert!(fc[StreamType::BiDi]
-            .is_new_stream(StreamId::from(bidi + 4))
-            .unwrap());
-        assert!(fc[StreamType::UniDi]
-            .is_new_stream(StreamId::from(unidi))
-            .unwrap());
+        assert!(
+            fc[StreamType::BiDi]
+                .is_new_stream(StreamId::from(bidi))
+                .unwrap()
+        );
+        assert!(
+            fc[StreamType::BiDi]
+                .is_new_stream(StreamId::from(bidi + 4))
+                .unwrap()
+        );
+        assert!(
+            fc[StreamType::UniDi]
+                .is_new_stream(StreamId::from(unidi))
+                .unwrap()
+        );
 
         // Exceed limits
         assert_eq!(
@@ -980,15 +1009,17 @@ mod test {
         fc[StreamType::BiDi].send_flowc_update();
         // consume the frame
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         fc[StreamType::BiDi].write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
         assert_eq!(tokens.len(), 1);
 
         // Now 9 can be a new StreamId.
-        assert!(fc[StreamType::BiDi]
-            .is_new_stream(StreamId::from(bidi + 8))
-            .unwrap());
+        assert!(
+            fc[StreamType::BiDi]
+                .is_new_stream(StreamId::from(bidi + 8))
+                .unwrap()
+        );
         assert_eq!(
             fc[StreamType::BiDi].take_stream_id(),
             StreamId::from(bidi + 8)
@@ -1006,9 +1037,11 @@ mod test {
         assert_eq!(tokens.len(), 2);
 
         // Now 7 can be a new StreamId.
-        assert!(fc[StreamType::UniDi]
-            .is_new_stream(StreamId::from(unidi + 4))
-            .unwrap());
+        assert!(
+            fc[StreamType::UniDi]
+                .is_new_stream(StreamId::from(unidi + 4))
+                .unwrap()
+        );
         assert_eq!(
             fc[StreamType::UniDi].take_stream_id(),
             StreamId::from(unidi + 4)
@@ -1088,7 +1121,7 @@ mod test {
 
     fn write_frames(fc: &mut ReceiverFlowControl<StreamId>, rtt: Duration, now: Instant) -> usize {
         let mut builder =
-            packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         fc.write_frames(
             &mut builder,
@@ -1196,23 +1229,34 @@ mod test {
     }
 
     #[expect(clippy::cast_precision_loss, reason = "This is test code.")]
+    #[expect(clippy::too_many_lines, reason = "This is test code.")]
     #[test]
     fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
         const DATA_FRAME_SIZE: u64 = 1_500;
         /// Allow auto-tuning algorithm to be off from actual bandwidth-delay
         /// product by up to 1KiB.
         const TOLERANCE: u64 = 1024;
+        const BW_TOLERANCE: f64 = 0.6;
 
         test_fixture::fixture_init();
 
         // Run multiple iterations with randomized bandwidth and rtt.
         for _ in 0..100 {
-            // Random bandwidth between 1 Mbit/s and 1 Gbit/s.
+            // Random bandwidth between 12 Mbit/s and 1 Gbit/s. Minimum 12
+            // Mbit/s to ensure bdp stays above DATA_FRAME_SIZE, see `assert!`
+            // below.
             let bandwidth =
-                u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 1) * 1_000 * 1_000;
+                u64::from(u16::from_be_bytes(random::<2>()) % 1_000 + 12) * 1_000 * 1_000;
             // Random delay between 1 ms and 256 ms.
-            let rtt = Duration::from_millis(u64::from(random::<1>()[0]) + 1);
-            let bdp = bandwidth * u64::try_from(rtt.as_millis()).unwrap() / 1_000 / 8;
+            let rtt_int = u64::from(random::<1>()[0]) + 1;
+            let rtt = Duration::from_millis(rtt_int);
+            let half_rtt = rtt / 2;
+            let bdp = bandwidth * rtt_int / 1_000 / 8;
+            assert!(
+                DATA_FRAME_SIZE <= bdp,
+                "BDP must be larger than DATA_FRAME_SIZE. Latency calculations
+                in test assume it can transfer DATA_FRAME_SIZE bytes in 1 RTT."
+            );
 
             let mut now = test_fixture::now();
 
@@ -1226,6 +1270,11 @@ mod test {
             let mut fc =
                 ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
 
+            let mut bytes_received: u64 = 0;
+            let start_time = now;
+
+            // Track when sender can next send.
+            let mut next_send_time = now;
             loop {
                 // Sender receives window updates.
                 if recv_to_send.front().is_some_and(|(at, _)| *at <= now) {
@@ -1236,9 +1285,14 @@ mod test {
                 // Sender sends data frames.
                 let sender_progressed = if sender_window > 0 {
                     let to_send = min(DATA_FRAME_SIZE, sender_window);
-                    send_to_recv.push_back((now, to_send));
                     sender_window -= to_send;
-                    now += Duration::from_secs_f64(to_send as f64 * 8.0 / bandwidth as f64);
+                    let time_to_send =
+                        Duration::from_secs_f64(to_send as f64 * 8.0 / bandwidth as f64);
+
+                    let send_start = next_send_time.max(now);
+                    next_send_time = send_start + time_to_send;
+
+                    send_to_recv.push_back((send_start + time_to_send + half_rtt, to_send));
                     true
                 } else {
                     false
@@ -1248,13 +1302,14 @@ mod test {
                 let mut receiver_progressed = false;
                 if send_to_recv.front().is_some_and(|(at, _)| *at <= now) {
                     let (_, data) = send_to_recv.pop_front().unwrap();
+                    bytes_received += data;
                     let consumed = fc.set_consumed(fc.retired() + data)?;
                     fc.add_retired(consumed);
 
                     // Receiver sends window updates.
                     let prev_max_allowed = fc.max_allowed;
                     if write_frames(&mut fc, rtt, now) == 1 {
-                        recv_to_send.push_front((now, fc.max_allowed - prev_max_allowed));
+                        recv_to_send.push_back((now + half_rtt, fc.max_allowed - prev_max_allowed));
                         receiver_progressed = true;
                         if last_max_active < fc.max_active() {
                             last_max_active = fc.max_active();
@@ -1273,27 +1328,44 @@ mod test {
                         .expect("both are None");
                 }
 
-                // Consider auto-tuning done once receive window hasn't changed for 4 RTT.
-                if now.duration_since(last_max_active_changed) > 4 * rtt {
+                // Consider auto-tuning done once receive window hasn't changed for 8 RTT.
+                // A large amount to allow the observed bandwidth average to stabilize.
+                if now.duration_since(last_max_active_changed) > 8 * rtt {
                     break;
                 }
             }
 
+            // See comment in [`ReceiverFlowControl::auto_tune_inner`] for an
+            // explanation of the effective window.
+            let effective_window =
+                (fc.max_active() * (WINDOW_UPDATE_FRACTION - 1)) / WINDOW_UPDATE_FRACTION;
+            let at_max_stream_data = fc.max_active() == MAX_LOCAL_MAX_STREAM_DATA;
+
+            let observed_bw =
+                (8 * bytes_received) as f64 / now.duration_since(start_time).as_secs_f64();
             let summary = format!(
-                "Got receive window of {} MiB on connection with bandwidth {} MBit/s ({bandwidth} Bit/s), delay {rtt:?}, bdp {} MiB.",
-                fc.max_active() / 1024 / 1024,
+                "Got receive window of {} KiB (effectively {} KiB) on connection with observed bandwidth {} MBit/s. Expected: bandwidth {} MBit/s ({bandwidth} Bit/s), rtt {rtt:?}, bdp {} KiB.",
+                fc.max_active() / 1024,
+                effective_window / 1024,
+                observed_bw / 1_000.0 / 1_000.0,
                 bandwidth / 1_000 / 1_000,
-                bdp / 1024 / 1024,
+                bdp / 1024,
             );
 
             assert!(
-                fc.max_active() + TOLERANCE >= bdp || fc.max_active() == MAX_LOCAL_MAX_STREAM_DATA,
+                effective_window + TOLERANCE >= bdp || at_max_stream_data,
                 "{summary} Receive window is smaller than the bdp."
             );
+
             assert!(
-                fc.max_active - TOLERANCE <= bdp
+                effective_window - TOLERANCE <= bdp
                     || fc.max_active == INITIAL_LOCAL_MAX_STREAM_DATA as u64,
                 "{summary} Receive window is larger than the bdp."
+            );
+
+            assert!(
+                (bandwidth as f64) * BW_TOLERANCE <= observed_bw || at_max_stream_data,
+                "{summary} Observed bandwidth is smaller than the link rate."
             );
 
             qdebug!("{summary}");
@@ -1319,7 +1391,7 @@ mod test {
         // Helper to write frames
         let write_conn_frames = |fc: &mut ReceiverFlowControl<()>, now: Instant| {
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let mut tokens = recovery::Tokens::new();
             fc.write_frames(
                 &mut builder,
@@ -1359,7 +1431,7 @@ mod test {
         // Helper to write frames
         let write_conn_frames = |fc: &mut ReceiverFlowControl<()>| {
             let mut builder =
-                packet::Builder::short(Encoder::new(), false, None::<&[u8]>, PACKET_LIMIT);
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
             let mut tokens = recovery::Tokens::new();
             fc.write_frames(
                 &mut builder,
@@ -1400,6 +1472,84 @@ mod test {
         qdebug!(
             "Connection flow control window reached max: {} MiB",
             fc.max_active() / 1024 / 1024
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn auto_tune_subject_display() {
+        assert_eq!(AutoTuneSubject::Connection.to_string(), "connection");
+        assert_eq!(
+            AutoTuneSubject::Stream(StreamId::new(4)).to_string(),
+            "stream 4"
+        );
+    }
+
+    #[test]
+    fn update_same_limit_returns_none() {
+        // `update` returns None when the new limit equals the current limit.
+        let mut fc = SenderFlowControl::new((), 10);
+        assert!(fc.update(10).is_none()); // Equal — no change.
+        assert!(fc.update(11).is_some()); // Strictly greater — update.
+    }
+
+    #[test]
+    fn set_max_active_equal_does_not_set_frame_pending() {
+        // `set_max_active` does not mark frame pending when the value is unchanged.
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), 100);
+        fc.set_max_active(100); // Same value — should not set frame_pending.
+        assert!(!fc.frame_needed());
+        fc.set_max_active(101); // Increase — should set frame_pending.
+        assert!(fc.frame_needed());
+    }
+
+    #[test]
+    fn retire_no_op_when_not_increasing() {
+        // `retire` is a no-op when the new value does not exceed the current retired count.
+        // Retire 80/100 bytes to exceed the 75% threshold and trigger a flow control update.
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), 100);
+        fc.set_consumed(80).unwrap();
+        fc.retire(80); // 20 bytes unused < 25 (25% threshold) → triggers update
+        assert!(fc.frame_needed());
+        fc.frame_sent(fc.next_limit()); // mark frame as sent, clearing pending
+        fc.retire(80); // same value — no-op
+        assert!(!fc.frame_needed());
+    }
+
+    #[test]
+    fn add_retired_zero_does_not_trigger_update() {
+        // `add_retired(0)` must not trigger a flow control update when no data was retired.
+        let mut fc = ReceiverFlowControl::new(StreamType::UniDi, 100);
+        fc.add_retired(0); // count == 0: no update.
+        assert!(!fc.frame_needed());
+        fc.add_retired(1); // count > 0: retired+max_active > max_allowed → triggers update.
+        assert!(fc.frame_needed());
+    }
+
+    #[test]
+    fn auto_tune_never_decreases_large_manually_set_max_active() -> Res<()> {
+        let rtt = Duration::from_millis(40);
+        let now = test_fixture::now();
+        let mut fc = ReceiverFlowControl::new(
+            StreamId::new(0),
+            // Very large manually configured window beyond the maximum auto-tuned window.
+            MAX_LOCAL_MAX_STREAM_DATA * 10,
+        );
+        let initial_max_active = fc.max_active();
+
+        // Consume and retire multiple windows to trigger auto-tuning.
+        // Each iteration: consume a full window, retire it, send update.
+        for _ in 1..11 {
+            let consumed = fc.set_consumed(fc.next_limit())?;
+            fc.add_retired(consumed);
+            write_frames(&mut fc, rtt, now);
+        }
+        let increased_max_active = fc.max_active();
+
+        assert!(
+            initial_max_active == increased_max_active,
+            "expect receive window auto-tuning to not decrease max_active below manually set initial value."
         );
 
         Ok(())

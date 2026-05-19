@@ -9,12 +9,12 @@ Versions of `mtu` in [current versions of Firefox](https://whattrainisitnow.com/
 
 The version of `mtu` that is active can be found in the Firefox repositories:
 
-- [release](https://hg.mozilla.org/mozilla-unified/file/release/third_party/rust/mtu-transport/Cargo.toml),
-- [beta](https://hg.mozilla.org/mozilla-unified/file/beta/third_party/rust/mtu-transport/Cargo.toml), and
-- [trunk/central](https://hg.mozilla.org/mozilla-unified/file/central/third_party/rust/mtu-transport/Cargo.toml),
-- [ESR 115](https://hg.mozilla.org/mozilla-unified/file/esr115/third_party/rust/mtu-transport/Cargo.toml).
+- [release](https://hg.mozilla.org/mozilla-unified/file/release/third_party/rust/mtu/Cargo.toml),
+- [beta](https://hg.mozilla.org/mozilla-unified/file/beta/third_party/rust/mtu/Cargo.toml), and
+- [trunk/central](https://hg.mozilla.org/mozilla-unified/file/central/third_party/rust/mtu/Cargo.toml),
+- [ESR 115](https://hg.mozilla.org/mozilla-unified/file/esr115/third_party/rust/mtu/Cargo.toml).
 
-The listed version in these files corresponds to [tags](https://github.com/mozilla/mtu/tags) on this repository.
+The listed version in these files corresponds to [tags](https://github.com/mozilla/neqo/tags) on this repository.
 Releases do not always correspond to a branch.
 
 We welcome reports of security vulnerabilities in any of these released versions or the latest code on the `main` branch.

@@ -21,34 +21,23 @@ use std::{
 };
 
 use neqo_common::{
+    Datagram, Decoder, Ecn, Role,
     event::Provider as _,
     hex,
-    qlog::{new_trace, Qlog},
-    qtrace, Datagram, Decoder, Ecn, Role,
+    qlog::{Qlog, new_trace},
+    qtrace,
 };
-use neqo_crypto::{init_db, random, AllowZeroRtt, AntiReplay, AuthenticationStatus};
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
-    version, Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State, Version,
+    Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
+    ConnectionIdRef, ConnectionParameters, State, Version, version,
 };
+use nss::{AllowZeroRtt, AntiReplay, AuthenticationStatus, random};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
 
 pub mod assertions;
 pub mod header_protection;
 pub mod sim;
-
-/// The path for the database used in tests.
-///
-/// Initialized via the `NSS_DB_PATH` environment variable. If that is not set,
-/// it defaults to the `db` directory in the current crate. If the environment
-/// variable is set to `$ARGV0`, it will be initialized to the directory of the
-/// current executable.
-pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
-    dir
-} else {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/db")
-};
 
 /// Initialize the test fixture.  Only call this if you aren't also calling a
 /// fixture function that depends on setup.  Other functions in the fixture
@@ -59,20 +48,13 @@ pub const NSS_DB_PATH: &str = if let Some(dir) = option_env!("NSS_DB_PATH") {
 /// When the NSS initialization fails.
 pub fn fixture_init() {
     neqo_common::log::init(None);
-    if NSS_DB_PATH == "$ARGV0" {
-        let mut current_exe = std::env::current_exe().unwrap();
-        current_exe.pop();
-        let nss_db_path = current_exe.to_str().unwrap();
-        init_db(nss_db_path).unwrap();
-    } else {
-        init_db(NSS_DB_PATH).unwrap();
-    }
+    nss_test_fixture::fixture_init();
 }
 
 // This needs to be > 2ms to avoid it being rounded to zero.
 // NSS operates in milliseconds and halves any value it is provided.
 // But make it a second, so that tests with reasonable RTTs don't fail.
-pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_millis(1000);
+pub const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(1);
 
 /// A baseline time for all tests.  This needs to be earlier than what `now()` produces
 /// because of the need to have a span of time elapse for anti-replay purposes.
@@ -81,6 +63,10 @@ fn earlier() -> Instant {
     // single-threaded.
     thread_local!(static EARLIER: OnceCell<Instant> = const { OnceCell::new() });
     fixture_init();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "This is the test wrapper for now()"
+    )]
     EARLIER.with(|b| *b.get_or_init(Instant::now))
 }
 
@@ -217,13 +203,13 @@ pub fn default_client() -> Connection {
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server() -> Connection {
-    new_server::<CountingConnectionIdGenerator>(DEFAULT_ALPN, ConnectionParameters::default())
+    new_server::<CountingConnectionIdGenerator, &str>(DEFAULT_ALPN, ConnectionParameters::default())
 }
 
 /// Create a transport server with default configuration.
 #[must_use]
 pub fn default_server_h3() -> Connection {
-    new_server::<CountingConnectionIdGenerator>(
+    new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN_H3,
         ConnectionParameters::default().pacing(false),
     )
@@ -235,7 +221,7 @@ pub fn default_server_h3() -> Connection {
 ///
 /// If this doesn't work.
 #[must_use]
-pub fn new_server<G>(alpn: &[impl AsRef<str>], params: ConnectionParameters) -> Connection
+pub fn new_server<G, A: AsRef<str>>(alpn: &[A], params: ConnectionParameters) -> Connection
 where
     G: ConnectionIdGenerator + Default + 'static,
 {
@@ -476,19 +462,27 @@ pub fn split_datagram(d: &Datagram) -> (Datagram, Option<Datagram>) {
 /// Strip any padding off the packet.
 /// This uses a heuristic to detect padding packets.  Don't rely on that too much.
 #[must_use]
-pub fn strip_padding(dgram: Datagram) -> Datagram {
-    fn is_padding(dgram: &Datagram) -> bool {
+pub fn strip_padding(d: Datagram) -> Datagram {
+    fn is_padding(dgram: &[u8]) -> bool {
         // This is a pretty rough heuristic, but it works for now.
         // Below the minimum packets size of 19 (1 type, 1 packet len, 1 content, 16 tag)
         // OR all values the same (except the last, in anticipation of SCONE indications).
         dgram.len() < 19 || dgram[1..dgram.len() - 1].iter().all(|&x| x == dgram[0])
     }
-    let (first, second) = split_datagram(&dgram);
-    if second.as_ref().is_some_and(is_padding) {
-        first
-    } else {
-        dgram
+
+    let mut remainder = &d[..];
+    while let (_first, Some(second)) = split_packet(remainder) {
+        if is_padding(second) {
+            return Datagram::new(
+                d.source(),
+                d.destination(),
+                d.tos(),
+                d[..d.len() - second.len()].to_vec(),
+            );
+        }
+        remainder = second;
     }
+    d
 }
 
 #[derive(Clone, Default)]
@@ -550,9 +544,10 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
         None,
         None,
         None,
+        #[expect(clippy::disallowed_methods, reason = "logging happens in real time")]
         Instant::now(),
         trace,
-        EventImportance::Base,
+        EventImportance::Extra,
         Box::new(buf),
     );
     let log = Qlog::enabled(streamer, PathBuf::from(""));

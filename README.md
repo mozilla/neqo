@@ -20,7 +20,7 @@ optional protocol features, and it may not handle all edge cases.
 It is also not optimized for performance or resource usage, and
 while it implements many of the necessary features for a server,
 it does not include configuration of a number of options that
-is suited to a live deployment.
+are suited to a live deployment.
 **Do not use the neqo server code in production.**
 
 To build Neqo:
@@ -29,7 +29,7 @@ To build Neqo:
 cargo build
 ```
 
-This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with Separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
+This will use a system-installed [NSS][NSS] library if it is new enough. (See "Build with separate NSS/NSPR" below if NSS is not installed or it is deemed too old.)
 
 To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
 
@@ -55,15 +55,13 @@ To run test HTTP/3 programs (`neqo-client` and `neqo-server`):
      export LD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.so -print | head -1 | xargs dirname | xargs realpath)"
      ```
 
-   - For MacOS:
+   - For macOS:
 
      ```shell
      export DYLD_LIBRARY_PATH="$(find $NSS_DIR/.. -name libssl3.dylib -print | head -1 | xargs dirname | xargs realpath)"
      ```
 
 5. (optional) After having an NSS build you can set the `NSS_PREBUILT=1` environment variable to skip building NSS again on future `cargo build` invocations.
-
-To confirm the NSS setup works you can run `cargo test -p neqo-crypto --lib`.
 
 ## Debugging Neqo
 
@@ -123,7 +121,7 @@ Some examples:
 
 ### Trying in-development Neqo code in Gecko
 
-In a checked-out copy of Gecko source, set `[patches.*]` values for the four
+In a checked-out copy of Gecko source, set `[patches.*]` values for the
 Neqo crates to local versions in the root `Cargo.toml`. For example, if Neqo
 was checked out to `/home/alice/git/neqo`, add the following lines to the root
 `Cargo.toml`.
@@ -132,7 +130,6 @@ was checked out to `/home/alice/git/neqo`, add the following lines to the root
 [patch."https://github.com/mozilla/neqo"]
 neqo-bin = { path = "/home/alice/git/neqo/neqo-bin" }
 neqo-common = { path = "/home/alice/git/neqo/neqo-common" }
-neqo-crypto = { path = "/home/alice/git/neqo/neqo-crypto" }
 neqo-http3 = { path = "/home/alice/git/neqo/neqo-http3" }
 neqo-qpack = { path = "/home/alice/git/neqo/neqo-qpack" }
 neqo-transport = { path = "/home/alice/git/neqo/neqo-transport" }
@@ -156,12 +153,59 @@ something has changed.
 
 ### Connect with Firefox to local neqo-server
 
-1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345' --db ./test-fixture/db`.
+1. Run `neqo-server` via `cargo run --bin neqo-server -- 'localhost:12345'`.
 2. On Firefox, set `about:config` preferences:
    - `network.http.http3.alt-svc-mapping-for-testing` to `localhost;h3=":12345"`
    - `network.http.http3.disable_when_third_party_roots_found` to `false`
 3. Optionally enable logging via `about:logging` or profiling via <https://profiler.firefox.com/>.
-4. Navigate to <https://localhost:12345> and accept self-signed certificate.
+4. Navigate to <https://localhost:12345> and accept the self-signed certificate.
+
+## Releasing Neqo and landing it in Firefox
+
+Neqo follows [semantic versioning](https://semver.org/). While the version is
+still below `1.0`, a **minor** bump (`0.X.0`) signals a breaking change and a
+**patch** bump (`0.X.Y`) is reserved for backwards-compatible fixes.
+
+### Minor release (e.g. `v0.26.0` → `v0.27.0`)
+
+1. Bump the workspace version in [`Cargo.toml`](./Cargo.toml). Commit the
+   resulting `Cargo.toml` and `Cargo.lock` change and open a pull request
+   against `main`.
+2. Merge the pull request.
+3. Create the `vX.Y.Z` git tag pointing at the **merged** commit on `main` and
+   push it.
+4. Publish a [GitHub release](https://github.com/mozilla/neqo/releases) for the
+   new tag.
+5. File a Bugzilla bug under *Core :: Networking* titled `Update neqo to
+   vX.Y.Z` (see [bug 2030978](https://bugzilla.mozilla.org/show_bug.cgi?id=2030978)
+   for an example).
+6. In a [`firefox`](https://github.com/mozilla-firefox/firefox) checkout, bump
+   the `neqo-*` dependency versions in
+   [`netwerk/socket/neqo_glue/Cargo.toml`](https://github.com/mozilla-firefox/firefox/blob/main/netwerk/socket/neqo_glue/Cargo.toml)
+   and
+   [`netwerk/test/http3server/Cargo.toml`](https://github.com/mozilla-firefox/firefox/blob/main/netwerk/test/http3server/Cargo.toml)
+   (see [Phabricator D293565](https://phabricator.services.mozilla.com/D293565)
+   for an example).
+7. Run `./mach -v vendor rust --force --ignore-modified`.
+8. Run `./mach cargo vet` and obtain the necessary supply-chain audits.
+9. Submit the change to Phabricator referencing the Bugzilla bug.
+
+### Patch release (e.g. `v0.26.0` → `v0.26.1`)
+
+Patch releases ship from a long-lived release branch so that `main` can keep
+moving with breaking changes.
+
+1. If it doesn't exist yet, create the `vX.Y` branch on GitHub off the
+   `vX.Y.0` tag (e.g. the
+   [`v0.26`](https://github.com/mozilla/neqo/tree/v0.26) branch was cut from
+   `v0.26.0`). Backport the fixes onto that branch.
+2. From the `vX.Y` branch, open a pull request that bumps the version to
+   `vX.Y.Z` in [`Cargo.toml`](./Cargo.toml) and targets `vX.Y` (not `main`).
+3. Follow steps 2–9 of the minor release flow, tagging and releasing off the
+   `vX.Y` branch instead of `main`. See
+   [bug 2034178](https://bugzilla.mozilla.org/show_bug.cgi?id=2034178) and
+   [Phabricator D296371](https://phabricator.services.mozilla.com/D296371) for
+   an example.
 
 [NSS]: https://hg.mozilla.org/projects/nss
 [NSPR]: https://hg.mozilla.org/projects/nspr

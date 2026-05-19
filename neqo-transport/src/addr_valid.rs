@@ -11,14 +11,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qinfo, qtrace, Buffer, Decoder, Encoder, Role};
-use neqo_crypto::{
+use neqo_common::{Buffer, Decoder, Encoder, Role, qinfo, qtrace};
+use nss::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
 };
 use smallvec::SmallVec;
+use static_assertions::const_assert;
 
-use crate::{cid::ConnectionId, frame::FrameType, packet, recovery, stats::FrameStats, Res};
+use crate::{
+    Res,
+    cid::ConnectionId,
+    frame::{FrameEncoder as _, FrameType},
+    packet, recovery,
+    stats::FrameStats,
+};
 
 /// A prefix we add to Retry tokens to distinguish them from `NEW_TOKEN` tokens.
 const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
@@ -27,8 +34,10 @@ const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
 /// corruption of individual bits in transit.
 const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
 
+const_assert!(TOKEN_IDENTIFIER_RETRY.len() == TOKEN_IDENTIFIER_NEW_TOKEN.len());
+
 /// The maximum number of tokens we'll save from `NEW_TOKEN` frames.
-/// This should be the same as the value of `MAX_TICKETS` in neqo-crypto.
+/// This should be the same as the value of `MAX_TICKETS` in `nss`.
 const MAX_NEW_TOKEN: usize = 4;
 /// The number of tokens we'll track for the purposes of looking for duplicates.
 /// This is based on how many might be received over a period where could be
@@ -85,11 +94,11 @@ impl AddressValidation {
         match peer_address.ip() {
             IpAddr::V4(a) => {
                 aad.encode_byte(4);
-                aad.encode(&a.octets());
+                aad.encode(a.octets());
             }
             IpAddr::V6(a) => {
                 aad.encode_byte(6);
-                aad.encode(&a.octets());
+                aad.encode(a.octets());
             }
         }
         if retry {
@@ -125,9 +134,21 @@ impl AddressValidation {
         // Include the token identifier ("Retry"/~) in the AAD, then keep it for plaintext.
         let mut buf = Self::encode_aad(peer_address, retry);
         let encrypted = self.self_encrypt.seal(buf.as_ref(), data.as_ref())?;
+        #[cfg(feature = "build-fuzzing-corpus")]
+        let mut corpus_data = buf.as_ref()[TOKEN_IDENTIFIER_RETRY.len()..].to_vec();
         buf.truncate(TOKEN_IDENTIFIER_RETRY.len());
         buf.encode(&encrypted);
-        Ok(buf.into())
+        let token: Vec<u8> = buf.into();
+        #[cfg(feature = "build-fuzzing-corpus")]
+        {
+            if !retry {
+                // Port is not validated for NEW_TOKEN, so use 0 as a placeholder.
+                corpus_data.extend_from_slice(&[0, 0]);
+            }
+            corpus_data.extend_from_slice(&token);
+            neqo_common::write_item_to_fuzzing_corpus("addr_valid", &corpus_data);
+        }
+        Ok(token)
     }
 
     /// This generates a token for use with Retry.
@@ -164,15 +185,13 @@ impl AddressValidation {
         let peer_addr = Self::encode_aad(peer_address, retry);
         let data = self.self_encrypt.open(peer_addr.as_ref(), token).ok()?;
         let mut dec = Decoder::new(&data);
-        match dec.decode_uint::<u32>() {
-            Some(d) => {
-                let end = self.start_time + Duration::from_millis(u64::from(d));
-                if end < now {
-                    qtrace!("Expired token: {end:?} vs. {now:?}");
-                    return None;
-                }
+        {
+            let d = dec.decode_uint::<u32>()?;
+            let end = self.start_time + Duration::from_millis(u64::from(d));
+            if end < now {
+                qtrace!("Expired token: {end:?} vs. {now:?}");
+                return None;
             }
-            _ => return None,
         }
         Some(ConnectionId::from(dec.decode_remainder()))
     }
@@ -184,10 +203,11 @@ impl AddressValidation {
     /// from `NEW_TOKEN` instead.  If there truly is corruption of packets that causes
     /// validation failure, it will be a failure that we try to recover from.
     fn is_likely_retry(token: &[u8]) -> bool {
-        let mut difference = 0;
-        for i in 0..TOKEN_IDENTIFIER_RETRY.len() {
-            difference += (token[i] ^ TOKEN_IDENTIFIER_RETRY[i]).count_ones();
-        }
+        let difference: u32 = token
+            .iter()
+            .zip(TOKEN_IDENTIFIER_RETRY.iter())
+            .map(|(a, b)| (a ^ b).count_ones())
+            .sum();
         usize::try_from(difference).expect("u32 fits in usize") < TOKEN_IDENTIFIER_RETRY.len()
     }
 
@@ -217,43 +237,46 @@ impl AddressValidation {
         // Note that this allows the token identifier part to be corrupted.
         // That's OK here as we don't depend on that being authenticated.
         #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
-        if let Some(cid) = self.decrypt_token(enc, peer_address, retry, now) {
-            if retry {
-                // This is from Retry, so we should have an ODCID >= 8.
-                if cid.len() >= 8 {
-                    qinfo!("AddressValidation: valid Retry token for {cid}");
-                    AddressValidationResult::ValidRetry(cid)
+        match self.decrypt_token(enc, peer_address, retry, now) {
+            Some(cid) => {
+                if retry {
+                    // This is from Retry, so we should have an ODCID >= 8.
+                    if cid.len() >= 8 {
+                        qinfo!("AddressValidation: valid Retry token for {cid}");
+                        AddressValidationResult::ValidRetry(cid)
+                    } else {
+                        panic!("AddressValidation: Retry token with small CID {cid}");
+                    }
+                } else if cid.is_empty() {
+                    // An empty connection ID means NEW_TOKEN.
+                    if self.validation == ValidateAddress::Always {
+                        qinfo!("AddressValidation: valid NEW_TOKEN token; validating again");
+                        AddressValidationResult::Validate
+                    } else {
+                        qinfo!("AddressValidation: valid NEW_TOKEN token; accepting");
+                        AddressValidationResult::Pass
+                    }
                 } else {
-                    panic!("AddressValidation: Retry token with small CID {cid}");
+                    panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
                 }
-            } else if cid.is_empty() {
-                // An empty connection ID means NEW_TOKEN.
-                if self.validation == ValidateAddress::Always {
-                    qinfo!("AddressValidation: valid NEW_TOKEN token; validating again");
-                    AddressValidationResult::Validate
-                } else {
-                    qinfo!("AddressValidation: valid NEW_TOKEN token; accepting");
-                    AddressValidationResult::Pass
-                }
-            } else {
-                panic!("AddressValidation: NEW_TOKEN token with CID {cid}");
             }
-        } else {
-            // From here on, we have a token that we couldn't decrypt.
-            // We've either lost the keys or we've received junk.
-            if retry {
-                // If this looked like a Retry, treat it as being bad.
-                qinfo!("AddressValidation: invalid Retry token; rejecting");
-                AddressValidationResult::Invalid
-            } else if self.validation == ValidateAddress::Never {
-                // We don't require validation, so OK.
-                qinfo!("AddressValidation: invalid NEW_TOKEN token; accepting");
-                AddressValidationResult::Pass
-            } else {
-                // This might be an invalid NEW_TOKEN token, or a valid one
-                // for which we have since lost the keys.  Check again.
-                qinfo!("AddressValidation: invalid NEW_TOKEN token; validating again");
-                AddressValidationResult::Validate
+            None => {
+                // From here on, we have a token that we couldn't decrypt.
+                // We've either lost the keys or we've received junk.
+                if retry {
+                    // If this looked like a Retry, treat it as being bad.
+                    qinfo!("AddressValidation: invalid Retry token; rejecting");
+                    AddressValidationResult::Invalid
+                } else if self.validation == ValidateAddress::Never {
+                    // We don't require validation, so OK.
+                    qinfo!("AddressValidation: invalid NEW_TOKEN token; accepting");
+                    AddressValidationResult::Pass
+                } else {
+                    // This might be an invalid NEW_TOKEN token, or a valid one
+                    // for which we have since lost the keys.  Check again.
+                    qinfo!("AddressValidation: invalid NEW_TOKEN token; validating again");
+                    AddressValidationResult::Validate
+                }
             }
         }
     }
@@ -292,11 +315,7 @@ impl NewTokenState {
     /// If this is a client, take a token if there is one.
     /// If this is a server, panic.
     pub fn take_token(&mut self) -> Option<&[u8]> {
-        if let Self::Client {
-            ref mut pending,
-            ref mut old,
-        } = self
-        {
+        if let Self::Client { pending, old } = self {
             pending.pop().map(|t| {
                 if old.len() >= MAX_SAVED_TOKENS {
                     old.remove(0);
@@ -312,11 +331,7 @@ impl NewTokenState {
     /// If this is a client, save a token.
     /// If this is a server, panic.
     pub fn save_token(&mut self, token: Vec<u8>) {
-        if let Self::Client {
-            ref mut pending,
-            old,
-        } = self
-        {
+        if let Self::Client { pending, old } = self {
             for t in old.iter().rev().chain(pending.iter().rev()) {
                 if t == &token {
                     qinfo!("NewTokenState discarding duplicate NEW_TOKEN");
@@ -341,7 +356,7 @@ impl NewTokenState {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        if let Self::Server(ref mut sender) = self {
+        if let Self::Server(sender) = self {
             sender.write_frames(builder, tokens, stats);
         }
     }
@@ -349,7 +364,7 @@ impl NewTokenState {
     /// If this a server, buffer a `NEW_TOKEN` for sending.
     /// If this is a client, panic.
     pub fn send_new_token(&mut self, token: Vec<u8>) {
-        if let Self::Server(ref mut sender) = self {
+        if let Self::Server(sender) = self {
             sender.send_new_token(token);
         } else {
             unreachable!();
@@ -359,7 +374,7 @@ impl NewTokenState {
     /// If this a server, process a lost signal for a `NEW_TOKEN` frame.
     /// If this is a client, panic.
     pub fn lost(&mut self, seqno: usize) {
-        if let Self::Server(ref mut sender) = self {
+        if let Self::Server(sender) = self {
             sender.lost(seqno);
         } else {
             unreachable!();
@@ -369,7 +384,7 @@ impl NewTokenState {
     /// If this a server, process remove the acknowledged `NEW_TOKEN` frame.
     /// If this is a client, panic.
     pub fn acked(&mut self, seqno: usize) {
-        if let Self::Server(ref mut sender) = self {
+        if let Self::Server(sender) = self {
             sender.acked(seqno);
         } else {
             unreachable!();
@@ -419,8 +434,9 @@ impl NewTokenSender {
             if t.needs_sending && t.len() <= builder.remaining() {
                 t.needs_sending = false;
 
-                builder.encode_varint(FrameType::NewToken);
-                builder.encode_vvec(&t.token);
+                builder.encode_frame(FrameType::NewToken, |b| {
+                    b.encode_vvec(&t.token);
+                });
 
                 tokens.push(recovery::Token::NewToken(t.seqno));
                 stats.new_token += 1;
@@ -445,12 +461,57 @@ impl NewTokenSender {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Role;
+    use neqo_common::{Encoder, Role};
 
-    use super::NewTokenState;
+    use super::{NewTokenFrameStatus, NewTokenSender, NewTokenState};
 
     const ONE: &[u8] = &[1, 2, 3];
     const TWO: &[u8] = &[4, 5];
+
+    #[test]
+    fn new_token_frame_status_len() {
+        let token = vec![1u8, 2, 3];
+        let expected = 1 + Encoder::vvec_len(token.len());
+        let status = NewTokenFrameStatus {
+            seqno: 0,
+            token,
+            needs_sending: true,
+        };
+        assert_eq!(status.len(), expected);
+    }
+
+    #[test]
+    fn new_token_sender_seqno_increments() {
+        let mut sender = NewTokenSender::default();
+        sender.send_new_token(vec![1]);
+        assert_eq!(sender.tokens[0].seqno, 0);
+        assert_eq!(sender.next_seqno, 1);
+        sender.send_new_token(vec![2]);
+        assert_eq!(sender.tokens[1].seqno, 1);
+        assert_eq!(sender.next_seqno, 2);
+    }
+
+    #[test]
+    fn new_token_sender_lost_marks_needs_sending() {
+        let mut sender = NewTokenSender::default();
+        sender.send_new_token(vec![1]);
+        sender.tokens[0].needs_sending = false; // pretend it was sent
+        sender.lost(0);
+        assert!(
+            sender.tokens[0].needs_sending,
+            "lost must re-enable needs_sending"
+        );
+    }
+
+    #[test]
+    fn new_token_sender_acked_removes_token() {
+        let mut sender = NewTokenSender::default();
+        sender.send_new_token(vec![1]);
+        sender.send_new_token(vec![2]);
+        sender.acked(0);
+        assert_eq!(sender.tokens.len(), 1);
+        assert_eq!(sender.tokens[0].seqno, 1, "only seqno=1 should remain");
+    }
 
     #[test]
     fn duplicate_saved() {

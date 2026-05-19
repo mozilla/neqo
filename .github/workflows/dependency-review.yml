@@ -6,10 +6,9 @@
 # PRs introducing known-vulnerable packages will be blocked from merging.
 #
 # Source repository: https://github.com/actions/dependency-review-action
-name: 'Dependency Review'
+name: "Dependency Review"
 on:
   pull_request:
-    branches: ["main"]
   merge_group:
 
 concurrency:
@@ -21,14 +20,4 @@ permissions:
 
 jobs:
   dependency-review:
-    name: Dependency review
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-        with:
-          persist-credentials: false
-
-      - uses: actions/dependency-review-action@40c09b7dc99638e5ddb0bfd91c1673effc064d8a # v4.8.1
-        with:
-          base-ref: ${{ github.event.pull_request.base.sha || 'main' }}
-          head-ref: ${{ github.event.pull_request.head.sha || github.ref }}
+    uses: mozilla/actions/.github/workflows/dependency-review.yml@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3

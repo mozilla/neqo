@@ -1,1 +1,2 @@
 disallowed-methods = []
+allow-unwrap-in-tests = true

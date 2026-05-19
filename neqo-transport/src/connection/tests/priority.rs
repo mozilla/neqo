@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider as _, Datagram};
+use neqo_common::{Datagram, event::Provider as _};
 use test_fixture::now;
 
 use super::{
@@ -14,9 +14,9 @@ use super::{
     connect, default_client, default_server, fill_cwnd, maybe_authenticate,
 };
 use crate::{
+    ConnectionEvent, StreamId, StreamType,
     addr_valid::{AddressValidation, ValidateAddress},
     send_stream::{RetransmissionPriority, TransmissionPriority},
-    ConnectionEvent, StreamId, StreamType,
 };
 
 const BLOCK_SIZE: usize = 4_096;
@@ -244,7 +244,7 @@ fn critical() {
     let stats_before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let stats_after = server.stats().frame_tx;
-    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
+    assert!(stats_after.crypto > stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 0);
     assert_eq!(stats_after.new_connection_id, 0);
     assert_eq!(stats_after.new_token, 0);
@@ -285,7 +285,7 @@ fn important() {
     let stats_before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let stats_after = server.stats().frame_tx;
-    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
+    assert!(stats_after.crypto > stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 1);
     assert_eq!(stats_after.new_connection_id, 0);
     assert_eq!(stats_after.new_token, 0);
@@ -328,7 +328,7 @@ fn high_normal() {
     let stats_before = server.stats().frame_tx;
     let dgram = server.process_output(now()).dgram();
     let stats_after = server.stats().frame_tx;
-    assert_eq!(stats_after.crypto, stats_before.crypto + 1);
+    assert!(stats_after.crypto > stats_before.crypto);
     assert_eq!(stats_after.streams_blocked, 1);
     assert_eq!(stats_after.new_connection_id, 0);
     assert_eq!(stats_after.new_token, 0);

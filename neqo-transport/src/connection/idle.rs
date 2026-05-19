@@ -59,7 +59,7 @@ impl IdleTimeout {
         t
     }
 
-    pub fn on_packet_sent(&mut self, now: Instant) {
+    pub const fn on_packet_sent(&mut self, now: Instant) {
         // Only reset idle timeout if we've received a packet since the last
         // time we reset the timeout here.
         match self.state {
@@ -133,11 +133,11 @@ impl IdleTimeout {
         }
     }
 
-    pub fn lost_keep_alive(&mut self) {
+    pub const fn lost_keep_alive(&mut self) {
         self.keep_alive_outstanding = false;
     }
 
-    pub fn ack_keep_alive(&mut self) {
+    pub const fn ack_keep_alive(&mut self) {
         self.keep_alive_outstanding = false;
     }
 }

@@ -7,14 +7,14 @@
 mod common;
 use common::assert_dscp;
 use neqo_common::{Datagram, Decoder, Encoder, Role};
-use neqo_crypto::AeadTrait as _;
 use neqo_transport::{
-    CloseReason, ConnectionParameters, Error, State, StreamType, Version, MIN_INITIAL_PACKET_SIZE,
+    CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamType, Version,
 };
+use nss::RecordProtectionOps as _;
 use test_fixture::{
-    default_client, default_server,
+    CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
-    new_client, new_server, now, split_datagram, CountingConnectionIdGenerator, DEFAULT_ALPN,
+    new_client, new_server, now, split_datagram,
 };
 
 #[test]
@@ -49,7 +49,7 @@ fn truncate_long_packet() {
     // This test needs to alter the server handshake, so turn off MLKEM.
     let mut client =
         new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
-    let mut server = new_server::<CountingConnectionIdGenerator>(
+    let mut server = new_server::<CountingConnectionIdGenerator, &str>(
         DEFAULT_ALPN,
         ConnectionParameters::default().mlkem(false),
     );
@@ -110,11 +110,11 @@ fn reorder_server_initial() {
         decode_initial_header(&server_initial, Role::Server).unwrap();
 
     // Now decrypt the packet.
-    let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
+    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
     let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
     let mut buf = vec![0; payload.len()];
-    let mut plaintext = aead
+    let mut plaintext = aead_dec
         .decrypt(pn, &header, &payload[pn_len..], &mut buf)
         .unwrap()
         .to_owned();
@@ -133,7 +133,8 @@ fn reorder_server_initial() {
     // And rebuild a packet.
     let mut packet = header.clone();
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
-    aead.encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
+    aead_enc
+        .encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
     header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let reordered = Datagram::new(
@@ -166,7 +167,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
         decode_initial_header(&server_initial, Role::Server).unwrap();
 
     // Now decrypt the packet.
-    let (aead, hp) = initial_aead_and_hp(client_dcid, Role::Server);
+    let (aead, _, hp) = initial_aead_and_hp(client_dcid, Role::Server);
     let (mut header, pn) = header_protection::remove(&hp, protected_header, orig_payload);
     // Re-encode the packet number as four bytes, so we have enough material for the header
     // protection sample if payload is empty.
@@ -217,6 +218,10 @@ fn packet_without_frames() {
 }
 
 /// Test that the stack permits a packet containing only padding.
+#[cfg_attr(
+    feature = "disable-encryption",
+    ignore = "null AEAD accepts the modified packet, so the client stays in WaitInitial rather than WaitVersion"
+)]
 #[test]
 fn packet_with_only_padding() {
     let mut client = new_client::<CountingConnectionIdGenerator>(
@@ -254,7 +259,7 @@ fn overflow_crypto() {
 
     // Now decrypt the server packet to get AEAD and HP instances.
     // We won't be using the packet, but making new ones.
-    let (aead, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
+    let (aead, _, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
     let (_, server_dcid, server_scid, _) =
         decode_initial_header(&server_initial, Role::Server).unwrap();
 
@@ -314,7 +319,7 @@ fn handshake_mlkem768x25519() {
     let mut server = default_server();
 
     client
-        .set_groups(&[neqo_crypto::TLS_GRP_KEM_MLKEM768X25519])
+        .set_groups(&[nss::TLS_GRP_KEM_MLKEM768X25519])
         .unwrap();
     client.send_additional_key_shares(0).unwrap();
 
@@ -323,11 +328,11 @@ fn handshake_mlkem768x25519() {
     assert_eq!(*server.state(), State::Confirmed);
     assert_eq!(
         client.tls_info().unwrap().key_exchange(),
-        neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
+        nss::TLS_GRP_KEM_MLKEM768X25519
     );
     assert_eq!(
         server.tls_info().unwrap().key_exchange(),
-        neqo_crypto::TLS_GRP_KEM_MLKEM768X25519
+        nss::TLS_GRP_KEM_MLKEM768X25519
     );
 }
 
@@ -347,7 +352,7 @@ fn client_initial_packet_number() {
         let client_initial = client.process_output(now());
         let (protected_header, client_dcid, _, payload) =
             decode_initial_header(client_initial.as_dgram_ref().unwrap(), Role::Client).unwrap();
-        let (_, hp) = initial_aead_and_hp(client_dcid, Role::Client);
+        let (_, _, hp) = initial_aead_and_hp(client_dcid, Role::Client);
         let (_, pn) = header_protection::remove(&hp, protected_header, payload);
         assert!(
             randomize && pn > 0 || !randomize && pn == 0,
@@ -367,7 +372,7 @@ fn server_initial_packet_number() {
                 .versions(Version::Version1, vec![Version::Version1])
                 .mlkem(false),
         );
-        let mut server = new_server::<CountingConnectionIdGenerator>(
+        let mut server = new_server::<CountingConnectionIdGenerator, &str>(
             DEFAULT_ALPN,
             ConnectionParameters::default()
                 .versions(Version::Version1, vec![Version::Version1])
@@ -378,7 +383,7 @@ fn server_initial_packet_number() {
         let (_protected_header, client_dcid, _scid, _payload) =
             decode_initial_header(client_initial.as_ref().unwrap(), Role::Client).unwrap();
 
-        let (_, hp) = initial_aead_and_hp(client_dcid, Role::Server);
+        let (_, _, hp) = initial_aead_and_hp(client_dcid, Role::Server);
 
         let server_initial = server.process(client_initial, now()).dgram();
         let (protected_header, _dcid, _scid, payload) =

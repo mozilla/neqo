@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::marker::PhantomData;
-
 /// An event provider is able to generate a stream of events.
 pub trait Provider {
     type Event;
@@ -19,34 +17,52 @@ pub trait Provider {
     fn has_events(&self) -> bool;
 
     /// Construct an iterator that produces all events.
-    fn events(&'_ mut self) -> Iter<'_, Self, Self::Event> {
-        Iter::new(self)
+    fn events(&'_ mut self) -> Iter<'_, Self> {
+        Iter { p: self }
     }
 }
 
-pub struct Iter<'a, P, E>
-where
-    P: ?Sized,
-{
+pub struct Iter<'a, P: ?Sized> {
     p: &'a mut P,
-    _e: PhantomData<E>,
 }
 
-impl<'a, P, E> Iter<'a, P, E>
-where
-    P: Provider<Event = E> + ?Sized,
-{
-    fn new(p: &'a mut P) -> Self {
-        Self { p, _e: PhantomData }
-    }
-}
-
-impl<P, E> Iterator for Iter<'_, P, E>
-where
-    P: Provider<Event = E>,
-{
-    type Item = E;
+impl<P: Provider + ?Sized> Iterator for Iter<'_, P> {
+    type Item = P::Event;
     fn next(&mut self) -> Option<Self::Item> {
         self.p.next_event()
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Provider;
+
+    struct MockProvider(std::collections::VecDeque<u32>);
+
+    impl Provider for MockProvider {
+        type Event = u32;
+        fn next_event(&mut self) -> Option<u32> {
+            self.0.pop_front()
+        }
+        fn has_events(&self) -> bool {
+            !self.0.is_empty()
+        }
+    }
+
+    #[test]
+    fn iter_yields_events() {
+        let mut p = MockProvider(std::collections::VecDeque::from([1, 2, 3]));
+        assert!(p.has_events());
+        let events: Vec<u32> = p.events().collect();
+        assert_eq!(events, [1, 2, 3]);
+        assert!(!p.has_events());
+    }
+
+    #[test]
+    fn iter_empty() {
+        let mut p = MockProvider(std::collections::VecDeque::new());
+        assert!(!p.has_events());
+        assert_eq!(p.events().next(), None);
     }
 }

@@ -13,13 +13,14 @@
 
 use std::ops::Range;
 
-use neqo_common::{hex_with_len, qtrace, Datagram, Decoder, Role};
-use neqo_crypto::{
+use neqo_common::{Datagram, Decoder, Role, hex_with_len, qtrace};
+use nss::{
+    Mode, RecordProtection as Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
-    hkdf, hp, Aead, AeadTrait as _,
+    hkdf, hp,
 };
 
-pub use crate::{default_client, now, CountingConnectionIdGenerator};
+pub use crate::{CountingConnectionIdGenerator, default_client, now};
 
 // Decode the header of a client Initial packet, returning three values:
 // * the entire header short of the packet number,
@@ -63,7 +64,7 @@ pub fn decode_initial_header(dgram: &Datagram, role: Role) -> Option<(&[u8], &[u
 /// Generate an AEAD and header protection object for a client Initial.
 /// Note that this works for QUIC version 1 only.
 #[must_use]
-pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, hp::Key) {
+pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, Aead, hp::Key) {
     const INITIAL_SALT: &[u8] = &[
         0x38, 0x76, 0x2c, 0xf7, 0xf5, 0x59, 0x34, 0xb3, 0x4d, 0x17, 0x9a, 0xe6, 0xa4, 0xc8, 0x0c,
         0xad, 0xcc, 0xbb, 0x7f, 0x0a,
@@ -91,8 +92,19 @@ pub fn initial_aead_and_hp(dcid: &[u8], role: Role) -> (Aead, hp::Key) {
         },
     )
     .unwrap();
+    let make = |mode| {
+        Aead::new(
+            TLS_VERSION_1_3,
+            TLS_AES_128_GCM_SHA256,
+            &secret,
+            "quic ",
+            mode,
+        )
+        .unwrap()
+    };
     (
-        Aead::new(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic ").unwrap(),
+        make(Mode::Encrypt),
+        make(Mode::Decrypt),
         hp::Key::extract(TLS_VERSION_1_3, TLS_AES_128_GCM_SHA256, &secret, "quic hp").unwrap(),
     )
 }

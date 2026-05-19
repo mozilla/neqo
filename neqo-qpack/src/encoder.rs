@@ -11,20 +11,19 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{qdebug, qerror, qlog::Qlog, qtrace, Header};
+use neqo_common::{Header, qdebug, qerror, qlog::Qlog, qtrace};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
 use crate::{
+    Error, Res, Settings,
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
     qlog,
-    qpack_send_buf::Data,
     reader::ReceiverConnWrapper,
     stats::Stats,
-    table::{HeaderTable, LookupResult, ADDITIONAL_TABLE_ENTRY_SIZE},
-    Error, Res, Settings,
+    table::{ADDITIONAL_TABLE_ENTRY_SIZE, HeaderTable, LookupResult},
 };
 
 pub const QPACK_UNI_STREAM_TYPE_ENCODER: u64 = 0x2;
@@ -71,7 +70,7 @@ impl Encoder {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
             max_entries: 0,
-            instruction_reader: DecoderInstructionReader::new(),
+            instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
             unacked_header_blocks: HashMap::default(),
@@ -225,7 +224,7 @@ impl Encoder {
     fn call_instruction(
         &mut self,
         instruction: DecoderInstruction,
-        qlog: &Qlog,
+        qlog: &mut Qlog,
         now: Instant,
     ) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
@@ -281,14 +280,14 @@ impl Encoder {
             return Err(Error::DynamicTableFull);
         }
 
-        let mut buf = Data::default();
+        let mut buf = neqo_common::Encoder::default();
         EncoderInstruction::InsertWithNameLiteral { name, value }
             .marshal(&mut buf, self.use_huffman);
 
         let stream_id = self.local_stream.stream_id().ok_or(Error::Internal)?;
 
         let sent = conn
-            .stream_send_atomic(stream_id, &buf)
+            .stream_send_atomic(stream_id, buf.as_ref())
             .map_err(|e| map_stream_send_atomic_error(&e))?;
         if !sent {
             return Err(Error::EncoderStreamBlocked);
@@ -321,9 +320,9 @@ impl Encoder {
             if cap < self.table.capacity() && !self.table.can_evict_to(cap) {
                 return Err(Error::DynamicTableFull);
             }
-            let mut buf = Data::default();
+            let mut buf = neqo_common::Encoder::default();
             EncoderInstruction::Capacity { value: cap }.marshal(&mut buf, self.use_huffman);
-            if !conn.stream_send_atomic(stream_id, &buf)? {
+            if !conn.stream_send_atomic(stream_id, buf.as_ref())? {
                 return Err(Error::EncoderStreamBlocked);
             }
             if self.table.set_capacity(cap).is_err() {
@@ -351,9 +350,9 @@ impl Encoder {
                 Ok(())
             }
             LocalStreamState::Uninitialized(stream_id) => {
-                let mut buf = Data::default();
+                let mut buf = neqo_common::Encoder::default();
                 buf.encode_varint(QPACK_UNI_STREAM_TYPE_ENCODER);
-                if !conn.stream_send_atomic(stream_id, &buf[..])? {
+                if !conn.stream_send_atomic(stream_id, buf.as_ref())? {
                     return Err(Error::EncoderStreamBlocked);
                 }
                 self.local_stream = LocalStreamState::Initialized(stream_id);
@@ -418,14 +417,14 @@ impl Encoder {
 
         for iter in h {
             let name = iter.name().as_bytes().to_vec();
-            let value = iter.value().as_bytes().to_vec();
+            let value = iter.value();
             qtrace!("encoding {name:x?} {value:x?}");
 
             if let Some(LookupResult {
                 index,
                 static_table,
                 value_matches,
-            }) = self.table.lookup(&name, &value, can_block)
+            }) = self.table.lookup(&name, value, can_block)
             {
                 qtrace!(
                     "[{self}] found a {} entry, value-match={value_matches}",
@@ -438,7 +437,7 @@ impl Encoder {
                         encoded_h.encode_indexed_dynamic(index);
                     }
                 } else {
-                    encoded_h.encode_literal_with_name_ref(static_table, index, &value);
+                    encoded_h.encode_literal_with_name_ref(static_table, index, value);
                 }
                 if !static_table && ref_entries.insert(index) {
                     self.table.add_ref(index);
@@ -447,7 +446,7 @@ impl Encoder {
                 // Insert using an InsertWithNameLiteral instruction. This entry name does not match
                 // any name in the tables therefore we cannot use any other
                 // instruction.
-                if let Ok(index) = self.send_and_insert(conn, &name, &value) {
+                if let Ok(index) = self.send_and_insert(conn, &name, value) {
                     encoded_h.encode_indexed_dynamic(index);
                     ref_entries.insert(index);
                     self.table.add_ref(index);
@@ -466,10 +465,10 @@ impl Encoder {
                     // As soon as one of the instructions cannot be written or the table is full, do
                     // not try again.
                     encoder_blocked = true;
-                    encoded_h.encode_literal_with_name_literal(&name, &value);
+                    encoded_h.encode_literal_with_name_literal(&name, value);
                 }
             } else {
-                encoded_h.encode_literal_with_name_literal(&name, &value);
+                encoded_h.encode_literal_with_name_literal(&name, value);
             }
         }
 
@@ -477,11 +476,11 @@ impl Encoder {
 
         if !stream_is_blocker {
             // The streams was not a blocker, check if the stream is a blocker now.
-            if let Some(max_ref) = ref_entries.iter().max() {
-                if *max_ref >= self.table.get_acked_inserts_cnt() {
-                    debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
-                    self.blocked_stream_cnt += 1;
-                }
+            if let Some(max_ref) = ref_entries.iter().max()
+                && *max_ref >= self.table.get_acked_inserts_cnt()
+            {
+                debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
+                self.blocked_stream_cnt += 1;
             }
         }
 
@@ -492,6 +491,8 @@ impl Encoder {
                 .push_front(ref_entries);
             self.stats.dynamic_table_references += 1;
         }
+        #[cfg(feature = "build-fuzzing-corpus")]
+        crate::fuzz::write_item_to_fuzzing_corpus(stream_id, &encoded_h);
         encoded_h
     }
 
@@ -555,8 +556,8 @@ mod tests {
 
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{
-        default_client, default_server, handshake, new_server, now, CountingConnectionIdGenerator,
-        DEFAULT_ALPN,
+        CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server, handshake,
+        new_server, now,
     };
 
     use super::{Connection, Encoder, Error, Header, Res};
@@ -594,7 +595,7 @@ mod tests {
             let buf = self
                 .encoder
                 .encode_header_block(&mut self.conn, headers, stream_id);
-            assert_eq!(&buf[..], expected_encoding);
+            assert_eq!(buf.as_ref(), expected_encoding);
             self.send_instructions(inst);
         }
 
@@ -616,7 +617,7 @@ mod tests {
     fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = max_data.map_or_else(default_server, |max| {
-            new_server::<CountingConnectionIdGenerator>(
+            new_server::<CountingConnectionIdGenerator, &str>(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
                     .max_stream_data(StreamType::UniDi, true, max)
@@ -665,10 +666,12 @@ mod tests {
             .unwrap();
         let out = encoder.peer_conn.process_output(now);
         drop(encoder.conn.process(out.dgram(), now));
-        assert!(encoder
-            .encoder
-            .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now)
-            .is_ok());
+        assert!(
+            encoder
+                .encoder
+                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now)
+                .is_ok()
+        );
     }
 
     const CAP_INSTRUCTION_200: &[u8] = &[0x02, 0x3f, 0xa9, 0x01];
@@ -820,7 +823,7 @@ mod tests {
             let buf = encoder
                 .encoder
                 .encode_header_block(&mut encoder.conn, &t.headers, STREAM_1);
-            assert_eq!(&buf[..], t.header_block);
+            assert_eq!(buf.as_ref(), t.header_block);
             encoder.send_instructions(t.encoder_inst);
         }
     }
@@ -894,7 +897,7 @@ mod tests {
             let buf = encoder
                 .encoder
                 .encode_header_block(&mut encoder.conn, &t.headers, STREAM_1);
-            assert_eq!(&buf[..], t.header_block);
+            assert_eq!(buf.as_ref(), t.header_block);
             encoder.send_instructions(t.encoder_inst);
         }
     }
@@ -966,7 +969,7 @@ mod tests {
             &[Header::new("content-length", "1234")],
             STREAM_1,
         );
-        assert_eq!(&buf[..], ENCODE_INDEXED_REF_DYNAMIC);
+        assert_eq!(buf.as_ref(), ENCODE_INDEXED_REF_DYNAMIC);
         encoder.send_instructions(&[]);
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be
