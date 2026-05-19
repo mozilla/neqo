@@ -34,9 +34,7 @@ runs:
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        # nss in the 7.8 release packages is too old; install it from snapshots.
-                        PKG_PATH=https://ftp.openbsd.org/pub/OpenBSD/snapshots/packages/amd64/ pkg_add nss
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-22.1.5 # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
@@ -58,9 +56,9 @@ runs:
           cd "$WD"
           pwd
           case "$PLATFORM" in
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm22/lib
-                        export LLVM_COV=/usr/local/llvm22/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm22/bin/llvm-profdata
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
+                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
                         export PATH="\$HOME/.cargo/bin:\$PATH"
                         ;;
             *)          sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
