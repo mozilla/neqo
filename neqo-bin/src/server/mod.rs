@@ -80,9 +80,9 @@ pub struct Args {
     #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[arg(short = 'd', long, default_value = "./test-fixture/db")]
-    /// NSS database directory.
-    db: PathBuf,
+    #[arg(short = 'd', long)]
+    /// NSS database directory [default: `$TEST_FIXTURE_DB` or the bundled NSS test DB].
+    db: Option<PathBuf>,
 
     #[arg(short = 'k', long, default_value = "key")]
     /// Name of key from NSS database.
@@ -102,11 +102,10 @@ pub struct Args {
 #[cfg(any(test, feature = "bench"))]
 impl Default for Args {
     fn default() -> Self {
-        use std::str::FromStr as _;
         Self {
             shared: SharedArgs::default(),
             hosts: vec!["[::]:12345".to_string()],
-            db: PathBuf::from_str("../test-fixture/db").unwrap(),
+            db: None,
             key: "key".to_string(),
             retry: false,
             ech: false,
@@ -542,7 +541,7 @@ pub fn run(
     args.update_for_tests();
     assert!(!args.key.is_empty(), "Need at least one key");
 
-    init_db(args.db.clone())?;
+    init_db(args.db.take().unwrap_or_else(nss_test_fixture::db_path))?;
 
     let hosts = args.listen_addresses();
     if hosts.is_empty() {

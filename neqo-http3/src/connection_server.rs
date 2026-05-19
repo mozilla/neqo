@@ -377,7 +377,8 @@ impl Http3ServerHandler {
                 | ConnectionEvent::SendStreamCreatable { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
                 | ConnectionEvent::IncomingDatagramDropped
-                | ConnectionEvent::SconeUpdated(_) => {}
+                | ConnectionEvent::SconeUpdated(_)
+                | ConnectionEvent::PathMigrated { .. } => {}
             }
         }
         Ok(())

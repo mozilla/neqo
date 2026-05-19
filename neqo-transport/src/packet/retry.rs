@@ -7,12 +7,15 @@
 use std::cell::RefCell;
 
 use neqo_common::qerror;
-use nss::{RecordProtection as Aead, TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3, hkdf};
+use nss::{
+    Mode, RecordProtection as Aead, RecordProtectionOps as _, TLS_AES_128_GCM_SHA256,
+    TLS_VERSION_1_3, hkdf,
+};
 
 use crate::{Error, Res, version::Version};
 
 /// The AEAD used for Retry is fixed, so use thread local storage.
-fn make_aead(version: Version) -> Aead {
+fn make_aead(version: Version, mode: Mode) -> Aead {
     #[cfg(debug_assertions)]
     ::nss::assert_initialized();
 
@@ -22,24 +25,33 @@ fn make_aead(version: Version) -> Aead {
         TLS_AES_128_GCM_SHA256,
         &secret,
         version.label_prefix(),
+        mode,
     )
     .expect("can create AEAD")
 }
 #[cfg(feature = "draft-29")]
-thread_local!(static RETRY_AEAD_29: RefCell<Aead> = RefCell::new(make_aead(Version::Draft29)));
-thread_local!(static RETRY_AEAD_V1: RefCell<Aead> = RefCell::new(make_aead(Version::Version1)));
-thread_local!(static RETRY_AEAD_V2: RefCell<Aead> = RefCell::new(make_aead(Version::Version2)));
+thread_local!(static RETRY_AEAD_29_ENC: RefCell<Aead> = RefCell::new(make_aead(Version::Draft29, Mode::Encrypt)));
+#[cfg(feature = "draft-29")]
+thread_local!(static RETRY_AEAD_29_DEC: RefCell<Aead> = RefCell::new(make_aead(Version::Draft29, Mode::Decrypt)));
+thread_local!(static RETRY_AEAD_V1_ENC: RefCell<Aead> = RefCell::new(make_aead(Version::Version1, Mode::Encrypt)));
+thread_local!(static RETRY_AEAD_V1_DEC: RefCell<Aead> = RefCell::new(make_aead(Version::Version1, Mode::Decrypt)));
+thread_local!(static RETRY_AEAD_V2_ENC: RefCell<Aead> = RefCell::new(make_aead(Version::Version2, Mode::Encrypt)));
+thread_local!(static RETRY_AEAD_V2_DEC: RefCell<Aead> = RefCell::new(make_aead(Version::Version2, Mode::Decrypt)));
 
 /// Run a function with the appropriate Retry AEAD.
-pub fn use_aead<F, T>(version: Version, f: F) -> Res<T>
+pub fn use_aead<F, T>(version: Version, mode: Mode, f: F) -> Res<T>
 where
     F: FnOnce(&Aead) -> Res<T>,
 {
-    match version {
-        Version::Version2 => &RETRY_AEAD_V2,
-        Version::Version1 => &RETRY_AEAD_V1,
+    match (version, mode) {
+        (Version::Version2, Mode::Encrypt) => &RETRY_AEAD_V2_ENC,
+        (Version::Version2, Mode::Decrypt) => &RETRY_AEAD_V2_DEC,
+        (Version::Version1, Mode::Encrypt) => &RETRY_AEAD_V1_ENC,
+        (Version::Version1, Mode::Decrypt) => &RETRY_AEAD_V1_DEC,
         #[cfg(feature = "draft-29")]
-        Version::Draft29 => &RETRY_AEAD_29,
+        (Version::Draft29, Mode::Encrypt) => &RETRY_AEAD_29_ENC,
+        #[cfg(feature = "draft-29")]
+        (Version::Draft29, Mode::Decrypt) => &RETRY_AEAD_29_DEC,
     }
     .try_with(|aead| f(&aead.borrow()))
     .map_err(|e| {
@@ -50,5 +62,6 @@ where
 
 /// Determine how large the expansion is for a given key.
 pub fn expansion(version: Version) -> usize {
-    use_aead(version, |aead| Ok(aead.expansion())).expect("Unable to access Retry AEAD")
+    use_aead(version, Mode::Encrypt, |aead| Ok(aead.expansion()))
+        .expect("Unable to access Retry AEAD")
 }

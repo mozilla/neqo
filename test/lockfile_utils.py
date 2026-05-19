@@ -202,7 +202,7 @@ def fetch_netwerk_crates() -> set[str]:
     import json
     import urllib.parse
 
-    crates = set()
+    crates: set[str] = set()
 
     # Search for Cargo.toml files in netwerk/ (fewer than 100 expected).
     query = urllib.parse.quote(

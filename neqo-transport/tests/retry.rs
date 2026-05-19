@@ -19,7 +19,7 @@ use neqo_transport::{
     CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamType,
     server::ValidateAddress,
 };
-use nss::{AuthenticationStatus, generate_ech_keys};
+use nss::{AuthenticationStatus, RecordProtectionOps as _, generate_ech_keys};
 use test_fixture::{
     CountingConnectionIdGenerator, assertions, damage_ech_config, datagram, default_client,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
@@ -462,13 +462,13 @@ fn mitm_retry() {
         decode_initial_header(&client_initial2, Role::Client).unwrap();
 
     // Now we have enough information to make keys.
-    let (aead, hp) = initial_aead_and_hp(d_cid, Role::Client);
+    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(d_cid, Role::Client);
     let (header, pn) = header_protection::remove(&hp, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
 
     // Decrypt.
     let mut plaintext_buf = vec![0; client_initial2.len()];
-    let plaintext = aead
+    let plaintext = aead_dec
         .decrypt(pn, &header, &payload[pn_len..], &mut plaintext_buf)
         .unwrap();
 
@@ -489,13 +489,14 @@ fn mitm_retry() {
         .as_ref()
         .to_vec();
     notoken_packet.resize_with(MIN_INITIAL_PACKET_SIZE, u8::default);
-    aead.encrypt(
-        pn,
-        &notoken_header,
-        plaintext,
-        &mut notoken_packet[notoken_header.len()..],
-    )
-    .unwrap();
+    aead_enc
+        .encrypt(
+            pn,
+            &notoken_header,
+            plaintext,
+            &mut notoken_packet[notoken_header.len()..],
+        )
+        .unwrap();
     // Unlike with decryption, don't truncate.
     // All MIN_INITIAL_PACKET_SIZE bytes are needed to reach the minimum datagram size.
 
@@ -545,7 +546,7 @@ fn retry_short_dcid() {
     let short_dcid = &[0x01, 0x02, 0x03, 0x04];
 
     // Decrypt with the original DCID.
-    let (aead_orig, hp_orig) = initial_aead_and_hp(d_cid, Role::Client);
+    let (_, aead_orig, hp_orig) = initial_aead_and_hp(d_cid, Role::Client);
     let (header, pn) = header_protection::remove(&hp_orig, protected_header, payload);
     let pn_len = header.len() - protected_header.len();
 
@@ -565,7 +566,7 @@ fn retry_short_dcid() {
     let short_dcid_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
 
     // Encrypt with keys derived from short DCID.
-    let (aead_short, hp_short) = initial_aead_and_hp(short_dcid, Role::Client);
+    let (aead_short, _, hp_short) = initial_aead_and_hp(short_dcid, Role::Client);
     let mut short_dcid_packet = Encoder::with_capacity(MIN_INITIAL_PACKET_SIZE)
         .encode(&short_dcid_header)
         .as_ref()

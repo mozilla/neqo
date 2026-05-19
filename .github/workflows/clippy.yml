@@ -23,7 +23,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+        uses: mozilla/actions/toolchains@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
 
   clippy:
     name: cargo clippy
@@ -43,7 +43,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy
@@ -54,17 +54,17 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
+      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Use cargo-hack to run clippy on each crate individually with its
-      # respective default features only. Can reveal warnings otherwise
-      # hidden given that a plain cargo clippy combines all features of the
-      # workspace. See e.g. https://github.com/mozilla/neqo/pull/1695.
-      - run: cargo hack clippy --feature-powerset --no-dev-deps --exclude-features gecko -- -D warnings
-      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      # Run clippy and tests across all meaningful feature combinations. Using
+      # --all-targets (not --no-dev-deps) ensures test code is also compiled
+      # and linted for each combination. Excluded features are either empty
+      # (ci, test-fixture, gecko), benchmarking-only (bench), or have their
+      # own dedicated workflow (build-fuzzing-corpus).
+      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

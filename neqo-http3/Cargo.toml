@@ -23,8 +23,8 @@ enumset = { workspace = true }
 http = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
-neqo-qpack = { path = "./../neqo-qpack" }
-neqo-transport = { path = "./../neqo-transport" }
+neqo-qpack = { path = "./../neqo-qpack", default-features = false }
+neqo-transport = { path = "./../neqo-transport", default-features = false }
 nss = { workspace = true }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
@@ -34,7 +34,7 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
-neqo-http3 = { path = ".", features = ["draft-29"] }
+neqo-http3 = { path = ".", default-features = false, features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
@@ -45,6 +45,8 @@ bench = [
         "test-fixture/bench",
         "log/release_max_level_info",
 ]
+blapi = ["neqo-transport/blapi"]
+default = ["blapi"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-transport/disable-encryption",

@@ -409,7 +409,7 @@ mod tests {
         let now = now();
         let mut pmtud = Pmtud::new(addr, iface_mtu);
         let mut stats = Stats::default();
-        let mut prot = CryptoDxState::test_default();
+        let mut prot = CryptoDxState::test_default_write();
 
         pmtud.next(now, &mut stats);
 
@@ -573,7 +573,7 @@ mod tests {
         let mut pmtud = Pmtud::new(addr, iface_mtu);
         pmtud.set_peer_max_udp_payload(peer_max_udp_payload);
         let mut stats = Stats::default();
-        let mut prot = CryptoDxState::test_default();
+        let mut prot = CryptoDxState::test_default_write();
 
         pmtud.start(now, &mut stats);
 
@@ -636,7 +636,7 @@ mod tests {
         assert!(pmtud.needs_probe());
         assert_eq!(pmtud.probe_count, 0);
 
-        let limit = pmtud.probe_size() - CryptoDxState::test_default().expansion();
+        let limit = pmtud.probe_size() - CryptoDxState::test_default_write().expansion();
         let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
         pmtud.send_probe(&mut builder, &mut Vec::new(), &mut stats);
         assert_eq!(
@@ -654,7 +654,7 @@ mod tests {
         let now = now();
         let mut pmtud = Pmtud::new(V4, None);
         let mut stats = Stats::default();
-        let mut prot = CryptoDxState::test_default();
+        let mut prot = CryptoDxState::test_default_write();
         pmtud.next(now, &mut stats);
 
         while pmtud.needs_probe() {
