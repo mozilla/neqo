@@ -64,7 +64,7 @@ jobs:
       # and linted for each combination. Excluded features are either empty
       # (ci, test-fixture, gecko), benchmarking-only (bench), or have their
       # own dedicated workflow (build-fuzzing-corpus).
-      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture -- -D warnings
+      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

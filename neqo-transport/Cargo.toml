@@ -34,11 +34,13 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
-neqo-transport = { path = ".", features = ["draft-29"] }
+neqo-transport = { path = ".", default-features = false, features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
 [features]
 bench = ["neqo-common/bench", "nss/bench", "test-fixture/bench", "log/release_max_level_info"]
+blapi = ["nss/blapi"]
+default = ["blapi"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "nss/disable-encryption",

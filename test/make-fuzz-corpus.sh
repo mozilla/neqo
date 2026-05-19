@@ -39,9 +39,9 @@ minimize_corpus() {
 # First, let's run the test suite to generate initial fuzzing corpora.
 # Compile first so we fail loudly on build errors, then run ignoring test failures.
 echo "Generating new fuzzing corpora under $TMP..."
-cargo test --no-run --quiet --locked --features build-fuzzing-corpus
+cargo test --no-run --quiet --locked --no-default-features --features build-fuzzing-corpus
 RUST_BACKTRACE=0 NEQO_CORPUS=$TMP \
-    cargo test --quiet --locked --features build-fuzzing-corpus --no-fail-fast || true
+    cargo test --quiet --locked --no-default-features --features build-fuzzing-corpus --no-fail-fast || true
 
 # Do dev builds, since we just merge corpora and don't actually run fuzzers here.
 # LTO-linking otherwise takes longer than the merging.
