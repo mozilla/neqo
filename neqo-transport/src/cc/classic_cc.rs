@@ -434,9 +434,10 @@ where
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
             ]
             .into_iter()
-            .chain((self.current.ssthresh != usize::MAX).then_some(
-                qlog::Metric::SsThresh(self.current.ssthresh),
-            )),
+            .chain(
+                (self.current.ssthresh != usize::MAX)
+                    .then_some(qlog::Metric::SsThresh(self.current.ssthresh)),
+            ),
             now,
         );
 

@@ -799,11 +799,7 @@ impl Loss {
         }
     }
 
-    fn expired_timer_type(
-        &self,
-        rtt: &RttEstimate,
-        now: Instant,
-    ) -> Option<qlog::LossTimerType> {
+    fn expired_timer_type(&self, rtt: &RttEstimate, now: Instant) -> Option<qlog::LossTimerType> {
         if self.earliest_loss_time(rtt).is_some_and(|t| t <= now) {
             Some(qlog::LossTimerType::Ack)
         } else if self.earliest_pto(rtt).is_some_and(|t| t <= now) {
