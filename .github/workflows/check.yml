@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+        uses: mozilla/actions/toolchains@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
 
   check:
     name: Run checks
@@ -79,7 +79,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+      - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -90,7 +90,7 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+      - uses: mozilla/actions/nss@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -168,7 +168,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+      - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
         with:
           version: stable
           tools: cargo-hack
