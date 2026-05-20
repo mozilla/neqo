@@ -37,8 +37,8 @@ use crate::{
 pub struct RecvStreams {
     streams: BTreeMap<StreamId, RecvStream>,
     keep_alive: Weak<()>,
-    /// Set when any stream transitions to a terminal state; cleared by `clear_terminal`.
-    has_terminal: bool,
+    /// Set when any stream has ended; cleared by `remove_ended`.
+    has_ended: bool,
 }
 
 impl RecvStreams {
@@ -96,26 +96,69 @@ impl RecvStreams {
 
     pub fn clear(&mut self) {
         self.streams.clear();
-        self.has_terminal = false;
+        self.has_ended = false;
     }
 
-    /// Note that a stream has transitioned to a terminal state so that
-    /// the next call to `clear_terminal` will run the scan.
-    pub const fn note_terminal(&mut self) {
-        self.has_terminal = true;
+    pub const fn set_ended(&mut self, ended: bool) {
+        self.has_ended |= ended;
     }
 
-    pub fn clear_terminal(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
-        if !self.has_terminal {
+    /// Read from a stream, noting when it ends.
+    ///
+    /// # Errors
+    /// When the stream does not exist or has no more data.
+    pub fn read(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
+        let (n, fin) = self.get_mut(stream_id)?.read(data)?;
+        self.set_ended(fin);
+        Ok((n, fin))
+    }
+
+    /// Stop sending on a stream, noting when it ends.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
+        let ended = self.get_mut(stream_id)?.stop_sending(err);
+        self.set_ended(ended);
+        Ok(())
+    }
+
+    /// Reset a stream, noting if it ended.
+    ///
+    /// # Errors
+    /// When flow control is violated.
+    pub fn reset(
+        &mut self,
+        stream_id: StreamId,
+        application_error_code: AppError,
+        final_size: u64,
+    ) -> Res<()> {
+        if let Ok(rs) = self.get_mut(stream_id) {
+            let ended = rs.reset(application_error_code, final_size)?;
+            self.set_ended(ended);
+        }
+        Ok(())
+    }
+
+    /// Note whether a stop-sending ack ended the stream.
+    pub fn stop_sending_acked(&mut self, stream_id: StreamId) {
+        if let Ok(rs) = self.get_mut(stream_id) {
+            let ended = rs.stop_sending_acked();
+            self.set_ended(ended);
+        }
+    }
+
+    pub fn remove_ended(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
+        if !self.has_ended {
             return (0, 0);
         }
-        self.has_terminal = false;
-        // Note: retained terminal bidi streams (send counterpart alive) will be re-flagged
+        self.has_ended = false;
+        // Note: retained ended bidi streams (send counterpart alive) will be re-flagged
         // when their send side is removed via `cleanup_closed_streams`.
         let mut removed_bidi = 0;
         let mut removed_uni = 0;
         self.streams.retain(|id, s| {
-            let dead = s.is_terminal() && (id.is_uni() || !send_streams.exists(*id));
+            let dead = s.is_ended() && (id.is_uni() || !send_streams.exists(*id));
             if dead && id.is_remote_initiated(role) {
                 if id.is_bidi() {
                     removed_bidi += 1;
@@ -688,7 +731,7 @@ impl RecvStream {
 
     /// # Errors
     /// When the reset occurs at an invalid point.
-    pub fn reset(&mut self, application_error_code: AppError, final_size: u64) -> Res<()> {
+    pub fn reset(&mut self, application_error_code: AppError, final_size: u64) -> Res<bool> {
         self.state.flow_control_consume_data(final_size, true)?;
         match &mut self.state {
             RecvStreamState::Recv {
@@ -711,6 +754,7 @@ impl RecvStream {
                     final_received: received,
                     final_read: read,
                 });
+                Ok(true)
             }
             RecvStreamState::AbortReading {
                 fc,
@@ -735,12 +779,10 @@ impl RecvStream {
                     final_received: received,
                     final_read: read,
                 });
+                Ok(true)
             }
-            _ => {
-                // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
-            }
+            _ => Ok(false), // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
         }
-        Ok(())
     }
 
     fn flow_control_retire_data(
@@ -770,7 +812,7 @@ impl RecvStream {
     }
 
     #[must_use]
-    pub const fn is_terminal(&self) -> bool {
+    pub const fn is_ended(&self) -> bool {
         matches!(
             self.state,
             RecvStreamState::ResetRecvd { .. } | RecvStreamState::DataRead { .. }
@@ -835,7 +877,7 @@ impl RecvStream {
         }
     }
 
-    pub fn stop_sending(&mut self, err: AppError) {
+    pub fn stop_sending(&mut self, err: AppError) -> bool {
         qtrace!("stop_sending called when in state {}", self.state);
         match &mut self.state {
             RecvStreamState::Recv {
@@ -863,6 +905,7 @@ impl RecvStream {
                     final_received: received,
                     final_read: read,
                 });
+                false
             }
             RecvStreamState::DataRecvd {
                 fc,
@@ -876,13 +919,12 @@ impl RecvStream {
                     final_received: received,
                     final_read: read,
                 });
+                true
             }
             RecvStreamState::DataRead { .. }
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
-            | RecvStreamState::ResetRecvd { .. } => {
-                // Already in terminal state
-            }
+            | RecvStreamState::ResetRecvd { .. } => false,
         }
     }
 
@@ -930,7 +972,7 @@ impl RecvStream {
         }
     }
 
-    pub fn stop_sending_acked(&mut self) {
+    pub fn stop_sending_acked(&mut self) -> bool {
         if let RecvStreamState::AbortReading {
             fc,
             session_fc,
@@ -949,17 +991,18 @@ impl RecvStream {
                     final_received: received,
                     final_read: read,
                 });
-            } else {
-                let fc_copy = mem::take(fc);
-                let session_fc_copy = mem::take(session_fc);
-                self.set_state(RecvStreamState::WaitForReset {
-                    fc: fc_copy,
-                    session_fc: session_fc_copy,
-                    final_received: received,
-                    final_read: read,
-                });
+                return true;
             }
+            let fc_copy = mem::take(fc);
+            let session_fc_copy = mem::take(session_fc);
+            self.set_state(RecvStreamState::WaitForReset {
+                fc: fc_copy,
+                session_fc: session_fc_copy,
+                final_received: received,
+                final_read: read,
+            });
         }
+        false
     }
 
     #[cfg(test)]

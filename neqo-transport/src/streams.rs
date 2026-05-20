@@ -15,7 +15,7 @@ use std::{
 use neqo_common::{Buffer, Role, qtrace, qwarn};
 
 use crate::{
-    ConnectionEvents, Error, Res,
+    AppError, ConnectionEvents, Error, Res,
     fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl},
     frame::Frame,
     packet,
@@ -120,10 +120,9 @@ impl Streams {
                 final_size,
             } => {
                 stats.reset_stream += 1;
-                if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
-                    rs.reset(*application_error_code, *final_size)?;
-                    // reset() may transition the stream to ResetRecvd (terminal).
-                    self.recv.note_terminal();
+                if self.obtain_stream(*stream_id)?.1.is_some() {
+                    self.recv
+                        .reset(*stream_id, *application_error_code, *final_size)?;
                 }
             }
             Frame::StopSending {
@@ -299,10 +298,7 @@ impl Streams {
             StreamRecoveryToken::Stream(st) => self.send.acked(st),
             StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_acked(*stream_id),
             StreamRecoveryToken::StopSending { stream_id } => {
-                if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
-                    rs.stop_sending_acked();
-                    self.recv.note_terminal();
-                }
+                self.recv.stop_sending_acked(*stream_id);
             }
             // We only worry when these are lost
             StreamRecoveryToken::DataBlocked(_)
@@ -319,19 +315,24 @@ impl Streams {
         self.recv.clear();
     }
 
-    /// Note that a recv stream has ended (i.e., transitioned to a terminal state).
-    pub const fn stream_ended(&mut self) {
-        self.recv.note_terminal();
+    /// # Errors
+    /// When the stream does not exist or has no more data.
+    pub fn recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
+        self.recv.read(stream_id, data)
+    }
+
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
+        self.recv.stop_sending(stream_id, err)
     }
 
     pub fn cleanup_closed_streams(&mut self) {
-        // Remove terminal send streams. If any were removed, bidi recv streams whose
+        // Remove ended send streams. If any were removed, bidi recv streams whose
         // send counterpart just disappeared may now be clearable too.
-        if self.send.remove_terminal() {
-            self.recv.note_terminal();
-        }
+        self.recv.set_ended(self.send.remove_ended());
 
-        let (removed_bidi, removed_uni) = self.recv.clear_terminal(&self.send, self.role);
+        let (removed_bidi, removed_uni) = self.recv.remove_ended(&self.send, self.role);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         // The updates will be send if any streams has been removed.
