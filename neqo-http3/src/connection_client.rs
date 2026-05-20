@@ -828,6 +828,8 @@ impl Http3Client {
 
     /// Send `WebTransport` datagram.
     ///
+    /// Consider calling [`Http3Client::datagram_send_queue_capacity`] before.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -847,6 +849,8 @@ impl Http3Client {
 
     /// Send `ConnectUdp` datagram.
     ///
+    /// Consider calling [`Http3Client::datagram_send_queue_capacity`] before.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -862,6 +866,13 @@ impl Http3Client {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         self.base_handler
             .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)
+    }
+
+    /// Returns the number of QUIC datagrams that can still be queued for
+    /// sending before the queue is full.
+    #[must_use]
+    pub fn datagram_send_queue_capacity(&self) -> usize {
+        self.conn.datagram_send_queue_capacity()
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
