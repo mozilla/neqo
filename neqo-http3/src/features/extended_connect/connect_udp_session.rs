@@ -13,7 +13,7 @@ use neqo_common::{Bytes, Decoder, Encoder, qdebug, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    Error, RecvStream, Res, SendStream,
+    Error, RecvStreamImpl, Res, SendStream as _, SendStreamImpl,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
         session::{DgramContextIdError, State},
@@ -52,7 +52,7 @@ impl Protocol for Session {
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
-        control_stream_recv: &mut Box<dyn RecvStream>,
+        control_stream_recv: &mut RecvStreamImpl,
         now: Instant,
     ) -> Res<Option<State>> {
         loop {
@@ -124,7 +124,7 @@ impl Protocol for Session {
 
     fn write_datagram_capsule(
         &self,
-        control_stream_send: &mut Box<dyn SendStream>,
+        control_stream_send: &mut SendStreamImpl,
         conn: &mut Connection,
         buf: &[u8],
         now: Instant,

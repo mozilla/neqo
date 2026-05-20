@@ -28,7 +28,7 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::Certifi
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
+    ReceiveOutput, RecvStream as _, Res, SendStream as _,
     client_events::{Http3ClientEvent, Http3ClientEvents},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -1272,19 +1272,22 @@ impl Http3Client {
 
         self.base_handler.add_recv_stream(
             stream_id,
-            Box::new(RecvMessage::new(
-                &RecvMessageInfo {
-                    message_type: MessageType::Response,
-                    stream_type: Http3StreamType::Push,
-                    stream_id,
-                    first_frame_type: None,
-                },
-                Rc::clone(self.base_handler.qpack_decoder()),
-                Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
-                None,
-                // TODO: think about the right priority for the push streams.
-                PriorityHandler::new(true, Priority::default()),
-            )),
+            Box::new(
+                RecvMessage::new(
+                    &RecvMessageInfo {
+                        message_type: MessageType::Response,
+                        stream_type: Http3StreamType::Push,
+                        stream_id,
+                        first_frame_type: None,
+                    },
+                    Rc::clone(self.base_handler.qpack_decoder()),
+                    Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
+                    None,
+                    // TODO: think about the right priority for the push streams.
+                    PriorityHandler::new(true, Priority::default()),
+                )
+                .into(),
+            ),
         );
         let res = self
             .base_handler

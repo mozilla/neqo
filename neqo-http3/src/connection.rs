@@ -25,8 +25,8 @@ use strum::Display;
 
 use crate::{
     CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
-    Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
-    SendStreamEvents,
+    Priority, PriorityHandler, ReceiveOutput, RecvStream as _, RecvStreamEvents, RecvStreamImpl,
+    Res, SendStream as _, SendStreamEvents, SendStreamImpl, Stream as _,
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
@@ -149,9 +149,10 @@ impl Http3State {
 /// - remote streams:
 ///   - all new incoming streams are registered with [`NewStreamHeadReader`]. This is triggered by
 ///     [`ConnectionEvent::NewStream`] and [`Http3Connection::add_new_stream`] is called.
-///   - reading from a [`NewStreamHeadReader`] stream, via the [`RecvStream::receive`] function,
-///     will decode a stream type. [`RecvStream::receive`] will return [`ReceiveOutput::NewStream`]
-///     when a stream type has been decoded.  After this point the stream:
+///   - reading from a [`NewStreamHeadReader`] stream, via the [`crate::RecvStream::receive`]
+///     function, will decode a stream type. [`crate::RecvStream::receive`] will return
+///     [`ReceiveOutput::NewStream`] when a stream type has been decoded.  After this point the
+///     stream:
 ///     - will be regegistered with the appropriate handler,
 ///     - will be canceled if is an unknown stream type or
 ///     - the connection will fail if it is unallowed stream type (receiving HTTP request on the
@@ -165,8 +166,8 @@ impl Http3State {
 /// ### Receiving data
 ///
 /// Reading from a stream is triggered by [`ConnectionEvent::RecvStreamReadable`] events for the
-/// stream. The receive handler is retrieved from `recv_streams` and its [`RecvStream::receive`]
-/// function is called.
+/// stream. The receive handler is retrieved from `recv_streams` and its
+/// [`crate::RecvStream::receive`] function is called.
 ///
 /// Receiving data on [`Http3StreamType::Http`] streams is also triggered by the
 /// [`Http3Connection::read_data`] function. [`ConnectionEvent::RecvStreamReadable`] events will
@@ -176,11 +177,11 @@ impl Http3State {
 /// consecutive `DATA` frames.
 ///
 /// On a [`Http3StreamType::WebTransport`] stream data will be read only by the
-/// `Http3Connection::read_data` function. The [`RecvStream::receive`] function only produces an
-/// [`Http3ClientEvent`] or [`Http3ServerEvent`] event.
+/// `Http3Connection::read_data` function. The [`crate::RecvStream::receive`] function only produces
+/// an [`Http3ClientEvent`] or [`Http3ServerEvent`] event.
 ///
-/// The [`RecvStream::receive`] and [`Http3Connection::read_data`] functions may detect that the
-/// stream is done, e.g. FIN received. In this case, the stream will be removed from the
+/// The [`crate::RecvStream::receive`] and [`Http3Connection::read_data`] functions may detect that
+/// the stream is done, e.g. FIN received. In this case, the stream will be removed from the
 /// `recv_stream` register, see [`Http3Connection::remove_recv_stream`].
 ///
 /// ### Sending data
@@ -206,19 +207,19 @@ impl Http3State {
 /// ### [`ControlStreamRemote`]
 ///
 /// The [`ControlStreamRemote`] handler uses [`FrameReader`] to read and decode frames received on
-/// the control frame. The [`RecvStream::receive`] implementation returns
+/// the control frame. The [`crate::RecvStream::receive`] implementation returns
 /// [`ReceiveOutput::ControlFrames`] with a list of control frames read (the list may be empty). The
 /// control frames are handled by [`Http3Connection`] and/or by [`Http3Client`] and
 /// [`Http3ServerHandler`].
 ///
 /// ### [`DecoderRecvStream`] and [`EncoderRecvStream`]
 ///
-/// The [`RecvStream::receive`] implementation of these handlers call corresponding
-/// [`RecvStream::receive`] functions of [`qpack::Encoder`] and [`qpack::Decoder`].
+/// The [`crate::RecvStream::receive`] implementation of these handlers call corresponding
+/// [`crate::RecvStream::receive`] functions of [`qpack::Encoder`] and [`qpack::Decoder`].
 ///
 /// [`DecoderRecvStream`] returns [`ReceiveOutput::UnblockedStreams`] that may contain a list of
 /// stream ids that are unblocked by receiving qpack decoder commands. [`Http3Connection`] will
-/// handle this output by calling [`RecvStream::receive`] for the listed stream ids.
+/// handle this output by calling [`crate::RecvStream::receive`] for the listed stream ids.
 ///
 /// [`EncoderRecvStream`] only returns [`ReceiveOutput::NoOutput`].
 ///
@@ -227,7 +228,7 @@ impl Http3State {
 /// ### [`NewStreamHeadReader`]
 ///
 /// A new incoming receiver stream registers a [`NewStreamHeadReader`] handler. This handler reads
-/// the first bytes of a stream to detect a stream type. The [`RecvStream::receive`] function
+/// the first bytes of a stream to detect a stream type. The [`crate::RecvStream::receive`] function
 /// returns [`ReceiveOutput::NoOutput`] if a stream type is still not known by reading the available
 /// stream data or [`ReceiveOutput::NewStream`]. The handling of the output is explained above.
 ///
@@ -269,8 +270,8 @@ impl Http3State {
 /// [`WebTransportRecvStream`]  handlers will be unregistered from the session if they are closed,
 /// reset, or canceled.
 ///
-/// The call to function [`RecvStream::receive`] may produce [`Http3ClientEvent::DataReadable`].
-/// Actual reading of data is done in the `read_data` function.
+/// The call to function [`crate::RecvStream::receive`] may produce
+/// [`Http3ClientEvent::DataReadable`]. Actual reading of data is done in the `read_data` function.
 ///
 /// [`Http3ServerEvent`]: crate::Http3ServerEvent
 /// [`Http3Server`]: crate::Http3Server
@@ -293,8 +294,8 @@ pub struct Http3Connection {
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     settings_state: Http3RemoteSettingsState,
     streams_with_pending_data: HashSet<StreamId>,
-    send_streams: HashMap<StreamId, Box<dyn SendStream>>,
-    recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
+    send_streams: HashMap<StreamId, Box<SendStreamImpl>>,
+    recv_streams: HashMap<StreamId, Box<RecvStreamImpl>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
 }
@@ -382,7 +383,7 @@ impl Http3Connection {
     }
 
     /// Inform an [`Http3Connection`] that a stream has data to send and that
-    /// [`SendStream::send`] should be called for the stream.
+    /// [`crate::SendStream::send`] should be called for the stream.
     pub(crate) fn stream_has_pending_data(&mut self, stream_id: StreamId) {
         self.streams_with_pending_data.insert(stream_id);
     }
@@ -467,11 +468,11 @@ impl Http3Connection {
         qtrace!("[{self}] A new stream: {stream_id}");
         self.recv_streams.insert(
             stream_id,
-            Box::new(NewStreamHeadReader::new(stream_id, self.role)),
+            Box::new(NewStreamHeadReader::new(stream_id, self.role).into()),
         );
     }
 
-    /// The function calls [`RecvStream::receive`] for a stream. It also deals
+    /// The function calls [`crate::RecvStream::receive`] for a stream. It also deals
     /// with the outcome of a read by calling
     /// [`Http3Connection::handle_stream_manipulation_output`].
     fn stream_receive(
@@ -710,8 +711,10 @@ impl Http3Connection {
         match stream_type {
             NewStreamType::Control => {
                 self.check_stream_exists(Http3StreamType::Control)?;
-                self.recv_streams
-                    .insert(stream_id, Box::new(ControlStreamRemote::new(stream_id)));
+                self.recv_streams.insert(
+                    stream_id,
+                    Box::new(ControlStreamRemote::new(stream_id).into()),
+                );
             }
 
             NewStreamType::Push(push_id) => {
@@ -722,10 +725,9 @@ impl Http3Connection {
                 self.check_stream_exists(Http3StreamType::Decoder)?;
                 self.recv_streams.insert(
                     stream_id,
-                    Box::new(DecoderRecvStream::new(
-                        stream_id,
-                        Rc::clone(&self.qpack_decoder),
-                    )),
+                    Box::new(
+                        DecoderRecvStream::new(stream_id, Rc::clone(&self.qpack_decoder)).into(),
+                    ),
                 );
             }
             NewStreamType::Encoder => {
@@ -733,10 +735,9 @@ impl Http3Connection {
                 self.check_stream_exists(Http3StreamType::Encoder)?;
                 self.recv_streams.insert(
                     stream_id,
-                    Box::new(EncoderRecvStream::new(
-                        stream_id,
-                        Rc::clone(&self.qpack_encoder),
-                    )),
+                    Box::new(
+                        EncoderRecvStream::new(stream_id, Rc::clone(&self.qpack_encoder)).into(),
+                    ),
                 );
             }
             NewStreamType::Http(_) => {
@@ -969,19 +970,22 @@ impl Http3Connection {
 
         self.add_streams(
             stream_id,
-            Box::new(send_message),
-            Box::new(RecvMessage::new(
-                &RecvMessageInfo {
-                    message_type: MessageType::Response,
-                    stream_type,
-                    stream_id,
-                    first_frame_type: None,
-                },
-                Rc::clone(&self.qpack_decoder),
-                recv_events,
-                push_handler,
-                PriorityHandler::new(false, request.priority),
-            )),
+            Box::new(send_message.into()),
+            Box::new(
+                RecvMessage::new(
+                    &RecvMessageInfo {
+                        message_type: MessageType::Response,
+                        stream_type,
+                        stream_id,
+                        first_frame_type: None,
+                    },
+                    Rc::clone(&self.qpack_decoder),
+                    recv_events,
+                    push_handler,
+                    PriorityHandler::new(false, request.priority),
+                )
+                .into(),
+            ),
         );
 
         // Call immediately send so that at least headers get sent. This will make Firefox faster,
@@ -1228,8 +1232,8 @@ impl Http3Connection {
         )));
         self.add_streams(
             id,
-            Box::new(Rc::clone(&extended_conn)),
-            Box::new(Rc::clone(&extended_conn)),
+            Box::new(Rc::clone(&extended_conn).into()),
+            Box::new(Rc::clone(&extended_conn).into()),
         );
 
         let final_headers = Self::create_request_headers(&RequestDescription {
@@ -1361,8 +1365,8 @@ impl Http3Connection {
                     ));
                     self.add_streams(
                         stream_id,
-                        Box::new(Rc::clone(&extended_conn)),
-                        Box::new(extended_conn),
+                        Box::new(Rc::clone(&extended_conn).into()),
+                        Box::new(extended_conn.into()),
                     );
                     self.streams_with_pending_data.insert(stream_id);
                 } else {
@@ -1499,41 +1503,53 @@ impl Http3Connection {
             if local {
                 self.send_streams.insert(
                     stream_id,
-                    Box::new(WebTransportSendStream::new(
-                        stream_id,
-                        session_id,
-                        send_events,
-                        webtransport_session,
-                        true,
-                    )),
+                    Box::new(
+                        WebTransportSendStream::new(
+                            stream_id,
+                            session_id,
+                            send_events,
+                            webtransport_session,
+                            true,
+                        )
+                        .into(),
+                    ),
                 );
             } else {
                 self.recv_streams.insert(
                     stream_id,
-                    Box::new(WebTransportRecvStream::new(
-                        stream_id,
-                        session_id,
-                        recv_events,
-                        webtransport_session,
-                    )),
+                    Box::new(
+                        WebTransportRecvStream::new(
+                            stream_id,
+                            session_id,
+                            recv_events,
+                            webtransport_session,
+                        )
+                        .into(),
+                    ),
                 );
             }
         } else {
             self.add_streams(
                 stream_id,
-                Box::new(WebTransportSendStream::new(
-                    stream_id,
-                    session_id,
-                    send_events,
-                    Rc::clone(&webtransport_session),
-                    local,
-                )),
-                Box::new(WebTransportRecvStream::new(
-                    stream_id,
-                    session_id,
-                    recv_events,
-                    webtransport_session,
-                )),
+                Box::new(
+                    WebTransportSendStream::new(
+                        stream_id,
+                        session_id,
+                        send_events,
+                        Rc::clone(&webtransport_session),
+                        local,
+                    )
+                    .into(),
+                ),
+                Box::new(
+                    WebTransportRecvStream::new(
+                        stream_id,
+                        session_id,
+                        recv_events,
+                        webtransport_session,
+                    )
+                    .into(),
+                ),
             );
         }
         Ok(())
@@ -1672,8 +1688,8 @@ impl Http3Connection {
     pub(crate) fn add_streams(
         &mut self,
         stream_id: StreamId,
-        send_stream: Box<dyn SendStream>,
-        recv_stream: Box<dyn RecvStream>,
+        send_stream: Box<SendStreamImpl>,
+        recv_stream: Box<RecvStreamImpl>,
     ) {
         if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
@@ -1686,7 +1702,7 @@ impl Http3Connection {
     pub(crate) fn add_recv_stream(
         &mut self,
         stream_id: StreamId,
-        recv_stream: Box<dyn RecvStream>,
+        recv_stream: Box<RecvStreamImpl>,
     ) {
         self.recv_streams.insert(stream_id, recv_stream);
     }
@@ -1789,7 +1805,7 @@ impl Http3Connection {
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
-    ) -> Option<Box<dyn RecvStream>> {
+    ) -> Option<Box<RecvStreamImpl>> {
         let stream = self.recv_streams.remove(&stream_id);
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
@@ -1806,7 +1822,7 @@ impl Http3Connection {
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
-    ) -> Option<Box<dyn SendStream>> {
+    ) -> Option<Box<SendStreamImpl>> {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
@@ -1853,22 +1869,22 @@ impl Http3Connection {
     }
 
     #[must_use]
-    pub fn send_streams(&self) -> &HashMap<StreamId, Box<dyn SendStream>> {
+    pub const fn send_streams(&self) -> &HashMap<StreamId, Box<SendStreamImpl>> {
         &self.send_streams
     }
 
     #[must_use]
-    pub fn send_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn SendStream>> {
+    pub const fn send_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<SendStreamImpl>> {
         &mut self.send_streams
     }
 
     #[must_use]
-    pub fn recv_streams(&self) -> &HashMap<StreamId, Box<dyn RecvStream>> {
+    pub const fn recv_streams(&self) -> &HashMap<StreamId, Box<RecvStreamImpl>> {
         &self.recv_streams
     }
 
     #[must_use]
-    pub fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
+    pub const fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<RecvStreamImpl>> {
         &mut self.recv_streams
     }
 }

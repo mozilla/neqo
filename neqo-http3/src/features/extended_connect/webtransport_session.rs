@@ -15,7 +15,7 @@ use neqo_common::{Bytes, Encoder, Role, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
+    Error, Http3StreamInfo, Http3StreamType, RecvStreamImpl, Res, SendStreamImpl,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
@@ -95,7 +95,7 @@ impl Protocol for Session {
         &mut self,
         conn: &mut Connection,
         events: &mut Box<dyn ExtendedConnectEvents>,
-        control_stream_recv: &mut Box<dyn RecvStream>,
+        control_stream_recv: &mut RecvStreamImpl,
         now: Instant,
     ) -> Res<Option<State>> {
         let (f, fin) = self
@@ -225,7 +225,7 @@ impl Protocol for Session {
 
     fn write_datagram_capsule(
         &self,
-        _control_stream_send: &mut Box<dyn SendStream>,
+        _control_stream_send: &mut SendStreamImpl,
         _conn: &mut Connection,
         _buf: &[u8],
         _now: Instant,

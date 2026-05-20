@@ -132,6 +132,30 @@ macro_rules! dispatch {
     };
 }
 
+/// Generate `From<VariantType>` impls for an enum whose variants each wrap exactly one type.
+///
+/// ```ignore
+/// impl_from_variants!(MyEnum {
+///     VariantA(TypeA),
+///     VariantB(TypeB),
+/// });
+/// // expands to:
+/// impl From<TypeA> for MyEnum {
+///     fn from(e: TypeA) -> Self { Self::VariantA(e) }
+/// }
+/// impl From<TypeB> for MyEnum {
+///     fn from(e: TypeB) -> Self { Self::VariantB(e) }
+/// }
+/// ```
+#[macro_export]
+macro_rules! impl_from_variants {
+    ($enum:ty { $($variant:ident($src:ty)),+ $(,)? }) => {
+        $(impl From<$src> for $enum {
+            fn from(e: $src) -> Self { Self::$variant(e) }
+        })+
+    };
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
