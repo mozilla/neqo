@@ -24,16 +24,16 @@ use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
 
 use crate::{
-    CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
-    Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
-    SendStreamEvents,
+    CloseType, Error, ExtendedConnectEventsImpl, Http3Parameters, Http3StreamType, NewStreamType,
+    Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEventsImpl, Res, SendStream,
+    SendStreamEventsImpl,
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::{
         ConnectType,
         extended_connect::{
-            self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            self, ExtendedConnectFeature, ExtendedConnectType,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -234,7 +234,7 @@ impl Http3State {
 /// ### [`SendMessage`] and [`RecvMessage`]
 ///
 /// [`RecvMessage::receive`] only returns [`ReceiveOutput::NoOutput`]. It also have an event
-/// listener of type [`HttpRecvStreamEvents`]. The listener is called when headers are ready, or
+/// listener of type [`RecvStreamEventsImpl`]. The listener is called when headers are ready, or
 /// data is ready, etc.
 ///
 /// For example for [`Http3StreamType::Http`] stream the listener will produce
@@ -248,7 +248,7 @@ impl Http3State {
 /// and [`RecvMessage`] handler to handle parsing and sending of HTTP part of
 /// the control stream.  When HTTP headers are exchanged,
 /// [`extended_connect::session::Session`] will take over handling of stream
-/// data. [`extended_connect::session::Session`] sets a [`HttpRecvStreamEvents`]
+/// data. [`extended_connect::session::Session`] sets a [`RecvStreamEventsImpl`]
 /// listener as the [`RecvMessage`] event listener.
 ///
 /// `neqo_http3` implements the WebTransport and MASQUE connect-udp HTTP
@@ -887,8 +887,8 @@ impl Http3Connection {
     pub fn request<T>(
         &mut self,
         conn: &mut Connection,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn HttpRecvStreamEvents>,
+        send_events: SendStreamEventsImpl,
+        recv_events: RecvStreamEventsImpl,
         push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
         now: Instant,
@@ -937,8 +937,8 @@ impl Http3Connection {
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn HttpRecvStreamEvents>,
+        send_events: SendStreamEventsImpl,
+        recv_events: RecvStreamEventsImpl,
         push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
         now: Instant,
@@ -1162,7 +1162,7 @@ impl Http3Connection {
     pub fn webtransport_create_session<T>(
         &mut self,
         conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         target: T,
         headers: &[Header],
     ) -> Res<StreamId>
@@ -1185,7 +1185,7 @@ impl Http3Connection {
     pub fn connect_udp_create_session<T>(
         &mut self,
         conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         target: T,
         headers: &[Header],
     ) -> Res<StreamId>
@@ -1208,7 +1208,7 @@ impl Http3Connection {
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         target: T,
         headers: &[Header],
         connect_type: ExtendedConnectType,
@@ -1250,7 +1250,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         accept_res: &SessionAcceptAction,
         now: Instant,
     ) -> Res<()> {
@@ -1272,7 +1272,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         accept_res: &SessionAcceptAction,
         now: Instant,
     ) -> Res<()> {
@@ -1294,7 +1294,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         accept_res: &SessionAcceptAction,
         connect_type: ExtendedConnectType,
         now: Instant,
@@ -1426,8 +1426,8 @@ impl Http3Connection {
         conn: &mut Connection,
         session_id: StreamId,
         stream_type: StreamType,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn RecvStreamEvents>,
+        send_events: SendStreamEventsImpl,
+        recv_events: RecvStreamEventsImpl,
     ) -> Res<StreamId> {
         qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
 
@@ -1462,8 +1462,8 @@ impl Http3Connection {
         &mut self,
         session_id: StreamId,
         stream_id: StreamId,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn RecvStreamEvents>,
+        send_events: SendStreamEventsImpl,
+        recv_events: RecvStreamEventsImpl,
     ) -> Res<()> {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
@@ -1490,8 +1490,8 @@ impl Http3Connection {
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
         session_id: StreamId,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn RecvStreamEvents>,
+        send_events: SendStreamEventsImpl,
+        recv_events: RecvStreamEventsImpl,
         local: bool,
     ) -> Res<()> {
         webtransport_session.borrow_mut().add_stream(stream_id)?;

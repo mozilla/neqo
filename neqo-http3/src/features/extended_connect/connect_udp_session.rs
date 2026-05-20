@@ -13,9 +13,9 @@ use neqo_common::{Bytes, Decoder, Encoder, qdebug, qtrace};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
-    Error, RecvStream, Res, SendStream,
+    Error, ExtendedConnectEventsImpl, RecvStream, Res, SendStream,
     features::extended_connect::{
-        CloseReason, ExtendedConnectEvents, ExtendedConnectType, Protocol,
+        CloseReason, ExtendedConnectEvents as _, ExtendedConnectType, Protocol,
         session::{DgramContextIdError, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, capsule::Capsule},
@@ -51,7 +51,7 @@ impl Protocol for Session {
     fn read_control_stream(
         &mut self,
         conn: &mut Connection,
-        events: &mut Box<dyn ExtendedConnectEvents>,
+        events: &mut ExtendedConnectEventsImpl,
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>> {

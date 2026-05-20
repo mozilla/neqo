@@ -506,8 +506,8 @@ impl Http3Client {
         }
         let output = self.base_handler.request(
             &mut self.conn,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
+            self.events.clone().into(),
             Some(Rc::clone(&self.push_handler)),
             &RequestDescription {
                 method,
@@ -547,8 +547,8 @@ impl Http3Client {
     {
         let output = self.base_handler.request(
             &mut self.conn,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
+            self.events.clone().into(),
             Some(Rc::clone(&self.push_handler)),
             &RequestDescription {
                 method: "CONNECT",
@@ -722,7 +722,7 @@ impl Http3Client {
     {
         let output = self.base_handler.webtransport_create_session(
             &mut self.conn,
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
             target,
             headers,
         );
@@ -750,7 +750,7 @@ impl Http3Client {
     {
         let output = self.base_handler.connect_udp_create_session(
             &mut self.conn,
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
             target,
             headers,
         );
@@ -821,8 +821,8 @@ impl Http3Client {
             &mut self.conn,
             session_id,
             stream_type,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
+            self.events.clone().into(),
+            self.events.clone().into(),
         )
     }
 
@@ -1209,8 +1209,8 @@ impl Http3Client {
                 self.base_handler.webtransport_create_stream_remote(
                     StreamId::from(session_id),
                     stream_id,
-                    Box::new(self.events.clone()),
-                    Box::new(self.events.clone()),
+                    self.events.clone().into(),
+                    self.events.clone().into(),
                 )?;
                 let res =
                     self.base_handler
@@ -1280,7 +1280,7 @@ impl Http3Client {
                     first_frame_type: None,
                 },
                 Rc::clone(self.base_handler.qpack_decoder()),
-                Box::new(RecvPushEvents::new(push_id, Rc::clone(&self.push_handler))),
+                RecvPushEvents::new(push_id, Rc::clone(&self.push_handler)).into(),
                 None,
                 // TODO: think about the right priority for the push streams.
                 PriorityHandler::new(true, Priority::default()),

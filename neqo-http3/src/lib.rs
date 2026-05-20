@@ -165,19 +165,25 @@ mod stream_type_reader;
 use std::{cell::RefCell, fmt::Debug, rc::Rc, time::Instant};
 
 use buffered_send_stream::BufferedStream;
+use client_events::Http3ClientEvents;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
+use features::extended_connect::{
+    ExtendedConnectEvents, ExtendedConnectType, HeaderListener, session::CloseReason,
+};
 use frames::HFrame;
 pub use neqo_common::Header;
-use neqo_common::MessageType;
+use neqo_common::{Bytes, MessageType};
 use neqo_qpack::Error as QpackError;
 use neqo_transport::{AppError, Connection, Error as TransportError, recv_stream, send_stream};
 pub use neqo_transport::{Output, StreamId, streams::SendOrder};
 pub use priority::Priority;
+use push_controller::RecvPushEvents;
 pub use push_id::PushId;
 pub use server::Http3Server;
+use server_connection_events::Http3ServerConnEvents;
 pub use server_events::{
     ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
     WebTransportRequest, WebTransportServerEvent,
@@ -498,7 +504,7 @@ trait HttpRecvStream: RecvStream {
     fn priority_update_frame(&mut self) -> Option<HFrame>;
     fn priority_update_sent(&mut self) -> Res<()>;
 
-    fn set_new_listener(&mut self, _conn_events: Box<dyn HttpRecvStreamEvents>) {}
+    fn set_new_listener(&mut self, _conn_events: RecvStreamEventsImpl) {}
     fn extended_connect_wait_for_response(&self) -> bool {
         false
     }
@@ -616,13 +622,170 @@ trait HttpSendStream: SendStream {
     ///
     /// This can also return an error if the underlying stream is closed.
     fn send_headers(&mut self, headers: &[Header], conn: &mut Connection) -> Res<()>;
-    fn set_new_listener(&mut self, _conn_events: Box<dyn SendStreamEvents>) {}
+    fn set_new_listener(&mut self, _conn_events: SendStreamEventsImpl) {}
 }
 
 trait SendStreamEvents: Debug {
     fn send_closed(&self, _stream_info: &Http3StreamInfo, _close_type: CloseType) {}
     fn data_writable(&self, _stream_info: &Http3StreamInfo) {}
 }
+
+// --- Concrete event implementations (no heap allocation) ---
+
+/// Generate `From<VariantType>` impls for an enum whose variants each wrap exactly one type.
+macro_rules! impl_from_variants {
+    ($enum:ty { $($variant:ident($src:ty)),+ $(,)? }) => {
+        $(impl From<$src> for $enum {
+            fn from(e: $src) -> Self { Self::$variant(e) }
+        })+
+    };
+}
+
+macro_rules! dispatch_send_stream_events {
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!([Client, Server, ExtendedConnect] $self . $method $args)
+    };
+}
+
+#[derive(Debug)]
+pub(crate) enum SendStreamEventsImpl {
+    Client(Http3ClientEvents),
+    Server(Http3ServerConnEvents),
+    ExtendedConnect(Rc<RefCell<HeaderListener>>),
+}
+
+impl SendStreamEvents for SendStreamEventsImpl {
+    fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
+        dispatch_send_stream_events!(self.send_closed(stream_info, close_type));
+    }
+
+    fn data_writable(&self, stream_info: &Http3StreamInfo) {
+        dispatch_send_stream_events!(self.data_writable(stream_info));
+    }
+}
+
+impl_from_variants!(SendStreamEventsImpl {
+    Client(Http3ClientEvents),
+    Server(Http3ServerConnEvents),
+    ExtendedConnect(Rc<RefCell<HeaderListener>>),
+});
+
+macro_rules! dispatch_recv_stream_events {
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!([Client, Server, Push, ExtendedConnect] $self . $method $args)
+    };
+}
+
+/// Concrete implementation of [`RecvStreamEvents`] and [`HttpRecvStreamEvents`].
+#[derive(Debug)]
+pub(crate) enum RecvStreamEventsImpl {
+    Client(Http3ClientEvents),
+    Server(Http3ServerConnEvents),
+    Push(RecvPushEvents),
+    ExtendedConnect(Rc<RefCell<HeaderListener>>),
+}
+
+impl RecvStreamEvents for RecvStreamEventsImpl {
+    fn data_readable(&self, stream_info: &Http3StreamInfo) {
+        dispatch_recv_stream_events!(self.data_readable(stream_info));
+    }
+
+    fn recv_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
+        dispatch_recv_stream_events!(self.recv_closed(stream_info, close_type));
+    }
+}
+
+impl HttpRecvStreamEvents for RecvStreamEventsImpl {
+    fn header_ready(
+        &self,
+        stream_info: &Http3StreamInfo,
+        headers: Vec<Header>,
+        interim: bool,
+        fin: bool,
+    ) {
+        dispatch_recv_stream_events!(self.header_ready(stream_info, headers, interim, fin));
+    }
+
+    fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
+        dispatch_recv_stream_events!(self.extended_connect_new_session(stream_id, headers));
+    }
+}
+
+impl_from_variants!(RecvStreamEventsImpl {
+    Client(Http3ClientEvents),
+    Server(Http3ServerConnEvents),
+    Push(RecvPushEvents),
+    ExtendedConnect(Rc<RefCell<HeaderListener>>),
+});
+
+macro_rules! dispatch_extended_connect_events {
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!([Client, Server] $self . $method $args)
+    };
+}
+
+/// Concrete implementation of [`ExtendedConnectEvents`].
+#[derive(Debug)]
+pub(crate) enum ExtendedConnectEventsImpl {
+    Client(Http3ClientEvents),
+    Server(Http3ServerConnEvents),
+}
+
+impl ExtendedConnectEvents for ExtendedConnectEventsImpl {
+    fn session_start(
+        &self,
+        connect_type: ExtendedConnectType,
+        stream_id: StreamId,
+        status: u16,
+        headers: Vec<Header>,
+    ) {
+        dispatch_extended_connect_events!(self.session_start(
+            connect_type,
+            stream_id,
+            status,
+            headers
+        ));
+    }
+
+    fn session_end(
+        &self,
+        connect_type: ExtendedConnectType,
+        stream_id: StreamId,
+        reason: CloseReason,
+        headers: Option<Vec<Header>>,
+    ) {
+        dispatch_extended_connect_events!(self.session_end(
+            connect_type,
+            stream_id,
+            reason,
+            headers
+        ));
+    }
+
+    fn extended_connect_new_stream(
+        &self,
+        stream_info: Http3StreamInfo,
+        emit_readable: bool,
+    ) -> Res<()> {
+        dispatch_extended_connect_events!(
+            self.extended_connect_new_stream(stream_info, emit_readable)
+        )
+    }
+
+    fn new_datagram(
+        &self,
+        session_id: StreamId,
+        datagram: Bytes,
+        connect_type: ExtendedConnectType,
+    ) {
+        dispatch_extended_connect_events!(self.new_datagram(session_id, datagram, connect_type));
+    }
+}
+
+impl_from_variants!(ExtendedConnectEventsImpl {
+    Client(Http3ClientEvents),
+    Server(Http3ServerConnEvents),
+});
 
 /// This enum is used to mark a different type of closing a stream:
 ///   `ResetApp` - the application has closed the stream.

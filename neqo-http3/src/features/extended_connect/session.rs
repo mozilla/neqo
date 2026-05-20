@@ -17,10 +17,10 @@ use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
 
 use crate::{
-    CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
-    SendStream, Stream,
+    CloseType, Error, ExtendedConnectEventsImpl, Http3StreamType, HttpRecvStream, Priority,
+    ReceiveOutput, RecvStream, Res, SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        ExtendedConnectEvents as _, ExtendedConnectType, HeaderListener, Headers,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -56,10 +56,10 @@ pub(crate) struct Session {
     stream_event_listener: Rc<RefCell<HeaderListener>>,
     id: StreamId,
     state: State,
-    events: Box<dyn ExtendedConnectEvents>,
+    events: ExtendedConnectEventsImpl,
     /// Corresponds to the `:protocol` pseudo-header in the HTTP EXTENDED
     /// CONNECT request.
-    protocol: Box<dyn Protocol>,
+    protocol: ProtocolImpl,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -86,7 +86,7 @@ impl Session {
     #[must_use]
     pub(crate) fn new(
         session_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         role: Role,
         qpack_encoder: Rc<RefCell<neqo_qpack::Encoder>>,
         qpack_decoder: Rc<RefCell<neqo_qpack::Decoder>>,
@@ -103,7 +103,7 @@ impl Session {
                     first_frame_type: None,
                 },
                 qpack_decoder,
-                Box::new(Rc::clone(&stream_event_listener)),
+                Rc::clone(&stream_event_listener).into(),
                 None,
                 PriorityHandler::new(false, Priority::default()),
             )),
@@ -112,7 +112,7 @@ impl Session {
                 Http3StreamType::ExtendedConnect,
                 session_id,
                 qpack_encoder,
-                Box::new(Rc::clone(&stream_event_listener)),
+                Rc::clone(&stream_event_listener).into(),
             )),
             stream_event_listener,
             id: session_id,
@@ -124,7 +124,7 @@ impl Session {
 
     pub(crate) fn new_with_http_streams(
         session_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
+        events: ExtendedConnectEventsImpl,
         role: Role,
         mut control_stream_recv: Box<dyn RecvStream>,
         mut control_stream_send: Box<dyn SendStream>,
@@ -135,11 +135,11 @@ impl Session {
         control_stream_recv
             .http_stream()
             .ok_or(Error::Internal)?
-            .set_new_listener(Box::new(Rc::clone(&stream_event_listener)));
+            .set_new_listener(Rc::clone(&stream_event_listener).into());
         control_stream_send
             .http_stream()
             .ok_or(Error::Internal)?
-            .set_new_listener(Box::new(Rc::clone(&stream_event_listener)));
+            .set_new_listener(Rc::clone(&stream_event_listener).into());
         Ok(Self {
             control_stream_recv,
             control_stream_send,
@@ -533,7 +533,7 @@ impl SendStream for Rc<RefCell<Session>> {
 pub(crate) trait Protocol: Debug + Display {
     fn connect_type(&self) -> ExtendedConnectType;
 
-    fn session_start(&mut self, _events: &mut Box<dyn ExtendedConnectEvents>) -> Res<()> {
+    fn session_start(&mut self, _events: &mut ExtendedConnectEventsImpl) -> Res<()> {
         Ok(())
     }
 
@@ -544,7 +544,7 @@ pub(crate) trait Protocol: Debug + Display {
     fn read_control_stream(
         &mut self,
         conn: &mut Connection,
-        events: &mut Box<dyn ExtendedConnectEvents>,
+        events: &mut ExtendedConnectEventsImpl,
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>>;
@@ -552,7 +552,7 @@ pub(crate) trait Protocol: Debug + Display {
     fn add_stream(
         &mut self,
         _stream_id: StreamId,
-        _events: &mut Box<dyn ExtendedConnectEvents>,
+        _events: &mut ExtendedConnectEventsImpl,
         _state: State,
     ) -> Res<()> {
         let msg = "Protocol does not support adding streams";
@@ -593,6 +593,88 @@ pub(crate) trait Protocol: Debug + Display {
         _buf: &[u8],
         _now: Instant,
     ) -> Res<()>;
+}
+
+macro_rules! dispatch_protocol {
+    ($self:ident . $method:ident $args:tt) => {
+        neqo_common::dispatch!([WebTransport, ConnectUdp] $self . $method $args)
+    };
+}
+
+/// Concrete enum dispatching across [`Protocol`] implementations without vtable overhead.
+#[derive(Debug, strum::Display)]
+pub(crate) enum ProtocolImpl {
+    #[strum(to_string = "{0}")]
+    WebTransport(super::webtransport_session::Session),
+    #[strum(to_string = "{0}")]
+    ConnectUdp(super::connect_udp_session::Session),
+}
+
+impl Protocol for ProtocolImpl {
+    fn connect_type(&self) -> ExtendedConnectType {
+        dispatch_protocol!(self.connect_type())
+    }
+
+    fn session_start(&mut self, events: &mut ExtendedConnectEventsImpl) -> Res<()> {
+        dispatch_protocol!(self.session_start(events))
+    }
+
+    fn close_frame(&self, error: u32, message: &str) -> Option<Vec<u8>> {
+        dispatch_protocol!(self.close_frame(error, message))
+    }
+
+    fn read_control_stream(
+        &mut self,
+        conn: &mut Connection,
+        events: &mut ExtendedConnectEventsImpl,
+        control_stream_recv: &mut Box<dyn RecvStream>,
+        now: Instant,
+    ) -> Res<Option<State>> {
+        dispatch_protocol!(self.read_control_stream(conn, events, control_stream_recv, now))
+    }
+
+    fn add_stream(
+        &mut self,
+        stream_id: StreamId,
+        events: &mut ExtendedConnectEventsImpl,
+        state: State,
+    ) -> Res<()> {
+        dispatch_protocol!(self.add_stream(stream_id, events, state))
+    }
+
+    fn remove_recv_stream(&mut self, stream_id: StreamId) {
+        dispatch_protocol!(self.remove_recv_stream(stream_id));
+    }
+
+    fn remove_send_stream(&mut self, stream_id: StreamId) {
+        dispatch_protocol!(self.remove_send_stream(stream_id));
+    }
+
+    fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
+        dispatch_protocol!(self.take_sub_streams())
+    }
+
+    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
+        dispatch_protocol!(self.write_datagram_prefix(encoder));
+    }
+
+    fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
+        dispatch_protocol!(self.dgram_context_id(datagram))
+    }
+
+    fn datagram_capsule_support(&self) -> bool {
+        dispatch_protocol!(self.datagram_capsule_support())
+    }
+
+    fn write_datagram_capsule(
+        &self,
+        control_stream_send: &mut Box<dyn SendStream>,
+        conn: &mut Connection,
+        buf: &[u8],
+        now: Instant,
+    ) -> Res<()> {
+        dispatch_protocol!(self.write_datagram_capsule(control_stream_send, conn, buf, now))
+    }
 }
 
 #[derive(Debug, Error)]
