@@ -90,7 +90,7 @@ pub trait CongestionController: Display + Debug {
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant);
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant);
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant, pacing_limited: bool);
 
     fn discard_in_flight(&mut self, now: Instant);
 }
@@ -222,8 +222,8 @@ impl CongestionController for CongestionControlImplementation {
         dispatch!(self.discard(pkt, now));
     }
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        dispatch!(self.on_packet_sent(pkt, now));
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant, pacing_limited: bool) {
+        dispatch!(self.on_packet_sent(pkt, now, pacing_limited));
     }
 
     fn discard_in_flight(&mut self, now: Instant) {

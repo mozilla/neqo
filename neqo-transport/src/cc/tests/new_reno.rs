@@ -107,7 +107,7 @@ fn issue_876() {
 
     // Send some more packets so that the cc is not app-limited.
     for p in &sent_packets[..6] {
-        cc.on_packet_sent(p, now);
+        cc.on_packet_sent(p, now, false);
     }
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_default(&cc);
@@ -129,7 +129,7 @@ fn issue_876() {
     assert_eq!(cc.bytes_in_flight(), 5 * cc.max_datagram_size() - 2);
 
     // Send a packet after recovery starts
-    cc.on_packet_sent(&sent_packets[6], now);
+    cc.on_packet_sent(&sent_packets[6], now, false);
     assert!(!cc.recovery_packet());
     cwnd_is_halved(&cc);
     assert_eq!(cc.acked_bytes(), 0);
@@ -183,7 +183,7 @@ fn issue_1465() {
     };
     let mut send_next = |cc: &mut ClassicCongestionController<ClassicSlowStart, NewReno>, now| {
         let p = next_packet(now);
-        cc.on_packet_sent(&p, now);
+        cc.on_packet_sent(&p, now, false);
         p
     };
 
@@ -225,7 +225,6 @@ fn issue_1465() {
 
     // send out recovery packet and get it acked to get out of recovery state
     let p4 = send_next(&mut cc, now);
-    cc.on_packet_sent(&p4, now);
     now += RTT;
     cc.on_packets_acked(
         &[p4],
@@ -246,7 +245,7 @@ fn issue_1465() {
     assert!(cc.recovery_packet());
     assert_eq!(cc.cwnd(), cur_cwnd / 2);
     assert_eq!(cc.acked_bytes(), 0);
-    assert_eq!(cc.bytes_in_flight(), 2 * cc.max_datagram_size());
+    assert_eq!(cc.bytes_in_flight(), cc.max_datagram_size());
 
     // this shouldn't introduce further cwnd reduction, but it did before https://github.com/mozilla/neqo/pull/1465
     cc.on_packets_lost(Some(now), None, PTO, &[p6], now, &mut cc_stats);
