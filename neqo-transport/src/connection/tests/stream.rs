@@ -376,11 +376,11 @@ fn sending_max_data() {
     let out = server.process_output(now()).dgram();
     client.process_input(out.unwrap(), now());
 
-    assert_eq!(
+    assert!(
         client
             .stream_send(stream_id, &[b'a'; SMALL_MAX_DATA + 1])
-            .unwrap(),
-        SMALL_MAX_DATA
+            .unwrap()
+            >= SMALL_MAX_DATA,
     );
 }
 
@@ -874,7 +874,8 @@ fn stream_data_blocked_generates_max_stream_data() {
     server.process_input(dgram.unwrap(), now);
     assert_eq!(server.stats().frame_rx.max_stream_data, msd_before + 1);
 
-    // Test that the entirety of the receive buffer is available now.
+    // Test that at least the original receive buffer is available now.
+    // Auto-tuning may have grown the window beyond the initial size.
     let mut written = 0;
     loop {
         const LARGE_BUFFER: &[u8] = &[0; 1024];
@@ -884,7 +885,7 @@ fn stream_data_blocked_generates_max_stream_data() {
         }
         written += amount;
     }
-    assert_eq!(written, INITIAL_LOCAL_MAX_STREAM_DATA);
+    assert!(written >= INITIAL_LOCAL_MAX_STREAM_DATA);
 }
 
 /// See <https://github.com/mozilla/neqo/issues/871>
@@ -1028,9 +1029,10 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     assert_eq!(server.stats().frame_rx.max_stream_data, expected);
 
     // If the flow control window has been increased, server can write more data.
+    // Auto-tuning may grow the window beyond new_fc.
     let written2 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
     if RECV_BUFFER_START < new_fc {
-        assert_eq!(u64::try_from(written2).unwrap(), new_fc - RECV_BUFFER_START);
+        assert!(u64::try_from(written2).unwrap() >= new_fc - RECV_BUFFER_START);
     } else {
         assert_eq!(written2, 0);
     }
@@ -1043,13 +1045,13 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     // read all data by client
     let mut buf = [0x0; 10000];
     let (read, _) = client.stream_recv(stream_id, &mut buf).unwrap();
-    assert_eq!(u64::try_from(read).unwrap(), max(RECV_BUFFER_START, new_fc));
+    assert!(u64::try_from(read).unwrap() >= max(RECV_BUFFER_START, new_fc));
 
     let out4 = client.process_output(now());
     drop(server.process(out4.dgram(), now()));
 
     let written3 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written3).unwrap(), new_fc);
+    assert!(u64::try_from(written3).unwrap() >= new_fc);
 }
 
 #[test]
@@ -1107,10 +1109,9 @@ fn session_flow_control_stop_sending_state_recv() {
     assert_eq!(client.stream_avail_send_space(stream_id2).unwrap(), 0);
     let out = server.process(out, now()).dgram();
     client.process_input(out.unwrap(), now());
-    assert_eq!(
-        client.stream_avail_send_space(stream_id2).unwrap(),
-        SMALL_MAX_DATA
-    );
+    let space = client.stream_avail_send_space(stream_id2).unwrap();
+    assert!(space >= SMALL_MAX_DATA);
+    assert!(space <= SMALL_MAX_DATA * 32, "window grew unexpectedly large");
 }
 
 #[test]
@@ -1156,12 +1157,11 @@ fn session_flow_control_stop_sending_state_size_known() {
     client.process_input(out.unwrap(), now());
 
     // The flow control should have been updated and the client can again send
-    // SMALL_MAX_DATA.
+    // at least SMALL_MAX_DATA (auto-tuning may grow the window further).
     let stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
-    assert_eq!(
-        client.stream_avail_send_space(stream_id2).unwrap(),
-        SMALL_MAX_DATA
-    );
+    let space = client.stream_avail_send_space(stream_id2).unwrap();
+    assert!(space >= SMALL_MAX_DATA);
+    assert!(space <= SMALL_MAX_DATA * 32, "window grew unexpectedly large");
 }
 
 #[test]
@@ -1201,12 +1201,11 @@ fn session_flow_control_stop_sending_state_data_recvd() {
     exchange_data(&mut client, &mut server);
 
     // The flow control should have been updated and the client can again send
-    // SMALL_MAX_DATA.
+    // at least SMALL_MAX_DATA (auto-tuning may grow the window further).
     let stream_id2 = client.stream_create(StreamType::UniDi).unwrap();
-    assert_eq!(
-        client.stream_avail_send_space(stream_id2).unwrap(),
-        SMALL_MAX_DATA
-    );
+    let space = client.stream_avail_send_space(stream_id2).unwrap();
+    assert!(space >= SMALL_MAX_DATA);
+    assert!(space <= SMALL_MAX_DATA * 32, "window grew unexpectedly large");
 }
 
 #[test]
@@ -1256,15 +1255,13 @@ fn session_flow_control_affects_all_streams() {
 
     exchange_data(&mut client, &mut server);
 
-    assert_eq!(
-        client.stream_avail_send_space(stream_id).unwrap(),
-        SMALL_MAX_DATA
-    );
+    let space1 = client.stream_avail_send_space(stream_id).unwrap();
+    assert!(space1 >= SMALL_MAX_DATA);
+    assert!(space1 <= SMALL_MAX_DATA * 32, "window grew unexpectedly large");
 
-    assert_eq!(
-        client.stream_avail_send_space(stream_id2).unwrap(),
-        SMALL_MAX_DATA
-    );
+    let space2 = client.stream_avail_send_space(stream_id2).unwrap();
+    assert!(space2 >= SMALL_MAX_DATA);
+    assert!(space2 <= SMALL_MAX_DATA * 32, "window grew unexpectedly large");
 }
 
 fn connect_w_different_limit(bidi_limit: u64, unidi_limit: u64) {
