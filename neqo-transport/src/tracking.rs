@@ -170,7 +170,7 @@ pub const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
 /// The default number of in-order packets we will receive after
 /// largest acknowledged without sending an immediate acknowledgment.
 pub const DEFAULT_ACK_PACKET_TOLERANCE: packet::Number = 1;
-const MAX_TRACKED_RANGES: usize = 32;
+const MAX_TRACKED_RANGES: usize = 128;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
 /// A structure that tracks what was included in an ACK.
