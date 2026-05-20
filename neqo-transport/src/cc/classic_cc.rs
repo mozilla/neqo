@@ -351,6 +351,11 @@ where
                 self.current.congestion_window,
                 self.current.phase
             );
+            qlog::metrics_updated(
+                &mut self.qlog,
+                [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+                now,
+            );
             return;
         }
 
@@ -427,7 +432,11 @@ where
             [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
-            ],
+            ]
+            .into_iter()
+            .chain((self.current.ssthresh != usize::MAX).then_some(
+                qlog::Metric::SsThresh(self.current.ssthresh),
+            )),
             now,
         );
 
@@ -672,7 +681,7 @@ where
         if old_state.to_qlog() != phase.to_qlog() {
             qlog::congestion_state_updated(
                 &mut self.qlog,
-                old_state.to_qlog(),
+                Some(old_state.to_qlog()),
                 phase.to_qlog(),
                 trigger,
                 now,
