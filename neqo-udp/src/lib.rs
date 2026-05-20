@@ -84,10 +84,11 @@ pub fn send_inner(
             return Ok(());
         }
         Err(e) if is_enobufs(&e) => {
-            // ENOBUFS means the send queue is momentarily full. The packet is
-            // already dropped by the kernel. Signal WouldBlock so callers retry.
-            qdebug!("Interface send queue full (ENOBUFS), signaling WouldBlock: {e}");
-            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            // The send queue is momentarily full. Don't map to WouldBlock: the
+            // socket IS writable, so edge-triggered epoll/kqueue won't re-signal
+            // and the send loop would hang. Drop the packet; QUIC will retransmit.
+            qdebug!("Interface send queue full (ENOBUFS), dropping packet: {e}");
+            return Ok(());
         }
         e @ Err(_) => return e,
     }
