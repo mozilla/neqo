@@ -29,19 +29,24 @@ use crate::{
 pub const CWND_INITIAL_PKTS: usize = 10;
 pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+pub enum Phase {
     /// In either slow start or congestion avoidance, not recovery.
+    #[strum(to_string = "slow_start")]
     SlowStart,
     /// In congestion avoidance.
+    #[strum(to_string = "congestion_avoidance")]
     CongestionAvoidance,
     /// In a recovery period, but no packets have been sent yet.  This is a
     /// transient phase because we want to exempt the first packet sent after
     /// entering recovery from the congestion window.
+    #[strum(to_string = "recovery")]
     RecoveryStart,
     /// In a recovery period, with the first packet sent at this time.
+    #[strum(to_string = "recovery")]
     Recovery,
     /// Start of persistent congestion, which is transient, like `RecoveryStart`.
+    #[strum(to_string = "slow_start")]
     PersistentCongestion,
 }
 
@@ -66,14 +71,6 @@ impl Phase {
             Self::RecoveryStart => Self::Recovery,
             _ => unreachable!(),
         };
-    }
-
-    pub const fn to_qlog(self) -> &'static str {
-        match self {
-            Self::SlowStart | Self::PersistentCongestion => "slow_start",
-            Self::CongestionAvoidance => "congestion_avoidance",
-            Self::Recovery | Self::RecoveryStart => "recovery",
-        }
     }
 }
 
@@ -351,6 +348,11 @@ where
                 self.current.congestion_window,
                 self.current.phase
             );
+            qlog::metrics_updated(
+                &mut self.qlog,
+                [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+                now,
+            );
             return;
         }
 
@@ -427,7 +429,12 @@ where
             [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
-            ],
+            ]
+            .into_iter()
+            .chain(
+                (self.current.ssthresh != usize::MAX)
+                    .then_some(qlog::Metric::SsThresh(self.current.ssthresh)),
+            ),
             now,
         );
 
@@ -669,11 +676,11 @@ where
         qdebug!("[{self}] phase -> {phase:?}");
         let old_state = self.current.phase;
         // Only emit a qlog event when a transition changes the qlog state.
-        if old_state.to_qlog() != phase.to_qlog() {
+        if !str::eq(old_state.into(), phase.into()) {
             qlog::congestion_state_updated(
                 &mut self.qlog,
-                old_state.to_qlog(),
-                phase.to_qlog(),
+                Some(old_state.into()),
+                phase.into(),
                 trigger,
                 now,
             );
@@ -2067,11 +2074,12 @@ mod tests {
     #[test]
     fn state_to_qlog() {
         use super::Phase;
-        assert_eq!(Phase::SlowStart.to_qlog(), "slow_start");
-        assert_eq!(Phase::PersistentCongestion.to_qlog(), "slow_start");
-        assert_eq!(Phase::CongestionAvoidance.to_qlog(), "congestion_avoidance");
-        assert_eq!(Phase::Recovery.to_qlog(), "recovery");
-        assert_eq!(Phase::RecoveryStart.to_qlog(), "recovery");
+        let qlog = |p: Phase| -> &str { p.into() };
+        assert_eq!(qlog(Phase::SlowStart), "slow_start");
+        assert_eq!(qlog(Phase::PersistentCongestion), "slow_start");
+        assert_eq!(qlog(Phase::CongestionAvoidance), "congestion_avoidance");
+        assert_eq!(qlog(Phase::Recovery), "recovery");
+        assert_eq!(qlog(Phase::RecoveryStart), "recovery");
     }
 
     #[test]
