@@ -1186,6 +1186,6 @@ fn split_api_loss_timer_type() {
     let log = qlog_contents.to_string();
     assert!(
         log.contains(r#""timer_type":"ack""#),
-        "Expected loss_timer_expired with timer_type ack in qlog"
+        "Expected loss_timer_expired with timer_type ack in qlog: {log}"
     );
 }
