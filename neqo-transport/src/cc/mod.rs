@@ -22,7 +22,9 @@ mod hystart;
 mod new_reno;
 mod search;
 
-pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
+pub use classic_cc::{
+    CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH, Phase,
+};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};

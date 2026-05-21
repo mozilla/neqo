@@ -793,7 +793,7 @@ impl Loss {
     /// Snapshot which timer type is due before input processing, so that ACKs
     /// in the same `process()` call cannot clear loss candidates and cause
     /// [`Self::timeout`] to misattribute the expiry as PTO.
-    pub fn note_timeout_type(&mut self, path: &Path, now: Instant) {
+    pub(crate) fn note_timeout_type(&mut self, path: &Path, now: Instant) {
         if self.qlog.is_enabled() && self.pending_timer_type.is_none() {
             self.pending_timer_type = self.expired_timer_type(path.rtt(), now);
         }

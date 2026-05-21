@@ -32,6 +32,7 @@ use strum::IntoEnumIterator as _;
 use crate::{
     AppError, CloseReason, Error, Res, StreamId,
     addr_valid::{AddressValidation, NewTokenState},
+    cc::Phase,
     cid::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore,
@@ -2931,7 +2932,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
-            qlog::congestion_state_updated(&mut self.qlog, None, "slow_start", None, now);
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         }
         qlog::client_version_information_initiated(
             &mut self.qlog,
@@ -3634,7 +3641,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
-            qlog::congestion_state_updated(&mut self.qlog, None, "slow_start", None, now);
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         } else {
             self.zero_rtt_state = if self
                 .crypto
