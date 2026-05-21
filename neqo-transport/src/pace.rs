@@ -136,17 +136,16 @@ impl Pacer {
         Self::bytes_for(cwnd, rtt, Duration::from_secs(1))
     }
 
-    /// Spend credit. This cannot fail, but instead may carry debt into the
-    /// future (see [`Pacer::c`]). Users of this API are expected to call
-    /// [`Pacer::next`] to determine when to spend.
+    /// Spend credit. Returns `true` when the next send would be pacing-limited,
+    /// i.e., [`Pacer::next`] now returns a time strictly after `now`.
+    /// Always returns `false` when pacing is disabled.
     ///
-    /// This function takes the current time (`now`), an estimate of the round
-    /// trip time (`rtt`), the estimated congestion window (`cwnd`), and the
-    /// number of bytes that were sent (`count`).
-    pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
+    /// This cannot fail, but instead may carry debt into the future (see
+    /// [`Pacer::c`]).
+    pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) -> bool {
         if !self.enabled {
             self.t = now;
-            return;
+            return false;
         }
 
         qtrace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
@@ -164,6 +163,7 @@ impl Pacer {
                 .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
         );
         self.t = now;
+        self.next(rtt, cwnd) > now
     }
 }
 

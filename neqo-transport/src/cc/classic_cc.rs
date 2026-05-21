@@ -574,7 +574,7 @@ where
         // limited if it would have fully utilized the congestion window without
         // pacing delay."  When the pacer is the reason we cannot send more
         // right now, cwnd underutilization is from pacing, not the application.
-        if !self.app_limited() || pacing_limited {
+        if pacing_limited || !self.app_limited() {
             self.first_app_limited = pkt.pn() + 1;
         }
 
