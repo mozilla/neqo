@@ -285,8 +285,9 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     assert_eq!(sent, recvd);
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
-    // Expect the server's available send space to be back to the stream limit.
-    assert_eq!(request.available()?, STREAM_LIMIT as usize);
+    // Expect the server's available send space to be at least the stream limit.
+    // With FC auto-tuning, the window may have grown beyond STREAM_LIMIT.
+    assert!(request.available()? >= STREAM_LIMIT as usize);
 
     // Expect the server to emit a DataWritable event, even though it always had
     // at least 1 byte available to send, i.e. it never exhausted the entire
@@ -330,7 +331,9 @@ fn data_writable_events() {
         ])
         .unwrap();
 
-    // Send a lot of data
+    // Send a lot of data. With FC auto-tuning, the window may grow so the
+    // number of rounds needed to send all data varies. Use a loop instead of
+    // a fixed number of send/receive rounds.
     let buf = &[1; DATA_AMOUNT];
     let mut sent = request.send_data(buf, now()).unwrap();
     assert!(sent < DATA_AMOUNT);
@@ -351,35 +354,22 @@ fn data_writable_events() {
             } if stream.stream_id() == stream_id
         )
     };
-    // Make sure we have a DataWritable event.
-    assert!(hconn_s.events().any(data_writable));
-    // Data can be sent again.
-    let s = request.send_data(&buf[sent..], now()).unwrap();
-    assert!(s > 0);
-    sent += s;
 
-    // Exchange packets and read the data on the client side.
-    exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
-    let (r, _) = hconn_c
-        .read_data(now(), stream_id, &mut recv_buf[recvd..])
-        .unwrap();
-    recvd += r;
-    exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
-    assert_eq!(sent, recvd);
+    while sent < DATA_AMOUNT {
+        // After each exchange, expect a DataWritable event.
+        assert!(hconn_s.events().any(data_writable));
+        let s = request.send_data(&buf[sent..], now()).unwrap();
+        assert!(s > 0);
+        sent += s;
 
-    // One more DataWritable event.
-    assert!(hconn_s.events().any(data_writable));
-    // Send more data.
-    let s = request.send_data(&buf[sent..], now()).unwrap();
-    assert!(s > 0);
-    sent += s;
-    assert_eq!(sent, DATA_AMOUNT);
-
-    exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
-    let (r, _) = hconn_c
-        .read_data(now(), stream_id, &mut recv_buf[recvd..])
-        .unwrap();
-    recvd += r;
+        exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
+        let (r, _) = hconn_c
+            .read_data(now(), stream_id, &mut recv_buf[recvd..])
+            .unwrap();
+        recvd += r;
+        exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
+        assert_eq!(sent, recvd);
+    }
 
     // Make sure all data is received by the client.
     assert_eq!(recvd, DATA_AMOUNT);
