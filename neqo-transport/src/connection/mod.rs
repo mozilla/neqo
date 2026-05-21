@@ -1105,6 +1105,10 @@ impl Connection {
             return;
         }
 
+        // Snapshot timer type before ACKs can alter loss state.
+        if let Some(path) = self.paths.primary() {
+            self.loss_recovery.note_timeout_type(&path.borrow(), now);
+        }
         for d in dgrams {
             self.input(d, now, now);
         }
