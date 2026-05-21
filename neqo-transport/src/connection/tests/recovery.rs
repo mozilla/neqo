@@ -1169,14 +1169,12 @@ fn split_api_loss_timer_type() {
     _ = client.process_output(now);
 
     // d0 was sent at `now - DEFAULT_RTT`. Loss time = d0_sent + RTT * 9/8.
-    let loss_time = (now - DEFAULT_RTT) + DEFAULT_RTT * 9 / 8;
+    let loss_time = now + DEFAULT_RTT / 8;
 
     // Server receives the "delayed" d0 and generates a new ACK covering both.
-    server.process_input(d0, loss_time - DEFAULT_RTT / 2);
-    let ack_all = server
-        .process_output(loss_time - DEFAULT_RTT / 2)
-        .dgram()
-        .unwrap();
+    let server_rx_time = loss_time.checked_sub(DEFAULT_RTT / 2).unwrap();
+    server.process_input(d0, server_rx_time);
+    let ack_all = server.process_output(server_rx_time).dgram().unwrap();
 
     // At loss_time, deliver the ACK via the split API.  This ACK clears the
     // loss candidate for d0.  Without the timer-type snapshot, timeout()
