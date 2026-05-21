@@ -197,7 +197,7 @@ mod tests {
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
-        p.spend(n, RTT, CWND, PACKET);
+        assert!(p.spend(n, RTT, CWND, PACKET));
         assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
@@ -207,7 +207,7 @@ mod tests {
         let mut p = Pacer::new(true, n + RTT, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n + RTT);
         // Now spend some credit in the past using a time machine.
-        p.spend(n, RTT, CWND, PACKET);
+        assert!(p.spend(n, RTT, CWND, PACKET));
         assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
@@ -216,7 +216,7 @@ mod tests {
         let n = now();
         let mut p = Pacer::new(false, n, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
-        p.spend(n, RTT, CWND, PACKET);
+        assert!(!p.spend(n, RTT, CWND, PACKET));
         assert_eq!(p.next(RTT, CWND), n);
     }
 
@@ -226,11 +226,9 @@ mod tests {
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
         assert_eq!(p.next(SHORT_RTT, CWND), n);
-        p.spend(n, SHORT_RTT, CWND, PACKET);
-        assert_eq!(
-            p.next(SHORT_RTT, CWND),
-            n,
-            "Expect packet to be sent immediately, instead of being paced below timer granularity"
+        assert!(
+            !p.spend(n, SHORT_RTT, CWND, PACKET),
+            "sub-granularity delay should not be pacing-limited"
         );
     }
 
@@ -280,12 +278,9 @@ mod tests {
         const CWND_AT_GRANULARITY: usize = 5000; // yields w = 1ms = GRANULARITY
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
-        p.spend(n, SHORT_RTT, CWND_AT_GRANULARITY, PACKET);
-        // w == GRANULARITY: should schedule for later, not send immediately.
-        assert_ne!(
-            p.next(SHORT_RTT, CWND_AT_GRANULARITY),
-            n,
-            "at exactly GRANULARITY should not send immediately"
+        assert!(
+            p.spend(n, SHORT_RTT, CWND_AT_GRANULARITY, PACKET),
+            "at exactly GRANULARITY should be pacing-limited"
         );
     }
 
