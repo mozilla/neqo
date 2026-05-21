@@ -1611,11 +1611,37 @@ mod tests {
         // Assert that the first header is encoded as an index to the dynamic table (a post form).
         assert!(buf3.len() > 3);
         assert_eq!(buf3[2], 0x10);
-        // Assert that the second header is encoded as a literal with a name literal
-        assert_eq!(buf3[3] & 0xf0, 0x20);
+        // Assert that the second header is encoded as a dynamic index (0x10) or a
+        // literal with a name literal (0x20), depending on whether FC auto-tuning
+        // grew the window enough to fit the instruction.
+        assert!(
+            buf3[3] & 0xf0 == 0x10 || buf3[3] & 0xf0 == 0x20,
+            "unexpected encoding prefix: {:#x}",
+            buf3[3] & 0xf0
+        );
 
-        // Asset that one instruction has been sent
-        encoder.send_instructions(ONE_INSTRUCTION_2);
+        // Assert that the expected instruction is a prefix of the output.
+        // With FC auto-tuning, deferred instructions may flush alongside it,
+        // so the output may be longer than ONE_INSTRUCTION_2 alone.
+        encoder
+            .encoder
+            .send_encoder_updates(&mut encoder.conn)
+            .unwrap();
+        let out = encoder.conn.process_output(now());
+        let out2 = encoder.peer_conn.process(out.dgram(), now());
+        drop(encoder.conn.process(out2.dgram(), now()));
+        let mut buf = [0_u8; 100];
+        let (amount, fin) = encoder
+            .peer_conn
+            .stream_recv(encoder.send_stream_id, &mut buf)
+            .unwrap();
+        assert!(!fin);
+        assert!(
+            amount >= ONE_INSTRUCTION_2.len(),
+            "expected at least {} bytes, got {amount}",
+            ONE_INSTRUCTION_2.len()
+        );
+        assert_eq!(&buf[..ONE_INSTRUCTION_2.len()], ONE_INSTRUCTION_2);
     }
 
     #[test]

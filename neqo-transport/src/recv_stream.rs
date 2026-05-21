@@ -1605,8 +1605,10 @@ mod tests {
             .borrow_mut()
             .write_frames(&mut builder, &mut token, &mut FrameStats::default());
 
-        // Switch to SizeKnown state. After auto-tuning the window is larger,
-        // so send enough data to exceed the update threshold.
+        // Switch to SizeKnown state.
+        // After the first write_frames, auto-tuning grows the session window
+        // (consumed * 4), so we need larger amounts to exceed the auto-tuned
+        // threshold and trigger a new FC update.
         s.inbound_stream_frame(true, 4 * u64::try_from(SESSION_WINDOW).unwrap() - 1, &[0])
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());

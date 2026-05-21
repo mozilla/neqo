@@ -245,9 +245,10 @@ where
     /// Retired items.
     retired: u64,
     frame_pending: bool,
-    /// Set when [`set_max_active`] increases the window manually.
-    /// Cleared by [`auto_tune_inner`] to avoid treating the manual
-    /// increase as peer consumption.
+    /// Skips one auto-tuning round when [`Self::set_max_active`]
+    /// increases the window manually. Cleared by
+    /// [`Self::auto_tune_inner`] to avoid treating the manual increase
+    /// as peer consumption.
     manual_increase: bool,
 }
 
@@ -1416,8 +1417,6 @@ mod test {
 
         let manual_value = after_auto + 100;
         fc.set_max_active(manual_value);
-        // This write_frames sends the new limit. Auto-tuning should be
-        // skipped because of the manual_increase flag.
         write_frames(&mut fc);
         assert_eq!(
             fc.max_active(),
