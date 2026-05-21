@@ -315,7 +315,7 @@ mod tests {
         )
     }
 
-    /// Send `n` packets at once, ACK them one RTT later, return (cwnd_before, cwnd_after).
+    /// Send `n` packets at once, ACK them one RTT later, return (`cwnd_before`, `cwnd_after`).
     fn send_and_ack(pacing: bool, n: usize) -> (usize, usize) {
         let mut sender = make_sender(pacing);
         let now = now();
