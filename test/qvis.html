@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>__TITLE__</title>
+    <style>
+      __UPLOT_CSS__
+    </style>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      :root {
+        --bg: #f8f8f8;
+        --fg: #222;
+        --mute: #666;
+        --panel-bg: #fff;
+        --panel-border: #ddd;
+        --legend-bg: #fff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #111;
+          --fg: #ccc;
+          --mute: #999;
+          --panel-bg: #181818;
+          --panel-border: #333;
+          --legend-bg: #181818;
+        }
+      }
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        font-family: system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        padding: 6px;
+        font-size: 12px;
+      }
+
+      /* Header */
+      .hdr {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 8px;
+      }
+      .hdr .hint {
+        margin-left: auto;
+        color: var(--mute);
+      }
+      .hdr h1 {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      /* CC state legend */
+      .cc-leg {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px 16px;
+        margin-bottom: 8px;
+      }
+      .cc-leg span {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .cc-leg b {
+        width: 20px;
+        height: 12px;
+        border-radius: 2px;
+        flex-shrink: 0;
+        border: 1px solid var(--panel-border);
+      }
+      .cc-leg .cc-label {
+        font-weight: 600;
+      }
+      .cc-leg .cc-active {
+        outline: 2px solid var(--fg);
+        outline-offset: 2px;
+      }
+      .cc-leg .cc-inactive {
+        color: var(--mute);
+      }
+
+      /* Panel row: chart + info side by side */
+      .row {
+        position: relative;
+        margin-bottom: 4px;
+      }
+      .chart {
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 4px;
+        position: relative;
+      }
+      .row.has-info .chart {
+        margin-right: 220px;
+      }
+      .chart .u-wrap {
+        max-width: 100% !important;
+        overflow: hidden;
+      }
+      .chart .u-over {
+        cursor: crosshair;
+      }
+      .chart.frozen .u-cursor-x,
+      .chart.frozen .u-cursor-y {
+        display: none;
+      }
+      .info {
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 220px;
+        color: var(--fg);
+        background: var(--panel-bg);
+        border: 1px solid var(--panel-border);
+        border-left: 0;
+        border-radius: 0 4px 4px 0;
+        display: none;
+        overflow-y: auto;
+      }
+      .info.open {
+        display: block;
+        padding: 4px 6px;
+      }
+      .ip-toggles {
+        border-bottom: 1px solid var(--panel-border);
+        padding-bottom: 3px;
+        margin-bottom: 3px;
+      }
+      .ip-toggles label {
+        display: flex;
+        align-items: center;
+        gap: 3px;
+        cursor: pointer;
+        padding: 1px 0;
+      }
+      .ip-toggles input {
+        margin: 0;
+      }
+      .info .ip-item {
+        margin-bottom: 4px;
+        border-bottom: 1px solid var(--panel-border);
+        padding-bottom: 3px;
+      }
+      .info .ip-label {
+        font-weight: 600;
+      }
+      .info .ip-frame {
+        margin: 2px 0;
+        padding-left: 8px;
+        border-left: 2px solid var(--panel-border);
+      }
+      .info .ip-frame-type {
+        font-weight: 600;
+      }
+      .info .ip-frame-detail {
+        padding-left: 4px;
+      }
+      .ip-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 4px;
+        vertical-align: 1px;
+        flex-shrink: 0;
+      }
+      .ip-bullet {
+        display: flex;
+        align-items: baseline;
+        gap: 4px;
+      }
+      .ip-line {
+        width: 40px;
+        height: 10px;
+        vertical-align: -1px;
+        margin-right: 4px;
+      }
+      .rtt-line {
+        position: absolute;
+        height: 0;
+        border-top: 1px solid;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .rtt-arrow {
+        position: absolute;
+        width: 0;
+        height: 0;
+        border-top: 5px solid transparent;
+        border-bottom: 5px solid transparent;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .rtt-arrow-r {
+        border-left: 8px solid;
+      }
+      .rtt-arrow-l {
+        border-right: 8px solid;
+      }
+      .rtt-label {
+        position: absolute;
+        pointer-events: none;
+        font-size: 10px;
+        font-weight: 600;
+        z-index: 1;
+        white-space: nowrap;
+      }
+      .info-toggle {
+        position: absolute;
+        right: 2px;
+        top: 2px;
+        z-index: 2;
+        cursor: pointer;
+        background: var(--legend-bg);
+        border: 1px solid var(--panel-border);
+        border-radius: 3px;
+        padding: 1px 5px;
+        font-size: 10px;
+        color: var(--mute);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="hdr">
+      <h1>__TITLE__</h1>
+      <span class="hint"
+        >Drag to zoom · ⌘-drag to pan · Scroll to zoom · Shift for single panel
+        · Double-click to reset · Click to freeze</span
+      >
+    </div>
+    <div id="ccleg" class="cc-leg"></div>
+    <div class="row has-info"><div id="p1" class="chart"></div></div>
+    <div class="row has-info"><div id="p2" class="chart"></div></div>
+    <div class="row has-info"><div id="p3" class="chart"></div></div>
+    <div class="row has-info"><div id="p4" class="chart"></div></div>
+
+    <script>
+      __UPLOT_JS__;
+    </script>
+    <script>
+      __QVIS_JS__;
+    </script>
+  </body>
+</html>
