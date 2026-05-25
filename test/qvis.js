@@ -85,6 +85,8 @@ decompress("__DATA_B64GZ__").then((D) => {
     pn: { f: fmtPn, u: "" },
     rtt: { f: fmtMs, u: " ms" },
     gap: { f: fmtMs, u: " ms" },
+    fcb: { f: fmtB, u: " bytes" },
+    sfcb: { f: fmtB, u: " bytes" },
   };
   const N = (n) => (typeof n === "number" ? n.toLocaleString() : n);
   const R = (a, b) => (a === b ? N(a) : `${N(a)}..${N(b)}`);
@@ -95,8 +97,28 @@ decompress("__DATA_B64GZ__").then((D) => {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   const DD = (s) => `<div class="ip-frame-detail">${s}</div>`;
+  const bullet = (color, text) =>
+    `<div class="ip-bullet"><span class="ip-dot" style="background:${color}"></span><span>${text}</span></div>`;
+  function lighten(hex, amt = 0.4) {
+    const n = parseInt(hex.replace("#", ""), 16);
+    const r = Math.min(
+      255,
+      ((n >> 16) & 255) + Math.round(amt * (255 - ((n >> 16) & 255))),
+    );
+    const g = Math.min(
+      255,
+      ((n >> 8) & 255) + Math.round(amt * (255 - ((n >> 8) & 255))),
+    );
+    const b = Math.min(255, (n & 255) + Math.round(amt * (255 - (n & 255))));
+    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+  }
   const sColor = (s, u, si) =>
     typeof s.stroke === "function" ? (u ? s.stroke(u, si) : "#888") : s.stroke;
+  function dotHtml(c, hollow) {
+    if (hollow)
+      return `<span class="ip-dot ip-dot-hollow" style="border-color:${c}"></span>`;
+    return `<span class="ip-dot" style="background:${c}"></span>`;
+  }
   function swatch(s) {
     const c = sColor(s);
     if (s.width > 0) {
@@ -104,9 +126,9 @@ decompress("__DATA_B64GZ__").then((D) => {
       const da = s.dash
         ? ` stroke-dasharray="${s.dash.map((v) => v / r).join(",")}"`
         : "";
-      return `<svg class="ip-line"><line x1="0" y1="5" x2="40" y2="5" stroke="${c}" stroke-width="${s.width || 1}"${da}/></svg>`;
+      return `<svg class="ip-line"><line x1="0" y1="5" x2="20" y2="5" stroke="${c}" stroke-width="${s.width || 1}"${da}/></svg>`;
     }
-    return `<span class="ip-dot" style="background:${c}"></span>`;
+    return dotHtml(c, s._hollow);
   }
 
   // ── Plugins ──────────────────────────────────────────────────────────
@@ -138,8 +160,8 @@ decompress("__DATA_B64GZ__").then((D) => {
             const ctx = u.ctx;
             for (const [color, intervals] of ccByColor)
               fillIntervals(ctx, u, intervals, color);
-            fillIntervals(ctx, u, D.fcStreamIntervals, fcStreamColor);
-            fillIntervals(ctx, u, D.fcConnIntervals, fcConnColor);
+            fillIntervals(ctx, u, fcStreamIntervals, fcStreamColor);
+            fillIntervals(ctx, u, fcConnIntervals, fcConnColor);
           },
         ],
       },
@@ -174,6 +196,70 @@ decompress("__DATA_B64GZ__").then((D) => {
     };
   }
 
+  // Derive FC-limited intervals from budget==0 regions
+  function budgetZeroIntervals(t, v, endT) {
+    const intervals = [];
+    let start = null;
+    for (let i = 0; i < t.length; i++) {
+      if (v[i] === 0 && start == null) start = t[i];
+      else if (v[i] > 0 && start != null) {
+        intervals.push([start, t[i]]);
+        start = null;
+      }
+    }
+    if (start != null) intervals.push([start, endT ?? t[t.length - 1]]);
+    return intervals;
+  }
+  const fcConnIntervals = D.fcConnBudget[0].length
+    ? budgetZeroIntervals(D.fcConnBudget[0], D.fcConnBudget[1], D.maxT)
+    : [];
+  const fcStreamIntervals = [];
+  for (const [sid, tv] of Object.entries(D.fcStreamBudget || {})) {
+    for (const iv of budgetZeroIntervals(tv[0], tv[1], D.maxT))
+      fcStreamIntervals.push([iv[0], iv[1], +sid]);
+  }
+  fcStreamIntervals.sort((a, b) => a[1] - b[1]);
+
+  function budgetAt(tv, t) {
+    if (!tv || !tv[0].length) return null;
+    const i = bisect(tv[0], t + 1e-9) - 1;
+    return i >= 0 ? tv[1][i] : null;
+  }
+
+  function tvPush(tv, t, v) {
+    tv[0].push(t);
+    tv[1].push(v);
+  }
+  function tvGetOrCreate(map, key) {
+    return map[key] || (map[key] = [[], []]);
+  }
+  const fcConnBlockedData = [[], []];
+  const fcConnIncreasedData = [[], []];
+  const fcStreamBlockedBySid = {};
+  const fcStreamIncreasedBySid = {};
+  const fcEvByTime = new Map();
+  for (const [t, type, value, sid] of D.fcEvents || []) {
+    if (!fcEvByTime.has(t)) fcEvByTime.set(t, []);
+    fcEvByTime.get(t).push({ type, value, sid });
+    const budgetTv = sid === -1 ? D.fcConnBudget : D.fcStreamBudget[sid];
+    const bv = budgetAt(budgetTv, t) ?? 0;
+    if (sid === -1) {
+      tvPush(type === "blocked" ? fcConnBlockedData : fcConnIncreasedData, t, bv);
+    } else {
+      const store =
+        type === "blocked" ? fcStreamBlockedBySid : fcStreamIncreasedBySid;
+      tvPush(tvGetOrCreate(store, sid), t, bv);
+    }
+  }
+  const hasFcConnBlocked = fcConnBlockedData[0].length > 0;
+  const hasFcConnIncreased = fcConnIncreasedData[0].length > 0;
+  const fcEventStreamIds = [
+    ...new Set([
+      ...Object.keys(fcStreamBlockedBySid),
+      ...Object.keys(fcStreamIncreasedBySid),
+    ]),
+  ].sort((a, b) => a - b);
+
   const _shadingP = shadingPlugin(),
     _zeroLineP = zeroLinePlugin();
 
@@ -192,13 +278,13 @@ decompress("__DATA_B64GZ__").then((D) => {
         "fc_stream",
         fcStreamColor,
         "Stream FC Limited",
-        D.fcStreamIntervals.length > 0,
+        fcStreamIntervals.length > 0,
       ],
       [
         "fc_conn",
         fcConnColor,
         "Connection FC Limited",
-        D.fcConnIntervals.length > 0,
+        fcConnIntervals.length > 0,
       ],
     ];
     for (const [key, color, label, active] of items) {
@@ -223,13 +309,12 @@ decompress("__DATA_B64GZ__").then((D) => {
       _activeRg = null;
     }
     if (t == null) return;
-    if (findInterval(D.fcConnIntervals, t)) _activeRg = ccLegEls.fc_conn;
-    else if (findInterval(D.fcStreamIntervals, t))
-      _activeRg = ccLegEls.fc_stream;
+    if (findInterval(fcConnIntervals, t)) _activeRg = ccLegEls.fc_conn;
+    else if (findInterval(fcStreamIntervals, t)) _activeRg = ccLegEls.fc_stream;
     else {
-      const iv = findInterval(D.ccIntervals, t);
-      if (iv)
-        _activeRg = ccLegEls[iv[2] === "recovery_start" ? "recovery" : iv[2]];
+      const cc = findInterval(D.ccIntervals, t);
+      if (cc)
+        _activeRg = ccLegEls[cc[2] === "recovery_start" ? "recovery" : cc[2]];
     }
     _activeRg?.classList.add("cc-active");
   }
@@ -249,6 +334,12 @@ decompress("__DATA_B64GZ__").then((D) => {
       ch.root.closest(".chart").classList.toggle("frozen", v);
     }
   }
+  const cursorSnapPct = 0.02;
+  const zoomResetThreshold = 0.999;
+  const rttMinWidth = 30;
+  const thinTargetPts = 30;
+  const spatialGridScale = 1e6;
+
   const stepped = uPlot.paths.stepped({ align: 1 });
   const axProps = {
     stroke: OI.ax,
@@ -275,13 +366,6 @@ decompress("__DATA_B64GZ__").then((D) => {
     return ticks.map((v) => _fmtMs1(v, d));
   }
   const xAx = { ...axProps, size: 38, values: fmtMsAdaptive };
-  const dummyRightAx = (scale) => ({
-    ...axProps,
-    scale,
-    side: 1,
-    label: " ",
-    values: () => [],
-  });
 
   // Y-axes: bare numbers, unit stored on axis for label
   const msUnits = [
@@ -522,7 +606,7 @@ decompress("__DATA_B64GZ__").then((D) => {
                           mn = init.max - nyr;
                         }
                         const ir = init.max - init.min;
-                        if (mx - mn >= ir * 0.999) {
+                        if (mx - mn >= ir * zoomResetThreshold) {
                           mn = init.min;
                           mx = init.max;
                         }
@@ -602,7 +686,7 @@ decompress("__DATA_B64GZ__").then((D) => {
     }
     if (
       Math.abs(u.valToPos(u.data[0][closestY], "x") - cx) >
-      u.over.clientWidth * 0.02
+      u.over.clientWidth * cursorSnapPct
     )
       return null;
     return closestY;
@@ -652,7 +736,16 @@ decompress("__DATA_B64GZ__").then((D) => {
   }
 
   function origPn(u, si, hi) {
-    const v = u._origData ? u._origData[si]?.[hi] : u.data[si]?.[hi];
+    if (!u._origData) {
+      const v = u.data[si]?.[hi];
+      return v != null ? Math.round(v) : null;
+    }
+    const rawT = u.data[0][hi];
+    const origT = u._origData[0];
+    if (!origT) return null;
+    const k = bisect(origT, rawT + 1e-10) - 1;
+    if (k < 0 || origT[k] !== rawT) return null;
+    const v = u._origData[si]?.[k];
     return v != null ? Math.round(v) : null;
   }
   const cursor = {
@@ -708,6 +801,8 @@ decompress("__DATA_B64GZ__").then((D) => {
     const candidates = [];
     for (let si = 1; si < u.series.length; si++) {
       if (!u.series[si].show) continue;
+      const sc = u.series[si].scale;
+      if ((sc === "fcb" || sc === "sfcb") && !u.series[si]._fcEvent) continue;
       const hi = nearestNonNull(u, si, idx);
       if (hi == null || u.data[si][hi] == null) continue;
       const v = u.data[si][hi];
@@ -773,6 +868,7 @@ decompress("__DATA_B64GZ__").then((D) => {
     for (let si = 1; si < data.length; si++) {
       const sk = sMap[si];
       if (!sk || sk === "x") continue;
+      if (series[si]?._fcEvent) continue;
       const a = data[si];
       if (!a) continue;
       if (!yRanges[sk]) yRanges[sk] = { min: 0, max: 0 };
@@ -809,6 +905,7 @@ decompress("__DATA_B64GZ__").then((D) => {
       plugins: [
         _shadingP,
         _zeroLineP,
+        _axisHlP,
         wheelZoomPlugin(),
         {
           hooks: {
@@ -822,6 +919,12 @@ decompress("__DATA_B64GZ__").then((D) => {
                 if (idx == null) {
                   ip.innerHTML = "";
                   u._shownSi = null;
+                  const tg = u._infoPanel.querySelector(".ip-toggles");
+                  if (tg) tg.style.display = "";
+                  if (u._activeScale) {
+                    u._activeScale = null;
+                    u.redraw(false);
+                  }
                   return;
                 }
                 const items = [];
@@ -831,6 +934,17 @@ decompress("__DATA_B64GZ__").then((D) => {
                   u,
                   cy,
                 ).sort((a, b) => a.si - b.si);
+                const nearest = deduped.reduce(
+                  (a, b) => (b.dist < a.dist ? b : a),
+                  deduped[0],
+                );
+                const activeScale = nearest
+                  ? u.series[nearest.si].scale
+                  : null;
+                if (activeScale !== u._activeScale) {
+                  u._activeScale = activeScale;
+                  u.redraw(false);
+                }
                 const shownSi = new Set();
                 const seenPn = new Set();
                 for (const { si, hi, v } of deduped) {
@@ -856,10 +970,12 @@ decompress("__DATA_B64GZ__").then((D) => {
                   const itemTExtra = itemFmtT.endsWith(" ms")
                     ? ""
                     : " (" + itemFmtT + ")";
-                  const hdr = `<span class="ip-dot" style="background:${col}"></span><span style="color:${col}">${label}${s.scale === "sb" ? " " + swatch(s) : ""}</span>`;
+                  const hollow = s._hollow;
+                  const hdr = `${dotHtml(col, hollow)}<span style="color:${col}">${label}${s.width > 0 ? " " + swatch(s) : ""}</span>`;
                   let html =
-                    `<div class="ip-item"><div class="ip-label ip-bullet">${hdr}</div>` +
-                    DD(`t = ${N(itemT)} ms${itemTExtra}`);
+                    `<div class="ip-item"><div class="ip-label ip-bullet">${hdr}</div><div class="ip-frame">` +
+                    DD(`t = ${N(itemT)} ms${itemTExtra}`) +
+                    `</div>`;
                   if (isLossSeries) {
                     html += `<div class="ip-frame">` + DD(N(pn));
                     const gi = lossGapInfo.get(pn);
@@ -903,7 +1019,13 @@ decompress("__DATA_B64GZ__").then((D) => {
                     const lossInfo = lostPnMap.get(pn);
                     if (lossInfo)
                       for (const lt of lossInfo.triggers)
-                        html += `<div class="ip-bullet"><span class="ip-dot" style="background:${lt.color}"></span><span>Declared lost: ${lt.label}</span></div>`;
+                        html += bullet(lt.color, `Declared lost: ${lt.label}`);
+                    const connBudget = budgetAt(D.fcConnBudget, itemT);
+                    if (connBudget != null)
+                      html +=
+                        `<div class="ip-frame">` +
+                        DD(`connection FC budget: ${fmtB(connBudget)}`) +
+                        `</div>`;
                   } else if (isAckSeries && pnRanges[pn]) {
                     const asc = [...pnRanges[pn]].sort((a, b) => a[0] - b[0]);
                     const myRange = asc.find(([a, b]) => pn >= a && pn <= b);
@@ -912,8 +1034,28 @@ decompress("__DATA_B64GZ__").then((D) => {
                     const rpn = ackRecvPn[pn];
                     if (rpn != null) html += DD(`from ACK ${N(rpn)}`);
                     if (ecnCePnSet.has(pn))
-                      html += `<div class="ip-bullet"><span class="ip-dot" style="background:${OI.cyan}"></span><span>CE marked</span></div>`;
+                      html += bullet(OI.cyan, "CE marked");
                     html += `</div>`;
+                  } else if (s._fcEvent) {
+                    const rawT = u.data[0][hi];
+                    const evs = (fcEvByTime.get(rawT) || []).filter(
+                      (e) =>
+                        e.type === s._fcEvent &&
+                        (s._fcSid != null
+                          ? e.sid === s._fcSid
+                          : s._fcConn
+                            ? e.sid === -1
+                            : e.sid !== -1),
+                    );
+                    for (const ev of evs) {
+                      html += `<div class="ip-frame">`;
+                      if (ev.type === "blocked") {
+                        html += DD(`Blocked at limit ${fmtB(ev.value)}`);
+                      } else {
+                        html += DD(`Budget now ${fmtB(ev.value)}`);
+                      }
+                      html += `</div>`;
+                    }
                   } else {
                     const su = scaleFmt[s.scale] || { f: fmtMs, u: " ms" };
                     const raw = `${s.scale === "pn" ? N(pn) : N(v)}${su.u}`;
@@ -925,7 +1067,16 @@ decompress("__DATA_B64GZ__").then((D) => {
                       DD(raw + (showAbbr ? " (" + abbr + ")" : "")) +
                       `</div>`;
                     if (s.label === "Send Gap" && fcGapTimes.has(u.data[0][hi]))
-                      html += `<div class="ip-bullet"><span class="ip-dot" style="background:${OI.vermillion}"></span><span>Flow control limited</span></div>`;
+                      html += bullet(OI.vermillion, "Flow control limited");
+                    if (s.scale === "sb" && s.label.startsWith("Stream ")) {
+                      const sid = s.label.replace("Stream ", "");
+                      const sBudget = budgetAt(D.fcStreamBudget[sid], itemT);
+                      if (sBudget != null)
+                        html +=
+                          `<div class="ip-frame">` +
+                          DD(`FC budget: ${fmtB(sBudget)}`) +
+                          `</div>`;
+                    }
                   }
                   html += "</div>";
                   items.push(html);
@@ -954,26 +1105,27 @@ decompress("__DATA_B64GZ__").then((D) => {
                     pts[i].style.background = hc || sc;
                   }
                 }
+                // Add FC limit info at the bottom
+                const curT = u.data[0][idx];
+                const fcC = findInterval(fcConnIntervals, curT);
+                const fcS = findInterval(fcStreamIntervals, curT);
+                if (fcC)
+                  items.push(bullet(fcConnColor, "Connection FC limited"));
+                if (fcS)
+                  items.push(
+                    bullet(
+                      fcStreamColor,
+                      `Stream ${H(String(fcS[2]))} FC limited`,
+                    ),
+                  );
                 ip.innerHTML =
                   items.join("") ||
                   "<div class='ip-detail'>Hover over data</div>";
                 const tg = u._infoPanel.querySelector(".ip-toggles");
                 if (tg) {
-                  if (u._tgTimer) {
-                    clearTimeout(u._tgTimer);
-                    u._tgTimer = null;
-                  }
-                  const ipEl = u._infoPanel,
-                    ov = () => ipEl.scrollHeight > ipEl.clientHeight;
-                  if (ov()) {
+                  tg.style.display = "";
+                  if (u._infoPanel.scrollHeight > u._infoPanel.clientHeight)
                     tg.style.display = "none";
-                  } else {
-                    u._tgTimer = setTimeout(() => {
-                      tg.style.display = "";
-                      u._tgTimer = null;
-                      if (ov()) tg.style.display = "none";
-                    }, 300);
-                  }
                 }
               },
             ],
@@ -1046,9 +1198,101 @@ decompress("__DATA_B64GZ__").then((D) => {
     for (const [k, r] of Object.entries(yRanges))
       c._initY[k] = { min: r.min, max: r.max };
     c._rangeLock = rangeLock;
+    c._activeScale = null;
     charts.push(c);
     return c;
   }
+
+  function axisHlPlugin() {
+    return {
+      hooks: {
+        drawClear: [
+          (u) => {
+            const orig = u.ctx.fillText.bind(u.ctx);
+            u._restoreFillText = () => {
+              u.ctx.fillText = orig;
+            };
+            u._labelPos = {};
+            u.ctx.fillText = function (text, x, y, maxW) {
+              for (let ai = 1; ai < u.axes.length; ai++) {
+                const ax = u.axes[ai];
+                if (ax.scale === "x") continue;
+                const lbl =
+                  typeof ax.label === "function"
+                    ? ax.label(u, ai)
+                    : ax.label;
+                if (lbl && text === lbl) {
+                  u._labelPos[ax.scale] = {
+                    transform: u.ctx.getTransform(),
+                    x,
+                    y,
+                    ai,
+                    textAlign: u.ctx.textAlign,
+                    textBaseline: u.ctx.textBaseline,
+                  };
+                  break;
+                }
+              }
+              return orig(text, x, y, maxW);
+            };
+          },
+        ],
+        draw: [
+          (u) => {
+            if (u._restoreFillText) {
+              u._restoreFillText();
+              u._restoreFillText = null;
+            }
+            const pos = u._labelPos?.[u._activeScale];
+            if (!pos) return;
+            const ax = u.axes[pos.ai];
+            const lbl =
+              typeof ax.label === "function"
+                ? ax.label(u, pos.ai)
+                : ax.label;
+            if (!lbl) return;
+            const ctx = u.ctx;
+            const r = devicePixelRatio;
+            ctx.save();
+            ctx.setTransform(pos.transform);
+            ctx.font =
+              ax.labelFont?.[0] || "bold 12px system-ui, sans-serif";
+            const m = ctx.measureText(lbl);
+            const pad = 4 * r;
+            const asc = m.actualBoundingBoxAscent || 10;
+            const dsc = m.actualBoundingBoxDescent || 2;
+            let cx = pos.x,
+              cy = pos.y;
+            if (
+              pos.textAlign === "start" ||
+              pos.textAlign === "left"
+            )
+              cx += m.width / 2;
+            else if (
+              pos.textAlign === "end" ||
+              pos.textAlign === "right"
+            )
+              cx -= m.width / 2;
+            if (pos.textBaseline === "alphabetic")
+              cy -= (asc - dsc) / 2;
+            else if (pos.textBaseline === "top")
+              cy += (asc + dsc) / 2;
+            else if (pos.textBaseline === "bottom")
+              cy -= (asc + dsc) / 2;
+            const hw = m.width / 2 + pad;
+            const hh = (asc + dsc) / 2 + pad;
+            ctx.strokeStyle = dk ? "#ccc" : "#222";
+            ctx.lineWidth = 2 * r;
+            ctx.beginPath();
+            ctx.roundRect(cx - hw, cy - hh, hw * 2, hh * 2, 4 * r);
+            ctx.stroke();
+            ctx.restore();
+          },
+        ],
+      },
+    };
+  }
+  const _axisHlP = axisHlPlugin();
 
   // Per-point deviation from linear interpolation (Ramer-Douglas-Peucker criterion).
   // Stored as fraction of y-range; cached per chart+series.
@@ -1102,7 +1346,7 @@ decompress("__DATA_B64GZ__").then((D) => {
       s.width > 0 ? (s.points?.size || 4) * 0.6 : (s.points?.size || 4) * 0.1;
     const occ = new Set();
     function cellKey(px, py) {
-      return ((px / minD) | 0) * 1e6 + ((py / minD) | 0);
+      return ((px / minD) | 0) * spatialGridScale + ((py / minD) | 0);
     }
     function tryAdd(idx) {
       const px = u.valToPos(u.data[0][idx], "x");
@@ -1111,12 +1355,12 @@ decompress("__DATA_B64GZ__").then((D) => {
         cy = (py / minD) | 0;
       for (let dx = -1; dx <= 1; dx++)
         for (let dy = -1; dy <= 1; dy++)
-          if (occ.has((cx + dx) * 1e6 + (cy + dy))) return false;
+          if (occ.has((cx + dx) * spatialGridScale + (cy + dy))) return false;
       occ.add(cellKey(px, py));
       return true;
     }
     let step = 1;
-    while (nn / step > 30) step *= 2;
+    while (nn / step > thinTargetPts) step *= 2;
     const dev = s.width > 0 ? getPointDev(u, si) : null;
     const out = [];
     // Pass 0: high-deviation corners (line series only) — highest priority
@@ -1203,7 +1447,10 @@ decompress("__DATA_B64GZ__").then((D) => {
       if (a[i] != null && a[i] > maxPn) maxPn = a[i];
   }
   const maxCwnd = D.metrics[D.mi.congestion_window]
-    ? Math.max(...D.metrics[D.mi.congestion_window].filter((v) => v != null))
+    ? D.metrics[D.mi.congestion_window].reduce(
+        (mx, v) => (v != null && v > mx ? v : mx),
+        0,
+      )
     : 0;
   let maxPktSize = 1;
   for (const pn of Object.keys(D.pktMeta)) {
@@ -1234,7 +1481,16 @@ decompress("__DATA_B64GZ__").then((D) => {
     }
     return out;
   }
-  const p1Data = [p1Unwrapped[0], ...p1Unwrapped.slice(1).map(wrapPn)];
+  const p1Base = [p1Unwrapped[0], ...p1Unwrapped.slice(1).map(wrapPn)];
+  // Join connection FC budget and FC event markers into panel 1
+  const p1ConnFcData = D.fcConnBudget[0].length > 0 ? D.fcConnBudget : null;
+  const p1FcTables = [];
+  if (p1ConnFcData) p1FcTables.push(p1ConnFcData);
+  if (hasFcConnBlocked) p1FcTables.push(fcConnBlockedData);
+  if (hasFcConnIncreased) p1FcTables.push(fcConnIncreasedData);
+  const p1Data = p1FcTables.length
+    ? uPlot.join([p1Base, ...p1FcTables])
+    : p1Base;
 
   // Panel 2: per-stream bytes (own panel with per-stream colors)
   const streamIds = Object.keys(D.streamBytes).sort((a, b) => a - b);
@@ -1246,9 +1502,16 @@ decompress("__DATA_B64GZ__").then((D) => {
     OI.cyan,
     OI.gray,
   ];
-  const p2Data = streamIds.length
-    ? uPlot.join(streamIds.map((sid) => D.streamBytes[sid]))
-    : null;
+  const p2StreamFcIds = streamIds.filter((sid) => D.fcStreamBudget[sid]);
+  const p2Tables = [
+    ...streamIds.map((sid) => D.streamBytes[sid]).filter(Boolean),
+    ...p2StreamFcIds.map((sid) => D.fcStreamBudget[sid]),
+    ...fcEventStreamIds.flatMap((sid) => [
+      ...(fcStreamBlockedBySid[sid] ? [fcStreamBlockedBySid[sid]] : []),
+      ...(fcStreamIncreasedBySid[sid] ? [fcStreamIncreasedBySid[sid]] : []),
+    ]),
+  ];
+  const p2Data = p2Tables.length ? uPlot.join(p2Tables) : null;
 
   // Panel 3: congestion metrics
   const M = D.metrics,
@@ -1264,7 +1527,7 @@ decompress("__DATA_B64GZ__").then((D) => {
   // Panel 4: send gaps (FC gaps recolored) + RTT metrics
   const fcGapTimes = new Set();
   {
-    const fcAll = [...D.fcStreamIntervals, ...D.fcConnIntervals].sort(
+    const fcAll = [...fcStreamIntervals, ...fcConnIntervals].sort(
       (a, b) => a[0] - b[0],
     );
     for (let i = 0, fi = 0; i < D.sendGap[0].length; i++) {
@@ -1397,7 +1660,7 @@ decompress("__DATA_B64GZ__").then((D) => {
               const y = u.valToPos(v, "pn");
               const left = Math.min(x1, x2),
                 w = Math.abs(x2 - x1);
-              if (x1 < 0 || x2 < 0 || y < 0 || w < 30) {
+              if (x1 < 0 || x2 < 0 || y < 0 || w < rttMinWidth) {
                 hide(j);
                 continue;
               }
@@ -1474,11 +1737,28 @@ decompress("__DATA_B64GZ__").then((D) => {
     };
   }
 
+  // FC event point helpers: filled (blocked) and hollow (increased)
+  const fcPtFilled = (col) => ({
+    size: 4,
+    width: 0,
+    show: true,
+    fill: col,
+  });
+  const fcPtHollow = (col) => ({
+    size: 4,
+    width: 1,
+    show: true,
+    stroke: col,
+    fill: "transparent",
+  });
+  const fcLighten = 0.55;
+  const fcConnStroke = lighten(OI.vermillion, fcLighten);
+
   // ── Panel definitions ───────────────────────────────────────────────
   const panels = [
     {
       id: "p1",
-      scales: { x: { time: false }, pn: {} },
+      scales: { x: { time: false }, pn: {}, fcb: {} },
       axes: [
         xAx,
         {
@@ -1487,13 +1767,47 @@ decompress("__DATA_B64GZ__").then((D) => {
           label: `Packet (mod ${N(pnMod)})`,
           values: fmtPnAxis,
         },
-        dummyRightAx("pn"),
+        {
+          ...axProps,
+          scale: "fcb",
+          side: 1,
+          label: axLabel("Connection FC Budget"),
+          values: fmtBAxis,
+        },
       ],
       series: [
         {},
         S("Sent", OI.blue, "pn"),
         P("ACK", OI.orange, "pn"),
         ...p1LossSeries,
+        ...(p1ConnFcData
+          ? [
+              S("Connection FC Budget", fcConnStroke, "fcb", {
+                width: 1,
+                paths: stepped,
+                points: { show: false },
+              }),
+            ]
+          : []),
+        ...(hasFcConnBlocked
+          ? [
+              P("FC Blocked", OI.vermillion, "fcb", {
+                _fcEvent: "blocked",
+                _fcConn: true,
+                _hollow: true,
+                points: fcPtHollow(OI.vermillion),
+              }),
+            ]
+          : []),
+        ...(hasFcConnIncreased
+          ? [
+              P("FC Increased", fcConnStroke, "fcb", {
+                _fcEvent: "increased",
+                _fcConn: true,
+                points: fcPtFilled(fcConnStroke),
+              }),
+            ]
+          : []),
       ],
       data: p1Data,
       extraPlugins: [
@@ -1516,7 +1830,7 @@ decompress("__DATA_B64GZ__").then((D) => {
     },
     {
       id: "p2",
-      scales: { x: { time: false }, sb: {} },
+      scales: { x: { time: false }, sb: {}, sfcb: {} },
       axes: [
         xAx,
         {
@@ -1525,7 +1839,13 @@ decompress("__DATA_B64GZ__").then((D) => {
           label: axLabel("Stream Bytes"),
           values: fmtBAxis,
         },
-        dummyRightAx("sb"),
+        {
+          ...axProps,
+          scale: "sfcb",
+          side: 1,
+          label: axLabel("Stream FC Budget"),
+          values: fmtBAxis,
+        },
       ],
       series: [
         {},
@@ -1536,6 +1856,44 @@ decompress("__DATA_B64GZ__").then((D) => {
             width: 1.5,
             ...(d ? { dash: d } : {}),
           });
+        }),
+        ...streamIds
+          .filter((sid) => D.fcStreamBudget[sid])
+          .map((sid, i) => {
+            const col =
+              streamColors[streamIds.indexOf(sid) % streamColors.length];
+            return S(`Stream ${sid} FC`, lighten(col, fcLighten), "sfcb", {
+              width: 1,
+              paths: stepped,
+              points: { show: false },
+            });
+          }),
+        ...fcEventStreamIds.flatMap((sid) => {
+          const sidIdx = streamIds.indexOf(sid);
+          const baseCol =
+            streamColors[(sidIdx >= 0 ? sidIdx : 0) % streamColors.length];
+          const lightCol = lighten(baseCol, fcLighten);
+          return [
+            ...(fcStreamBlockedBySid[sid]
+              ? [
+                  P(`Stream ${sid} FC Blocked`, baseCol, "sfcb", {
+                    _fcEvent: "blocked",
+                    _fcSid: +sid,
+                    _hollow: true,
+                    points: fcPtHollow(baseCol),
+                  }),
+                ]
+              : []),
+            ...(fcStreamIncreasedBySid[sid]
+              ? [
+                  P(`Stream ${sid} FC Increased`, lightCol, "sfcb", {
+                    _fcEvent: "increased",
+                    _fcSid: +sid,
+                    points: fcPtFilled(lightCol),
+                  }),
+                ]
+              : []),
+          ];
         }),
       ],
       data: p2Data,
@@ -1556,7 +1914,6 @@ decompress("__DATA_B64GZ__").then((D) => {
           scale: "rate",
           label: axLabel("Pacing Rate"),
           side: 1,
-          stroke: OI.orange,
           values: fmtBpsAxis,
         },
       ],
@@ -1580,7 +1937,6 @@ decompress("__DATA_B64GZ__").then((D) => {
           scale: "gap",
           label: axLabel("Send Gap"),
           side: 1,
-          stroke: OI.gray,
           values: fmtMsAxis,
         },
       ],

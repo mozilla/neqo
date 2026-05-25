@@ -22,6 +22,7 @@ import base64
 import gzip
 import html
 import json
+import re
 import sys
 import urllib.request
 from dataclasses import dataclass, field
@@ -81,8 +82,14 @@ class TraceData:
     ecn_ce_t: list[float] = field(default_factory=list)
     ecn_ce_pn: list[int] = field(default_factory=list)
     cc_transitions: list[tuple[float, str]] = field(default_factory=list)
-    fc_conn_intervals: list[tuple[float, float]] = field(default_factory=list)
-    fc_stream_intervals: list[tuple[float, float]] = field(default_factory=list)
+    fc_conn_budget_t: list[float] = field(default_factory=list)
+    fc_conn_budget_v: list[int] = field(default_factory=list)
+    fc_stream_budget: dict[int, tuple[list[float], list[int]]] = field(
+        default_factory=dict
+    )
+    fc_events: list[tuple[float, str, int, int]] = field(
+        default_factory=list
+    )  # (time, type, value, stream_id) — type: "blocked"/"increased"
     max_t: float = 0.0
     title: str = ""
 
@@ -116,9 +123,22 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
     cum_stream: dict[int, int] = {}
     acked_pns: set[int] = set()
     cur: dict[str, float | None] = dict.fromkeys(METRIC_FIELDS)
-    fc_conn_blocked = False
-    fc_stream_blocked: set[int] = set()
-    last_stream_data_t: float = 0.0
+    fc_conn_limit: int = 0
+    fc_conn_used: int = 0  # total stream bytes sent (connection-level FC)
+    fc_stream_limit: dict[int | str, int] = {}  # int=stream_id, str=initial param key
+    fc_stream_hwm: dict[int, int] = {}  # per-stream high-water mark (offset+length)
+    def _append_conn_budget(t: float) -> None:
+        budget = max(0, fc_conn_limit - fc_conn_used)
+        data.fc_conn_budget_t.append(t)
+        data.fc_conn_budget_v.append(budget)
+
+    def _append_stream_budget(sid: int, t: float) -> int:
+        budget = max(0, fc_stream_limit[sid] - fc_stream_hwm.get(sid, 0))
+        sb = data.fc_stream_budget.setdefault(sid, ([], []))
+        sb[0].append(t)
+        sb[1].append(budget)
+        return budget
+
     sent_seq, lost_seq, ack_seq, metrics_seq = _Seq(), _Seq(), _Seq(), _Seq()
     last_ce_count = 0
     last_recv_pn: int | None = None
@@ -145,25 +165,57 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                 for fr in frames:
                     ft = fr.get("frame_type", "")
                     if ft == "stream":
-                        last_stream_data_t = t
-                    elif ft == "data_blocked":
-                        fc_conn_blocked = True
+                        sid = int(fr.get("stream_id", 0))
+                        off = int(fr.get("offset", 0))
+                        length = int(fr.get("length") or 0)
+                        end = off + length
+                        old_hwm = fc_stream_hwm.get(sid, 0)
+                        if end > old_hwm:
+                            fc_conn_used += end - old_hwm
+                            fc_stream_hwm[sid] = end
+                        # Initialize per-stream limit from transport params
+                        if sid not in fc_stream_limit:
+                            is_uni = bool(sid & 0x2)
+                            if is_uni:
+                                k = "initial_max_stream_data_uni"
+                            else:
+                                we_initiated = (sid & 0x1) == 0
+                                k = (
+                                    "initial_max_stream_data_bidi_remote"
+                                    if we_initiated
+                                    else "initial_max_stream_data_bidi_local"
+                                )
+                            if k in fc_stream_limit:
+                                fc_stream_limit[sid] = fc_stream_limit[k]
+                        if sid in fc_stream_limit:
+                            _append_stream_budget(sid, t)
+                        if fc_conn_limit > 0:
+                            _append_conn_budget(t)
                     elif ft == "stream_data_blocked":
-                        fc_stream_blocked.add(int(fr.get("stream_id", 0)))
+                        sid = int(fr.get("stream_id", 0))
+                        lim = int(fr.get("limit", 0))
+                        data.fc_events.append((t, "blocked", lim, sid))
+                    elif ft == "data_blocked":
+                        lim = int(fr.get("limit", 0))
+                        data.fc_events.append((t, "blocked", lim, -1))
         elif name == "transport:packet_received":
             hdr = d.get("header") or {}
             for fr in frames:
                 ft = fr.get("frame_type", "")
-                if ft == "max_data" and fc_conn_blocked:
-                    if last_stream_data_t < t:
-                        data.fc_conn_intervals.append((last_stream_data_t, t))
-                    fc_conn_blocked = False
+                if ft == "max_data":
+                    lim = int(fr.get("maximum") or fr.get("limit", 0))
+                    if lim > fc_conn_limit:
+                        fc_conn_limit = lim
+                        _append_conn_budget(t)
+                        budget = data.fc_conn_budget_v[-1]
+                        data.fc_events.append((t, "increased", budget, -1))
                 elif ft == "max_stream_data":
                     sid = int(fr.get("stream_id", 0))
-                    if sid in fc_stream_blocked:
-                        if last_stream_data_t < t:
-                            data.fc_stream_intervals.append((last_stream_data_t, t))
-                        fc_stream_blocked.discard(sid)
+                    lim = int(fr.get("maximum") or fr.get("limit", 0))
+                    if lim > fc_stream_limit.get(sid, 0):
+                        fc_stream_limit[sid] = lim
+                        budget = _append_stream_budget(sid, t)
+                        data.fc_events.append((t, "increased", budget, sid))
                 if ft == "ack":
                     ack_ranges = fr.get("acked_ranges")
                     if ack_ranges:
@@ -178,7 +230,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                         # Pick top `delta` pns from acked_ranges (highest first)
                         pns_desc: list[int] = []
                         for r in ack_ranges or []:
-                            for p in range(int(r[0]), int(r[1]) - 1, -1):
+                            for p in range(int(r[1]), int(r[0]) - 1, -1):
                                 pns_desc.append(p)
                                 if len(pns_desc) >= delta:
                                     break
@@ -221,6 +273,19 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                             sb = data.stream_bytes.setdefault(sid, ([], []))
                             sb[0].append(t)
                             sb[1].append(cum_stream[sid])
+        elif name == "transport:parameters_set":
+            if d.get("owner") == "remote":
+                if (v := d.get("initial_max_data")) is not None:
+                    fc_conn_limit = int(v)
+                    _append_conn_budget(t)
+                # Store initial per-stream limits by stream type
+                for key in (
+                    "initial_max_stream_data_bidi_local",
+                    "initial_max_stream_data_bidi_remote",
+                    "initial_max_stream_data_uni",
+                ):
+                    if (v := d.get(key)) is not None:
+                        fc_stream_limit[key] = int(v)
         elif name == "recovery:parameters_set":
             if (v := d.get("initial_congestion_window")) is not None:
                 cur["congestion_window"] = float(v)
@@ -237,10 +302,6 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                 cc_state = f"recovery:{tr}"
             data.cc_transitions.append((t, cc_state))
 
-    if fc_conn_blocked:
-        data.fc_conn_intervals.append((last_stream_data_t, data.max_t))
-    if fc_stream_blocked:
-        data.fc_stream_intervals.append((last_stream_data_t, data.max_t))
     return data
 
 
@@ -306,8 +367,13 @@ def data_to_json(data: TraceData) -> str:  # noqa: PLR0914
             "title": data.title,
             "maxT": data.max_t,
             "ccIntervals": cc,
-            "fcStreamIntervals": data.fc_stream_intervals,
-            "fcConnIntervals": data.fc_conn_intervals,
+            "fcConnBudget": [data.fc_conn_budget_t, data.fc_conn_budget_v],
+            "fcStreamBudget": {
+                str(sid): list(tv)
+                for sid, tv in sorted(data.fc_stream_budget.items())
+                if isinstance(sid, int)
+            },
+            "fcEvents": [[t, typ, val, sid] for t, typ, val, sid in data.fc_events],
             "sent": [data.sent_t, data.sent_pn],
             "streamBytes": {
                 str(sid): list(tv) for sid, tv in sorted(data.stream_bytes.items())
@@ -346,8 +412,6 @@ def _template() -> str:
 
 
 def generate_html(data: TraceData) -> str:
-    import re
-
     data_b64 = base64.b64encode(gzip.compress(data_to_json(data).encode())).decode()
     subs = {
         "__TITLE__": html.escape(data.title),
