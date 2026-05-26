@@ -256,3 +256,35 @@ fn issue_1465() {
 fn new_reno_display() {
     assert_eq!(NewReno::default().to_string(), "NewReno");
 }
+
+#[test]
+fn congestion_avoidance_no_two_mss_cap() {
+    // Acking 3 * cwnd bytes in one on_packets_acked call should earn 3 MSS.
+    let mut cc = make_cc_newreno();
+    let mut cc_stats = CongestionControlStats::default();
+    let now = now();
+    let mtu = cc.max_datagram_size();
+
+    // Force congestion avoidance: set ssthresh == cwnd.
+    // For NewReno, bytes_for_cwnd_increase returns cwnd, so one MSS of cwnd
+    // growth requires acknowledging a full cwnd worth of bytes.
+    let cwnd0 = cc.cwnd();
+    cc.set_ssthresh(cwnd0);
+
+    // Send 3 * cwnd / mtu packets. This keeps BIF well above the app-limited
+    // threshold so that is_app_limited is false when all packets are acked.
+    let n = 3 * (cwnd0 / mtu);
+    let mut pkts = Vec::with_capacity(n);
+    for pn in 0..n as u64 {
+        let p = sent::make_packet(pn, now, mtu);
+        cc.on_packet_sent(&p, now, false);
+        pkts.push(p);
+    }
+
+    // ACK all packets in one call: new_acked = 3 * cwnd.
+    cc.on_packets_acked(&pkts, &RttEstimate::new(RTT), now + RTT, &mut cc_stats);
+
+    // new_acked / bytes_for_increase = 3*cwnd0 / cwnd0 = 3 increments.
+    assert_eq!(cc.cwnd(), cwnd0 + 3 * mtu);
+    assert_eq!(cc.acked_bytes(), 0);
+}
