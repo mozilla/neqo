@@ -5,6 +5,7 @@
 # option. This file may not be copied, modified, or distributed
 # except according to those terms.
 # /// script
+# requires-python = ">=3.10"
 # ///
 """Visualize neqo .sqlog files as interactive HTML.
 
