@@ -715,7 +715,8 @@ decompress("__DATA_B64GZ__").then((D) => {
             const { left, top, width, height } = u.bbox;
             const r = ((u.series[si].points?.size || 5) / 2) * devicePixelRatio;
             const byColor = new Map();
-            for (let i = 0; i < d.length; i++) {
+            const [i0, i1] = u.series[si].idxs || [0, d.length - 1];
+            for (let i = i0; i <= i1; i++) {
               if (d[i] == null) continue;
               const color = colorFn(u, si, i);
               if (!color) continue;
@@ -1874,7 +1875,7 @@ decompress("__DATA_B64GZ__").then((D) => {
           });
         }),
         ...p2StreamFcIds
-          .map((sid, i) => {
+          .map((sid) => {
             const col =
               streamColors[streamIds.indexOf(sid) % streamColors.length];
             return S(`Stream ${sid} FC`, lighten(col, fcLighten), "sfcb", {

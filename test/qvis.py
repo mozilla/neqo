@@ -449,20 +449,26 @@ def main() -> None:
 
     errors = 0
     for path in args.sqlog:
-        stem = Path(path).stem
-        out_dir = Path(args.output_dir) if args.output_dir else Path(path).parent
-        out_dir.mkdir(parents=True, exist_ok=True)
-        output = str(out_dir / (stem + ".html"))
-        header, events = parse_sqlog(path)
-        if not events:
-            print(f"{path}: no events, skipping", file=sys.stderr)
+        try:
+            stem = Path(path).stem
+            out_dir = Path(args.output_dir) if args.output_dir else Path(path).parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+            output = str(out_dir / (stem + ".html"))
+            header, events = parse_sqlog(path)
+            if not events:
+                print(f"{path}: no events, skipping", file=sys.stderr)
+                errors += 1
+                continue
+            vp = header.get("trace", {}).get("vantage_point", {})
+            is_server = vp.get("type") == "server"
+            data = extract(
+                events, args.title or Path(path).name, is_server=is_server
+            )
+            Path(output).write_text(generate_html(data), encoding="utf-8")
+            print(output)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            print(f"{path}: {e}", file=sys.stderr)
             errors += 1
-            continue
-        vp = header.get("trace", {}).get("vantage_point", {})
-        is_server = vp.get("type") == "server"
-        data = extract(events, args.title or Path(path).name, is_server=is_server)
-        Path(output).write_text(generate_html(data), encoding="utf-8")
-        print(output)
     if errors:
         sys.exit(1)
 
