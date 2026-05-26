@@ -120,7 +120,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
     filename: str = "",
     is_server: bool = False,
 ) -> TraceData:
-    events.sort(key=lambda ev: ev["time"])
+    events = sorted(events, key=lambda ev: ev["time"])
     data = TraceData(
         max_t=max((ev["time"] for ev in events), default=0.0),
         metrics={f: [] for f in METRIC_FIELDS},
@@ -161,7 +161,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
         _Seq(), _Seq(), _Seq(), _Seq(), _Seq(),
     )
     last_ce_count = 0
-    last_recv_pn: int | None = None
+    last_recv_pn: dict[str, int] = {}
     prev_sent_t: float = -1.0
 
     for ev in events:
@@ -233,14 +233,13 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                         fc_stream_limit[sid] = lim
                         budget = _append_stream_budget(sid, t)
                         data.fc_events.append((t, "increased", budget, sid))
-                if ft == "ack":
+                elif ft == "ack":
                     ack_ranges = fr.get("acked_ranges")
                     if ack_ranges:
-                        last_recv_pn = (
-                            int(hdr["packet_number"])
-                            if hdr.get("packet_number") is not None
-                            else None
-                        )
+                        pkt_type = hdr.get("packet_type", "")
+                        space = "application_data" if pkt_type == "1RTT" else pkt_type
+                        if hdr.get("packet_number") is not None:
+                            last_recv_pn[space] = int(hdr["packet_number"])
                     ce = int(fr.get("ce", 0))
                     if ce > last_ce_count:
                         delta = ce - last_ce_count
@@ -265,6 +264,8 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                 data.lost_trigger.append(str(d.get("trigger") or "unknown"))
         elif name == "transport:packets_acked":
             pns = sorted(int(pn) for pn in d.get("packet_numbers") or [])
+            space = d.get("packet_type") or d.get("packet_number_space", "")
+            rpn = last_recv_pn.get(space)
             # Compute ranges from newly-acked pns (not cumulative ACK frame)
             new_ranges: list[list[int]] = []
             for pn in pns:
@@ -276,8 +277,8 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                 data.acked_t.append(ack_seq(t))
                 data.acked_pn.append(pn)
                 data.ack_ranges[pn] = new_ranges  # shared ref — dedup in data_to_json uses id()
-                if last_recv_pn is not None:
-                    data.ack_recv_pn[pn] = last_recv_pn
+                if rpn is not None:
+                    data.ack_recv_pn[pn] = rpn
                 if pn not in acked_pns:
                     acked_pns.add(pn)
                     for fr in pn_frames.get(pn, []):
@@ -287,6 +288,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                             sb = data.stream_bytes.setdefault(sid, ([], []))
                             sb[0].append(t)
                             sb[1].append(acked_stream_hwm[sid])
+                    pn_frames.pop(pn, None)
         elif name == "transport:parameters_set":
             if d.get("owner") == "remote":
                 if (v := d.get("initial_max_data")) is not None:
