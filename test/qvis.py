@@ -272,7 +272,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
             for pn in pns:
                 data.acked_t.append(ack_seq(t))
                 data.acked_pn.append(pn)
-                data.ack_ranges[pn] = new_ranges
+                data.ack_ranges[pn] = new_ranges  # shared ref — dedup in data_to_json uses id()
                 if last_recv_pn is not None:
                     data.ack_recv_pn[pn] = last_recv_pn
                 if pn not in acked_pns:
@@ -410,7 +410,7 @@ def _fetch(url: str) -> str:
         with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
             return resp.read().decode()
     except Exception as e:  # pylint: disable=broad-exception-caught
-        raise SystemExit(f"Failed to fetch {url}: {e}") from e
+        raise RuntimeError(f"Failed to fetch {url}: {e}") from e
 
 
 _DIR = Path(__file__).parent
