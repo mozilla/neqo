@@ -42,6 +42,10 @@
         padding: 6px;
         font-size: 12px;
       }
+      body.error {
+        padding: 2em;
+        font-size: 16px;
+      }
 
       /* Header */
       .hdr {
@@ -76,6 +80,7 @@
       .cc-leg b {
         width: 20px;
         height: 12px;
+        background: var(--c);
         border-radius: 2px;
         flex-shrink: 0;
         border: 1px solid var(--panel-border);
@@ -176,11 +181,14 @@
         margin-right: 4px;
         vertical-align: 1px;
         flex-shrink: 0;
+        background: var(--c);
+      }
+      .ip-color {
+        color: var(--c);
       }
       .ip-dot-hollow {
         background: transparent;
-        border-width: 1.5px;
-        border-style: solid;
+        border: 1.5px solid var(--c);
       }
       .ip-bullet {
         display: flex;
@@ -241,10 +249,7 @@
   <body>
     <div class="hdr">
       <h1>__TITLE__</h1>
-      <span class="hint"
-        >Drag to zoom · ⌘-drag to pan · Scroll to zoom · Shift for single panel
-        · Double-click to reset · Click to freeze</span
-      >
+      <span class="hint"></span>
     </div>
     <div id="ccleg" class="cc-leg"></div>
     <div class="row has-info"><div id="p1" class="chart"></div></div>

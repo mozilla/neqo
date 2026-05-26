@@ -8,6 +8,11 @@ async function decompress(b64) {
   return JSON.parse(await new Response(ds.readable).text());
 }
 decompress("__DATA_B64GZ__").then((D) => {
+  const isMac = /Mac/.test(navigator.platform);
+  const modKey = isMac ? "⌘" : "Ctrl";
+  document.querySelector(".hint").textContent =
+    `Drag to zoom \xb7 ${modKey}-drag to pan \xb7 Scroll to zoom \xb7 Shift for single panel \xb7 Double-click to reset \xb7 Click to freeze`;
+
   // ── Palette ──────────────────────────────────────────────────────────
   const dkMq = matchMedia("(prefers-color-scheme:dark)");
   const dk = dkMq.matches;
@@ -98,7 +103,7 @@ decompress("__DATA_B64GZ__").then((D) => {
       .replace(/"/g, "&quot;");
   const DD = (s) => `<div class="ip-frame-detail">${s}</div>`;
   const bullet = (color, text) =>
-    `<div class="ip-bullet"><span class="ip-dot" style="background:${color}"></span><span>${text}</span></div>`;
+    `<div class="ip-bullet">${dotHtml(color, false)}<span>${text}</span></div>`;
   function lighten(hex, amt = 0.4) {
     const n = parseInt(hex.replace("#", ""), 16);
     const r = Math.min(
@@ -115,9 +120,8 @@ decompress("__DATA_B64GZ__").then((D) => {
   const sColor = (s, u, si) =>
     typeof s.stroke === "function" ? (u ? s.stroke(u, si) : "#888") : s.stroke;
   function dotHtml(c, hollow) {
-    if (hollow)
-      return `<span class="ip-dot ip-dot-hollow" style="border-color:${c}"></span>`;
-    return `<span class="ip-dot" style="background:${c}"></span>`;
+    const cls = hollow ? "ip-dot ip-dot-hollow" : "ip-dot";
+    return `<span class="${cls}" style="--c:${c}"></span>`;
   }
   function swatch(s) {
     const c = sColor(s);
@@ -273,7 +277,13 @@ decompress("__DATA_B64GZ__").then((D) => {
     const items = [
       ...Object.entries(CC)
         .filter(([st]) => st !== "recovery_start")
-        .map(([st, [c, l]]) => [st, c, l, activeCC.has(st)]),
+        .map(([st, [c, l]]) => [
+          st,
+          c,
+          l,
+          activeCC.has(st) ||
+            (st === "recovery" && activeCC.has("recovery_start")),
+        ]),
       [
         "fc_stream",
         fcStreamColor,
@@ -288,7 +298,7 @@ decompress("__DATA_B64GZ__").then((D) => {
       ],
     ];
     for (const [key, color, label, active] of items) {
-      el.innerHTML += `<span data-rg="${H(key)}" class="${active ? "" : "cc-inactive"}"><b style="background:${color}"></b><span class="cc-label">${H(label)}</span></span>`;
+      el.innerHTML += `<span data-rg="${H(key)}" class="${active ? "" : "cc-inactive"}"><b style="--c:${color}"></b><span class="cc-label">${H(label)}</span></span>`;
     }
     el.querySelectorAll("[data-rg]").forEach(
       (s) => (ccLegEls[s.dataset.rg] = s),
@@ -336,9 +346,6 @@ decompress("__DATA_B64GZ__").then((D) => {
   }
   const cursorSnapPct = 0.02;
   const zoomResetThreshold = 0.999;
-  const rttMinWidth = 30;
-  const thinTargetPts = 30;
-  const spatialGridScale = 1e6;
 
   const stepped = uPlot.paths.stepped({ align: 1 });
   const axProps = {
@@ -576,8 +583,6 @@ decompress("__DATA_B64GZ__").then((D) => {
                       xVal - leftPct * nxr,
                       xVal - leftPct * nxr + nxr,
                     );
-                    if (nMax - nMin < (globalXMax - globalXMin) / rect.width)
-                      return;
                     function zoomY(ch) {
                       let f = factor;
                       forYScales(ch, (k, s) => {
@@ -883,8 +888,14 @@ decompress("__DATA_B64GZ__").then((D) => {
     }
     // Inject range functions: return pre-computed range when locked, pass-through otherwise.
     const rangeLock = { v: true };
-    scales.x.range = (u, mn, mx) =>
-      rangeLock.v ? [globalXMin, globalXMax] : [mn, mx];
+    scales.x.range = (u, mn, mx) => {
+      if (rangeLock.v) return [globalXMin, globalXMax];
+      if (mx - mn < minXRange) {
+        const mid = (mn + mx) / 2;
+        return [mid - minXRange / 2, mid + minXRange / 2];
+      }
+      return [mn, mx];
+    };
     for (const k of Object.keys(scales)) {
       if (k === "x" || !yRanges[k]) continue;
       const r = yRanges[k];
@@ -971,7 +982,7 @@ decompress("__DATA_B64GZ__").then((D) => {
                     ? ""
                     : " (" + itemFmtT + ")";
                   const hollow = s._hollow;
-                  const hdr = `${dotHtml(col, hollow)}<span style="color:${col}">${label}${s.width > 0 ? " " + swatch(s) : ""}</span>`;
+                  const hdr = `${dotHtml(col, hollow)}<span class="ip-color" style="--c:${col}">${label}${s.width > 0 ? " " + swatch(s) : ""}</span>`;
                   let html =
                     `<div class="ip-item"><div class="ip-label ip-bullet">${hdr}</div><div class="ip-frame">` +
                     DD(`t = ${N(itemT)} ms${itemTExtra}`) +
@@ -1173,7 +1184,7 @@ decompress("__DATA_B64GZ__").then((D) => {
       lbl.appendChild(cb);
       lbl.insertAdjacentHTML(
         "beforeend",
-        swatch(s) + `<span style="color:${sColor(s)}">${H(s.label)}</span>`,
+        swatch(s) + `<span class="ip-color" style="--c:${sColor(s)}">${H(s.label)}</span>`,
       );
       togglesDiv.appendChild(lbl);
     }
@@ -1589,6 +1600,7 @@ decompress("__DATA_B64GZ__").then((D) => {
         arrow = mkEl("div", "rtt-arrow"),
         label = mkEl("div", "rtt-label");
       line.style.display = arrow.style.display = label.style.display = "none";
+      label.style.transform = "translateX(-50%)";
       parent.append(line, arrow, label);
       return { line, arrow, label };
     }
@@ -1728,7 +1740,6 @@ decompress("__DATA_B64GZ__").then((D) => {
               label.style.color = c;
               label.style.left = best.lx + "px";
               label.style.top = best.ly + "px";
-              label.style.transform = "translateX(-50%)";
               label.textContent = fmtMs(dt);
             }
           },
@@ -1857,8 +1868,7 @@ decompress("__DATA_B64GZ__").then((D) => {
             ...(d ? { dash: d } : {}),
           });
         }),
-        ...streamIds
-          .filter((sid) => D.fcStreamBudget[sid])
+        ...p2StreamFcIds
           .map((sid, i) => {
             const col =
               streamColors[streamIds.indexOf(sid) % streamColors.length];
@@ -1995,9 +2005,14 @@ decompress("__DATA_B64GZ__").then((D) => {
     };
   }
 
+  const { W: initW, H: initH } = layoutDims();
+  const minXRange = (globalXMax - globalXMin) / initW;
+  const rttMinWidth = initW * 0.02;
+  const thinTargetPts = Math.max(10, Math.round(initW / 40));
+  const spatialGridScale = Math.max(initH, initW) * 10;
+
   function init() {
-    const { W, H } = layoutDims();
-    for (const p of panels) mkChart(p, W, H);
+    for (const p of panels) mkChart(p, initW, initH);
     for (const c of charts) c.redraw(false);
   }
   init();
@@ -2006,4 +2021,7 @@ decompress("__DATA_B64GZ__").then((D) => {
     const { W, H } = layoutDims();
     for (const c of charts) c.setSize({ width: W, height: H });
   });
+}).catch((e) => {
+  document.body.classList.add("error");
+  document.body.textContent = "Failed to load trace data: " + e;
 }); // end decompress().then()

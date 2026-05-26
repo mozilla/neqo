@@ -439,6 +439,7 @@ def main() -> None:
     for path in args.sqlog:
         stem = Path(path).stem
         out_dir = Path(args.output_dir) if args.output_dir else Path(path).parent
+        out_dir.mkdir(parents=True, exist_ok=True)
         output = str(out_dir / (stem + ".html"))
         events = parse_sqlog(path)
         if not events:
