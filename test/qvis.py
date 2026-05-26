@@ -106,7 +106,7 @@ def parse_sqlog(path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         try:
             obj = json.loads(chunk)
         except json.JSONDecodeError:
-            print("warning: skipping malformed JSON chunk in sqlog", file=sys.stderr)
+            print(f"warning: skipping malformed JSON chunk in {path}", file=sys.stderr)
             continue
         if "time" in obj and "name" in obj:
             events.append(obj)
@@ -157,9 +157,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
             hwm[sid] = end
         return max(old, end)
 
-    sent_seq, lost_seq, ack_seq, metrics_seq, ecn_seq = (
-        _Seq(), _Seq(), _Seq(), _Seq(), _Seq(),
-    )
+    sent_seq, lost_seq, ack_seq, metrics_seq = _Seq(), _Seq(), _Seq(), _Seq()
     last_ce_count = 0
     last_recv_pn: dict[str, int] = {}
     prev_sent_t: float = -1.0
@@ -253,7 +251,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                             if len(pns_desc) >= delta:
                                 break
                         for p in pns_desc:
-                            data.ecn_ce_t.append(ecn_seq(t))
+                            data.ecn_ce_t.append(t)
                             data.ecn_ce_pn.append(p)
                         last_ce_count = ce
         elif name == "recovery:packet_lost":
