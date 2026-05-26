@@ -44,7 +44,7 @@ METRIC_FIELDS = (
     "pacing_rate",
 )
 _INT_METRICS = {"congestion_window", "bytes_in_flight", "ssthresh", "pacing_rate"}
-_EPS = 2.0**-23  # ~119ns; exact in IEEE 754, so no representation noise
+_EPS = 2.0**-23  # ~0.12 ns (in ms); exact in IEEE 754, so no representation noise
 
 
 class _Seq:

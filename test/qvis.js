@@ -13,7 +13,7 @@ async function decompress(b64) {
   return JSON.parse(await new Response(ds.readable).text());
 }
 decompress("__DATA_B64GZ__").then((D) => {
-  const isMac = /Mac/.test(navigator.platform);
+  const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
   const modKey = isMac ? "⌘" : "Ctrl";
   document.querySelector(".hint").textContent =
     `Drag to zoom \xb7 ${modKey}-drag to pan \xb7 Scroll to zoom \xb7 Shift for single panel \xb7 Double-click to reset \xb7 Click to freeze`;
@@ -701,9 +701,9 @@ decompress("__DATA_B64GZ__").then((D) => {
       return null;
     return closestY;
   }
-  // Overdraw series points in different colors based on a classifier function.
-  // colorFn(u, si, dataIdx) → color string or null
-  function recolorPlugin(seriesFilter, colorFn) {
+  // Overdraw series points based on a classifier function.
+  // styleFn(u, si, dataIdx) → color string | {color, hollow} | null
+  function recolorPlugin(seriesFilter, styleFn) {
     return {
       hooks: {
         drawSeries: [
@@ -714,12 +714,15 @@ decompress("__DATA_B64GZ__").then((D) => {
               sc = u.series[si].scale;
             const { left, top, width, height } = u.bbox;
             const r = ((u.series[si].points?.size || 5) / 2) * devicePixelRatio;
-            const byColor = new Map();
+            const filled = new Map();
+            const hollowed = new Map();
             const [i0, i1] = u.series[si].idxs || [0, d.length - 1];
             for (let i = i0; i <= i1; i++) {
               if (d[i] == null) continue;
-              const color = colorFn(u, si, i);
-              if (!color) continue;
+              const res = styleFn(u, si, i);
+              if (!res) continue;
+              const color = typeof res === "string" ? res : res.color;
+              const hollow = typeof res !== "string" && res.hollow;
               const cx = Math.round(u.valToPos(u.data[0][i], "x", true));
               const cy = Math.round(u.valToPos(d[i], sc, true));
               if (
@@ -729,15 +732,23 @@ decompress("__DATA_B64GZ__").then((D) => {
                 cy > top + height
               )
                 continue;
-              if (!byColor.has(color)) byColor.set(color, new Path2D());
-              const p = byColor.get(color);
+              const map = hollow ? hollowed : filled;
+              if (!map.has(color)) map.set(color, new Path2D());
+              const p = map.get(color);
               p.moveTo(cx + r, cy);
               p.arc(cx, cy, r, 0, Math.PI * 2);
             }
             ctx.save();
-            for (const [color, path] of byColor) {
+            for (const [color, path] of filled) {
               ctx.fillStyle = color;
               ctx.fill(path);
+            }
+            for (const [color, path] of hollowed) {
+              ctx.fillStyle = dk ? "#181818" : "#fff";
+              ctx.fill(path);
+              ctx.strokeStyle = color;
+              ctx.lineWidth = devicePixelRatio;
+              ctx.stroke(path);
             }
             ctx.restore();
           },
@@ -1470,12 +1481,17 @@ decompress("__DATA_B64GZ__").then((D) => {
       )
     : 0;
   let maxPktSize = 1;
+  const noStreamPns = new Set();
   for (const pn of Object.keys(D.pktMeta)) {
     const m = D.pktMeta[pn];
-    if (m[0] != null) maxPktSize = Math.max(maxPktSize, m[2]);
-    else
+    if (m[0] != null) {
+      maxPktSize = Math.max(maxPktSize, m[2]);
+    } else {
+      const hasStream = m[1].some((fr) => fr.frame_type === "stream");
+      if (!hasStream) noStreamPns.add(+pn);
       for (const fr of m[1])
         if (fr.length) maxPktSize = Math.max(maxPktSize, fr.length);
+    }
   }
   const maxInflight = Math.ceil(maxCwnd / maxPktSize);
   const raw = Math.max(50, maxInflight * 2, Math.ceil(maxPn / 8));
@@ -1836,6 +1852,8 @@ decompress("__DATA_B64GZ__").then((D) => {
             if (si === 1) {
               const li = lostPnMap.get(pn);
               if (li) return li.color;
+              if (noStreamPns.has(pn))
+                return { color: OI.blue, hollow: true };
             }
             if (si === 2 && ecnCePnSet.has(pn)) return OI.cyan;
             return null;
