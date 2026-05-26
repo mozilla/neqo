@@ -94,8 +94,9 @@ class TraceData:
     title: str = ""
 
 
-def parse_sqlog(path: str) -> list[dict[str, Any]]:
+def parse_sqlog(path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     raw = Path(path).read_bytes()
+    header: dict[str, Any] = {}
     events: list[dict[str, Any]] = []
     for chunk in raw.split(b"\x1e"):
         chunk = chunk.strip()
@@ -107,11 +108,15 @@ def parse_sqlog(path: str) -> list[dict[str, Any]]:
             continue
         if "time" in obj and "name" in obj:
             events.append(obj)
-    return events
+        elif "trace" in obj:
+            header = obj
+    return header, events
 
 
 def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
-    events: list[dict[str, Any]], filename: str = ""
+    events: list[dict[str, Any]],
+    filename: str = "",
+    is_server: bool = False,
 ) -> TraceData:
     events.sort(key=lambda ev: ev["time"])
     data = TraceData(
@@ -120,7 +125,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
         title=filename,
     )
     pn_frames: dict[int, list] = {}
-    cum_stream: dict[int, int] = {}
+    acked_stream_hwm: dict[int, int] = {}
     acked_pns: set[int] = set()
     cur: dict[str, float | None] = dict.fromkeys(METRIC_FIELDS)
     fc_conn_limit: int = 0
@@ -138,6 +143,17 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
         sb[0].append(t)
         sb[1].append(budget)
         return budget
+
+    def _stream_frame(fr: dict[str, Any]) -> tuple[int, int, int]:
+        sid = int(fr.get("stream_id", 0))
+        off = int(fr.get("offset", 0))
+        return sid, off, off + int(fr.get("length") or 0)
+
+    def _update_hwm(hwm: dict[int, int], sid: int, end: int) -> int:
+        old = hwm.get(sid, 0)
+        if end > old:
+            hwm[sid] = end
+        return max(old, end)
 
     sent_seq, lost_seq, ack_seq, metrics_seq = _Seq(), _Seq(), _Seq(), _Seq()
     last_ce_count = 0
@@ -165,21 +181,18 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                 for fr in frames:
                     ft = fr.get("frame_type", "")
                     if ft == "stream":
-                        sid = int(fr.get("stream_id", 0))
-                        off = int(fr.get("offset", 0))
-                        length = int(fr.get("length") or 0)
-                        end = off + length
+                        sid, off, end = _stream_frame(fr)
                         old_hwm = fc_stream_hwm.get(sid, 0)
+                        _update_hwm(fc_stream_hwm, sid, end)
                         if end > old_hwm:
                             fc_conn_used += end - old_hwm
-                            fc_stream_hwm[sid] = end
                         # Initialize per-stream limit from transport params
                         if sid not in fc_stream_limit:
                             is_uni = bool(sid & 0x2)
                             if is_uni:
                                 k = "initial_max_stream_data_uni"
                             else:
-                                we_initiated = (sid & 0x1) == 0
+                                we_initiated = (sid & 0x1) == (1 if is_server else 0)
                                 k = (
                                     "initial_max_stream_data_bidi_remote"
                                     if we_initiated
@@ -266,13 +279,11 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                     acked_pns.add(pn)
                     for fr in pn_frames.get(pn, []):
                         if fr.get("frame_type") == "stream":
-                            sid = int(fr.get("stream_id", 0))
-                            cum_stream[sid] = cum_stream.get(sid, 0) + int(
-                                fr.get("length") or 0
-                            )
+                            sid, _, end = _stream_frame(fr)
+                            _update_hwm(acked_stream_hwm, sid, end)
                             sb = data.stream_bytes.setdefault(sid, ([], []))
                             sb[0].append(t)
-                            sb[1].append(cum_stream[sid])
+                            sb[1].append(acked_stream_hwm[sid])
         elif name == "transport:parameters_set":
             if d.get("owner") == "remote":
                 if (v := d.get("initial_max_data")) is not None:
@@ -334,7 +345,8 @@ def data_to_json(data: TraceData) -> str:  # noqa: PLR0914
     ]
     mi = {f: i + 1 for i, f in enumerate(METRIC_FIELDS)}
 
-    # Deduplicate ack_ranges: many pns share the same range list.
+    # Deduplicate ack_ranges: many pns share the same range list object
+    # (assigned by reference in extract()), so id() detects shared instances.
     # Emit as [ranges_list, pn→index] instead of pn→ranges.
     # Each unique range list also carries its recv_pn (same for all pns in group).
     ranges_dedup: dict[int, int] = {}  # id(ranges) → index
@@ -441,12 +453,14 @@ def main() -> None:
         out_dir = Path(args.output_dir) if args.output_dir else Path(path).parent
         out_dir.mkdir(parents=True, exist_ok=True)
         output = str(out_dir / (stem + ".html"))
-        events = parse_sqlog(path)
+        header, events = parse_sqlog(path)
         if not events:
             print(f"{path}: no events, skipping", file=sys.stderr)
             errors += 1
             continue
-        data = extract(events, args.title or Path(path).name)
+        vp = header.get("trace", {}).get("vantage_point", {})
+        is_server = vp.get("type") == "server"
+        data = extract(events, args.title or Path(path).name, is_server=is_server)
         Path(output).write_text(generate_html(data), encoding="utf-8")
         print(output)
     if errors:
