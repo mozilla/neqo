@@ -426,14 +426,17 @@ decompress("__DATA_B64GZ__").then((D) => {
   function syncAll(src, xMin, xMax, yZoom) {
     if (syncing) return;
     syncing = true;
-    for (const ch of charts) {
-      if (ch === src) continue;
-      ch.batch(() => {
-        ch.setScale("x", { min: xMin, max: xMax });
-        if (yZoom) yZoom(ch);
-      });
+    try {
+      for (const ch of charts) {
+        if (ch === src) continue;
+        ch.batch(() => {
+          ch.setScale("x", { min: xMin, max: xMax });
+          if (yZoom) yZoom(ch);
+        });
+      }
+    } finally {
+      syncing = false;
     }
-    syncing = false;
   }
 
   function wheelZoomPlugin() {

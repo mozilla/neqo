@@ -106,6 +106,7 @@ def parse_sqlog(path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         try:
             obj = json.loads(chunk)
         except json.JSONDecodeError:
+            print("warning: skipping malformed JSON chunk in sqlog", file=sys.stderr)
             continue
         if "time" in obj and "name" in obj:
             events.append(obj)
@@ -156,7 +157,9 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
             hwm[sid] = end
         return max(old, end)
 
-    sent_seq, lost_seq, ack_seq, metrics_seq = _Seq(), _Seq(), _Seq(), _Seq()
+    sent_seq, lost_seq, ack_seq, metrics_seq, ecn_seq = (
+        _Seq(), _Seq(), _Seq(), _Seq(), _Seq(),
+    )
     last_ce_count = 0
     last_recv_pn: int | None = None
     prev_sent_t: float = -1.0
@@ -250,7 +253,6 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                                     break
                             if len(pns_desc) >= delta:
                                 break
-                        ecn_seq = _Seq()
                         for p in pns_desc:
                             data.ecn_ce_t.append(ecn_seq(t))
                             data.ecn_ce_pn.append(p)
@@ -386,7 +388,7 @@ def data_to_json(data: TraceData) -> str:  # noqa: PLR0914
                 for sid, tv in sorted(data.fc_stream_budget.items())
                 if isinstance(sid, int)
             },
-            "fcEvents": [[t, typ, val, sid] for t, typ, val, sid in data.fc_events],
+            "fcEvents": data.fc_events,
             "sent": [data.sent_t, data.sent_pn],
             "streamBytes": {
                 str(sid): list(tv) for sid, tv in sorted(data.stream_bytes.items())
