@@ -336,6 +336,7 @@ decompress("__DATA_B64GZ__").then((D) => {
 
   // ── Chart helpers ────────────────────────────────────────────────────
   const charts = [];
+  let _selectGuard = false;
   function mkEl(tag, cls) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -626,6 +627,10 @@ decompress("__DATA_B64GZ__").then((D) => {
                         ch.setScale(k, { min: mn, max: mx });
                       });
                     }
+                    const atXLimit = u.scales.x.max - u.scales.x.min <
+                      minXRange * (1 + cursorSnapPct);
+                    if (factor < 1 && nMax - nMin < minXRange && atXLimit)
+                      return;
                     u.batch(() => {
                       u.setScale("x", { min: nMin, max: nMax });
                       zoomY(u);
@@ -774,7 +779,7 @@ decompress("__DATA_B64GZ__").then((D) => {
     return v != null ? Math.round(v) : null;
   }
   const cursor = {
-    drag: { x: true, y: false, setScale: true },
+    drag: { x: true, y: false, setScale: false },
     points: { size: 10, width: 1 },
     sync: { key: "qvis", setSeries: false },
     dataIdx: (u, si, ci) =>
@@ -920,7 +925,9 @@ decompress("__DATA_B64GZ__").then((D) => {
       if (k === "x" || !yRanges[k]) continue;
       const r = yRanges[k];
       scales[k].range = (u, mn, mx) =>
-        rangeLock.v ? [r.min, r.max] : [mn, mx];
+        rangeLock.v || mn == null || mx == null || mx <= mn
+          ? [r.min, r.max]
+          : [mn, mx];
     }
 
     const panelEl = document.getElementById(el);
@@ -1157,6 +1164,33 @@ decompress("__DATA_B64GZ__").then((D) => {
                   tg.style.display = "";
                   if (u._infoPanel.scrollHeight > u._infoPanel.clientHeight)
                     tg.style.display = "none";
+                }
+              },
+            ],
+            setSelect: [
+              (u) => {
+                if (_selectGuard || syncing || u.select.width < 2) return;
+                _selectGuard = true;
+                requestAnimationFrame(() => { _selectGuard = false; });
+                const nMin = u.posToVal(u.select.left, "x");
+                const nMax = u.posToVal(u.select.left + u.select.width, "x");
+                const atLimit =
+                  nMax - nMin < minXRange &&
+                  u.scales.x.max - u.scales.x.min < minXRange * (1 + cursorSnapPct);
+                if (atLimit) return;
+                syncing = true;
+                try {
+                  for (const ch of charts) {
+                    ch.setSelect({ left: 0, width: 0, top: 0, height: 0 }, false);
+                    ch.batch(() => {
+                      ch.setScale("x", { min: nMin, max: nMax });
+                      forYScales(ch, (k) =>
+                        ch.setScale(k, { min: null, max: null }),
+                      );
+                    });
+                  }
+                } finally {
+                  syncing = false;
                 }
               },
             ],
