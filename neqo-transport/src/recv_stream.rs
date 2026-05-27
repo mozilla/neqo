@@ -877,6 +877,7 @@ impl RecvStream {
         }
     }
 
+    #[must_use]
     pub fn stop_sending(&mut self, err: AppError) -> bool {
         qtrace!("stop_sending called when in state {}", self.state);
         match &mut self.state {
