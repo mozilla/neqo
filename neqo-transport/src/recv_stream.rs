@@ -973,6 +973,7 @@ impl RecvStream {
         }
     }
 
+    #[must_use]
     pub fn stop_sending_acked(&mut self) -> bool {
         if let RecvStreamState::AbortReading {
             fc,
