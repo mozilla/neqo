@@ -1,0 +1,480 @@
+#!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+# http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+# <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+# option. This file may not be copied, modified, or distributed
+# except according to those terms.
+# /// script
+# requires-python = ">=3.10"
+# ///
+"""Visualize neqo .sqlog files as interactive HTML.
+
+Requires network access on first run to fetch uPlot from CDN (cached thereafter).
+
+Usage:
+    uv run test/qvis.py <file.sqlog> [...]
+    uv run test/qvis.py --output-dir /tmp /path/to/*.sqlog
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import gzip
+import html
+import json
+import re
+import sys
+import urllib.request
+from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
+from typing import Any
+
+UPLOT_JS_URL = "https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.iife.min.js"
+UPLOT_CSS_URL = "https://cdn.jsdelivr.net/npm/uplot@1.6.32/dist/uPlot.min.css"
+
+METRIC_FIELDS = (
+    "min_rtt",
+    "smoothed_rtt",
+    "latest_rtt",
+    "congestion_window",
+    "bytes_in_flight",
+    "ssthresh",
+    "pacing_rate",
+)
+_INT_METRICS = {"congestion_window", "bytes_in_flight", "ssthresh", "pacing_rate"}
+_EPS = 2.0**-23  # ~0.12 ns (in ms); exact in IEEE 754, so no representation noise
+
+
+class _Seq:
+    """Generates epsilon-offset timestamps to disambiguate same-time events."""
+
+    def __init__(self) -> None:
+        self._t = -1.0
+        self._n = 0
+
+    def __call__(self, t: float) -> float:
+        if t == self._t:
+            self._n += 1
+        else:
+            self._n = 0
+            self._t = t
+        return t + self._n * _EPS
+
+
+@dataclass
+class TraceData:
+    sent_t: list[float] = field(default_factory=list)
+    send_gap_t: list[float] = field(default_factory=list)
+    send_gap_v: list[float] = field(default_factory=list)
+    sent_pn: list[int] = field(default_factory=list)
+    sent_frames: list[list] = field(default_factory=list)
+    lost_t: list[float] = field(default_factory=list)
+    lost_pn: list[int] = field(default_factory=list)
+    lost_trigger: list[str] = field(default_factory=list)
+    acked_t: list[float] = field(default_factory=list)
+    acked_pn: list[int] = field(default_factory=list)
+    stream_bytes: dict[int, tuple[list[float], list[int]]] = field(default_factory=dict)
+    metrics_t: list[float] = field(default_factory=list)
+    metrics: dict[str, list[float | None]] = field(default_factory=dict)
+    ack_ranges: dict[int, list[list[int]]] = field(default_factory=dict)
+    ack_recv_pn: dict[int, int] = field(default_factory=dict)
+    ecn_ce_t: list[float] = field(default_factory=list)
+    ecn_ce_pn: list[int] = field(default_factory=list)
+    cc_transitions: list[tuple[float, str]] = field(default_factory=list)
+    fc_conn_budget_t: list[float] = field(default_factory=list)
+    fc_conn_budget_v: list[int] = field(default_factory=list)
+    fc_stream_budget: dict[int, tuple[list[float], list[int]]] = field(
+        default_factory=dict
+    )
+    fc_events: list[tuple[float, str, int, int]] = field(
+        default_factory=list
+    )  # (time, type, value, stream_id) — type: "blocked"/"increased"
+    max_t: float = 0.0
+    title: str = ""
+
+
+def parse_sqlog(path: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    raw = Path(path).read_bytes()
+    header: dict[str, Any] = {}
+    events: list[dict[str, Any]] = []
+    for chunk in raw.split(b"\x1e"):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+        try:
+            obj = json.loads(chunk)
+        except json.JSONDecodeError:
+            print(f"warning: skipping malformed JSON chunk in {path}", file=sys.stderr)
+            continue
+        if "time" in obj and "name" in obj:
+            events.append(obj)
+        elif "trace" in obj:
+            header = obj
+    return header, events
+
+
+def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+    events: list[dict[str, Any]],
+    filename: str = "",
+    is_server: bool = False,
+) -> TraceData:
+    events = sorted(events, key=lambda ev: ev["time"])
+    data = TraceData(
+        max_t=max((ev["time"] for ev in events), default=0.0),
+        metrics={f: [] for f in METRIC_FIELDS},
+        title=filename,
+    )
+    pn_frames: dict[int, list] = {}
+    acked_stream_hwm: dict[int, int] = {}
+    acked_pns: set[int] = set()
+    cur: dict[str, float | None] = dict.fromkeys(METRIC_FIELDS)
+    fc_conn_limit: int = 0
+    fc_conn_used: int = 0  # total stream bytes sent (connection-level FC)
+    fc_stream_limit: dict[int | str, int] = {}  # int=stream_id, str=initial param key
+    fc_stream_hwm: dict[int, int] = {}  # per-stream high-water mark (offset+length)
+    def _append_conn_budget(t: float) -> None:
+        budget = max(0, fc_conn_limit - fc_conn_used)
+        data.fc_conn_budget_t.append(t)
+        data.fc_conn_budget_v.append(budget)
+
+    def _append_stream_budget(sid: int, t: float) -> int:
+        budget = max(0, fc_stream_limit[sid] - fc_stream_hwm.get(sid, 0))
+        sb = data.fc_stream_budget.setdefault(sid, ([], []))
+        sb[0].append(t)
+        sb[1].append(budget)
+        return budget
+
+    def _stream_frame(fr: dict[str, Any]) -> tuple[int, int, int]:
+        sid = int(fr.get("stream_id", 0))
+        off = int(fr.get("offset", 0))
+        return sid, off, off + int(fr.get("length") or 0)
+
+    def _update_hwm(hwm: dict[int, int], sid: int, end: int) -> int:
+        old = hwm.get(sid, 0)
+        if end > old:
+            hwm[sid] = end
+        return max(old, end)
+
+    sent_seq, lost_seq, ack_seq, metrics_seq = _Seq(), _Seq(), _Seq(), _Seq()
+    last_ce_count = 0
+    last_recv_pn: dict[str, int] = {}
+    prev_sent_t: float = -1.0
+
+    for ev in events:
+        t: float = ev["time"]
+        name: str = ev["name"]
+        d: dict[str, Any] = ev.get("data") or {}
+        frames = d.get("frames") or []
+
+        if name == "transport:packet_sent":
+            hdr = d.get("header") or {}
+            if (pn := hdr.get("packet_number")) is not None:
+                st = sent_seq(t)
+                data.sent_t.append(st)
+                data.sent_pn.append(int(pn))
+                data.sent_frames.append(frames)
+                if prev_sent_t >= 0:
+                    data.send_gap_t.append((prev_sent_t + t) / 2.0)
+                    data.send_gap_v.append(t - prev_sent_t)
+                prev_sent_t = t
+                pn_frames[int(pn)] = frames
+                for fr in frames:
+                    ft = fr.get("frame_type", "")
+                    if ft == "stream":
+                        sid, off, end = _stream_frame(fr)
+                        old_hwm = fc_stream_hwm.get(sid, 0)
+                        _update_hwm(fc_stream_hwm, sid, end)
+                        if end > old_hwm:
+                            fc_conn_used += end - old_hwm
+                        # Initialize per-stream limit from transport params
+                        if sid not in fc_stream_limit:
+                            is_uni = bool(sid & 0x2)
+                            if is_uni:
+                                k = "initial_max_stream_data_uni"
+                            else:
+                                we_initiated = (sid & 0x1) == (1 if is_server else 0)
+                                k = (
+                                    "initial_max_stream_data_bidi_remote"
+                                    if we_initiated
+                                    else "initial_max_stream_data_bidi_local"
+                                )
+                            if k in fc_stream_limit:
+                                fc_stream_limit[sid] = fc_stream_limit[k]
+                        if sid in fc_stream_limit:
+                            _append_stream_budget(sid, t)
+                        if fc_conn_limit > 0:
+                            _append_conn_budget(t)
+                    elif ft == "stream_data_blocked":
+                        sid = int(fr.get("stream_id", 0))
+                        lim = int(fr.get("limit", 0))
+                        data.fc_events.append((t, "blocked", lim, sid))
+                    elif ft == "data_blocked":
+                        lim = int(fr.get("limit", 0))
+                        data.fc_events.append((t, "blocked", lim, -1))
+        elif name == "transport:packet_received":
+            hdr = d.get("header") or {}
+            for fr in frames:
+                ft = fr.get("frame_type", "")
+                if ft == "max_data":
+                    lim = int(fr.get("maximum") or fr.get("limit", 0))
+                    if lim > fc_conn_limit:
+                        fc_conn_limit = lim
+                        _append_conn_budget(t)
+                        budget = data.fc_conn_budget_v[-1]
+                        data.fc_events.append((t, "increased", budget, -1))
+                elif ft == "max_stream_data":
+                    sid = int(fr.get("stream_id", 0))
+                    lim = int(fr.get("maximum") or fr.get("limit", 0))
+                    if lim > fc_stream_limit.get(sid, 0):
+                        fc_stream_limit[sid] = lim
+                        budget = _append_stream_budget(sid, t)
+                        data.fc_events.append((t, "increased", budget, sid))
+                elif ft == "ack":
+                    ack_ranges = fr.get("acked_ranges")
+                    if ack_ranges:
+                        pkt_type = hdr.get("packet_type", "")
+                        space = "application_data" if pkt_type == "1RTT" else pkt_type
+                        if hdr.get("packet_number") is not None:
+                            last_recv_pn[space] = int(hdr["packet_number"])
+                    ce = int(fr.get("ce", 0))
+                    if ce > last_ce_count:
+                        delta = ce - last_ce_count
+                        # Pick top `delta` pns from acked_ranges (highest first)
+                        pns_desc: list[int] = []
+                        for r in ack_ranges or []:
+                            for p in range(int(r[1]), int(r[0]) - 1, -1):
+                                pns_desc.append(p)
+                                if len(pns_desc) >= delta:
+                                    break
+                            if len(pns_desc) >= delta:
+                                break
+                        for p in pns_desc:
+                            data.ecn_ce_t.append(t)
+                            data.ecn_ce_pn.append(p)
+                        last_ce_count = ce
+        elif name == "recovery:packet_lost":
+            hdr = d.get("header") or {}
+            if (pn := hdr.get("packet_number")) is not None:
+                data.lost_t.append(lost_seq(t))
+                data.lost_pn.append(int(pn))
+                data.lost_trigger.append(str(d.get("trigger") or "unknown"))
+        elif name == "transport:packets_acked":
+            pns = sorted(int(pn) for pn in d.get("packet_numbers") or [])
+            space = d.get("packet_type") or d.get("packet_number_space", "")
+            rpn = last_recv_pn.get(space)
+            # Compute ranges from newly-acked pns (not cumulative ACK frame)
+            new_ranges: list[list[int]] = []
+            for pn in pns:
+                if new_ranges and pn == new_ranges[-1][1] + 1:
+                    new_ranges[-1][1] = pn
+                else:
+                    new_ranges.append([pn, pn])
+            for pn in pns:
+                data.acked_t.append(ack_seq(t))
+                data.acked_pn.append(pn)
+                data.ack_ranges[pn] = new_ranges  # shared ref — dedup in data_to_json uses id()
+                if rpn is not None:
+                    data.ack_recv_pn[pn] = rpn
+                if pn not in acked_pns:
+                    acked_pns.add(pn)
+                    for fr in pn_frames.get(pn, []):
+                        if fr.get("frame_type") == "stream":
+                            sid, _, end = _stream_frame(fr)
+                            _update_hwm(acked_stream_hwm, sid, end)
+                            sb = data.stream_bytes.setdefault(sid, ([], []))
+                            sb[0].append(t)
+                            sb[1].append(acked_stream_hwm[sid])
+                    pn_frames.pop(pn, None)
+        elif name == "transport:parameters_set":
+            if d.get("owner") == "remote":
+                if (v := d.get("initial_max_data")) is not None:
+                    fc_conn_limit = int(v)
+                    _append_conn_budget(t)
+                # Store initial per-stream limits by stream type
+                for key in (
+                    "initial_max_stream_data_bidi_local",
+                    "initial_max_stream_data_bidi_remote",
+                    "initial_max_stream_data_uni",
+                ):
+                    if (v := d.get(key)) is not None:
+                        fc_stream_limit[key] = int(v)
+        elif name == "recovery:parameters_set":
+            if (v := d.get("initial_congestion_window")) is not None:
+                cur["congestion_window"] = float(v)
+        elif name == "recovery:metrics_updated":
+            data.metrics_t.append(metrics_seq(t))
+            for f in METRIC_FIELDS:
+                if f in d:
+                    cur[f] = float(d[f])
+                data.metrics[f].append(cur[f])
+        elif name == "recovery:congestion_state_updated":
+            cc_state = str(d.get("new") or "unknown")
+            tr: str | None = d.get("trigger")
+            if cc_state == "recovery" and tr:
+                cc_state = f"recovery:{tr}"
+            data.cc_transitions.append((t, cc_state))
+
+    return data
+
+
+def _r4(v: float | None) -> float | None:
+    return None if v is None else float(f"{v:.4g}")
+
+
+def data_to_json(data: TraceData) -> str:  # noqa: PLR0914
+
+    cc = []
+    tr = data.cc_transitions
+    if tr and tr[0][0] > 0:
+        cc.append([0, tr[0][0], "slow_start"])
+    for i, (t, s) in enumerate(tr):
+        cc.append([t, tr[i + 1][0] if i + 1 < len(tr) else data.max_t, s])
+
+    loss_by_trigger: dict[str, tuple[list[float], list[int]]] = {}
+    for t, pn, trig in zip(data.lost_t, data.lost_pn, data.lost_trigger):
+        loss_by_trigger.setdefault(trig, ([], []))
+        loss_by_trigger[trig][0].append(t)
+        loss_by_trigger[trig][1].append(pn)
+
+    def _mv(f: str, v: float | None) -> float | int | None:
+        if v is None:
+            return None
+        return int(v) if f in _INT_METRICS else _r4(v)
+
+    metrics = [data.metrics_t] + [
+        [_mv(f, v) for v in data.metrics[f]] for f in METRIC_FIELDS
+    ]
+    mi = {f: i + 1 for i, f in enumerate(METRIC_FIELDS)}
+
+    # Deduplicate ack_ranges: many pns share the same range list object
+    # (assigned by reference in extract()), so id() detects shared instances.
+    # Emit as [ranges_list, pn→index] instead of pn→ranges.
+    # Each unique range list also carries its recv_pn (same for all pns in group).
+    ranges_dedup: dict[int, int] = {}  # id(ranges) → index
+    ranges_list: list[tuple[list[list[int]], int | None]] = []
+    ack_idx: dict[str, int] = {}
+    for pn, ranges in data.ack_ranges.items():
+        rid = id(ranges)
+        if rid not in ranges_dedup:
+            ranges_dedup[rid] = len(ranges_list)
+            ranges_list.append((ranges, data.ack_recv_pn.get(pn)))
+        ack_idx[str(pn)] = ranges_dedup[rid]
+
+    # Compact pktMeta: stream-only packets (99%+) as [stream_id, offset, length, fin].
+    # Other packets as full frame list (prefixed with null marker).
+    pkt_meta: dict[str, Any] = {}
+    for pn, frames in zip(data.sent_pn, data.sent_frames):
+        if len(frames) == 1 and frames[0].get("frame_type") == "stream":
+            fr = frames[0]
+            pkt_meta[str(pn)] = [
+                int(fr.get("stream_id", 0)),
+                int(fr.get("offset", 0)),
+                int(fr.get("length", 0)),
+                1 if fr.get("fin") else 0,
+            ]
+        else:
+            pkt_meta[str(pn)] = [None, frames]
+
+    return json.dumps(
+        {
+            "title": data.title,
+            "maxT": data.max_t,
+            "ccIntervals": cc,
+            "fcConnBudget": [data.fc_conn_budget_t, data.fc_conn_budget_v],
+            "fcStreamBudget": {
+                str(sid): list(tv)
+                for sid, tv in sorted(data.fc_stream_budget.items())
+                if isinstance(sid, int)
+            },
+            "fcEvents": data.fc_events,
+            "sent": [data.sent_t, data.sent_pn],
+            "streamBytes": {
+                str(sid): list(tv) for sid, tv in sorted(data.stream_bytes.items())
+            },
+            "acked": [data.acked_t, data.acked_pn],
+            "lost": {trig: [lt, lpn] for trig, (lt, lpn) in loss_by_trigger.items()},
+            "ecnCe": [data.ecn_ce_t, data.ecn_ce_pn],
+            "metrics": metrics,
+            "mi": mi,
+            "sendGap": [data.send_gap_t, data.send_gap_v],
+            "pktMeta": pkt_meta,
+            "ackRanges": ranges_list,
+            "ackIdx": ack_idx,
+        },
+        separators=(",", ":"),
+    )
+
+
+@lru_cache
+def _fetch(url: str) -> str:
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:  # noqa: S310
+            return resp.read().decode()
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        raise RuntimeError(f"Failed to fetch {url}: {e}") from e
+
+
+_DIR = Path(__file__).parent
+
+
+@lru_cache
+def _template() -> str:
+    html_tmpl = (_DIR / "qvis.html").read_text(encoding="utf-8")
+    js = (_DIR / "qvis.js").read_text(encoding="utf-8")
+    return html_tmpl.replace("__QVIS_JS__", js)
+
+
+def generate_html(data: TraceData) -> str:
+    data_b64 = base64.b64encode(gzip.compress(data_to_json(data).encode())).decode()
+    subs = {
+        "__TITLE__": html.escape(data.title),
+        "__UPLOT_CSS__": _fetch(UPLOT_CSS_URL),
+        "__UPLOT_JS__": _fetch(UPLOT_JS_URL),
+        "__DATA_B64GZ__": data_b64,
+    }
+    return re.compile("|".join(re.escape(k) for k in subs)).sub(
+        lambda m: subs[m.group()], _template()
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Visualize neqo .sqlog files as interactive HTML",
+    )
+    parser.add_argument("sqlog", nargs="+", help="Path(s) to .sqlog file(s)")
+    parser.add_argument("--output-dir", "-d", metavar="DIR")
+    parser.add_argument(
+        "--title", "-t", metavar="TITLE", help="Plot title (default: filename)"
+    )
+    args = parser.parse_args()
+
+    errors = 0
+    for path in args.sqlog:
+        try:
+            stem = Path(path).stem
+            out_dir = Path(args.output_dir) if args.output_dir else Path(path).parent
+            out_dir.mkdir(parents=True, exist_ok=True)
+            output = str(out_dir / (stem + ".html"))
+            header, events = parse_sqlog(path)
+            if not events:
+                print(f"{path}: no events, skipping", file=sys.stderr)
+                errors += 1
+                continue
+            vp = header.get("trace", {}).get("vantage_point", {})
+            is_server = vp.get("type") == "server"
+            data = extract(
+                events, args.title or Path(path).name, is_server=is_server
+            )
+            Path(output).write_text(generate_html(data), encoding="utf-8")
+            print(output)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            print(f"{path}: {e}", file=sys.stderr)
+            errors += 1
+    if errors:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -339,7 +339,7 @@ impl PushController {
             None => {
                 qtrace!("Push has already been closed");
                 // If we have some events for the push_id in the event queue, the caller still does
-                // not not know that the push has been closed. Otherwise return
+                // not know that the push has been closed. Otherwise return
                 // InvalidStreamId.
                 if self.conn_events.has_push(push_id) {
                     self.conn_events.remove_events_for_push_id(push_id);

@@ -223,9 +223,10 @@ impl PacketSender {
     }
 
     pub fn on_packet_sent(&mut self, pkt: &sent::Packet, rtt: Duration, now: Instant) {
-        self.pacer
+        let pacing_limited = self
+            .pacer
             .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
-        self.cc.on_packet_sent(pkt, now);
+        self.cc.on_packet_sent(pkt, now, pacing_limited);
     }
 
     #[must_use]
@@ -242,12 +243,18 @@ impl PacketSender {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::{
+        net::{IpAddr, Ipv4Addr},
+        time::Duration,
+    };
 
     use test_fixture::now;
 
     use super::PacketSender;
-    use crate::{ConnectionParameters, SlowStart, cc::CongestionControl, pmtud::Pmtud};
+    use crate::{
+        ConnectionParameters, SlowStart, cc::CongestionControl, pmtud::Pmtud, recovery::sent,
+        rtt::RttEstimate, stats::Stats,
+    };
 
     #[test]
     fn packet_sender_creation_and_display() {
@@ -295,5 +302,63 @@ mod tests {
                 "expected prefix {expected_prefix:?}, got {description:?}",
             );
         }
+    }
+
+    const RTT: Duration = Duration::from_millis(100);
+
+    fn make_sender(pacing: bool) -> PacketSender {
+        let params = ConnectionParameters::default().pacing(pacing);
+        PacketSender::new(
+            &params,
+            Pmtud::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(1500)),
+            now(),
+        )
+    }
+
+    /// Send `n` packets at once, ACK them one RTT later, return (`cwnd_before`, `cwnd_after`).
+    fn send_and_ack(pacing: bool, n: usize) -> (usize, usize) {
+        let mut sender = make_sender(pacing);
+        let now = now();
+        let mtu = sender.pmtud().plpmtu();
+        let cwnd_before = sender.cwnd();
+
+        let pkts: Vec<_> = (0..n)
+            .map(|pn| {
+                let p = sent::make_packet(pn as u64, now, mtu);
+                sender.on_packet_sent(&p, RTT, now);
+                p
+            })
+            .collect();
+        sender.on_packets_acked(
+            &pkts,
+            &RttEstimate::new(RTT),
+            now + RTT,
+            &mut Stats::default(),
+        );
+
+        (cwnd_before, sender.cwnd())
+    }
+
+    #[test]
+    fn pacing_limited_allows_cwnd_growth() {
+        // Sending more than PACING_BURST_SIZE packets exhausts burst credit,
+        // making subsequent sends pacing-limited rather than app-limited.
+        let (before, after) = send_and_ack(true, super::PACING_BURST_SIZE + 1);
+        assert!(after > before, "cwnd should grow: {after} vs {before}");
+    }
+
+    #[test]
+    fn app_limited_suppresses_cwnd_growth() {
+        // A single packet is well below cwnd and within burst — genuinely app-limited.
+        let (before, after) = send_and_ack(true, 1);
+        assert_eq!(after, before, "cwnd should not grow when app-limited");
+    }
+
+    #[test]
+    fn pacing_disabled_never_pacing_limited() {
+        // With pacing off, spend() always returns false, so single-packet
+        // sends remain app-limited regardless of burst budget.
+        let (before, after) = send_and_ack(false, 1);
+        assert_eq!(after, before, "cwnd should not grow with pacing disabled");
     }
 }

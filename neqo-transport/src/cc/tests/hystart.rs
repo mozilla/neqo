@@ -684,7 +684,7 @@ fn integration_full_slow_start_to_css_to_ca() {
     let initial_cwnd_packets = cc.cwnd() / MIN_INITIAL_PACKET_SIZE;
     for _ in 0..initial_cwnd_packets {
         let pkt = sent::make_packet(next_send, now, MIN_INITIAL_PACKET_SIZE);
-        cc.on_packet_sent(&pkt, now);
+        cc.on_packet_sent(&pkt, now, false);
         next_send += 1;
     }
 
@@ -757,7 +757,7 @@ fn integration_full_slow_start_to_css_to_ca() {
         while cc.bytes_in_flight() < cc.cwnd() {
             let send_pn = next_send;
             let pkt = sent::make_packet(send_pn, now, MIN_INITIAL_PACKET_SIZE);
-            cc.on_packet_sent(&pkt, now);
+            cc.on_packet_sent(&pkt, now, false);
             next_send += 1;
         }
 
