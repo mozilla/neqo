@@ -99,7 +99,7 @@ impl RecvStreams {
         self.has_ended = false;
     }
 
-    pub const fn set_ended(&mut self, ended: bool) {
+    pub(crate) const fn set_ended(&mut self, ended: bool) {
         self.has_ended |= ended;
     }
 
@@ -2219,7 +2219,7 @@ mod tests {
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        s.stop_sending(Error::None.code());
+        assert!(!s.stop_sending(Error::None.code()));
         // All data will de retired
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
@@ -2260,7 +2260,7 @@ mod tests {
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        s.stop_sending(Error::None.code());
+        assert!(!s.stop_sending(Error::None.code()));
         // All data will de retired
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
@@ -2318,11 +2318,11 @@ mod tests {
         check_fc(&fc.borrow(), SW / 2, 0);
         check_fc(s.fc().unwrap(), SW / 2, 0);
 
-        s.stop_sending(Error::None.code());
+        assert!(!s.stop_sending(Error::None.code()));
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
-        s.stop_sending_acked();
+        assert!(!s.stop_sending_acked());
         check_fc(&fc.borrow(), SW / 2, SW / 2);
         check_fc(s.fc().unwrap(), SW / 2, SW / 2);
 
