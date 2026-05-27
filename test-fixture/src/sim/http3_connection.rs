@@ -10,7 +10,7 @@ use std::{
     cmp::min,
     collections::HashMap,
     fmt::{self, Debug, Display},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
@@ -218,8 +218,8 @@ impl sim::Node for Node {
         }
     }
 
-    fn has_timer_jitter(&self) -> bool {
-        true
+    fn timer_jitter_bound(&self) -> Duration {
+        super::LINUX_TIMER_SLACK
     }
 }
 
@@ -442,17 +442,11 @@ mod tests {
     use crate::{
         boxed,
         sim::{
-            Node as _, Simulator,
+            Simulator,
             http3_connection::{Node, Requests, Responses},
             network::TailDrop,
         },
     };
-
-    #[test]
-    fn has_timer_jitter() {
-        assert!(Node::default_client(vec![]).has_timer_jitter());
-        assert!(Node::default_server(vec![]).has_timer_jitter());
-    }
 
     #[test]
     fn requests() {

@@ -9,7 +9,7 @@
 use std::{
     cmp::min,
     fmt::{self, Debug},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
@@ -179,21 +179,8 @@ impl sim::Node for Node {
         qinfo!("{test_name}: {:?}", self.c.stats());
     }
 
-    fn has_timer_jitter(&self) -> bool {
-        true
-    }
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use super::Node;
-    use crate::sim::Node as _;
-
-    #[test]
-    fn has_timer_jitter() {
-        assert!(Node::default_client(vec![]).has_timer_jitter());
-        assert!(Node::default_server(vec![]).has_timer_jitter());
+    fn timer_jitter_bound(&self) -> Duration {
+        super::LINUX_TIMER_SLACK
     }
 }
 
