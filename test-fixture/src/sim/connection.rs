@@ -178,6 +178,23 @@ impl sim::Node for Node {
     fn print_summary(&self, test_name: &str) {
         qinfo!("{test_name}: {:?}", self.c.stats());
     }
+
+    fn has_timer_jitter(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::Node;
+    use crate::sim::Node as _;
+
+    #[test]
+    fn has_timer_jitter() {
+        assert!(Node::default_client(vec![]).has_timer_jitter());
+        assert!(Node::default_server(vec![]).has_timer_jitter());
+    }
 }
 
 impl Debug for Node {

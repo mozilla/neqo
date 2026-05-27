@@ -217,6 +217,10 @@ impl sim::Node for Node {
             Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
         }
     }
+
+    fn has_timer_jitter(&self) -> bool {
+        true
+    }
 }
 
 impl Debug for Node {
@@ -438,11 +442,17 @@ mod tests {
     use crate::{
         boxed,
         sim::{
-            Simulator,
+            Node as _, Simulator,
             http3_connection::{Node, Requests, Responses},
             network::TailDrop,
         },
     };
+
+    #[test]
+    fn has_timer_jitter() {
+        assert!(Node::default_client(vec![]).has_timer_jitter());
+        assert!(Node::default_server(vec![]).has_timer_jitter());
+    }
 
     #[test]
     fn requests() {
