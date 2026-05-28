@@ -12,8 +12,9 @@ permissions:
 
 jobs:
   semver:
+  semver:
     name: Check semver
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: mozilla/actions/semver@95b043d77461064eed6fbffa7b3f240bcbf19d3b # v1.1.5
         with:
