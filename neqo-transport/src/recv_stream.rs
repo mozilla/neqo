@@ -981,6 +981,9 @@ impl RecvStream {
         }
     }
 
+    /// # Returns
+    /// `true` if the stream transitions to `ResetRecvd` (ended) because
+    /// the final size was already known.
     #[must_use]
     pub fn stop_sending_acked(&mut self) -> bool {
         if let RecvStreamState::AbortReading {
