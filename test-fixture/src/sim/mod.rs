@@ -38,7 +38,7 @@ pub mod network {
         delay::{Delay, RandomDelay},
         drop::Drop,
         mtu::Mtu,
-        taildrop::TailDrop,
+        taildrop::{Aqm, TailDrop},
     };
 }
 
