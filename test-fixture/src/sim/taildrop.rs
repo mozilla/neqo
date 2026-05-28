@@ -37,7 +37,7 @@ struct CodelState {
     /// `count` at entry to the last dropping period; used for fast restart.
     lastcount: u32,
     /// The time at which the next mark/drop is due (only valid when dropping).
-    drop_next: Option<Instant>,
+    next_mark_time: Option<Instant>,
 }
 
 impl CodelState {
@@ -57,11 +57,11 @@ impl CodelState {
             if !over_interval {
                 // ok_to_drop became false (RFC 8289): leave dropping state.
                 self.dropping = false;
-            } else if let Some(dn) = self.drop_next.filter(|&dn| now >= dn) {
+            } else if let Some(dn) = self.next_mark_time.filter(|&dn| now >= dn) {
                 // Time for another mark/drop in the current dropping interval.
-                // RFC 8289: next drop is relative to the previous drop_next, not now.
+                // RFC 8289: next drop is relative to the previous next_mark_time, not now.
                 self.count += 1;
-                self.drop_next = Some(self.control_law(dn));
+                self.next_mark_time = Some(self.control_law(dn));
                 return true;
             }
         } else if over_interval {
@@ -69,54 +69,50 @@ impl CodelState {
             self.dropping = true;
             // Fast restart: if we re-enter quickly, ramp up from where we left off
             // rather than starting from count=1 (RFC 8289 §4: 16×INTERVAL window).
-            let delta = self.count.saturating_sub(self.lastcount);
             let recently_dropping = self
-                .drop_next
+                .next_mark_time
                 .is_some_and(|dn| now.saturating_duration_since(dn) < CODEL_INTERVAL * 16);
-            self.count = if delta > 1 && recently_dropping {
-                delta
+            self.count = if recently_dropping {
+                max(1, self.count.saturating_sub(self.lastcount))
             } else {
                 1
             };
             self.lastcount = self.count;
-            self.drop_next = Some(self.control_law(now));
+            self.next_mark_time = Some(self.control_law(now));
             return true;
         }
 
         false
     }
 
-    /// Apply the `CoDel` congestion signal: CE-mark ECT(0) packets, drop others.
-    /// Returns `None` if the packet was dropped.
-    fn signal(dgram: &Datagram) -> Option<Datagram> {
-        let tos = dgram.tos();
-        let ecn = Ecn::from(tos);
-        if ecn.is_ect() {
-            assert_ne!(ecn, Ecn::Ect1, "ECT(1)/L4S is not implemented");
-            qtrace!(
-                "codel marking {} bytes (sojourn exceeded target)",
-                dgram.len()
-            );
-            Some(Datagram::new(
-                dgram.source(),
-                dgram.destination(),
-                Tos::from((Dscp::from(tos), Ecn::Ce)),
-                dgram.to_vec(),
-            ))
-        } else {
-            qtrace!(
-                "codel dropping {} bytes (sojourn exceeded target)",
-                dgram.len()
-            );
-            None
-        }
-    }
-
     /// next = now + INTERVAL / sqrt(count)
     fn control_law(&self, base: Instant) -> Instant {
-        base + Duration::from_secs_f64(
-            CODEL_INTERVAL.as_secs_f64() / f64::from(self.count.max(1)).sqrt(),
-        )
+        base + CODEL_INTERVAL / self.count.max(1).isqrt()
+    }
+}
+
+/// CE-mark an ECT(0) datagram; drop (return `None`) if not ECT-capable.
+fn mark_ce(dgram: &Datagram) -> Option<Datagram> {
+    let tos = dgram.tos();
+    let ecn = Ecn::from(tos);
+    if ecn.is_ect() {
+        assert_ne!(ecn, Ecn::Ect1, "ECT(1)/L4S is not implemented");
+        qtrace!(
+            "codel marking {} bytes (sojourn exceeded target)",
+            dgram.len()
+        );
+        Some(Datagram::new(
+            dgram.source(),
+            dgram.destination(),
+            Tos::from((Dscp::from(tos), Ecn::Ce)),
+            dgram.to_vec(),
+        ))
+    } else {
+        qtrace!(
+            "codel dropping {} bytes (sojourn exceeded target)",
+            dgram.len()
+        );
+        None
     }
 }
 
@@ -359,7 +355,7 @@ impl TailDrop {
 
         let sojourn = now.saturating_duration_since(enqueue_time);
         if self.codel.update(sojourn, self.used == 0, now) {
-            let result = CodelState::signal(&pkt);
+            let result = mark_ce(&pkt);
             if result.is_some() {
                 self.stats.marked += 1;
             } else {
