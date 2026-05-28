@@ -12,6 +12,9 @@ permissions:
 
 jobs:
   semver:
-    uses: mozilla/actions/.github/workflows/semver.yml@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
-    with:
-      package: mtu
+    name: Check semver
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mozilla/actions/semver@95b043d77461064eed6fbffa7b3f240bcbf19d3b # v1.1.5
+        with:
+          package: mtu
