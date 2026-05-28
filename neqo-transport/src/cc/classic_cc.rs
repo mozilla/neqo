@@ -415,15 +415,11 @@ where
                 now,
             );
             debug_assert!(bytes_for_increase > 0);
-            // If prior credit crossed the threshold (e.g., bytes_for_increase dropped
-            // between calls), consume one increment and discard the excess so it does
-            // not compound with the credit from the current ACK.
-            let acked = self.current.acked_bytes;
-            let carry = acked >= bytes_for_increase;
-            let acked = (if carry { 0 } else { acked }) + new_acked;
-            // Apply all increments earned by the current ACK, allowing >1 MSS of growth when a
-            // large burst is acknowledged (RFC 9002 has no 2-MSS cap; RFC 3465 §2.3 is TCP-only).
-            let n = usize::from(carry) + acked / bytes_for_increase;
+            // Cap prior credit to one increment (in case bytes_for_increase dropped between
+            // calls), then apply all increments earned, allowing >1 MSS of growth when a large
+            // burst is acknowledged (RFC 9002 has no 2-MSS cap; RFC 3465 §2.3 is TCP-only).
+            let acked = self.current.acked_bytes.min(bytes_for_increase) + new_acked;
+            let n = acked / bytes_for_increase;
             self.current.acked_bytes = acked % bytes_for_increase;
             self.current.congestion_window += n * self.max_datagram_size();
         }
