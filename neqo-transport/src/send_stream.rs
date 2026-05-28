@@ -1657,24 +1657,23 @@ impl SendStreams {
         }
         self.has_ended = false;
         let mut removed = false;
-        self.map.retain(|stream_id, stream| {
-            if stream.is_ended() {
-                removed = true;
-                if stream.is_fair() {
-                    match stream.sendorder() {
-                        None => self.regular.remove(*stream_id),
-                        Some(sendorder) => {
-                            if let Some(group) = self.sendordered.get_mut(&sendorder) {
-                                group.remove(*stream_id);
-                            }
+        for (stream_id, stream) in self
+            .map
+            .extract_if(.., |_, stream: &mut SendStream| stream.is_ended())
+        {
+            removed = true;
+            if stream.is_fair() {
+                match stream.sendorder() {
+                    None => self.regular.remove(stream_id),
+                    Some(sendorder) => {
+                        if let Some(group) = self.sendordered.get_mut(&sendorder) {
+                            group.remove(stream_id);
                         }
                     }
                 }
-                // if unfair, we're done
-                return false;
             }
-            true
-        });
+            // if unfair, we're done
+        }
         removed
     }
 

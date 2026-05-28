@@ -731,6 +731,10 @@ impl RecvStream {
 
     /// # Errors
     /// When the reset occurs at an invalid point.
+    ///
+    /// # Returns
+    /// `true` when the stream transitions to `ResetRecvd` (ended).
+    /// `false` if the stream is already in a terminal state and the reset is a no-op.
     pub fn reset(&mut self, application_error_code: AppError, final_size: u64) -> Res<bool> {
         self.state.flow_control_consume_data(final_size, true)?;
         match &mut self.state {
@@ -877,6 +881,10 @@ impl RecvStream {
         }
     }
 
+    /// # Returns
+    /// `true` if the stream transitions to `DataRead` (ended).
+    /// `false` if the stream transitions to `AbortReading` or was already
+    /// in a terminal or aborting state.
     #[must_use]
     pub fn stop_sending(&mut self, err: AppError) -> bool {
         qtrace!("stop_sending called when in state {}", self.state);

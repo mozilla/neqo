@@ -317,6 +317,9 @@ impl Streams {
 
     /// # Errors
     /// When the stream does not exist or has no more data.
+    ///
+    /// # Returns
+    /// `(bytes_read, fin)` where `fin` is `true` when the stream has ended.
     pub fn recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
         self.recv.read(stream_id, data)
     }
