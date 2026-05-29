@@ -19,6 +19,8 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
+#[cfg(feature = "bench")]
+pub use crypto::{CryptoDxState, CryptoStates};
 pub mod ecn;
 mod events;
 mod fc;

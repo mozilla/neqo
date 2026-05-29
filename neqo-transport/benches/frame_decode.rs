@@ -13,7 +13,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use neqo_common::{Decoder, Encoder};
-use neqo_transport::frame::Frame;
+use neqo_transport::frame::{Frame, FrameType};
 
 const FRAME_PAYLOAD: usize = 100;
 
@@ -23,13 +23,12 @@ const FRAME_PAYLOAD: usize = 100;
 ///
 /// Frame type 0x0e = StreamWithOffLen (offset present, length present, no FIN).
 fn encode_stream_frames(n: usize) -> Vec<u8> {
-    let payload = vec![0u8; FRAME_PAYLOAD];
     let mut enc = Encoder::default();
     for i in 0..n as u64 {
-        enc.encode_byte(0x0e); // StreamWithOffLen
-        enc.encode_varint(1u64); // stream id = 1
-        enc.encode_varint(i * FRAME_PAYLOAD as u64); // offset
-        enc.encode_vvec(&payload); // length-prefixed payload
+        enc.encode_varint(FrameType::StreamWithOffLen)
+            .encode_varint(1u8) // stream id = 1
+            .encode_varint(i * FRAME_PAYLOAD as u64) // offset
+            .encode_vvec(&[0u8; FRAME_PAYLOAD]); // length-prefixed payload
     }
     enc.into()
 }

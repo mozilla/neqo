@@ -748,20 +748,17 @@ impl CryptoDxState {
         Ok(len)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default_write() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default_write() -> Self {
         Self::test_default_with_direction(CryptoDxDirection::Write)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default_read() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default_read() -> Self {
         Self::test_default_with_direction(CryptoDxDirection::Read)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
     fn test_default_with_direction(direction: CryptoDxDirection) -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
@@ -1358,9 +1355,8 @@ impl CryptoStates {
     }
 
     /// Make some state for removing protection in tests.
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default() -> Self {
         let read = |epoch| {
             let mut dx = CryptoDxState::test_default_read();
             dx.epoch = epoch;
@@ -1371,14 +1367,12 @@ impl CryptoStates {
             cipher: TLS_AES_128_GCM_SHA256,
             next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
         };
-        let initials = EnumMap::from_array([
-            None,
-            Some(CryptoState {
+        let initials = EnumMap::from_fn(|v| {
+            (v == Version::Version1).then(|| CryptoState {
                 tx: CryptoDxState::test_default_write(),
                 rx: read(0),
-            }),
-            None,
-        ]);
+            })
+        });
         Self {
             initials,
             handshake: None,

@@ -93,6 +93,10 @@ codspeed.mode = "simulation"
 name = "frame_decode"
 codspeed.mode = "simulation"
 
+[[package.metadata.bench]]
+name = "packet_codec"
+codspeed.mode = "simulation"
+
 [[bench]]
 name = "transfer_walltime"
 harness = false
@@ -130,5 +134,10 @@ required-features = ["bench"]
 
 [[bench]]
 name = "frame_decode"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "packet_codec"
 harness = false
 required-features = ["bench"]
