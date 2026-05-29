@@ -424,7 +424,7 @@ mod test {
         )));
         let mut td = TailDrop::new(1, capacity, Aqm::red(), Duration::from_secs(2));
         td.init(rng, now());
-        let Aqm::Red(ref state) = td.aqm else {
+        let Aqm::Red(state) = &td.aqm else {
             unreachable!()
         };
         let successes = (0..trials)
