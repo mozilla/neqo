@@ -51,7 +51,12 @@ fn gbit_bandwidth(ecn: bool) {
         // so that the overall throughput remains roughly consistent.
         let capacity_byte = (1 + usize::from(ecn)) * rate_byte * BUFFER_LATENCY_MS / 1000;
         let delay = Duration::from_millis(LINK_RTT_MS) / 2;
-        TailDrop::new(rate_byte, capacity_byte, if ecn { Aqm::codel() } else { Aqm::None }, delay)
+        TailDrop::new(
+            rate_byte,
+            capacity_byte,
+            if ecn { Aqm::codel() } else { Aqm::None },
+            delay,
+        )
     };
 
     init_log(None);

@@ -6,6 +6,7 @@
 
 #![expect(clippy::unwrap_used, reason = "This is test code.")]
 
+pub(super) mod aqm;
 /// Tests with simulated network components.
 pub mod connection;
 mod delay;
@@ -35,10 +36,11 @@ use crate::now;
 
 pub mod network {
     pub use super::{
+        aqm::Aqm,
         delay::{Delay, RandomDelay},
         drop::Drop,
         mtu::Mtu,
-        taildrop::{Aqm, TailDrop},
+        taildrop::TailDrop,
     };
 }
 
