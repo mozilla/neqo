@@ -762,7 +762,8 @@ impl CryptoDxState {
     fn test_default_with_direction(direction: CryptoDxDirection) -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
-        Self::new_initial(Version::default(), direction, "server in", CLIENT_CID, 0).unwrap()
+        Self::new_initial(Version::default(), direction, "server in", CLIENT_CID, 0)
+            .expect("state created")
     }
 
     /// Get the amount of extra padding packets protected with this profile need.
@@ -1365,7 +1366,7 @@ impl CryptoStates {
         let app_read = |epoch| CryptoDxAppData {
             dx: read(epoch),
             cipher: TLS_AES_128_GCM_SHA256,
-            next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
+            next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).expect("key is valid"),
         };
         let initials = EnumMap::from_fn(|v| {
             (v == Version::Version1).then(|| CryptoState {
