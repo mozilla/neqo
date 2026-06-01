@@ -90,7 +90,7 @@ fn bench_decode(c: &mut Criterion, name: &str, pkt: Vec<u8>) {
                 let decrypted = public.decrypt(&mut crypto, now).expect("decrypt");
                 let mut dec = Decoder::new(&decrypted);
                 while dec.remaining() > 0 {
-                    black_box(Frame::decode(&mut dec).ok());
+                    black_box(Frame::decode(&mut dec).expect("decode frame"));
                 }
                 black_box(buf)
             },

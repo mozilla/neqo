@@ -11,7 +11,7 @@
 
 use std::hint::black_box;
 
-use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use neqo_common::{Decoder, Encoder};
 use neqo_transport::frame::{Frame, FrameType};
 
@@ -36,17 +36,12 @@ fn encode_stream_frames(n: usize) -> Vec<u8> {
 fn frame_decode(c: &mut Criterion, n: usize) {
     let buf = encode_stream_frames(n);
     c.bench_function(&format!("Frame::decode {n} STREAM frames"), |b| {
-        b.iter_batched(
-            || buf.clone(),
-            |buf| {
-                let mut dec = Decoder::new(&buf);
-                while dec.remaining() > 0 {
-                    black_box(Frame::decode(&mut dec).ok());
-                }
-                black_box(buf)
-            },
-            BatchSize::SmallInput,
-        );
+        b.iter(|| {
+            let mut dec = Decoder::new(&buf);
+            while dec.remaining() > 0 {
+                black_box(Frame::decode(&mut dec).expect("decode frame"));
+            }
+        });
     });
 }
 
