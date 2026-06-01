@@ -11,12 +11,12 @@ use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
-    AT_LEAST_PTO, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
+    AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
     connect_with_rtt, default_client, default_server, maybe_authenticate, new_client, new_server,
     send_and_receive, send_something,
 };
 use crate::{
-    packet, recovery,
+    CloseReason, Error, packet, recovery,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -800,4 +800,52 @@ fn keep_alive_with_unresponsive_server() {
     }
     // Connection should be closed due to idle timeout.
     assert!(matches!(client.state(), State::Closed(_)));
+}
+
+/// A connection whose packets are all dropped (a black hole) is declared broken
+/// after `max_pto` consecutive PTOs, and crucially does so earlier than the idle
+/// timeout would have.
+#[test]
+fn declare_broken_after_max_pto() {
+    const MAX_PTO: usize = 7;
+    let mut client = new_client(ConnectionParameters::default().max_pto(Some(MAX_PTO)));
+    let mut server = default_server();
+    let start = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // The client sends data that never reaches the server: a black hole.
+    let mut now = start;
+    drop(send_something(&mut client, now));
+
+    // Advance through PTOs, dropping every probe the client emits.
+    for _ in 0..=MAX_PTO {
+        let cb = loop {
+            match client.process_output(now) {
+                // Drop the PTO probe(s) without advancing time.
+                Output::Datagram(_) => {}
+                Output::Callback(t) => break t,
+                Output::None => break Duration::ZERO,
+            }
+        };
+        if matches!(client.state(), State::Closed(_)) {
+            break;
+        }
+        now += cb;
+    }
+
+    assert!(
+        matches!(
+            client.state(),
+            State::Closed(CloseReason::Transport(Error::TooManyPtos))
+        ),
+        "expected TooManyPtos, got {:?}",
+        client.state()
+    );
+    assert_eq!(client.loss_recovery.pto_count(), MAX_PTO);
+    // The whole point: we gave up well before the idle timeout would have fired.
+    assert!(
+        now - start < default_timeout(),
+        "closed after {:?}, which is not earlier than the {:?} idle timeout",
+        now - start,
+        default_timeout()
+    );
 }
