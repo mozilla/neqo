@@ -30,6 +30,7 @@ from lockfile_utils import (
     find_non_gecko_duplicates,
     get_all_versions,
     group_by_semver_range,
+    is_ahead_of_gecko,
     load_lockfiles,
     semver_range,
 )
@@ -120,7 +121,7 @@ def filter_neqo_only_mismatches(
         remaining = [
             (desc, our_ver, gecko_ver)
             for desc, our_ver, gecko_ver in issues
-            if gecko_ver is None or Version(our_ver) <= Version(gecko_ver)
+            if not is_ahead_of_gecko(our_ver, gecko_ver, gecko_versions[name])
         ]
 
         if not remaining:

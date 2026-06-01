@@ -13,9 +13,10 @@ cargo update commands to align versions.  The rules are:
 
 - Deps not in Gecko (dev/build tools) and deps only neqo uses within Gecko are
   bumped to their newest compatible version.
-- Shared deps that are behind Gecko are upgraded up to Gecko's version.
-- Shared deps already ahead of Gecko are left alone (staged for next vendor).
-- Deps are NEVER downgraded.
+- Shared production deps are pinned to Gecko's exact version (up or down).
+- Shared dev/build-only deps are upgraded to Gecko's version if behind, but
+  left alone if ahead (they don't affect Gecko's runtime).
+- Deps Gecko doesn't depend on (or only neqo uses) are bumped to latest.
 - Non-Gecko duplicate versions are auto-resolved where possible.
 
 Usage: uv run --project test update-lockfile
@@ -490,7 +491,8 @@ def main():
     our_pkgs = parse_packages(load_lockfile("Cargo.lock"))
     common = set(gecko_pkgs) & set(our_pkgs)
 
-    # Phase 2: Upgrade-only alignment of shared deps that are behind Gecko.
+    # Phase 2: Align shared deps to Gecko's exact version (up or down).
+    # Dev/build-only deps are only upgraded, never downgraded (see collect_version_updates).
     dev_only = find_dev_only_packages()
     version_updates = collect_version_updates(
         common, neqo_only, dev_only, gecko_pkgs, our_pkgs
