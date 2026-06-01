@@ -673,7 +673,7 @@ fn integration_full_slow_start_to_css_to_ca() {
     let base_rtt_est = RttEstimate::new(base_rtt);
     let increased_rtt_est = RttEstimate::new(increased_rtt);
 
-    assert_eq!(cc.ssthresh(), usize::MAX, "Should start in slow start");
+    assert_eq!(cc.ssthresh(), None, "Should start in slow start");
 
     let mut next_send: u64 = 0;
     let mut next_ack: u64 = 0;
@@ -734,7 +734,7 @@ fn integration_full_slow_start_to_css_to_ca() {
         }
 
         // Detect CA: ssthresh has been set
-        if ssthresh_before == usize::MAX && ssthresh_after != usize::MAX {
+        if ssthresh_before.is_none() && ssthresh_after.is_some() {
             ca_detected = true;
             qdebug!("CA entered at ack_pn={ack_pn}, iteration={iteration}");
             // This assert makes sure that the ACK that we decided to move to CA on does not apply
@@ -767,5 +767,9 @@ fn integration_full_slow_start_to_css_to_ca() {
 
     assert!(css_detected, "Should have entered CSS");
     assert!(ca_detected, "Should have entered CA after CSS rounds");
-    assert_eq!(cc.ssthresh(), cc.cwnd(), "ssthresh should be set in CA");
+    assert_eq!(
+        cc.ssthresh(),
+        Some(cc.cwnd()),
+        "ssthresh should be set in CA"
+    );
 }

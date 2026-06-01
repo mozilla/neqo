@@ -30,12 +30,12 @@ const PTO: Duration = RTT;
 
 fn cwnd_is_default(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial());
-    assert_eq!(cc.ssthresh(), usize::MAX);
+    assert_eq!(cc.ssthresh(), None);
 }
 
 fn cwnd_is_halved(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
     assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
-    assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
+    assert_eq!(cc.ssthresh(), Some(cc.cwnd_initial() / 2));
 }
 
 #[test]
