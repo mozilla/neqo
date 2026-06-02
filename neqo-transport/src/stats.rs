@@ -18,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
-use crate::{ecn, packet};
+use crate::{ecn, packet, version::Version};
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -322,6 +322,10 @@ impl DerefMut for DscpCount {
 pub struct Stats {
     pub info: String,
 
+    /// The QUIC version in use. After the handshake completes this reflects the
+    /// version negotiated via compatible version negotiation (RFC 9368).
+    pub version: Version,
+
     /// Total packets received, including all the bad ones.
     pub packets_rx: usize,
     /// Duplicate packets received.
@@ -449,6 +453,7 @@ impl Stats {
 impl Debug for Stats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "stats for {}", self.info)?;
+        writeln!(f, "  version: {:?}", self.version)?;
         writeln!(
             f,
             "  rx: {} drop {} dup {} saved {}",
@@ -574,6 +579,7 @@ fn debug() {
     assert_eq!(
         format!("{stats:?}"),
         "stats for\u{0020}
+  version: Version1
   rx: 0 drop 0 dup 0 saved 0
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:

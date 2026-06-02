@@ -944,6 +944,7 @@ impl Connection {
     #[must_use]
     pub fn stats(&self) -> Stats {
         let mut v = self.stats.borrow().clone();
+        v.version = self.version;
         if let Some(p) = self.paths.primary() {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
