@@ -126,8 +126,8 @@ where
     /// Mark flow control as blocked.
     /// This only does something if the current limit exceeds the last reported blocking limit.
     pub const fn blocked(&mut self) {
-        if let Some(l) = self.blocked_at
-            && self.limit <= l
+        if let Some(block) = self.blocked_at
+            && self.limit <= block
         {
             return;
         }
@@ -153,8 +153,8 @@ where
     /// Only send again if value of `self.blocked_at` hasn't increased since sending.
     /// That would imply that the limit has since increased.
     pub const fn frame_lost(&mut self, limit: u64) {
-        if let Some(l) = self.blocked_at
-            && l == limit
+        if let Some(block) = self.blocked_at
+            && block == limit
         {
             self.blocked_frame = true;
         }
