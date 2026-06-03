@@ -32,6 +32,7 @@ use strum::IntoEnumIterator as _;
 use crate::{
     AppError, CloseReason, Error, Res, StreamId,
     addr_valid::{AddressValidation, NewTokenState},
+    cc::Phase,
     cid::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore,
@@ -1106,6 +1107,10 @@ impl Connection {
             return;
         }
 
+        // Snapshot timer type before ACKs can alter loss state.
+        if let Some(path) = self.paths.primary() {
+            self.loss_recovery.note_timeout_type(&path.borrow(), now);
+        }
         for d in dgrams {
             self.input(d, now, now);
         }
@@ -1264,6 +1269,10 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         if let Some(d) = dgram {
+            // Snapshot timer type before ACKs can alter loss state.
+            if let Some(path) = self.paths.primary() {
+                self.loss_recovery.note_timeout_type(&path.borrow(), now);
+            }
             self.input(d, now, now);
             self.process_saved(now);
         }
@@ -2924,6 +2933,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         }
         qlog::client_version_information_initiated(
             &mut self.qlog,
@@ -3624,6 +3640,13 @@ impl Connection {
                 &mut self.qlog,
                 path.borrow().plpmtu(),
                 self.conn_params.get_congestion_control(),
+                now,
+            );
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
                 now,
             );
         } else {
