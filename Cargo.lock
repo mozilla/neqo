@@ -857,8 +857,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.12.2"
-source = "git+https://github.com/mozilla/nss-rs?rev=0.12.2#ee26ca59b52b405be802c1ed669b7252b6caa811"
+version = "0.13.0"
+source = "git+https://github.com/mozilla/nss-rs?rev=0.13.0#2395138084a8892129f024ab813d6c92bb9e1409"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -872,6 +872,7 @@ dependencies = [
  "thiserror",
  "toml",
  "windows",
+ "zeroize",
 ]
 
 [[package]]
@@ -1222,7 +1223,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs?rev=0.12.2#ee26ca59b52b405be802c1ed669b7252b6caa811"
+source = "git+https://github.com/mozilla/nss-rs?rev=0.13.0#2395138084a8892129f024ab813d6c92bb9e1409"
 dependencies = [
  "log",
  "nss-rs",
@@ -1607,6 +1608,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6f42320e61fe2cfd34354ecb597f86f413484a798ba44a8ca1165c58d42da6c1"
 dependencies = [
  "bitflags",
+]
+
+[[package]]
+name = "zeroize"
+version = "1.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
+dependencies = [
+ "zeroize_derive",
+]
+
+[[package]]
+name = "zeroize_derive"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
