@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 
 import tomlkit
+from packaging.version import Version
 
 GECKO_RAW_URL = (
     "https://raw.githubusercontent.com/mozilla-firefox/firefox/refs/heads/main"
@@ -312,6 +313,85 @@ def collect_dep_categories() -> tuple[set[str], set[str]]:
     dev_build_roots.update(ws_deps.get("build-dependencies", {}))
 
     return normal_deps, dev_build_roots
+
+
+def is_ahead_of_gecko(
+    our_ver: str, gecko_ver: str | None, gecko_versions_for_name: list[tuple[str, str]]
+) -> bool:
+    """Check if our version is ahead of (newer than) the Gecko version.
+
+    If gecko_ver is None, compares against Gecko's highest version for the package.
+    """
+    if gecko_ver is not None:
+        return Version(our_ver) > Version(gecko_ver)
+    gecko_max = max(
+        (Version(v) for v, _ in gecko_versions_for_name),
+        default=Version("0"),
+    )
+    return Version(our_ver) > gecko_max
+
+
+def classify_version_relation(our_ver: str, gecko_vers_in_range: list[str]) -> str:
+    """Classify our version relative to Gecko's for the same semver range.
+
+    Returns one of: "no-range", "match", "behind", "ahead".
+    999-patched versions on either side are treated as "match".
+    """
+    if not gecko_vers_in_range:
+        return "no-range"
+    gecko_ver = max(gecko_vers_in_range, key=Version)
+    if our_ver.endswith(".999") or gecko_ver.endswith(".999"):
+        return "match"
+    our_v = Version(our_ver)
+    gecko_v = Version(gecko_ver)
+    if our_v == gecko_v:
+        return "match"
+    return "behind" if our_v < gecko_v else "ahead"
+
+
+def find_non_gecko_duplicates(
+    our_lock: dict, gecko_versions: dict[str, list[tuple[str, str]]]
+) -> dict[str, list[str]]:
+    """Find package versions that are duplicates not sanctioned by Gecko (invariant A).
+
+    Only considers registry packages — path and git dependencies with the same
+    name are different crates and are excluded.  A duplicate is Gecko-sanctioned
+    only when Gecko carries the same set of semver ranges for that package.
+    Versions in extra ranges are "off-versions" that should be eliminated.
+
+    Returns a dict of name -> [off_ver, ...] for packages with unsanctioned duplicates.
+    """
+    our_pkgs = parse_packages(our_lock)
+    result: dict[str, list[str]] = {}
+
+    for name, versions in our_pkgs.items():
+        # Only registry packages participate in version dedup.
+        registry_vers = [v for v, info in versions.items() if is_registry_package(info)]
+        if len(registry_vers) <= 1:
+            continue
+
+        our_by_range = group_by_semver_range(registry_vers)
+
+        if name in gecko_versions:
+            gecko_vers = [v for v, _ in gecko_versions[name]]
+            gecko_ranges = set(group_by_semver_range(gecko_vers).keys())
+            off_versions = [
+                v for v in registry_vers if semver_range(v) not in gecko_ranges
+            ]
+        else:
+            # Package not in Gecko: keep the range with the newest max version.
+            keep_range = max(
+                our_by_range,
+                key=lambda r: max(Version(v) for v in our_by_range[r]),
+            )
+            off_versions = [
+                v for v in registry_vers if semver_range(v) != keep_range
+            ]
+
+        if off_versions:
+            result[name] = off_versions
+
+    return result
 
 
 def find_dev_only_packages() -> set[str]:

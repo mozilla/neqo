@@ -36,8 +36,8 @@ hex = { version = "0.4", default-features = false }
 http = { version = "1", default-features = false, features = ["std"] }
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
-nss = { rev = "0.12.0", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
-nss-test-fixture = { rev = "0.12.0", package = "test-fixture", git = "https://github.com/mozilla/nss-rs" }
+nss = { rev = "0.13.0", version = "0.13.0", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
+nss-test-fixture = { rev = "0.13.0", version = "0.1.0", package = "test-fixture", git = "https://github.com/mozilla/nss-rs" }
 qlog = { version = "0.16.0", default-features = false }
 quinn-udp = { version = "0.6", default-features = false, features = ["log", "fast-apple-datapath"] }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
@@ -46,10 +46,6 @@ strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.12", default-features = false }
 windows = { version = ">=0.60,<0.63", default-features = false }
 
-[patch.crates-io]
-# TODO: Remove this once Gecko switches back to the official mio crate.
-# See <https://bugzilla.mozilla.org/show_bug.cgi?id=2024485> for details.
-mio = { git = "https://github.com/kinetiknz/mio", rev = "5e8b202db39facecc343170f50a07916640a607c" }
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"

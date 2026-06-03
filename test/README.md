@@ -72,13 +72,9 @@ and whether mismatches are production-affecting or dev/build-only.
 uv run --project test update-lockfile
 ```
 
-Runs `cargo update --precise` to align shared dependencies with Gecko's pinned
-versions.  Pass `--update-neqo-only` to also bump neqo-exclusive packages to
-their latest available versions:
-
-```shell
-uv run --project test update-lockfile --update-neqo-only
-```
+Aligns shared dependencies with Gecko's pinned versions and updates packages
+Gecko doesn't depend on (dev/build tools and neqo-exclusive packages) to their
+latest available versions.
 
 Set `GITHUB_TOKEN` (or `GITHUB_API_TOKEN`) in the environment to avoid GitHub
 API rate limits when fetching Gecko metadata.

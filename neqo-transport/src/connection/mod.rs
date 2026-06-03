@@ -945,6 +945,7 @@ impl Connection {
     #[must_use]
     pub fn stats(&self) -> Stats {
         let mut v = self.stats.borrow().clone();
+        v.version = self.version;
         if let Some(p) = self.paths.primary() {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
@@ -3881,20 +3882,14 @@ impl Connection {
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        let rb = stream.read(data)?;
-        Ok(rb)
+        self.streams.recv(stream_id, data)
     }
 
     /// Application is no longer interested in this stream.
     /// # Errors
     /// When the stream ID is invalid.
     pub fn stream_stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        stream.stop_sending(err);
-        Ok(())
+        self.streams.stop_sending(stream_id, err)
     }
 
     /// Increases `max_stream_data` for a `stream_id`.

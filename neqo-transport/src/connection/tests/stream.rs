@@ -1316,3 +1316,63 @@ fn client_stream_creatable_event() {
     connect_w_different_limit(1, 0);
     connect_w_different_limit(1, 1);
 }
+
+/// Connect client and server, create a unidirectional stream, and exhaust the stream limit.
+/// Returns the stream ID of the one open stream.
+fn setup_exhausted_uni_streams(client: &mut Connection, server: &mut Connection) -> StreamId {
+    connect(client, server);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    while client.stream_create(StreamType::UniDi).is_ok() {}
+    stream_id
+}
+
+/// `stream_stop_sending` on a stream in `DataRecvd` transitions to `DataRead` (ended).
+/// Verify the stream is cleaned up so the peer regains stream credit.
+#[test]
+fn uni_stream_cleaned_up_after_stop_sending_on_data_recvd() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let stream_id = setup_exhausted_uni_streams(&mut client, &mut server);
+
+    // Send data + FIN; server reaches DataRecvd.
+    client.stream_send(stream_id, b"hello").unwrap();
+    client.stream_close_send(stream_id).unwrap();
+    exchange_data(&mut client, &mut server);
+
+    // stop_sending on DataRecvd → DataRead (ended); stream is cleaned up.
+    server
+        .stream_stop_sending(stream_id, Error::None.code())
+        .unwrap();
+    exchange_data(&mut client, &mut server);
+
+    client.stream_create(StreamType::UniDi).unwrap();
+}
+
+/// `stop_sending_acked` on a stream in `AbortReading { final_size_reached: true }`
+/// transitions to `ResetRecvd` (ended). Verify the stream is cleaned up.
+#[test]
+fn uni_stream_cleaned_up_after_stop_sending_acked_with_final_size_known() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let stream_id = setup_exhausted_uni_streams(&mut client, &mut server);
+
+    // Send data and FIN in two separate packets; delay the data packet so the server
+    // receives the FIN first and enters SizeKnown (final size known, data not yet complete).
+    client.stream_send(stream_id, b"hello").unwrap();
+    let data_pkt = client.process_output(now()).dgram();
+    client.stream_close_send(stream_id).unwrap();
+    let fin_pkt = client.process_output(now()).dgram();
+    server.process_input(fin_pkt.unwrap(), now());
+
+    // stop_sending in SizeKnown → AbortReading { final_size_reached: true }.
+    server
+        .stream_stop_sending(stream_id, Error::None.code())
+        .unwrap();
+
+    // Deliver the delayed data packet and complete the exchange; STOP_SENDING is acked,
+    // triggering stop_sending_acked → ResetRecvd (ended); stream is cleaned up.
+    server.process_input(data_pkt.unwrap(), now());
+    exchange_data(&mut client, &mut server);
+
+    client.stream_create(StreamType::UniDi).unwrap();
+}

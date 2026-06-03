@@ -1185,7 +1185,7 @@ impl SendStream {
     }
 
     #[must_use]
-    pub const fn is_terminal(&self) -> bool {
+    pub const fn is_ended(&self) -> bool {
         matches!(
             self.state,
             State::DataRecvd { .. } | State::ResetRecvd { .. }
@@ -1498,6 +1498,8 @@ pub struct SendStreams {
     // Streams which are owned by the IndexMap.
     sendordered: BTreeMap<SendOrder, OrderGroup>,
     regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
+    /// Set when any stream has ended; cleared by `remove_ended`.
+    has_ended: bool,
 }
 
 impl SendStreams {
@@ -1611,12 +1613,14 @@ impl SendStreams {
     pub fn acked(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
             ss.mark_as_acked(token.offset, token.length, token.fin);
+            self.has_ended |= ss.is_ended();
         }
     }
 
     pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.map.get_mut(&id) {
             ss.reset_acked();
+            self.has_ended |= ss.is_ended();
         }
     }
 
@@ -1642,26 +1646,35 @@ impl SendStreams {
         self.map.clear();
         self.sendordered.clear();
         self.regular.clear();
+        self.has_ended = false;
     }
 
-    pub fn remove_terminal(&mut self) {
-        self.map.retain(|stream_id, stream| {
-            if stream.is_terminal() {
-                if stream.is_fair() {
-                    match stream.sendorder() {
-                        None => self.regular.remove(*stream_id),
-                        Some(sendorder) => {
-                            if let Some(group) = self.sendordered.get_mut(&sendorder) {
-                                group.remove(*stream_id);
-                            }
+    /// Remove ended streams. Returns `true` if any were removed.
+    #[must_use]
+    pub fn remove_ended(&mut self) -> bool {
+        if !self.has_ended {
+            return false;
+        }
+        self.has_ended = false;
+        let mut removed = false;
+        for (stream_id, stream) in self
+            .map
+            .extract_if(.., |_, stream: &mut SendStream| stream.is_ended())
+        {
+            removed = true;
+            if stream.is_fair() {
+                match stream.sendorder() {
+                    None => self.regular.remove(stream_id),
+                    Some(sendorder) => {
+                        if let Some(group) = self.sendordered.get_mut(&sendorder) {
+                            group.remove(stream_id);
                         }
                     }
                 }
-                // if unfair, we're done
-                return false;
             }
-            true
-        });
+            // if unfair, we're done
+        }
+        removed
     }
 
     pub(crate) fn write_frames<B: Buffer>(
@@ -2869,7 +2882,7 @@ mod tests {
         // Ack the fin, then the data.
         s.mark_as_acked(len_u64, 0, true);
         s.mark_as_acked(0, MESSAGE.len(), false);
-        assert!(s.is_terminal());
+        assert!(s.is_ended());
     }
 
     #[test]
@@ -3239,7 +3252,7 @@ mod tests {
         check_stats(&s, len_u64, len_u64, len_u64);
 
         s.mark_as_acked(len_u64, 0, true);
-        assert!(s.is_terminal());
+        assert!(s.is_ended());
     }
 
     fn stream_with_priority(tx: TransmissionPriority, rx: RetransmissionPriority) -> SendStream {
