@@ -111,7 +111,9 @@ jobs:
           # shellcheck disable=SC2086
           if [ "$TOOLCHAIN" == "stable" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
-            cargo llvm-cov report $BUILD_TYPE --lcov --include-ffi --output-path lcov.info
+            if [ "$RUNNER_OS" == "Linux" ] && [ -z "$BUILD_TYPE" ]; then
+              cargo llvm-cov report --lcov --include-ffi --output-path lcov.info
+            fi
           elif [ -n "$CAREFUL" ]; then
             cargo careful test $BUILD_TYPE --locked --target "$(rustc --print host-tuple)"
           fi
@@ -172,6 +174,7 @@ jobs:
   crap:
     name: CRAP analysis
     needs: check
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
