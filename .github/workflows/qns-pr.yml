@@ -30,7 +30,7 @@ jobs:
           - name: baseline
             ref: ${{ github.event.pull_request.base.sha }}
     steps:
-      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+      - uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
         with:
           cache-binary: true
 
@@ -169,7 +169,7 @@ jobs:
       # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
       # with v28.0.4. Install newer version.
       - name: Set up Docker
-        uses: docker/setup-docker-action@b2189fbf2a6592b51fee7cdd93ee2bfaeba733db # v5.1.0
+        uses: docker/setup-docker-action@0234bb73ccb40f0c430b795634f9247e2b5c2d23 # v5.2.0
         with:
           version: "v28.1.0"
 
