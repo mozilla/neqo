@@ -34,7 +34,7 @@ runs:
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.2p0 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.8p4 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
@@ -69,7 +69,7 @@ runs:
             netbsd)     # FIXME: Why do we need to set this on NetBSD?
                         export LD_LIBRARY_PATH=/usr/pkg/lib/nss:/usr/pkg/lib/nspr
                         ;;
-            solaris)    export LIBCLANG_PATH="/usr/lib/amd64"
+            solaris)    export LIBCLANG_PATH=/usr/llvm/21/lib/amd64
                         ;;
           esac
           case "$PLATFORM" in
