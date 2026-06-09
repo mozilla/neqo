@@ -77,7 +77,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+        uses: mozilla/actions/rust@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: flamegraph, samply

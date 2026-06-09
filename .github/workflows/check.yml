@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+        uses: mozilla/actions/toolchains@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
 
   check:
     name: Run checks
@@ -79,7 +79,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+      - uses: mozilla/actions/rust@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -90,7 +90,7 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+      - uses: mozilla/actions/nss@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -152,7 +152,7 @@ jobs:
           path: lcov.info
           retention-days: 1
 
-      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -206,7 +206,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+      - uses: mozilla/actions/rust@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           version: stable
           tools: cargo-hack
