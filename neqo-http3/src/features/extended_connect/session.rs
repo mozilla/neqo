@@ -62,6 +62,8 @@ pub(crate) struct Session {
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
     draining: bool,
+    role: Role,
+    stats: SessionStats,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -122,6 +124,8 @@ impl Session {
             events,
             protocol,
             draining: false,
+            role,
+            stats: SessionStats::default(),
         }
     }
 
@@ -152,6 +156,8 @@ impl Session {
             events,
             protocol,
             draining: false,
+            role,
+            stats: SessionStats::default(),
         })
     }
 
@@ -324,7 +330,15 @@ impl Session {
 
     pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         self.protocol
-            .add_stream(stream_id, &mut self.events, self.state)
+            .add_stream(stream_id, &mut self.events, self.state)?;
+        if !self.state.closing_state() {
+            if stream_id.is_self_initiated(self.role) {
+                self.stats.streams_opened_local += 1;
+            } else {
+                self.stats.streams_opened_remote += 1;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -427,8 +441,8 @@ impl Session {
         dgram_data.encode(buf);
 
         conn.send_datagram(dgram_data.into(), id)?;
-        self.protocol.record_datagram_sent();
-        self.protocol.record_bytes_sent(buf.len() as u64);
+        self.stats.datagrams_sent += 1;
+        self.stats.bytes_sent += buf.len() as u64;
         qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
@@ -442,11 +456,10 @@ impl Session {
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
-                let len = slice.len() as u64;
+                self.stats.datagrams_received += 1;
+                self.stats.bytes_received += slice.len() as u64;
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
-                self.protocol.record_datagram_received();
-                self.protocol.record_bytes_received(len);
             }
             Err(e) => {
                 qdebug!("[{self}]: received datagram with invalid context identifier: {e}");
@@ -458,13 +471,9 @@ impl Session {
         self.protocol.validate_send_group(group_id)
     }
 
-    pub(crate) fn record_stream_opened(&mut self, local: bool) {
-        self.protocol.record_stream_opened(local);
-    }
-
     #[must_use]
-    pub(crate) fn stats(&self, now: Instant) -> Option<SessionStats> {
-        self.protocol.stats(now)
+    pub(crate) fn stats(&self) -> SessionStats {
+        self.stats.clone()
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -639,20 +648,6 @@ pub(crate) trait Protocol: Debug + Display {
     fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
         // Default implementation returns false
         false
-    }
-
-    fn record_bytes_sent(&mut self, _bytes: u64) {}
-
-    fn record_bytes_received(&mut self, _bytes: u64) {}
-
-    fn record_datagram_sent(&mut self) {}
-
-    fn record_datagram_received(&mut self) {}
-
-    fn record_stream_opened(&mut self, _local: bool) {}
-
-    fn stats(&self, _now: Instant) -> Option<SessionStats> {
-        None
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);

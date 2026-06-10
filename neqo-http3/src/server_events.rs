@@ -291,7 +291,8 @@ impl WebTransportRequest {
     /// Also return an error if the stream was closed on the transport layer,
     /// but that information is not yet consumed on the  http/3 layer.
     pub fn close_session(&self, error: u32, message: &str, now: Instant) -> Res<()> {
-        self.stream_handler
+        _ = self
+            .stream_handler
             .handler
             .borrow_mut()
             .webtransport_close_session(
@@ -300,8 +301,8 @@ impl WebTransportRequest {
                 error,
                 message,
                 now,
-            )
-            .map(|_| ())
+            )?;
+        Ok(())
     }
 
     #[must_use]

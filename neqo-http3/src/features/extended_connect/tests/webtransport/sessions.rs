@@ -1251,10 +1251,7 @@ fn wt_session_stats_initial() {
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    let stats = wt
-        .client
-        .webtransport_session_stats(session_id, now())
-        .unwrap();
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.bytes_sent, 0);
     assert_eq!(stats.bytes_received, 0);
     assert_eq!(stats.datagrams_sent, 0);
@@ -1272,20 +1269,14 @@ fn wt_session_stats_streams() {
     wt.client
         .webtransport_create_stream(session_id, StreamType::UniDi)
         .unwrap();
-    let stats = wt
-        .client
-        .webtransport_session_stats(session_id, now())
-        .unwrap();
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.streams_opened_local, 1);
     assert_eq!(stats.streams_opened_remote, 0);
 
     wt.client
         .webtransport_create_stream(session_id, StreamType::BiDi)
         .unwrap();
-    let stats = wt
-        .client
-        .webtransport_session_stats(session_id, now())
-        .unwrap();
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.streams_opened_local, 2);
     assert_eq!(stats.streams_opened_remote, 0);
 }
@@ -1301,10 +1292,7 @@ fn wt_session_stats_datagrams() {
     wt.send_datagram(session_id, DGRAM).unwrap();
     wt.exchange_packets();
 
-    let stats = wt
-        .client
-        .webtransport_session_stats(session_id, now())
-        .unwrap();
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.datagrams_sent, 1);
     assert!(stats.bytes_sent >= DGRAM.len() as u64);
 
