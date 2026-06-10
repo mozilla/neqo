@@ -294,10 +294,6 @@ where
             .first()
             .expect("`acked_pkts.first().is_some()` is checked in `Loss::on_ack_received`");
 
-        // Initialize the stat to the initial congestion window value. If we early return on
-        // `is_app_limited` the stat is never set on very short connections otherwise.
-        cc_stats.cwnd.get_or_insert(self.current.congestion_window);
-
         // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
         // big a PTO does no harm here.
@@ -428,7 +424,6 @@ where
             self.current.congestion_window += n * self.max_datagram_size();
         }
 
-        cc_stats.cwnd = Some(self.current.congestion_window);
         qlog::metrics_updated(
             &mut self.qlog,
             [
@@ -802,7 +797,7 @@ where
         pto: Duration,
         lost_packets: impl IntoIterator<Item = &'a sent::Packet>,
         now: Instant,
-        cc_stats: &mut CongestionControlStats,
+        _cc_stats: &mut CongestionControlStats,
     ) -> bool {
         if first_rtt_sample_time.is_none() {
             return false;
@@ -849,7 +844,6 @@ where
                     // state leftover from initial slow start to have it perform correctly.
                     self.slow_start.reset();
 
-                    cc_stats.cwnd = Some(self.current.congestion_window);
                     qlog::metrics_updated(
                         &mut self.qlog,
                         [
@@ -934,7 +928,6 @@ where
             Loss(_) => cc_stats.congestion_events.loss += 1,
             Ecn => cc_stats.congestion_events.ecn += 1,
         }
-        cc_stats.cwnd = Some(self.current.congestion_window);
         // If we were in slow start when `on_congestion_event` was called we will exit slow start
         // and should record the exit stats.
         if self.current.phase.in_slow_start() {
@@ -2130,19 +2123,17 @@ mod tests {
         cc.on_packets_acked(&sent_packets, &rtt_estimate, now, &mut cc_stats);
         let cwnd_after_growth = cc.cwnd();
         assert!(cwnd_after_growth > cwnd_initial);
-        assert_eq!(cc_stats.cwnd, Some(cwnd_after_growth));
 
-        // Tracks cwnd after congestion event reduction
+        // cwnd shrinks after congestion event
         let pkt_lost = sent::make_packet(next_pn, now, 1000);
         cc.on_packet_sent(&pkt_lost, now);
         cc.on_packets_lost(Some(now), None, PTO, &[pkt_lost], now, &mut cc_stats);
-        assert_eq!(cc_stats.cwnd, Some(cc.cwnd()));
-        assert!(cc_stats.cwnd.is_some_and(|cwnd| cwnd < cwnd_after_growth));
+        assert!(cc.cwnd() < cwnd_after_growth);
 
-        // Tracks cwnd after persistent congestion
+        // cwnd resets to minimum after persistent congestion
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         cc.detect_persistent_congestion(Some(now), None, PTO, lost.iter(), now, &mut cc_stats);
-        assert_eq!(cc_stats.cwnd, Some(cc.cwnd_min()));
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
     }
 
     #[test]
@@ -2164,7 +2155,6 @@ mod tests {
         cc.on_packets_acked(&[pkt], &rtt_estimate, now, &mut cc_stats);
 
         assert_eq!(cc.cwnd(), cwnd_initial);
-        assert_eq!(cc_stats.cwnd, Some(cwnd_initial));
     }
 
     #[test]
