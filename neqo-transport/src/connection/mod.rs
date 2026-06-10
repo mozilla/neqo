@@ -51,7 +51,7 @@ use crate::{
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
-    stats::{Stats, StatsCell},
+    stats::{FrameStats, Stats, StatsCell},
     stream_id::StreamType,
     streams::{SendOrder, Streams},
     tparams::{
@@ -1749,8 +1749,11 @@ impl Connection {
 
         // Handle each packet in the datagram.
         while !slc.is_empty() {
-            self.stats.borrow_mut().packets_rx += 1;
-            self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
+            {
+                let mut stats = self.stats.borrow_mut();
+                stats.packets_rx += 1;
+                stats.dscp_rx[tos.into()] += 1;
+            }
             let slc_len = slc.len();
             let (packet, remainder) =
                 match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
@@ -2309,6 +2312,7 @@ impl Connection {
         &mut self,
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
+        stats: &mut Stats,
         now: Instant,
     ) {
         let rtt = self.paths.primary().map_or_else(
@@ -2316,7 +2320,6 @@ impl Connection {
             |p| p.borrow().rtt().estimate(),
         );
 
-        let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server
             && let Some(t) = self.state_signaling.write_done(builder)
@@ -2396,6 +2399,7 @@ impl Connection {
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
+    #[expect(clippy::too_many_arguments, reason = "frame_stats parameter added to avoid repeated borrow")]
     fn maybe_probe<B: Buffer>(
         &mut self,
         path: &PathRef,
@@ -2403,6 +2407,7 @@ impl Connection {
         builder: &mut packet::Builder<B>,
         ack_end: usize,
         tokens: &mut recovery::Tokens,
+        frame_stats: &mut FrameStats,
         now: Instant,
     ) -> bool {
         let untracked = self.received_untracked && !self.state.connected();
@@ -2438,8 +2443,7 @@ impl Connection {
             // Nothing ack-eliciting and we need to probe; send PING.
             debug_assert_ne!(builder.remaining(), 0);
             builder.encode_frame(FrameType::Ping, |_| {});
-            let stats = &mut self.stats.borrow_mut().frame_tx;
-            stats.ping += 1;
+            frame_stats.ping += 1;
         }
         probe
     }
@@ -2447,6 +2451,7 @@ impl Connection {
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
+    #[expect(clippy::too_many_arguments, reason = "stats parameter added to avoid repeated borrow")]
     fn write_frames(
         &mut self,
         path: &PathRef,
@@ -2454,6 +2459,7 @@ impl Connection {
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
+        stats: &mut Stats,
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
         let mut tokens = recovery::Tokens::new();
@@ -2461,14 +2467,13 @@ impl Connection {
         let mut ack_eliciting = false;
 
         if primary {
-            let stats = &mut self.stats.borrow_mut().frame_tx;
             self.acks.write_frame(
                 space,
                 now,
                 path.borrow().rtt().estimate(),
                 builder,
                 &mut tokens,
-                stats,
+                &mut stats.frame_tx,
             );
         }
         let ack_end = builder.len();
@@ -2481,7 +2486,7 @@ impl Connection {
             // The probing code needs to know so it can track that.
             if path.borrow_mut().write_frames(
                 builder,
-                &mut self.stats.borrow_mut().frame_tx,
+                &mut stats.frame_tx,
                 full_mtu,
                 now,
             ) {
@@ -2504,19 +2509,18 @@ impl Connection {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
-                        &mut self.stats.borrow_mut(),
+                        stats,
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, stats, now);
             } else {
-                let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
                     space,
                     self.conn_params.sni_slicing_enabled(),
                     builder,
                     &mut tokens,
-                    stats,
+                    &mut stats.frame_tx,
                 );
             }
 
@@ -2529,7 +2533,15 @@ impl Connection {
 
         // Maybe send a probe now, either to probe for losses or to keep the connection live.
         let force_probe = profile.should_probe(space);
-        ack_eliciting |= self.maybe_probe(path, force_probe, builder, ack_end, &mut tokens, now);
+        ack_eliciting |= self.maybe_probe(
+            path,
+            force_probe,
+            builder,
+            ack_end,
+            &mut tokens,
+            &mut stats.frame_tx,
+            now,
+        );
         // If this is not the primary path, this should be ack-eliciting.
         debug_assert!(primary || ack_eliciting);
 
@@ -2537,9 +2549,8 @@ impl Connection {
         // And avoid padding packets that otherwise only contain ACK because adding PADDING
         // causes those packets to consume congestion window, which is not tracked (yet).
         // And avoid padding if we don't have a full MTU available.
-        let stats = &mut self.stats.borrow_mut().frame_tx;
         let padded = if ack_eliciting && full_mtu && builder.pad() {
-            stats.padding += 1;
+            stats.frame_tx.padding += 1;
             true
         } else {
             false
@@ -2548,6 +2559,7 @@ impl Connection {
         (tokens, ack_eliciting, padded)
     }
 
+    #[expect(clippy::too_many_arguments, reason = "stats parameter added to avoid repeated borrow")]
     fn write_closing_frames<B: Buffer>(
         &mut self,
         close: &ClosingFrame,
@@ -2556,6 +2568,7 @@ impl Connection {
         now: Instant,
         path: &PathRef,
         tokens: &mut recovery::Tokens,
+        stats: &mut Stats,
     ) {
         if builder.remaining() > ClosingFrame::MIN_LENGTH + RecvdPackets::USEFUL_ACK_LEN {
             // Include an ACK frame with the CONNECTION_CLOSE.
@@ -2568,7 +2581,7 @@ impl Connection {
                 path.borrow().rtt().estimate(),
                 builder,
                 tokens,
-                &mut self.stats.borrow_mut().frame_tx,
+                &mut stats.frame_tx,
             );
             builder.set_limit(limit);
         }
@@ -2579,7 +2592,7 @@ impl Connection {
             close.sanitize()
         };
         sanitized.as_ref().unwrap_or(close).write_frame(builder);
-        self.stats.borrow_mut().frame_tx.connection_close += 1;
+        stats.frame_tx.connection_close += 1;
     }
 
     /// Build batch of datagrams to be sent on the provided path.
@@ -2752,15 +2765,41 @@ impl Connection {
                 break;
             }
 
-            // Add frames to the packet.
+            // Add frames to the packet.  Take a single stats borrow over the
+            // frame-writing calls, covering what were previously 5+ short borrows
+            // in write_frames and its callees.  The guard must be dropped before
+            // any callee that also borrows stats (e.g. loss_recovery.discard).
             let payload_start = builder.len();
             let (mut tokens, mut ack_eliciting, mut padded) =
                 (recovery::Tokens::new(), false, false);
-            if let Some(close) = closing_frame {
-                self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
-            } else {
-                (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+            {
+                // Clone the StatsCell (shared Rc) so the guard does not hold a
+                // compile-time borrow on `self.stats`, allowing `&mut self` calls.
+                let stats_cell = self.stats.clone();
+                let mut stats_guard = stats_cell.borrow_mut();
+                let stats = &mut *stats_guard;
+                if let Some(close) = closing_frame {
+                    self.write_closing_frames(
+                        close,
+                        &mut builder,
+                        space,
+                        now,
+                        path,
+                        &mut tokens,
+                        stats,
+                    );
+                } else {
+                    (tokens, ack_eliciting, padded) = self.write_frames(
+                        path,
+                        space,
+                        &profile,
+                        &mut builder,
+                        header_start != 0,
+                        stats,
+                        now,
+                    );
+                }
+                // stats_guard drops here; must happen before discard_keys below.
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2786,12 +2825,16 @@ impl Connection {
                 now,
             );
 
-            self.stats.borrow_mut().packets_tx += 1;
-            // Track which packet types are sent with which ECN codepoints. For
-            // coalesced packets, this increases the counts for each packet type
-            // contained in the coalesced packet. This is per Section 13.4.1 of
-            // RFC 9000.
-            self.stats.borrow_mut().ecn_tx[pt] += Ecn::from(packet_tos);
+            {
+                // Combine packets_tx and ecn_tx into a single borrow.
+                let mut stats = self.stats.borrow_mut();
+                stats.packets_tx += 1;
+                // Track which packet types are sent with which ECN codepoints. For
+                // coalesced packets, this increases the counts for each packet type
+                // contained in the coalesced packet. This is per Section 13.4.1 of
+                // RFC 9000.
+                stats.ecn_tx[pt] += Ecn::from(packet_tos);
+            }
             let tx = self
                 .crypto
                 .states_mut()
