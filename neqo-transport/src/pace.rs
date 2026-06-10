@@ -42,6 +42,13 @@ impl Pacer {
     /// our current congestion controller, which double the window every RTT.
     const SPEEDUP: u64 = 2;
 
+    /// Timer granularity in nanoseconds, as a compile-time constant.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "GRANULARITY is 1ms, fits in u64"
+    )]
+    const GRANULARITY_NS: u64 = GRANULARITY.as_nanos() as u64;
+
     /// Create a new `Pacer`.  This takes the current time, the maximum burst size,
     /// and the packet size.
     ///
@@ -163,7 +170,21 @@ impl Pacer {
                 .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
         );
         self.t = now;
-        self.next(rtt, cwnd) > now
+        // Since self.t == now, next() > now iff self.c < packet AND w_ns >= GRANULARITY.
+        // Inline that check to avoid calling next() and repeating the arithmetic.
+        let packet = isize::try_from(self.p).expect("packet size fits into isize");
+        if self.c >= packet {
+            return false; // credit available: send immediately
+        }
+        let Ok(deficit) = u64::try_from(packet - self.c) else {
+            return false; // overflow: treat as no wait
+        };
+        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
+        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        if divisor == 0 {
+            return false;
+        }
+        rtt_ns.saturating_mul(deficit) / divisor >= Self::GRANULARITY_NS
     }
 }
 
@@ -182,7 +203,7 @@ impl Debug for Pacer {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use test_fixture::now;
 
@@ -281,6 +302,96 @@ mod tests {
         assert!(
             p.spend(n, SHORT_RTT, CWND_AT_GRANULARITY, PACKET),
             "at exactly GRANULARITY should be pacing-limited"
+        );
+    }
+
+    /// Verify that the inlined `spend` return value agrees with the original
+    /// `self.next(rtt, cwnd) > now` expression.
+    ///
+    /// Strategy: for each scenario, construct two identical pacers. Call
+    /// `spend` on one and record its result, then manually advance the other
+    /// pacer's credit (mirroring what `spend` does) and check `next() > now`.
+    /// The two values must agree.
+    #[test]
+    fn spend_equivalence() {
+        let n = now();
+
+        // Manually replicate the credit-update logic from `spend` so we can
+        // check `next() > now` on a separate pacer that was not modified by
+        // the inlined return.
+        let check = |enabled: bool,
+                     start: Instant,
+                     t: Instant,
+                     m: usize,
+                     p_sz: usize,
+                     rtt: Duration,
+                     cwnd: usize,
+                     count: usize| {
+            let mut pacer = Pacer::new(enabled, start, m, p_sz);
+
+            // Oracle: replicate the credit update, set t, then call next().
+            let incr = Pacer::bytes_for(cwnd, rtt, t.saturating_duration_since(start))
+                .and_then(|b| usize::try_from(b).ok())
+                .unwrap_or(m);
+            let mut oracle = Pacer::new(enabled, start, m, p_sz);
+            oracle.c = std::cmp::min(
+                isize::try_from(m).unwrap_or(isize::MAX),
+                oracle
+                    .c
+                    .saturating_add(isize::try_from(incr).unwrap_or(isize::MAX))
+                    .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
+            );
+            oracle.t = t;
+            let expected = if enabled {
+                oracle.next(rtt, cwnd) > t
+            } else {
+                false
+            };
+
+            let got = pacer.spend(t, rtt, cwnd, count);
+            assert_eq!(
+                got, expected,
+                "spend/next disagree: got={got} expected={expected} \
+                 enabled={enabled} rtt={rtt:?} cwnd={cwnd} count={count}"
+            );
+        };
+
+        // Case 1: standard pacing-limited (RTT=1s, cwnd=10*PACKET).
+        check(true, n, n, PACKET, PACKET, RTT, CWND, PACKET);
+
+        // Case 2: sub-granularity wait — not pacing-limited.
+        const SHORT_RTT: Duration = Duration::from_millis(10);
+        check(true, n, n, PACKET, PACKET, SHORT_RTT, CWND, PACKET);
+
+        // Case 3: exactly at GRANULARITY boundary (w = 1ms = GRANULARITY).
+        check(
+            true,
+            n,
+            n,
+            PACKET,
+            PACKET,
+            Duration::from_millis(10),
+            5000,
+            PACKET,
+        );
+
+        // Case 4: pacing disabled.
+        check(false, n, n, PACKET, PACKET, RTT, CWND, PACKET);
+
+        // Case 5: time has elapsed since start — partial credit accrued.
+        let n2 = n + Duration::from_millis(500);
+        check(true, n, n2, PACKET, PACKET, RTT, CWND, PACKET);
+
+        // Case 6: large cwnd, sub-granularity result.
+        check(
+            true,
+            n,
+            n,
+            PACKET,
+            PACKET,
+            Duration::from_millis(1),
+            CWND * 100,
+            PACKET,
         );
     }
 
