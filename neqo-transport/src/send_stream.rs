@@ -184,6 +184,18 @@ impl RangeTracker {
         }
     }
 
+    /// Collect the keys of all `used` entries that start within `[start, end)`.
+    /// Returns an empty `SmallVec` — without heap allocation — when the range is clear,
+    /// which is the common case for both `mark_acked` and `mark_sent`.
+    fn keys_in_range(&self, start: u64, end: u64) -> SmallVec<[u64; 8]> {
+        let mut it = self.used.range(start..end).peekable();
+        if it.peek().is_some() {
+            it.map(|(&k, _)| k).collect()
+        } else {
+            SmallVec::new()
+        }
+    }
+
     /// Mark a range as acknowledged.  This is simpler than marking a range as sent
     /// because an acknowledged range can never turn back into a sent range, so
     /// this function can just override the entire range.
@@ -212,12 +224,7 @@ impl RangeTracker {
         }
         let mut new_end = new_off + new_len;
 
-        // Get all existing ranges that start within this new range.
-        let mut covered = self
-            .used
-            .range(new_off..new_end)
-            .map(|(&k, _)| k)
-            .collect::<SmallVec<[_; 8]>>();
+        let mut covered = self.keys_in_range(new_off, new_end);
 
         if let Entry::Occupied(next_entry) = self.used.entry(new_end) {
             // Check if the very next entry is the same type as this.
@@ -309,12 +316,7 @@ impl RangeTracker {
 
         self.first_unmarked = None;
 
-        // Get all existing ranges that start within this new range.
-        let covered = self
-            .used
-            .range(new_off..(new_off + new_len))
-            .map(|(&k, _)| k)
-            .collect::<SmallVec<[u64; 8]>>();
+        let covered = self.keys_in_range(new_off, new_end);
 
         if let Entry::Occupied(next_entry) = self.used.entry(new_end)
             && next_entry.get().1 == RangeState::Sent
