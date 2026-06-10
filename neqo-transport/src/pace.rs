@@ -6,6 +6,15 @@
 
 // Pacer
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_panics_doc,
+        clippy::must_use_candidate,
+        reason = "`Pacer` is only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cmp::min,
     fmt::{self, Debug, Display, Formatter},
