@@ -650,8 +650,8 @@ impl ServerSession {
                 error,
                 message,
                 now,
-            )
-            .map(|_| ())
+            )?;
+        Ok(())
     }
 
     #[must_use]

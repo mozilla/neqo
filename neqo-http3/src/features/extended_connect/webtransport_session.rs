@@ -20,7 +20,6 @@ use crate::{
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
-        stats::SessionStats,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
@@ -47,8 +46,6 @@ pub struct Session {
     /// Cumulative count of locally-initiated bidi streams over the session
     /// lifetime.
     cumulative_bidi_count: u64,
-    /// Session-level statistics.
-    stats: SessionStats,
 }
 
 impl Display for Session {
@@ -71,7 +68,6 @@ impl Session {
             send_groups: HashSet::default(),
             cumulative_uni_count: 0,
             cumulative_bidi_count: 0,
-            stats: SessionStats::default(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -95,51 +91,6 @@ impl Session {
             StreamType::UniDi => self.cumulative_uni_count,
             StreamType::BiDi => self.cumulative_bidi_count,
         }
-    }
-    pub(crate) const fn record_bytes_sent(&mut self, bytes: u64) {
-        self.stats.bytes_sent += bytes;
-    }
-
-    pub(crate) const fn record_bytes_received(&mut self, bytes: u64) {
-        self.stats.bytes_received += bytes;
-    }
-
-    pub(crate) const fn record_datagram_sent(&mut self) {
-        self.stats.datagrams_sent += 1;
-    }
-
-    pub(crate) const fn record_datagram_received(&mut self) {
-        self.stats.datagrams_received += 1;
-    }
-
-    pub(crate) const fn record_stream_opened(&mut self, local: bool) {
-        if local {
-            self.stats.streams_opened_local += 1;
-        } else {
-            self.stats.streams_opened_remote += 1;
-        }
-    }
-
-    #[expect(dead_code, reason = "pending datagram stats update")]
-    pub(crate) const fn record_datagram_expired_outgoing(&mut self) {
-        self.stats.expired_outgoing += 1;
-    }
-
-    #[expect(dead_code, reason = "pending datagram stats update")]
-    pub(crate) const fn record_datagram_lost_outgoing(&mut self) {
-        self.stats.lost_outgoing += 1;
-    }
-
-    #[expect(dead_code, reason = "pending datagram stats update")]
-    pub(crate) const fn record_datagram_dropped_incoming(&mut self) {
-        self.stats.dropped_incoming += 1;
-    }
-
-    #[must_use]
-    pub(crate) fn stats(&self, now: Instant) -> SessionStats {
-        let mut stats = self.stats.clone();
-        stats.timestamp = Some(now);
-        stats
     }
 }
 
@@ -320,30 +271,6 @@ impl Protocol for Session {
 
     fn local_stream_count(&self, stream_type: StreamType) -> u64 {
         self.local_stream_count(stream_type)
-    }
-
-    fn record_bytes_sent(&mut self, bytes: u64) {
-        Self::record_bytes_sent(self, bytes);
-    }
-
-    fn record_bytes_received(&mut self, bytes: u64) {
-        Self::record_bytes_received(self, bytes);
-    }
-
-    fn record_datagram_sent(&mut self) {
-        Self::record_datagram_sent(self);
-    }
-
-    fn record_datagram_received(&mut self) {
-        Self::record_datagram_received(self);
-    }
-
-    fn record_stream_opened(&mut self, local: bool) {
-        Self::record_stream_opened(self, local);
-    }
-
-    fn stats(&self, now: Instant) -> Option<SessionStats> {
-        Some(Self::stats(self, now))
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {

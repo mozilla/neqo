@@ -1202,10 +1202,8 @@ impl Http3Client {
     pub fn webtransport_session_stats(
         &self,
         session_id: StreamId,
-        now: Instant,
     ) -> Res<crate::features::extended_connect::stats::SessionStats> {
-        self.base_handler
-            .webtransport_session_stats(session_id, now)
+        self.base_handler.webtransport_session_stats(session_id)
     }
 
     /// Create a WebTransport stream with a send group.
