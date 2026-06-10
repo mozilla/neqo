@@ -138,6 +138,9 @@ pub struct LossRecoverySpace {
     /// This is `None` if there were no out-of-order packets detected.
     /// When set to `Some(T)`, time-based loss detection should be enabled.
     first_ooo_time: Option<Instant>,
+    /// Scratch buffer reused across ACK frames to avoid allocating a fresh
+    /// `Vec<Packet>` on every call to `remove_acked`.
+    acked_scratch: Vec<sent::Packet>,
 }
 
 impl LossRecoverySpace {
@@ -151,6 +154,7 @@ impl LossRecoverySpace {
             in_flight_outstanding: 0,
             sent_packets: sent::Packets::default(),
             first_ooo_time: None,
+            acked_scratch: Vec::new(),
         }
     }
 
@@ -243,38 +247,32 @@ impl LossRecoverySpace {
         debug_assert!(self.in_flight_outstanding >= count);
         self.in_flight_outstanding -= count;
         if self.in_flight_outstanding == 0 {
-            qtrace!("remove_packet outstanding == 0 for space {}", self.space);
-        }
-    }
-
-    fn remove_packet(&mut self, p: &sent::Packet) {
-        if p.ack_eliciting() {
-            self.remove_outstanding(1);
+            qtrace!("remove_outstanding == 0 for space {}", self.space);
         }
     }
 
     /// Remove all newly acknowledged packets.
-    /// Returns all the acknowledged packets, with the largest packet number first.
-    /// ...and a boolean indicating if any of those packets were ack-eliciting.
-    /// This operates more efficiently because it assumes that the input is sorted
-    /// in the order that an ACK frame is (from the top).
-    fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> (Vec<sent::Packet>, bool)
+    /// Returns a boolean indicating if any of those packets were ack-eliciting.
+    /// The acknowledged packets are placed into `self.acked_scratch`; callers
+    /// must read from that field.  The buffer is reused across calls to avoid a
+    /// fresh allocation per ACK frame.
+    fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> bool
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
     {
-        let acked = self.sent_packets.take_ranges(acked_ranges);
-        let mut eliciting = false;
-        for p in &acked {
-            self.remove_packet(p);
-            eliciting |= p.ack_eliciting();
-            if p.lost() {
-                stats.late_ack += 1;
-            }
-            if p.pto_fired() {
-                stats.pto_ack += 1;
-            }
+        self.sent_packets
+            .take_ranges(acked_ranges, &mut self.acked_scratch);
+        // Count first to avoid holding &self.acked_scratch across the &mut self call below.
+        let mut ack_eliciting_count: usize = 0;
+        for p in &self.acked_scratch {
+            ack_eliciting_count += usize::from(p.ack_eliciting());
+            stats.late_ack += usize::from(p.lost());
+            stats.pto_ack += usize::from(p.pto_fired());
         }
-        (acked, eliciting)
+        if ack_eliciting_count > 0 {
+            self.remove_outstanding(ack_eliciting_count);
+        }
+        ack_eliciting_count > 0
     }
 
     /// Remove all tracked packets from the space.
@@ -631,35 +629,36 @@ impl Loss {
             return (Vec::new(), Vec::new());
         };
 
-        let (acked_packets, any_ack_eliciting) =
-            space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
-        let Some(largest_acked_pkt) = acked_packets.first() else {
+        let any_ack_eliciting = space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
+        let Some(largest_acked_pkt) = space.acked_scratch.first() else {
             // No new information.
             return (Vec::new(), Vec::new());
         };
 
+        // Extract what we need from the largest acked packet before we mutate other fields.
+        let largest_pn = largest_acked_pkt.pn();
+        let largest_sent_time = largest_acked_pkt.time_sent();
+        let largest_on_primary = largest_acked_pkt.on_primary_path();
+
         // Track largest PN acked per space
         let prev_largest_acked = space.largest_acked_sent_time;
-        if Some(largest_acked_pkt.pn()) > space.largest_acked {
-            space.largest_acked = Some(largest_acked_pkt.pn());
+        if Some(largest_pn) > space.largest_acked {
+            space.largest_acked = Some(largest_pn);
 
             // If the largest acknowledged is newly acked and any newly acked
             // packet was ack-eliciting, update the RTT. (-recovery 5.1)
-            space.largest_acked_sent_time = Some(largest_acked_pkt.time_sent());
-            if any_ack_eliciting && largest_acked_pkt.on_primary_path() {
+            space.largest_acked_sent_time = Some(largest_sent_time);
+            if any_ack_eliciting && largest_on_primary {
                 self.rtt_sample(
                     primary_path.borrow_mut().rtt_mut(),
-                    largest_acked_pkt.time_sent(),
+                    largest_sent_time,
                     now,
                     ack_delay,
                 );
             }
         }
 
-        qdebug!(
-            "[{self}] ACK for {pn_space:?} - largest_acked={}",
-            largest_acked_pkt.pn()
-        );
+        qdebug!("[{self}] ACK for {pn_space:?} - largest_acked={largest_pn}");
 
         // Perform loss detection.
         // PTO is used to remove lost packets from in-flight accounting.
@@ -667,9 +666,7 @@ impl Loss {
         // as we rely on the count of in-flight packets to determine whether to send
         // another probe.  Removing them too soon would result in not sending on PTO.
         let cleanup_delay = self.pto_period(primary_path.borrow().rtt());
-        let Some(sp) = self.spaces.get_mut(pn_space) else {
-            return (Vec::new(), Vec::new());
-        };
+        let sp = self.spaces.get_mut(pn_space).expect("space not removed");
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
@@ -686,11 +683,13 @@ impl Loss {
             now,
         );
 
+        let space = self.spaces.get_mut(pn_space).expect("space not removed");
+
         // This must happen after on_packets_lost. If in recovery, this could
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
         primary_path.borrow_mut().on_packets_acked(
-            &acked_packets,
+            &space.acked_scratch,
             ack_ecn,
             now,
             &mut self.stats.borrow_mut(),
@@ -701,6 +700,9 @@ impl Loss {
         }
         self.pto_state = None;
 
+        // split_off(0) moves all packets into a new Vec for the caller while
+        // leaving acked_scratch empty with its capacity intact for the next ACK.
+        let acked_packets = space.acked_scratch.split_off(0);
         (acked_packets, lost)
     }
 
@@ -1281,16 +1283,16 @@ mod tests {
         let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
         let mut stats = Stats::default();
         add_sent(&mut lrs, 10);
-        let (acked, _) = lrs.remove_acked(vec![], &mut stats);
-        assert!(acked.is_empty());
-        let (acked, _) = lrs.remove_acked(vec![7..=8, 2..=4], &mut stats);
-        match_acked(&acked, &[8, 7, 4, 3, 2]);
-        let (acked, _) = lrs.remove_acked(vec![8..=11], &mut stats);
-        match_acked(&acked, &[10, 9]);
-        let (acked, _) = lrs.remove_acked(vec![0..=2], &mut stats);
-        match_acked(&acked, &[1, 0]);
-        let (acked, _) = lrs.remove_acked(vec![5..=6], &mut stats);
-        match_acked(&acked, &[6, 5]);
+        lrs.remove_acked(vec![], &mut stats);
+        assert!(lrs.acked_scratch.is_empty());
+        lrs.remove_acked(vec![7..=8, 2..=4], &mut stats);
+        match_acked(&lrs.acked_scratch, &[8, 7, 4, 3, 2]);
+        lrs.remove_acked(vec![8..=11], &mut stats);
+        match_acked(&lrs.acked_scratch, &[10, 9]);
+        lrs.remove_acked(vec![0..=2], &mut stats);
+        match_acked(&lrs.acked_scratch, &[1, 0]);
+        lrs.remove_acked(vec![5..=6], &mut stats);
+        match_acked(&lrs.acked_scratch, &[6, 5]);
     }
 
     #[test]

@@ -240,15 +240,15 @@ impl Packets {
         self.packets.iter_mut()
     }
 
-    /// Take values from specified ranges of packet numbers.
-    /// The values returned will be reversed, so that the most recent packet appears first.
-    /// This is because ACK frames arrive with ranges starting from the largest acknowledged
-    /// and we want to match that.
-    pub fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
+    /// Take values from specified ranges of packet numbers into a caller-provided buffer.
+    /// The buffer is cleared first, then filled with the most recent packet first per range.
+    ///
+    /// Reusing the buffer across calls avoids a fresh allocation per ACK frame.
+    pub fn take_ranges<R>(&mut self, acked_ranges: R, out: &mut Vec<Packet>)
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
     {
-        let mut result = Vec::new();
+        out.clear();
 
         // According to RFC 9000 §19.3.1 ACK ranges are in descending order:
         //
@@ -257,6 +257,9 @@ impl Packets {
         //
         // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
         let mut previous_range_start: Option<packet::Number> = None;
+
+        let acked_ranges = acked_ranges.into_iter();
+        out.reserve(acked_ranges.size_hint().0);
 
         for range in acked_ranges {
             debug_assert!(
@@ -270,9 +273,8 @@ impl Packets {
             if start_idx == end_idx {
                 continue;
             }
-            result.extend(self.packets.drain(start_idx..end_idx).rev());
+            out.extend(self.packets.drain(start_idx..end_idx).rev());
         }
-        result
     }
 
     /// Empty out all tracked packets.
@@ -365,11 +367,11 @@ mod tests {
     }
 
     fn remove_one(pkts: &mut Packets, idx: packet::Number) {
-        let store = pkts.take_ranges([idx..=idx]);
+        let mut store = Vec::new();
+        pkts.take_ranges([idx..=idx], &mut store);
         let mut it = store.into_iter();
         assert_eq!(idx, it.next().unwrap().pn());
         assert!(it.next().is_none());
-        drop(it);
     }
 
     fn assert_zero_and_two<'a, 'b: 'a>(
@@ -426,7 +428,9 @@ mod tests {
     fn ignore_unknown() {
         let mut pkts = Packets::default();
         pkts.track(pkt(0));
-        assert!(pkts.take_ranges([1..=1]).is_empty());
+        let mut out = Vec::new();
+        pkts.take_ranges([1..=1], &mut out);
+        assert!(out.is_empty());
     }
 
     /// Verify `take_ranges` with multiple non-contiguous ranges and multi-packet
@@ -441,7 +445,8 @@ mod tests {
             pkts.track(pkt(i));
         }
         // ACK ranges [4..=5, 1..=2] in descending order (as per RFC 9000 §19.3.1).
-        let acked = pkts.take_ranges([4..=5, 1..=2]);
+        let mut acked = Vec::new();
+        pkts.take_ranges([4..=5, 1..=2], &mut acked);
 
         // Returned in largest-pn-first order: 5, 4, 2, 1.
         let pns: Vec<u32> = acked.iter().map(|p| u32::try_from(p.pn).unwrap()).collect();
