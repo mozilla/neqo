@@ -1682,7 +1682,7 @@ impl SendStreams {
         removed
     }
 
-    pub(crate) fn write_frames<B: Buffer>(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,

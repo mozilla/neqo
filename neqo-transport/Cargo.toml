@@ -97,6 +97,10 @@ codspeed.mode = "simulation"
 name = "packet_codec"
 codspeed.mode = "simulation"
 
+[[package.metadata.bench]]
+name = "send_streams"
+codspeed.mode = "simulation"
+
 [[bench]]
 name = "transfer_walltime"
 harness = false
@@ -139,5 +143,10 @@ required-features = ["bench"]
 
 [[bench]]
 name = "packet_codec"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "send_streams"
 harness = false
 required-features = ["bench"]

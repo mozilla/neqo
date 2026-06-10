@@ -19,8 +19,6 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
-#[cfg(feature = "bench")]
-pub use crypto::{CryptoDxState, CryptoStates};
 pub mod ecn;
 mod events;
 mod fc;
@@ -29,8 +27,6 @@ pub mod frame;
 #[cfg(not(any(fuzzing, feature = "bench")))]
 mod frame;
 mod pace;
-#[cfg(feature = "bench")]
-pub use pace::Pacer;
 #[cfg(any(fuzzing, feature = "bench"))]
 pub mod packet;
 #[cfg(not(any(fuzzing, feature = "bench")))]
@@ -83,6 +79,13 @@ pub use self::{
     stats::{SlowStartExitReason, Stats},
     stream_id::{StreamId, StreamType},
     version::Version,
+};
+#[cfg(feature = "bench")]
+pub use self::{
+    crypto::{CryptoDxState, CryptoStates},
+    fc::SenderFlowControl,
+    pace::Pacer,
+    stats::FrameStats,
 };
 
 pub type TransportError = u64;
