@@ -8,23 +8,22 @@
 //! These are distinct from the connection-level stats in [`neqo_transport::Stats`],
 //! which are internal counters reported to Glean.
 
-use std::time::Instant;
-
 #[expect(
     clippy::module_name_repetitions,
     reason = "stats::SessionStats is clearer than stats::Session"
 )]
 #[derive(Debug, Clone, Default)]
 pub struct SessionStats {
-    pub timestamp: Option<Instant>,
-    pub bytes_sent: u64,
-    pub bytes_received: u64,
+    /// Payload bytes sent in WebTransport datagrams (excludes stream data).
+    pub datagram_bytes_sent: u64,
+    /// Payload bytes received in WebTransport datagrams (excludes stream data).
+    pub datagram_bytes_received: u64,
     pub datagrams_sent: u64,
     pub datagrams_received: u64,
     pub streams_opened_local: u64,
     pub streams_opened_remote: u64,
-    pub expired_outgoing: u64,
-    pub expired_incoming: u64,
-    pub lost_outgoing: u64,
-    pub dropped_incoming: u64,
+    pub datagrams_expired_outgoing: u64,
+    pub datagrams_expired_incoming: u64,
+    pub datagrams_lost_outgoing: u64,
+    pub datagrams_dropped_incoming: u64,
 }
