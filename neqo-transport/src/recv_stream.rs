@@ -180,12 +180,24 @@ pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
+    /// End offset of the rightmost received byte (the end of the last entry in
+    /// `data_ranges`, or `retired` if the map is empty).  Used to skip the
+    /// unconditional backwards `BTreeMap` probe in `inbound_frame` for the common
+    /// in-order case.
+    frontier_end: u64,
 }
 
 impl RxStreamOrderer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Allocate a `Vec` for a new data-range entry, pre-sized with headroom.
+    fn make_buf(data: &[u8]) -> Vec<u8> {
+        let mut v = Vec::with_capacity(data.len().next_power_of_two().max(4096));
+        v.extend_from_slice(data);
+        v
     }
 
     /// Process an incoming stream frame off the wire. This may result in data
@@ -218,6 +230,33 @@ impl RxStreamOrderer {
             return;
         }
 
+        // ── Fast path: new_start >= frontier_end ─────────────────────────────────
+        // No preceding entry can overlap; skip the BTreeMap backwards probe.
+        // Covers in-order delivery and gap-filling arrivals at or past frontier.
+        if new_start >= self.frontier_end {
+            self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
+            if new_start == self.frontier_end {
+                // Adjacent: try to extend the last entry to avoid a BTreeMap insert.
+                let extended = self
+                    .data_ranges
+                    .last_entry()
+                    .filter(|e| e.get().len() < 65_536)
+                    .map(|mut e| {
+                        e.get_mut().extend_from_slice(new_data);
+                    })
+                    .is_some();
+                if !extended {
+                    self.data_ranges.insert(new_start, Self::make_buf(new_data));
+                }
+            } else {
+                // Gap: new data is not contiguous with any existing entry.
+                self.data_ranges.insert(new_start, Self::make_buf(new_data));
+            }
+            self.frontier_end = max(self.frontier_end, new_end);
+            return;
+        }
+
+        // ── Slow path: new_start < frontier_end: retransmission / overlap ────────
         let extend = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
@@ -235,7 +274,7 @@ impl RxStreamOrderer {
                 // If it is small enough, extend the previous buffer.
                 // This can't always extend, because otherwise the buffer could end up
                 // growing indefinitely without being released.
-                prev_vec.len() < 4096 && prev_end == new_start
+                prev_vec.len() < 65_536 && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
@@ -308,9 +347,12 @@ impl RxStreamOrderer {
             if extend {
                 if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
                     buf.extend_from_slice(to_add);
+                    // new_start was advanced by overlap, so new_end is still the real end.
+                    self.frontier_end = max(self.frontier_end, new_end);
                 }
             } else {
-                self.data_ranges.insert(new_start, to_add.to_vec());
+                self.data_ranges.insert(new_start, Self::make_buf(to_add));
+                self.frontier_end = max(self.frontier_end, new_end);
             }
         }
     }
@@ -403,11 +445,21 @@ impl RxStreamOrderer {
             if keep {
                 let mut keep = self.data_ranges.split_off(&range_start);
                 mem::swap(&mut self.data_ranges, &mut keep);
+                // Update frontier_end to reflect the new last entry in the map,
+                // or retired if the map is now empty.
+                self.frontier_end = self
+                    .data_ranges
+                    .last_key_value()
+                    .map_or(self.retired, |(&k, v)| {
+                        k + u64::try_from(v.len()).expect("usize fits in u64")
+                    });
                 return copied;
             }
         }
 
         self.data_ranges.clear();
+        // All entries were consumed; frontier_end drops back to retired.
+        self.frontier_end = self.retired;
         copied
     }
 
@@ -1084,30 +1136,30 @@ mod tests {
         }
     }
 
-    /// A buffer of exactly 4096 bytes has reached the extension limit and must not be extended.
+    /// A buffer of exactly 65_536 bytes has reached the extension limit and must not be extended.
     #[test]
-    fn inbound_frame_no_extend_at_4096() {
+    fn inbound_frame_no_extend_at_65536() {
         let mut s = RxStreamOrderer::default();
         // Fill to the extend threshold.
-        s.inbound_frame(0, &[0u8; 4096]);
-        assert_eq!(s.data_ranges[&0].len(), 4096);
+        s.inbound_frame(0, &vec![0u8; 65_536]);
+        assert_eq!(s.data_ranges[&0].len(), 65_536);
         // The next byte must not be merged; the threshold has been reached.
-        s.inbound_frame(4096, &[1u8]);
+        s.inbound_frame(65_536, &[1u8]);
         assert_eq!(
             s.data_ranges.len(),
             2,
-            "a 4096-byte buffer must not be extended further"
+            "a 65536-byte buffer must not be extended further"
         );
     }
 
-    /// A buffer of 4095 bytes IS extended when the next frame is contiguous.
+    /// A buffer of 65_535 bytes IS extended when the next frame is contiguous.
     #[test]
-    fn inbound_frame_extends_below_4096() {
+    fn inbound_frame_extends_below_65536() {
         let mut s = RxStreamOrderer::default();
-        s.inbound_frame(0, &[0u8; 4095]);
-        s.inbound_frame(4095, &[1u8]);
+        s.inbound_frame(0, &vec![0u8; 65_535]);
+        s.inbound_frame(65_535, &[1u8]);
         assert_eq!(s.data_ranges.len(), 1);
-        assert_eq!(s.data_ranges[&0].len(), 4096);
+        assert_eq!(s.data_ranges[&0].len(), 65_536);
     }
 
     /// Reading exactly `available` bytes frees the range so the next read can proceed.
