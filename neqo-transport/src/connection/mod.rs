@@ -2399,7 +2399,10 @@ impl Connection {
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
-    #[expect(clippy::too_many_arguments, reason = "frame_stats parameter added to avoid repeated borrow")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "frame_stats parameter added to avoid repeated borrow"
+    )]
     fn maybe_probe<B: Buffer>(
         &mut self,
         path: &PathRef,
@@ -2451,7 +2454,10 @@ impl Connection {
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
-    #[expect(clippy::too_many_arguments, reason = "stats parameter added to avoid repeated borrow")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "stats parameter added to avoid repeated borrow"
+    )]
     fn write_frames(
         &mut self,
         path: &PathRef,
@@ -2484,12 +2490,10 @@ impl Connection {
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Path validation probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
-            if path.borrow_mut().write_frames(
-                builder,
-                &mut stats.frame_tx,
-                full_mtu,
-                now,
-            ) {
+            if path
+                .borrow_mut()
+                .write_frames(builder, &mut stats.frame_tx, full_mtu, now)
+            {
                 builder.enable_padding(true);
             }
         }
@@ -2506,11 +2510,9 @@ impl Connection {
                     && !coalesced // Only send PMTUD probes using non-coalesced packets.
                     && full_mtu
                 {
-                    path.borrow_mut().pmtud_mut().send_probe(
-                        builder,
-                        &mut tokens,
-                        stats,
-                    );
+                    path.borrow_mut()
+                        .pmtud_mut()
+                        .send_probe(builder, &mut tokens, stats);
                     ack_eliciting = true;
                 }
                 self.write_appdata_frames(builder, &mut tokens, stats, now);
@@ -2559,7 +2561,10 @@ impl Connection {
         (tokens, ack_eliciting, padded)
     }
 
-    #[expect(clippy::too_many_arguments, reason = "stats parameter added to avoid repeated borrow")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "stats parameter added to avoid repeated borrow"
+    )]
     fn write_closing_frames<B: Buffer>(
         &mut self,
         close: &ClosingFrame,
