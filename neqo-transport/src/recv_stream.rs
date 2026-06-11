@@ -193,13 +193,6 @@ impl RxStreamOrderer {
         Self::default()
     }
 
-    /// Allocate a `Vec` for a new data-range entry, pre-sized with headroom.
-    fn make_buf(data: &[u8]) -> Vec<u8> {
-        let mut v = Vec::with_capacity(data.len().next_power_of_two().max(4096));
-        v.extend_from_slice(data);
-        v
-    }
-
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
@@ -240,17 +233,17 @@ impl RxStreamOrderer {
                 let extended = self
                     .data_ranges
                     .last_entry()
-                    .filter(|e| e.get().len() < 65_536)
+                    .filter(|e| e.get().len() < 4096)
                     .map(|mut e| {
                         e.get_mut().extend_from_slice(new_data);
                     })
                     .is_some();
                 if !extended {
-                    self.data_ranges.insert(new_start, Self::make_buf(new_data));
+                    self.data_ranges.insert(new_start, new_data.to_vec());
                 }
             } else {
                 // Gap: new data is not contiguous with any existing entry.
-                self.data_ranges.insert(new_start, Self::make_buf(new_data));
+                self.data_ranges.insert(new_start, new_data.to_vec());
             }
             self.frontier_end = max(self.frontier_end, new_end);
             return;
@@ -274,7 +267,7 @@ impl RxStreamOrderer {
                 // If it is small enough, extend the previous buffer.
                 // This can't always extend, because otherwise the buffer could end up
                 // growing indefinitely without being released.
-                prev_vec.len() < 65_536 && prev_end == new_start
+                prev_vec.len() < 4096 && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
@@ -351,7 +344,7 @@ impl RxStreamOrderer {
                     self.frontier_end = max(self.frontier_end, new_end);
                 }
             } else {
-                self.data_ranges.insert(new_start, Self::make_buf(to_add));
+                self.data_ranges.insert(new_start, to_add.to_vec());
                 self.frontier_end = max(self.frontier_end, new_end);
             }
         }
@@ -1136,30 +1129,30 @@ mod tests {
         }
     }
 
-    /// A buffer of exactly 65_536 bytes has reached the extension limit and must not be extended.
+    /// A buffer of exactly 4096 bytes has reached the extension limit and must not be extended.
     #[test]
-    fn inbound_frame_no_extend_at_65536() {
+    fn inbound_frame_no_extend_at_4096() {
         let mut s = RxStreamOrderer::default();
         // Fill to the extend threshold.
-        s.inbound_frame(0, &vec![0u8; 65_536]);
-        assert_eq!(s.data_ranges[&0].len(), 65_536);
+        s.inbound_frame(0, &[0u8; 4096]);
+        assert_eq!(s.data_ranges[&0].len(), 4096);
         // The next byte must not be merged; the threshold has been reached.
-        s.inbound_frame(65_536, &[1u8]);
+        s.inbound_frame(4096, &[1u8]);
         assert_eq!(
             s.data_ranges.len(),
             2,
-            "a 65536-byte buffer must not be extended further"
+            "a 4096-byte buffer must not be extended further"
         );
     }
 
-    /// A buffer of 65_535 bytes IS extended when the next frame is contiguous.
+    /// A buffer of 4095 bytes IS extended when the next frame is contiguous.
     #[test]
-    fn inbound_frame_extends_below_65536() {
+    fn inbound_frame_extends_below_4096() {
         let mut s = RxStreamOrderer::default();
-        s.inbound_frame(0, &vec![0u8; 65_535]);
-        s.inbound_frame(65_535, &[1u8]);
+        s.inbound_frame(0, &[0u8; 4095]);
+        s.inbound_frame(4095, &[1u8]);
         assert_eq!(s.data_ranges.len(), 1);
-        assert_eq!(s.data_ranges[&0].len(), 65_536);
+        assert_eq!(s.data_ranges[&0].len(), 4096);
     }
 
     /// Reading exactly `available` bytes frees the range so the next read can proceed.
