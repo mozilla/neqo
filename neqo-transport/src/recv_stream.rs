@@ -226,6 +226,15 @@ impl RxStreamOrderer {
 
         // Common case: new_start >= end
         if new_start >= self.end {
+            debug_assert_eq!(
+                self.end,
+                self.data_ranges
+                    .last_key_value()
+                    .map_or(self.retired, |(&k, v)| {
+                        k + u64::try_from(v.len()).expect("usize fits in u64")
+                    }),
+                "end must equal the end of the last range, or retired if empty"
+            );
             self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
             // Adjacent: try to extend the last entry to avoid a BTreeMap insert.
             // Gap (new_start > end): short-circuits straight to insert.
@@ -254,7 +263,6 @@ impl RxStreamOrderer {
                 //   NNNNNN            NN
                 // NNNNNNNN            NN
                 // Add a range containing only new data
-                // (In-order frames will take this path, with no overlap)
                 let overlap = prev_end.saturating_sub(new_start);
                 qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
