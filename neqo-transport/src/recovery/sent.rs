@@ -242,7 +242,6 @@ impl Packets {
 
     /// Take values from specified ranges of packet numbers into a caller-provided buffer.
     /// The buffer is cleared first, then filled with the most recent packet first per range.
-    ///
     /// Reusing the buffer across calls avoids a fresh allocation per ACK frame.
     pub fn take_ranges<R>(&mut self, acked_ranges: R, out: &mut Vec<Packet>)
     where
@@ -257,9 +256,6 @@ impl Packets {
         //
         // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
         let mut previous_range_start: Option<packet::Number> = None;
-
-        let acked_ranges = acked_ranges.into_iter();
-        out.reserve(acked_ranges.size_hint().0);
 
         for range in acked_ranges {
             debug_assert!(

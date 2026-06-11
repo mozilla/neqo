@@ -138,8 +138,9 @@ pub struct LossRecoverySpace {
     /// This is `None` if there were no out-of-order packets detected.
     /// When set to `Some(T)`, time-based loss detection should be enabled.
     first_ooo_time: Option<Instant>,
-    /// Scratch buffer reused across ACK frames to avoid allocating a fresh
-    /// `Vec<Packet>` on every call to `remove_acked`.
+    /// Holds the packets acknowledged by the most recent ACK frame.
+    /// Filled by `take_ranges` inside `remove_acked`; borrowed by `on_ack_received`
+    /// and its caller; cleared and refilled on the next call to `remove_acked`.
     acked: Vec<sent::Packet>,
 }
 
@@ -253,9 +254,9 @@ impl LossRecoverySpace {
 
     /// Remove all newly acknowledged packets.
     /// Returns a boolean indicating if any of those packets were ack-eliciting.
-    /// The acknowledged packets are placed into `self.acked`; callers
-    /// must read from that field.  The buffer is reused across calls to avoid a
-    /// fresh allocation per ACK frame.
+    /// The acknowledged packets are placed into `self.acked` and exposed to the
+    /// caller via the slice returned by `on_ack_received`.  The buffer is
+    /// cleared and refilled on the next call.
     fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> bool
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
@@ -610,7 +611,10 @@ impl Loss {
         }
     }
 
-    /// Returns (acked packets, lost packets)
+    /// Returns (acked packets, lost packets).
+    /// The acked-packets slice borrows `self` (via `space.acked`); it is valid
+    /// until the next call to `on_ack_received` for the same space, which will
+    /// refill the buffer via `take_ranges` → `out.clear()`.
     pub fn on_ack_received<R>(
         &mut self,
         primary_path: &PathRef,
@@ -619,19 +623,19 @@ impl Loss {
         ack_ecn: Option<&ecn::Count>,
         ack_delay: Duration,
         now: Instant,
-    ) -> (Vec<sent::Packet>, Vec<sent::Packet>)
+    ) -> (&[sent::Packet], Vec<sent::Packet>)
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
     {
         let Some(space) = self.spaces.get_mut(pn_space) else {
             qinfo!("ACK on discarded space");
-            return (Vec::new(), Vec::new());
+            return (&[], Vec::new());
         };
 
         let any_ack_eliciting = space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
         let Some(largest_acked_pkt) = space.acked.first() else {
             // No new information.
-            return (Vec::new(), Vec::new());
+            return (&[], Vec::new());
         };
 
         // Extract what we need from the largest acked packet before we mutate other fields.
@@ -699,10 +703,7 @@ impl Loss {
         }
         self.pto_state = None;
 
-        // split_off(0) moves all packets into a new Vec for the caller while
-        // leaving acked empty with its capacity intact for the next ACK.
-        let acked_packets = space.acked.split_off(0);
-        (acked_packets, lost)
+        (&space.acked, lost)
     }
 
     /// When receiving a retry, get all the sent packets so that they can be flushed.
@@ -1090,7 +1091,7 @@ mod tests {
             ack_ecn: Option<&ecn::Count>,
             ack_delay: Duration,
             now: Instant,
-        ) -> (Vec<sent::Packet>, Vec<sent::Packet>) {
+        ) -> (&[sent::Packet], Vec<sent::Packet>) {
             self.lr
                 .on_ack_received(&self.path, pn_space, acked_ranges, ack_ecn, ack_delay, now)
         }

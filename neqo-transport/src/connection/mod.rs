@@ -3562,7 +3562,7 @@ impl Connection {
             now,
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
-        qlog::packets_acked(&mut self.qlog, space, &acked_packets, now);
+        qlog::packets_acked(&mut self.qlog, space, acked_packets, now);
         for acked in acked_packets {
             for token in acked.tokens() {
                 match token {
