@@ -88,42 +88,48 @@ impl Pacer {
         self.p = mtu;
     }
 
+    /// Nanoseconds to wait after `self.t` before the next packet may be sent.
+    /// Returns `0` when a packet can be sent immediately: credit is available,
+    /// the deficit overflows, `cwnd` is zero, or the computed wait is below the
+    /// timer granularity.
+    #[inline]
+    fn wait_ns(&self, rtt: Duration, cwnd: usize) -> u64 {
+        let packet = isize::try_from(self.p).expect("packet size fits into isize");
+        if self.c >= packet {
+            return 0;
+        }
+        // This is the inverse of the function in `spend`:
+        // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
+        //
+        // `deficit` can exceed 2 × MTU when `self.c` carries accumulated debt
+        // from consecutive sub-granularity sends; `saturating_mul` caps the
+        // product safely regardless of the actual value.
+        let Ok(deficit) = u64::try_from(packet - self.c) else {
+            return 0;
+        };
+        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
+        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        let w_ns = rtt_ns
+            .saturating_mul(deficit)
+            .checked_div(divisor)
+            .unwrap_or(0);
+        // If the increment is below the timer granularity, send immediately.
+        if w_ns < Self::GRANULARITY_NS {
+            return 0;
+        }
+        w_ns
+    }
+
     /// Determine when the next packet will be available based on the provided
     /// RTT, provided congestion window and accumulated credit or debt.  This
     /// doesn't update state.  This returns a time, which could be in the past
     /// (this object doesn't know what the current time is).
     pub fn next(&self, rtt: Duration, cwnd: usize) -> Instant {
-        let packet = isize::try_from(self.p).expect("packet size fits into isize");
-
-        if self.c >= packet {
+        let w_ns = self.wait_ns(rtt, cwnd);
+        if w_ns == 0 {
             qtrace!("[{self}] next {cwnd}/{rtt:?} no wait = {:?}", self.t);
             return self.t;
         }
-
-        // This is the inverse of the function in `spend`:
-        // self.t + rtt * (self.p - self.c) / (Self::SPEEDUP * cwnd)
-        //
-        // `deficit` can exceed 2 × MTU when `self.c` carries accumulated debt
-        // from consecutive sub-granularity sends.  `saturating_mul` caps the
-        // product safely regardless of the actual value.
-        let Ok(deficit) = u64::try_from(packet - self.c) else {
-            qtrace!("[{self}] next {cwnd}/{rtt:?} deficit overflow");
-            return self.t;
-        };
-        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
-        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
-        let w_ns = rtt_ns.saturating_mul(deficit) / divisor;
-
-        // If the increment is below the timer granularity, send immediately.
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "GRANULARITY is 1ms, fits in u64"
-        )]
-        if w_ns < GRANULARITY.as_nanos() as u64 {
-            qtrace!("[{self}] next {cwnd}/{rtt:?} below granularity ({w_ns}ns)");
-            return self.t;
-        }
-
         let nxt = self.t + Duration::from_nanos(w_ns);
         qtrace!("[{self}] next {cwnd}/{rtt:?} wait {w_ns}ns = {nxt:?}");
         nxt
@@ -179,21 +185,8 @@ impl Pacer {
                 .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
         );
         self.t = now;
-        // Since self.t == now, next() > now iff self.c < packet AND w_ns >= GRANULARITY.
-        // Inline that check to avoid calling next() and repeating the arithmetic.
-        let packet = isize::try_from(self.p).expect("packet size fits into isize");
-        if self.c >= packet {
-            return false; // credit available: send immediately
-        }
-        let Ok(deficit) = u64::try_from(packet - self.c) else {
-            return false; // overflow: treat as no wait
-        };
-        let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
-        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
-        if divisor == 0 {
-            return false;
-        }
-        rtt_ns.saturating_mul(deficit) / divisor >= Self::GRANULARITY_NS
+        // self.t == now, so next() > now iff the computed wait is non-zero.
+        self.wait_ns(rtt, cwnd) > 0
     }
 }
 
@@ -323,6 +316,7 @@ mod tests {
     /// The two values must agree.
     #[test]
     fn spend_equivalence() {
+        const SHORT_RTT: Duration = Duration::from_millis(10);
         let n = now();
 
         // Manually replicate the credit-update logic from `spend` so we can
@@ -369,7 +363,6 @@ mod tests {
         check(true, n, n, PACKET, PACKET, RTT, CWND, PACKET);
 
         // Case 2: sub-granularity wait — not pacing-limited.
-        const SHORT_RTT: Duration = Duration::from_millis(10);
         check(true, n, n, PACKET, PACKET, SHORT_RTT, CWND, PACKET);
 
         // Case 3: exactly at GRANULARITY boundary (w = 1ms = GRANULARITY).
