@@ -152,6 +152,11 @@ where
             .filter(|&l| self.blocked_frame && self.limit <= l)
     }
 
+    /// Returns whether a blocking frame needs to be sent.
+    pub(crate) fn is_blocked(&self) -> bool {
+        self.blocked_needed().is_some()
+    }
+
     /// Clear the need to send a blocked frame.
     const fn blocked_sent(&mut self) {
         self.blocked_frame = false;

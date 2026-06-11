@@ -140,7 +140,7 @@ pub struct LossRecoverySpace {
     first_ooo_time: Option<Instant>,
     /// Scratch buffer reused across ACK frames to avoid allocating a fresh
     /// `Vec<Packet>` on every call to `remove_acked`.
-    acked_scratch: Vec<sent::Packet>,
+    acked: Vec<sent::Packet>,
 }
 
 impl LossRecoverySpace {
@@ -154,7 +154,7 @@ impl LossRecoverySpace {
             in_flight_outstanding: 0,
             sent_packets: sent::Packets::default(),
             first_ooo_time: None,
-            acked_scratch: Vec::new(),
+            acked: Vec::new(),
         }
     }
 
@@ -253,18 +253,17 @@ impl LossRecoverySpace {
 
     /// Remove all newly acknowledged packets.
     /// Returns a boolean indicating if any of those packets were ack-eliciting.
-    /// The acknowledged packets are placed into `self.acked_scratch`; callers
+    /// The acknowledged packets are placed into `self.acked`; callers
     /// must read from that field.  The buffer is reused across calls to avoid a
     /// fresh allocation per ACK frame.
     fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> bool
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
     {
-        self.sent_packets
-            .take_ranges(acked_ranges, &mut self.acked_scratch);
-        // Count first to avoid holding &self.acked_scratch across the &mut self call below.
+        self.sent_packets.take_ranges(acked_ranges, &mut self.acked);
+        // Count first to avoid holding &self.acked across the &mut self call below.
         let mut ack_eliciting_count: usize = 0;
-        for p in &self.acked_scratch {
+        for p in &self.acked {
             ack_eliciting_count += usize::from(p.ack_eliciting());
             stats.late_ack += usize::from(p.lost());
             stats.pto_ack += usize::from(p.pto_fired());
@@ -630,7 +629,7 @@ impl Loss {
         };
 
         let any_ack_eliciting = space.remove_acked(acked_ranges, &mut self.stats.borrow_mut());
-        let Some(largest_acked_pkt) = space.acked_scratch.first() else {
+        let Some(largest_acked_pkt) = space.acked.first() else {
             // No new information.
             return (Vec::new(), Vec::new());
         };
@@ -689,7 +688,7 @@ impl Loss {
         // take us out, and then lost packets will start a new recovery period
         // when it shouldn't.
         primary_path.borrow_mut().on_packets_acked(
-            &space.acked_scratch,
+            &space.acked,
             ack_ecn,
             now,
             &mut self.stats.borrow_mut(),
@@ -701,8 +700,8 @@ impl Loss {
         self.pto_state = None;
 
         // split_off(0) moves all packets into a new Vec for the caller while
-        // leaving acked_scratch empty with its capacity intact for the next ACK.
-        let acked_packets = space.acked_scratch.split_off(0);
+        // leaving acked empty with its capacity intact for the next ACK.
+        let acked_packets = space.acked.split_off(0);
         (acked_packets, lost)
     }
 
@@ -1284,15 +1283,15 @@ mod tests {
         let mut stats = Stats::default();
         add_sent(&mut lrs, 10);
         lrs.remove_acked(vec![], &mut stats);
-        assert!(lrs.acked_scratch.is_empty());
+        assert!(lrs.acked.is_empty());
         lrs.remove_acked(vec![7..=8, 2..=4], &mut stats);
-        match_acked(&lrs.acked_scratch, &[8, 7, 4, 3, 2]);
+        match_acked(&lrs.acked, &[8, 7, 4, 3, 2]);
         lrs.remove_acked(vec![8..=11], &mut stats);
-        match_acked(&lrs.acked_scratch, &[10, 9]);
+        match_acked(&lrs.acked, &[10, 9]);
         lrs.remove_acked(vec![0..=2], &mut stats);
-        match_acked(&lrs.acked_scratch, &[1, 0]);
+        match_acked(&lrs.acked, &[1, 0]);
         lrs.remove_acked(vec![5..=6], &mut stats);
-        match_acked(&lrs.acked_scratch, &[6, 5]);
+        match_acked(&lrs.acked, &[6, 5]);
     }
 
     #[test]
