@@ -462,7 +462,7 @@ mod tests {
 
     type TestSetup = (&'static [u8], u8, Res<u64>);
     const TEST_CASES_BIG_NUMBERS: &[TestSetup] = &[
-        // 1 << 64 - 1 is fine
+        // (1 << 64) - 1 is fine
         (
             &[
                 0xFF, 0x80, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
@@ -522,10 +522,13 @@ mod tests {
     fn read_prefixed_int_big_number() {
         for (buf, prefix_len, value) in TEST_CASES_BIG_NUMBERS {
             let mut reader = IntReader::new(buf[0], *prefix_len);
-            println!("p{prefix_len}: {buf:x?}");
             let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
-            assert_eq!(reader.read(&mut test_receiver), *value);
+            assert_eq!(
+                reader.read(&mut test_receiver),
+                *value,
+                "p{prefix_len}: {buf:x?}"
+            );
         }
     }
 
