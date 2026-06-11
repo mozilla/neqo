@@ -770,7 +770,7 @@ impl SendStream {
 
     /// Return `false` if the builder is full and the caller should stop iterating.
     ///
-    /// Any new frame type added here must also be reflected in [`Self::has_data_at`].
+    /// Any new frame type added here must also be reflected in `has_data_at`.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
