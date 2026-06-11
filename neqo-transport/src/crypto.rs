@@ -4,6 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_errors_doc,
+        clippy::missing_panics_doc,
+        clippy::must_use_candidate,
+        reason = "These items are only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
