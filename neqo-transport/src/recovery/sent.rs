@@ -7,7 +7,7 @@
 // A collection for sent packets.
 
 use std::{
-    collections::BTreeMap,
+    collections::VecDeque,
     ops::RangeInclusive,
     rc::Rc,
     time::{Duration, Instant},
@@ -214,7 +214,7 @@ impl Packet {
 #[derive(Debug, Default)]
 pub struct Packets {
     /// The collection.
-    packets: BTreeMap<u64, Packet>,
+    packets: VecDeque<Packet>,
 }
 
 impl Packets {
@@ -229,11 +229,15 @@ impl Packets {
     }
 
     pub fn track(&mut self, packet: Packet) {
-        self.packets.insert(packet.pn, packet);
+        debug_assert!(
+            self.packets.back().is_none_or(|last| last.pn < packet.pn),
+            "packet numbers must be monotonically increasing"
+        );
+        self.packets.push_back(packet);
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
-        self.packets.values_mut()
+        self.packets.iter_mut()
     }
 
     /// Take values from specified ranges of packet numbers.
@@ -243,93 +247,51 @@ impl Packets {
     pub fn take_ranges<R>(&mut self, acked_ranges: R) -> Vec<Packet>
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
-        R::IntoIter: ExactSizeIterator,
     {
         let mut result = Vec::new();
 
-        // Start with all packets. We will add unacknowledged packets back.
-        //  [---------------------------packets----------------------------]
-        let mut packets = std::mem::take(&mut self.packets);
-
+        // According to RFC 9000 §19.3.1 ACK ranges are in descending order:
+        //
+        // > Each ACK Range consists of alternating Gap and ACK Range Length
+        // > values in **descending packet number order**.
+        //
+        // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
         let mut previous_range_start: Option<packet::Number> = None;
 
         for range in acked_ranges {
-            // Split off at the end of the acked range.
-            //
-            //  [---------packets--------][----------after_acked_range---------]
-            let after_acked_range = packets.split_off(&(*range.end() + 1));
-
-            // Split off at the start of the acked range.
-            //
-            //  [-packets-][-acked_range-][----------after_acked_range---------]
-            let acked_range = packets.split_off(range.start());
-
-            // According to RFC 9000 19.3.1 ACK ranges are in descending order:
-            //
-            // > Each ACK Range consists of alternating Gap and ACK Range Length
-            // > values in **descending packet number order**.
-            //
-            // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
-            debug_assert!(previous_range_start.is_none_or(|s| s > *range.end()));
+            debug_assert!(
+                previous_range_start.is_none_or(|s| s > *range.end()),
+                "ACK ranges must be in descending order per RFC 9000 \u{a7}19.3.1"
+            );
             previous_range_start = Some(*range.start());
 
-            // Thus none of the following ACK ranges will acknowledge packets in
-            // `after_acked_range`. Let's put those back early.
-            //
-            //  [-packets-][-acked_range-][------------self.packets------------]
-            if self.packets.is_empty() {
-                // Don't re-insert un-acked packets into empty collection, but
-                // instead replace the empty one entirely.
-                self.packets = after_acked_range;
-            } else {
-                // Need to extend existing one. Not the first iteration, thus
-                // `after_acked_range` should be small.
-                self.packets.extend(after_acked_range);
+            let start_idx = self.packets.partition_point(|p| p.pn < *range.start());
+            let end_idx = self.packets.partition_point(|p| p.pn <= *range.end());
+            if start_idx == end_idx {
+                continue;
             }
-
-            // Take the acked packets.
-            result.extend(acked_range.into_values().rev());
+            result.extend(self.packets.drain(start_idx..end_idx).rev());
         }
-
-        // Put remaining non-acked packets back.
-        //
-        // This is inefficient if the acknowledged packets include the last sent
-        // packet AND there is a large unacknowledged span of packets. That's
-        // rare enough that we won't do anything special for that case.
-        self.packets.extend(packets);
-
         result
     }
 
-    /// Empty out the packets, but keep the offset.
+    /// Empty out all tracked packets.
     pub fn drain_all(&mut self) -> impl Iterator<Item = Packet> + use<> {
-        std::mem::take(&mut self.packets).into_values()
+        std::mem::take(&mut self.packets).into_iter()
     }
 
     /// See `LossRecoverySpace::remove_old_lost` for details on `now` and `cd`.
     /// Returns the number of ack-eliciting packets removed.
     pub fn remove_expired(&mut self, now: Instant, cd: Duration) -> usize {
-        let mut it = self.packets.iter();
-        // If the first item is not expired, do nothing (the most common case).
-        if it.next().is_some_and(|(_, p)| p.expired(now, cd)) {
-            // Find the index of the first unexpired packet.
-            let to_remove = if let Some(first_keep) =
-                it.find_map(|(i, p)| if p.expired(now, cd) { None } else { Some(*i) })
-            {
-                // Some packets haven't expired, so keep those.
-                let keep = self.packets.split_off(&first_keep);
-                std::mem::replace(&mut self.packets, keep)
-            } else {
-                // All packets are expired.
-                std::mem::take(&mut self.packets)
-            };
-            to_remove
-                .into_values()
-                .filter(Packet::ack_eliciting)
-                .count()
-        } else {
-            0
+        if self.packets.front().is_none_or(|p| !p.expired(now, cd)) {
+            return 0;
         }
+        let keep_from = self.packets.partition_point(|p| p.expired(now, cd));
+        debug_assert!(self.packets.range(keep_from..).all(|p| !p.expired(now, cd)));
+        self.packets
+            .drain(..keep_from)
+            .filter(Packet::ack_eliciting)
+            .count()
     }
 }
 
@@ -403,13 +365,11 @@ mod tests {
     }
 
     fn remove_one(pkts: &mut Packets, idx: packet::Number) {
-        assert_eq!(pkts.len(), 3);
         let store = pkts.take_ranges([idx..=idx]);
         let mut it = store.into_iter();
         assert_eq!(idx, it.next().unwrap().pn());
         assert!(it.next().is_none());
         drop(it);
-        assert_eq!(pkts.len(), 2);
     }
 
     fn assert_zero_and_two<'a, 'b: 'a>(
@@ -421,28 +381,14 @@ mod tests {
     }
 
     #[test]
-    fn iterate_skipped() {
+    fn iterate() {
         let mut pkts = pkts();
-        for (i, p) in pkts.packets.values().enumerate() {
+        for (i, p) in pkts.iter_mut().enumerate() {
             assert_eq!(i, usize::try_from(p.pn).unwrap());
         }
         remove_one(&mut pkts, 1);
 
-        // Validate the merged result multiple ways.
         assert_zero_and_two(pkts.iter_mut());
-
-        {
-            // Reverse the expectations here as this iterator reverses its output.
-            let store = pkts.take_ranges([0..=2]);
-            let mut it = store.into_iter();
-            assert_eq!(it.next().unwrap().pn(), 2);
-            assert_eq!(it.next().unwrap().pn(), 0);
-            assert!(it.next().is_none());
-        };
-
-        // The None values are still there in this case, so offset is 0.
-        assert_eq!(pkts.packets.len(), 0);
-        assert_eq!(pkts.len(), 0);
     }
 
     #[test]
@@ -481,6 +427,32 @@ mod tests {
         let mut pkts = Packets::default();
         pkts.track(pkt(0));
         assert!(pkts.take_ranges([1..=1]).is_empty());
+    }
+
+    /// Verify `take_ranges` with multiple non-contiguous ranges and multi-packet
+    /// spans.  This exercises the trickiest code path: elements from several
+    /// disjoint intervals must be removed and returned in descending pn order
+    /// while the remaining elements stay in order.
+    #[test]
+    fn take_ranges_multi() {
+        // Build pkt(0)..=pkt(5).
+        let mut pkts = Packets::default();
+        for i in 0..6 {
+            pkts.track(pkt(i));
+        }
+        // ACK ranges [4..=5, 1..=2] in descending order (as per RFC 9000 §19.3.1).
+        let acked = pkts.take_ranges([4..=5, 1..=2]);
+
+        // Returned in largest-pn-first order: 5, 4, 2, 1.
+        let pns: Vec<u32> = acked.iter().map(|p| u32::try_from(p.pn).unwrap()).collect();
+        assert_eq!(pns, [5, 4, 2, 1]);
+
+        // Remaining tracked: 0 and 3, in order.
+        let remaining: Vec<u32> = pkts
+            .iter_mut()
+            .map(|p| u32::try_from(p.pn).unwrap())
+            .collect();
+        assert_eq!(remaining, [0, 3]);
     }
 
     #[test]
