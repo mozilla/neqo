@@ -69,8 +69,37 @@ codspeed.mode = "simulation"
 codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
 
 [[package.metadata.bench]]
+name = "rx_stream_orderer"
+codspeed.mode = "simulation"
+
+[[package.metadata.bench]]
+name = "range_tracker"
+codspeed.mode = "simulation"
+
+[[package.metadata.bench]]
+name = "sent_packets"
+codspeed.mode = "simulation"
+
+[[package.metadata.bench]]
 name = "min_bandwidth"
+codspeed.mode = "simulation"
 codspeed.memory = false # Not a Criterion benchmark; plain fn main() with simulated time.
+
+[[package.metadata.bench]]
+name = "pacer"
+codspeed.mode = "simulation"
+
+[[package.metadata.bench]]
+name = "frame_decode"
+codspeed.mode = "simulation"
+
+[[package.metadata.bench]]
+name = "packet_codec"
+codspeed.mode = "simulation"
+
+[[package.metadata.bench]]
+name = "send_streams"
+codspeed.mode = "simulation"
 
 [[bench]]
 name = "transfer_walltime"
@@ -99,5 +128,25 @@ required-features = ["bench"]
 
 [[bench]]
 name = "min_bandwidth"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "pacer"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "frame_decode"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "packet_codec"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "send_streams"
 harness = false
 required-features = ["bench"]

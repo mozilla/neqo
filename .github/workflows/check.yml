@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+        uses: mozilla/actions/toolchains@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
 
   check:
     name: Run checks
@@ -79,7 +79,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+      - uses: mozilla/actions/rust@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -90,7 +90,7 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+      - uses: mozilla/actions/nss@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -142,7 +142,7 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+      - uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -168,7 +168,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+      - uses: mozilla/actions/rust@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
         with:
           version: stable
           tools: cargo-hack
@@ -208,9 +208,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # TODO: Re-enable openbsd once vmactions/openbsd-vm supports OpenBSD > 7.8; nss-3.116 (in 7.8) is too old, and snapshot packages require a newer base system.
-        # NSS package on 'solaris' is too old (3.110, need >= 3.121).
-        os: [freebsd, netbsd]
+        # TODO: NSS package on 'solaris' is too old (3.110).
+        os: [freebsd, netbsd, openbsd]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -219,4 +218,3 @@ jobs:
         with:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
-

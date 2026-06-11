@@ -29,19 +29,24 @@ use crate::{
 pub const CWND_INITIAL_PKTS: usize = 10;
 pub const PERSISTENT_CONG_THRESH: u32 = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
+pub enum Phase {
     /// In either slow start or congestion avoidance, not recovery.
+    #[strum(to_string = "slow_start")]
     SlowStart,
     /// In congestion avoidance.
+    #[strum(to_string = "congestion_avoidance")]
     CongestionAvoidance,
     /// In a recovery period, but no packets have been sent yet.  This is a
     /// transient phase because we want to exempt the first packet sent after
     /// entering recovery from the congestion window.
+    #[strum(to_string = "recovery")]
     RecoveryStart,
     /// In a recovery period, with the first packet sent at this time.
+    #[strum(to_string = "recovery")]
     Recovery,
     /// Start of persistent congestion, which is transient, like `RecoveryStart`.
+    #[strum(to_string = "slow_start")]
     PersistentCongestion,
 }
 
@@ -66,14 +71,6 @@ impl Phase {
             Self::RecoveryStart => Self::Recovery,
             _ => unreachable!(),
         };
-    }
-
-    pub const fn to_qlog(self) -> &'static str {
-        match self {
-            Self::SlowStart | Self::PersistentCongestion => "slow_start",
-            Self::CongestionAvoidance => "congestion_avoidance",
-            Self::Recovery | Self::RecoveryStart => "recovery",
-        }
     }
 }
 
@@ -158,7 +155,7 @@ struct State {
     phase: Phase,
     congestion_window: usize,
     acked_bytes: usize,
-    ssthresh: usize,
+    ssthresh: Option<usize>,
     /// Packet number of the first packet that was sent after a congestion event. When this one is
     /// acked we will exit [`Phase::Recovery`] and enter [`Phase::CongestionAvoidance`].
     recovery_start: Option<packet::Number>,
@@ -168,7 +165,7 @@ impl Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "State [phase: {:?}, cwnd: {}, ssthresh: {}, recovery_start: {:?}]",
+            "State [phase: {:?}, cwnd: {}, ssthresh: {:?}, recovery_start: {:?}]",
             self.phase, self.congestion_window, self.ssthresh, self.recovery_start
         )
     }
@@ -180,7 +177,7 @@ impl State {
             phase: Phase::SlowStart,
             congestion_window: cwnd_initial(mtu),
             acked_bytes: 0,
-            ssthresh: usize::MAX,
+            ssthresh: None,
             recovery_start: None,
         }
     }
@@ -203,7 +200,7 @@ pub struct ClassicCongestionController<S, T> {
     /// increasing the congestion window.
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.8
-    first_app_limited: packet::Number,
+    first_app_limited: Option<packet::Number>,
     pmtud: Pmtud,
     qlog: Qlog,
     /// Current congestion controller parameters.
@@ -319,7 +316,7 @@ where
             if !pkt.cc_outstanding() {
                 continue;
             }
-            if pkt.pn() < self.first_app_limited {
+            if self.first_app_limited.is_some_and(|f| pkt.pn() < f) {
                 is_app_limited = false;
             }
             // BIF is set to 0 on a path change, but in case that was because of a simple rebinding
@@ -351,11 +348,20 @@ where
                 self.current.congestion_window,
                 self.current.phase
             );
+            qlog::metrics_updated(
+                &mut self.qlog,
+                [qlog::Metric::BytesInFlight(self.bytes_in_flight)],
+                now,
+            );
             return;
         }
 
         // Slow start: grow up to ssthresh.
-        if self.current.congestion_window < self.current.ssthresh {
+        if self
+            .current
+            .ssthresh
+            .is_none_or(|s| self.current.congestion_window < s)
+        {
             // Check if the slow start algorithm wants to exit.
             if let Some(exit_cwnd) = self.slow_start.on_packets_acked(
                 rtt_est,
@@ -366,7 +372,7 @@ where
             ) {
                 qdebug!("Exited slow start by algorithm");
                 self.current.congestion_window = exit_cwnd;
-                self.current.ssthresh = exit_cwnd;
+                self.current.ssthresh = Some(exit_cwnd);
                 cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
                 cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::Heuristic);
                 self.set_phase(Phase::CongestionAvoidance, None, now);
@@ -380,20 +386,25 @@ where
                 // This can only happen after persistent congestion when we re-enter slow start
                 // while having a previously established `ssthresh` which has now
                 // been reached.
-                if self.current.congestion_window >= self.current.ssthresh {
+                if let Some(ssthresh) = self.current.ssthresh
+                    && self.current.congestion_window >= ssthresh
+                {
                     qdebug!(
-                        "Exited slow start because the threshold was reached, ssthresh: {}",
-                        self.current.ssthresh
+                        "Exited slow start because the threshold was reached, ssthresh: {ssthresh}",
                     );
                     // Clamp congestion window to ssthresh.
-                    self.current.congestion_window = self.current.ssthresh;
+                    self.current.congestion_window = ssthresh;
                     self.set_phase(Phase::CongestionAvoidance, None, now);
                 }
             }
         }
 
         // Congestion avoidance, above the slow start threshold.
-        if self.current.congestion_window >= self.current.ssthresh {
+        if self
+            .current
+            .ssthresh
+            .is_some_and(|s| self.current.congestion_window >= s)
+        {
             // The following function return the amount acked bytes a controller needs
             // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
             let bytes_for_increase = self.congestion_control.bytes_for_cwnd_increase(
@@ -427,7 +438,9 @@ where
             [
                 qlog::Metric::CongestionWindow(self.current.congestion_window),
                 qlog::Metric::BytesInFlight(self.bytes_in_flight),
-            ],
+            ]
+            .into_iter()
+            .chain(self.current.ssthresh.map(qlog::Metric::SsThresh)),
             now,
         );
 
@@ -575,7 +588,7 @@ where
         // pacing delay."  When the pacer is the reason we cannot send more
         // right now, cwnd underutilization is from pacing, not the application.
         if pacing_limited || !self.app_limited() {
-            self.first_app_limited = pkt.pn() + 1;
+            self.first_app_limited = Some(pkt.pn() + 1);
         }
 
         self.bytes_in_flight += pkt.len();
@@ -619,7 +632,7 @@ where
             bytes_in_flight: 0,
             maybe_lost_packets: HashMap::default(),
             qlog: Qlog::disabled(),
-            first_app_limited: 0,
+            first_app_limited: None,
             pmtud,
             current: State::new(mtu),
             stored: None,
@@ -629,13 +642,13 @@ where
 
     #[cfg(test)]
     #[must_use]
-    pub const fn ssthresh(&self) -> usize {
+    pub const fn ssthresh(&self) -> Option<usize> {
         self.current.ssthresh
     }
 
     #[cfg(test)]
     pub const fn set_ssthresh(&mut self, v: usize) {
-        self.current.ssthresh = v;
+        self.current.ssthresh = Some(v);
     }
 
     /// Accessor for [`ClassicCongestionController::congestion_control`]. Is used to call Cubic
@@ -669,11 +682,11 @@ where
         qdebug!("[{self}] phase -> {phase:?}");
         let old_state = self.current.phase;
         // Only emit a qlog event when a transition changes the qlog state.
-        if old_state.to_qlog() != phase.to_qlog() {
+        if !str::eq(old_state.into(), phase.into()) {
             qlog::congestion_state_updated(
                 &mut self.qlog,
-                old_state.to_qlog(),
-                phase.to_qlog(),
+                Some(old_state.into()),
+                phase.into(),
                 trigger,
                 now,
             );
@@ -791,7 +804,7 @@ where
 
         let pc_period = pto * PERSISTENT_CONG_THRESH;
 
-        let mut last_pn = 1 << 62; // Impossibly large, but not enough to overflow.
+        let mut last_pn: Option<packet::Number> = None;
         let mut start = None;
 
         // Look for the first lost packet after the previous largest acknowledged.
@@ -803,11 +816,11 @@ where
             .into_iter()
             .skip_while(|p| Some(p.time_sent()) < cutoff)
         {
-            if p.pn() != last_pn + 1 {
+            if last_pn.is_none_or(|l| p.pn() != l + 1) {
                 // Not a contiguous range of lost packets, start over.
                 start = None;
             }
-            last_pn = p.pn();
+            last_pn = Some(p.pn());
             if !p.cc_in_flight() {
                 // Not interesting, keep looking.
                 continue;
@@ -834,9 +847,13 @@ where
                     qlog::metrics_updated(
                         &mut self.qlog,
                         [
-                            qlog::Metric::CongestionWindow(self.current.congestion_window),
-                            qlog::Metric::SsThresh(self.current.ssthresh),
-                        ],
+                            Some(qlog::Metric::CongestionWindow(
+                                self.current.congestion_window,
+                            )),
+                            self.current.ssthresh.map(qlog::Metric::SsThresh),
+                        ]
+                        .into_iter()
+                        .flatten(),
                         now,
                     );
 
@@ -898,9 +915,9 @@ where
         );
         self.current.congestion_window = max(cwnd, self.cwnd_min());
         self.current.acked_bytes = acked_bytes;
-        self.current.ssthresh = self.current.congestion_window;
+        self.current.ssthresh = Some(self.current.congestion_window);
         qinfo!(
-            "[{self}] Cong event -> recovery; cwnd {}, ssthresh {}",
+            "[{self}] Cong event -> recovery; cwnd {}, ssthresh {:?}",
             self.current.congestion_window,
             self.current.ssthresh
         );
@@ -920,9 +937,13 @@ where
         qlog::metrics_updated(
             &mut self.qlog,
             [
-                qlog::Metric::CongestionWindow(self.current.congestion_window),
-                qlog::Metric::SsThresh(self.current.ssthresh),
-            ],
+                Some(qlog::Metric::CongestionWindow(
+                    self.current.congestion_window,
+                )),
+                self.current.ssthresh.map(qlog::Metric::SsThresh),
+            ]
+            .into_iter()
+            .flatten(),
             now,
         );
         let trigger = (congestion_trigger == Ecn).then_some(qlog::CongestionStateTrigger::Ecn);
@@ -984,12 +1005,12 @@ mod tests {
 
     fn cwnd_is_default(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        assert_eq!(cc.ssthresh(), usize::MAX);
+        assert_eq!(cc.ssthresh(), None);
     }
 
     fn cwnd_is_halved(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
         assert_eq!(cc.cwnd(), cc.cwnd_initial() / 2);
-        assert_eq!(cc.ssthresh(), cc.cwnd_initial() / 2);
+        assert_eq!(cc.ssthresh(), Some(cc.cwnd_initial() / 2));
     }
 
     fn lost(pn: packet::Number, ack_eliciting: bool, t: Duration) -> sent::Packet {
@@ -1618,14 +1639,14 @@ mod tests {
         );
         cc.on_packet_sent(&p_ce, now, false);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        assert_eq!(cc.ssthresh(), usize::MAX);
+        assert_eq!(cc.ssthresh(), None);
         assert_eq!(cc.current.phase, Phase::SlowStart);
         assert_eq!(cc_stats.congestion_events.ecn, 0);
 
         // Signal congestion (ECN CE) and thus change phase to recovery start.
         cc.on_ecn_ce_received(&p_ce, now, &mut cc_stats);
         assert_eq!(cc.cwnd(), cc.cwnd_initial() * 85 / 100);
-        assert_eq!(cc.ssthresh(), cc.cwnd_initial() * 85 / 100);
+        assert_eq!(cc.ssthresh(), Some(cc.cwnd_initial() * 85 / 100));
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
         assert_eq!(cc_stats.congestion_events.ecn, 1);
     }
@@ -2067,11 +2088,12 @@ mod tests {
     #[test]
     fn state_to_qlog() {
         use super::Phase;
-        assert_eq!(Phase::SlowStart.to_qlog(), "slow_start");
-        assert_eq!(Phase::PersistentCongestion.to_qlog(), "slow_start");
-        assert_eq!(Phase::CongestionAvoidance.to_qlog(), "congestion_avoidance");
-        assert_eq!(Phase::Recovery.to_qlog(), "recovery");
-        assert_eq!(Phase::RecoveryStart.to_qlog(), "recovery");
+        let qlog = |p: Phase| -> &str { p.into() };
+        assert_eq!(qlog(Phase::SlowStart), "slow_start");
+        assert_eq!(qlog(Phase::PersistentCongestion), "slow_start");
+        assert_eq!(qlog(Phase::CongestionAvoidance), "congestion_avoidance");
+        assert_eq!(qlog(Phase::Recovery), "recovery");
+        assert_eq!(qlog(Phase::RecoveryStart), "recovery");
     }
 
     #[test]

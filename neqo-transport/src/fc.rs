@@ -7,6 +7,14 @@
 // Tracks possibly-redundant flow control signals from other code and converts
 // into flow control frames needing to be sent to the remote.
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_panics_doc,
+        reason = "`SenderFlowControl` is only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -73,13 +81,10 @@ where
     limit: u64,
     /// How much of that limit we've used.
     used: u64,
-    /// The point at which blocking occurred.  This is updated each time
-    /// the sender decides that it is blocked.  It only ever changes
-    /// when blocking occurs.  This ensures that blocking at any given limit
-    /// is only reported once.
-    /// Note: All values are one greater than the corresponding `limit` to
-    /// allow distinguishing between blocking at a limit of 0 and no blocking.
-    blocked_at: u64,
+    /// The limit at which blocking was last reported, or `None` if never blocked.
+    /// Updated each time the sender decides it is blocked, ensuring that blocking
+    /// at any given limit is only reported once.
+    blocked_at: Option<u64>,
     /// Whether a blocked frame should be sent.
     blocked_frame: bool,
 }
@@ -94,7 +99,7 @@ where
             subject,
             limit: initial,
             used: 0,
-            blocked_at: 0,
+            blocked_at: None,
             blocked_frame: false,
         }
     }
@@ -102,7 +107,6 @@ where
     /// Update the maximum. Returns `Some` with the updated available flow
     /// control if the change was an increase and `None` otherwise.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
-        debug_assert!(limit < u64::MAX);
         (limit > self.limit).then(|| {
             self.limit = limit;
             self.blocked_frame = false;
@@ -130,10 +134,13 @@ where
     /// Mark flow control as blocked.
     /// This only does something if the current limit exceeds the last reported blocking limit.
     pub const fn blocked(&mut self) {
-        if self.limit >= self.blocked_at {
-            self.blocked_at = self.limit + 1;
-            self.blocked_frame = true;
+        if let Some(block) = self.blocked_at
+            && self.limit <= block
+        {
+            return;
         }
+        self.blocked_at = Some(self.limit);
+        self.blocked_frame = true;
     }
 
     /// Return whether a blocking frame needs to be sent.
@@ -141,7 +148,8 @@ where
     /// if a blocking frame has not been sent (or it has been lost), and
     /// if the blocking condition remains.
     fn blocked_needed(&self) -> Option<u64> {
-        (self.blocked_frame && self.limit < self.blocked_at).then(|| self.blocked_at - 1)
+        self.blocked_at
+            .filter(|&l| self.blocked_frame && self.limit <= l)
     }
 
     /// Clear the need to send a blocked frame.
@@ -153,7 +161,9 @@ where
     /// Only send again if value of `self.blocked_at` hasn't increased since sending.
     /// That would imply that the limit has since increased.
     pub const fn frame_lost(&mut self, limit: u64) {
-        if self.blocked_at == limit + 1 {
+        if let Some(block) = self.blocked_at
+            && block == limit
+        {
             self.blocked_frame = true;
         }
     }

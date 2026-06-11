@@ -455,6 +455,11 @@ impl RangeTracker {
             usize::try_from(self.highest_offset()).expect("u64 fits in usize"),
         );
     }
+
+    #[cfg(feature = "bench")]
+    pub fn mark_as_lost(&mut self, off: u64, len: usize) {
+        self.unmark_range(off, len);
+    }
 }
 
 /// Buffer to contain queued bytes and track their state.
@@ -1677,7 +1682,7 @@ impl SendStreams {
         removed
     }
 
-    pub(crate) fn write_frames<B: Buffer>(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
