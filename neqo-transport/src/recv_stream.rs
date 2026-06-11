@@ -180,14 +180,15 @@ pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
-    /// End offset of the rightmost received byte (the end of the last entry in
-    /// `data_ranges`, or `retired` if the map is empty).  Used to skip the
-    /// unconditional backwards `BTreeMap` probe in `inbound_frame` for the common
-    /// in-order case.
-    frontier_end: u64,
+    /// Offset of the rightmost received byte (the end of the last entry in
+    /// `data_ranges`, or `retired` if the map is empty).
+    end: u64,
 }
 
 impl RxStreamOrderer {
+    /// Maximum length of a buffered range before a new entry is created instead of extending.
+    const RANGE_LEN: usize = 4096;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -223,33 +224,27 @@ impl RxStreamOrderer {
             return;
         }
 
-        // ── Fast path: new_start >= frontier_end ─────────────────────────────────
-        // No preceding entry can overlap; skip the BTreeMap backwards probe.
-        // Covers in-order delivery and gap-filling arrivals at or past frontier.
-        if new_start >= self.frontier_end {
+        // Common case: new_start >= end
+        if new_start >= self.end {
             self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
-            if new_start == self.frontier_end {
-                // Adjacent: try to extend the last entry to avoid a BTreeMap insert.
-                let extended = self
+            // Adjacent: try to extend the last entry to avoid a BTreeMap insert.
+            // Gap (new_start > end): short-circuits straight to insert.
+            if new_start != self.end
+                || self
                     .data_ranges
                     .last_entry()
-                    .filter(|e| e.get().len() < 4096)
-                    .map(|mut e| {
-                        e.get_mut().extend_from_slice(new_data);
-                    })
-                    .is_some();
-                if !extended {
-                    self.data_ranges.insert(new_start, new_data.to_vec());
-                }
-            } else {
-                // Gap: new data is not contiguous with any existing entry.
+                    .filter(|e| e.get().len() < Self::RANGE_LEN)
+                    .map(|mut e| e.get_mut().extend_from_slice(new_data))
+                    .is_none()
+            {
                 self.data_ranges.insert(new_start, new_data.to_vec());
             }
-            self.frontier_end = max(self.frontier_end, new_end);
+            // new_end > new_start >= end, so direct assignment is correct.
+            self.end = new_end;
             return;
         }
 
-        // ── Slow path: new_start < frontier_end: retransmission / overlap ────────
+        // Retransmission/overlap: new_start < end
         let extend = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
@@ -267,7 +262,7 @@ impl RxStreamOrderer {
                 // If it is small enough, extend the previous buffer.
                 // This can't always extend, because otherwise the buffer could end up
                 // growing indefinitely without being released.
-                prev_vec.len() < 4096 && prev_end == new_start
+                prev_vec.len() < Self::RANGE_LEN && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
@@ -340,13 +335,12 @@ impl RxStreamOrderer {
             if extend {
                 if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
                     buf.extend_from_slice(to_add);
-                    // new_start was advanced by overlap, so new_end is still the real end.
-                    self.frontier_end = max(self.frontier_end, new_end);
                 }
             } else {
                 self.data_ranges.insert(new_start, to_add.to_vec());
-                self.frontier_end = max(self.frontier_end, new_end);
             }
+            // new_start was advanced by overlap, so new_end is still the real end.
+            self.end = max(self.end, new_end);
         }
     }
 
@@ -438,21 +432,12 @@ impl RxStreamOrderer {
             if keep {
                 let mut keep = self.data_ranges.split_off(&range_start);
                 mem::swap(&mut self.data_ranges, &mut keep);
-                // Update frontier_end to reflect the new last entry in the map,
-                // or retired if the map is now empty.
-                self.frontier_end = self
-                    .data_ranges
-                    .last_key_value()
-                    .map_or(self.retired, |(&k, v)| {
-                        k + u64::try_from(v.len()).expect("usize fits in u64")
-                    });
                 return copied;
             }
         }
 
         self.data_ranges.clear();
-        // All entries were consumed; frontier_end drops back to retired.
-        self.frontier_end = self.retired;
+        self.end = self.retired; // All entries were consumed.
         copied
     }
 
