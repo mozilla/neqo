@@ -52,9 +52,12 @@ fn take_ranges(c: &mut Criterion) {
     let now = Instant::now();
     c.bench_function("sent::Packets::take_ranges", |b| {
         b.iter_batched_ref(
-            || make_packets(PACKETS, now),
+            || (make_packets(PACKETS, now), Vec::new()),
             // Take the first 90 packets, minus some gaps.
-            |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29])),
+            |(pkts, out)| {
+                pkts.take_ranges([70..=89, 40..=59, 10..=29], out);
+                black_box(out.len())
+            },
             BatchSize::SmallInput,
         );
     });
