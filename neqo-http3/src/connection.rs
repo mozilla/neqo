@@ -49,6 +49,10 @@ use crate::{
     stream_type_reader::NewStreamHeadReader,
 };
 
+/// Number of unidirectional streams HTTP/3 opens for its own use (control, QPACK encoder, QPACK
+/// decoder).
+pub const HTTP3_UNI_CONTROL_STREAMS: u64 = 3;
+
 pub struct RequestDescription<'b, T: RequestTarget> {
     pub method: &'b str,
     pub connect_type: Option<ConnectType>,
@@ -1517,6 +1521,70 @@ impl Http3Connection {
             return Err(Error::InvalidStreamId);
         }
         Ok(borrowed.stats())
+    }
+
+    pub(crate) fn webtransport_increase_max_uni_streams(
+        &self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let session = self
+            .recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .ok_or(Error::InvalidStreamId)?;
+        if session.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
+        session.borrow_mut().set_anticipated_incoming_uni(value);
+        // Sum across all sessions: each session's streams count against the same
+        // QUIC connection-level limit. The baseline is set by ConnectionParameters;
+        // this only raises it when the total exceeds that default.
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().connect_type() == ExtendedConnectType::WebTransport)
+            .map(|s| u64::from(s.borrow().anticipated_incoming_uni()))
+            .sum();
+        conn.set_remote_max_streams_uni(total + HTTP3_UNI_CONTROL_STREAMS);
+        Ok(())
+    }
+
+    pub(crate) fn webtransport_increase_max_bidi_streams(
+        &self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let session = self
+            .recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .ok_or(Error::InvalidStreamId)?;
+        {
+            let session_ref = session.borrow();
+            if session_ref.connect_type() != ExtendedConnectType::WebTransport {
+                return Err(Error::InvalidStreamId);
+            }
+        }
+        session.borrow_mut().set_anticipated_incoming_bidi(value);
+        // Sum across all sessions: each session's streams count against the same
+        // QUIC connection-level limit. The baseline is set by ConnectionParameters;
+        // this only raises it when the total exceeds that default.
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| {
+                let session = s.extended_connect_session()?;
+                let session_ref = session.borrow();
+                (session_ref.connect_type() == ExtendedConnectType::WebTransport)
+                    .then(|| u64::from(session_ref.anticipated_incoming_bidi()))
+            })
+            .sum();
+        conn.set_remote_max_streams_bidi(total);
+        Ok(())
     }
 
     pub(crate) fn connect_udp_close_session(
