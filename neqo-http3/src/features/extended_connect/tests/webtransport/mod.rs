@@ -5,6 +5,7 @@
 // except according to those terms.
 
 mod anticipated_streams;
+mod atomic_write;
 mod datagrams;
 mod negotiation;
 mod sessions;
