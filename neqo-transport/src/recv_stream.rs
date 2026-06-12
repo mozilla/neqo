@@ -235,7 +235,7 @@ impl RxStreamOrderer {
                 // If it is small enough, extend the previous buffer.
                 // This can't always extend, because otherwise the buffer could end up
                 // growing indefinitely without being released.
-                prev_vec.len() < 4096 && prev_end == new_start
+                prev_vec.len() < 65_536 && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
@@ -310,7 +310,9 @@ impl RxStreamOrderer {
                     buf.extend_from_slice(to_add);
                 }
             } else {
-                self.data_ranges.insert(new_start, to_add.to_vec());
+                let mut v = Vec::with_capacity(to_add.len().next_power_of_two().max(4_096));
+                v.extend_from_slice(to_add);
+                self.data_ranges.insert(new_start, v);
             }
         }
     }
@@ -1084,30 +1086,30 @@ mod tests {
         }
     }
 
-    /// A buffer of exactly 4096 bytes has reached the extension limit and must not be extended.
+    /// A buffer of exactly 65536 bytes has reached the extension limit and must not be extended.
     #[test]
-    fn inbound_frame_no_extend_at_4096() {
+    fn inbound_frame_no_extend_at_65536() {
         let mut s = RxStreamOrderer::default();
         // Fill to the extend threshold.
-        s.inbound_frame(0, &[0u8; 4096]);
-        assert_eq!(s.data_ranges[&0].len(), 4096);
+        s.inbound_frame(0, &[0u8; 65_536]);
+        assert_eq!(s.data_ranges[&0].len(), 65_536);
         // The next byte must not be merged; the threshold has been reached.
-        s.inbound_frame(4096, &[1u8]);
+        s.inbound_frame(65_536, &[1u8]);
         assert_eq!(
             s.data_ranges.len(),
             2,
-            "a 4096-byte buffer must not be extended further"
+            "a 65536-byte buffer must not be extended further"
         );
     }
 
-    /// A buffer of 4095 bytes IS extended when the next frame is contiguous.
+    /// A buffer of 65535 bytes IS extended when the next frame is contiguous.
     #[test]
-    fn inbound_frame_extends_below_4096() {
+    fn inbound_frame_extends_below_65536() {
         let mut s = RxStreamOrderer::default();
-        s.inbound_frame(0, &[0u8; 4095]);
-        s.inbound_frame(4095, &[1u8]);
+        s.inbound_frame(0, &[0u8; 65_535]);
+        s.inbound_frame(65_535, &[1u8]);
         assert_eq!(s.data_ranges.len(), 1);
-        assert_eq!(s.data_ranges[&0].len(), 4096);
+        assert_eq!(s.data_ranges[&0].len(), 65_536);
     }
 
     /// Reading exactly `available` bytes frees the range so the next read can proceed.
