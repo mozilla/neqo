@@ -9,7 +9,6 @@
 use std::{
     collections::VecDeque,
     ops::RangeInclusive,
-    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -36,7 +35,7 @@ pub struct Packet {
     ack_eliciting: bool,
     time_sent: Instant,
     primary_path: bool,
-    tokens: Rc<recovery::Tokens>,
+    tokens: recovery::Tokens,
 
     loss_info: Option<LossInfo>,
     /// After a PTO, this is true when the packet has been released.
@@ -47,7 +46,7 @@ pub struct Packet {
 
 impl Packet {
     #[must_use]
-    pub fn new(
+    pub const fn new(
         pt: packet::Type,
         pn: packet::Number,
         time_sent: Instant,
@@ -61,7 +60,7 @@ impl Packet {
             time_sent,
             ack_eliciting,
             primary_path: true,
-            tokens: Rc::new(tokens),
+            tokens,
             loss_info: None,
             pto: false,
             len,
@@ -127,8 +126,8 @@ impl Packet {
 
     /// Access the recovery tokens that this holds.
     #[must_use]
-    pub fn tokens(&self) -> &recovery::Tokens {
-        self.tokens.as_ref()
+    pub const fn tokens(&self) -> &recovery::Tokens {
+        &self.tokens
     }
 
     /// Clears the flag that had this packet on the primary path.
@@ -296,7 +295,7 @@ impl Packets {
 /// Test helper to create a sent packet.
 #[cfg(test)]
 #[must_use]
-pub fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> Packet {
+pub const fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> Packet {
     Packet::new(
         packet::Type::Short,
         pn,

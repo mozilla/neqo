@@ -280,6 +280,12 @@ impl Http3ServerHandler {
             .connect_udp_send_datagram(session_id, conn, buf, id, now)
     }
 
+    pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {
+        self.base_handler
+            .validate_extended_connect_session(session_id)
+            .map(|_| ())
+    }
+
     /// Process HTTTP3 layer.
     pub fn process_http3(&mut self, conn: &mut Connection, now: Instant) {
         qtrace!("[{self}] Process http3 internal");
