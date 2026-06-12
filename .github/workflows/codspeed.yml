@@ -50,7 +50,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
+      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
         with:
           version: stable
           tools: cargo-codspeed
@@ -60,7 +60,7 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@2e46408d5c495e59a21e5e125e82008fad0d9408 # v1.1.7
+      - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
