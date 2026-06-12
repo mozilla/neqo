@@ -800,6 +800,7 @@ fn wt_transport_stats_populated() {
             "min_rtt should be <= smoothed RTT"
         );
     }
+    assert!(transport_stats.cwnd > 0, "cwnd should be positive");
 }
 
 #[test]
