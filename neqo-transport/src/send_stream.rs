@@ -728,6 +728,9 @@ pub struct SendStream {
     fair: bool,
     send_group: Option<SendGroupId>,
     writable_event_low_watermark: NonZeroUsize,
+    /// Cached result: true iff `has_data_at(self.priority)` would return true.
+    /// Maintained at every state transition so the common path is an O(1) field read.
+    has_data: bool,
 }
 
 impl SendStream {
@@ -752,6 +755,7 @@ impl SendStream {
             fair: false,
             send_group: None,
             writable_event_low_watermark: NonZeroUsize::MIN,
+            has_data: false,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -779,22 +783,42 @@ impl SendStream {
             } if p == priority => return true,
             _ => {}
         }
-        // STREAM_DATA_BLOCKED pending?
-        if priority == self.priority
-            && let State::Ready { fc, .. } | State::Send { fc, .. } = &self.state
-            && fc.is_blocked()
-        {
-            return true;
+
+        if priority == self.priority {
+            // STREAM_DATA_BLOCKED pending? O(1) bool read — checked live to avoid
+            // staleness when fc state changes outside our update sites.
+            if let State::Ready { fc, .. } | State::Send { fc, .. } = &self.state
+                && fc.is_blocked()
+            {
+                return true;
+            }
+            // STREAM pending? Use cached result: avoids the expensive BTree probe.
+            return self.has_data;
         }
-        // STREAM pending?
-        let retransmission = if priority == self.priority {
-            false
-        } else if priority == self.effective_priority {
-            true
-        } else {
-            return false;
-        };
-        self.has_next_bytes(retransmission)
+
+        if priority == self.effective_priority {
+            // Retransmission path: check TxBuffer for lost bytes.
+            return self.has_next_bytes(true);
+        }
+
+        false
+    }
+
+    /// Update the cache that backs the `has_data_at(self.priority)` STREAM check.
+    ///
+    /// `fc.is_blocked()` and `ResetSent` are checked live in `has_data_at` (both
+    /// are O(1)), so only the `has_next_bytes` result — the expensive `BTree` probe —
+    /// needs to be cached here.  Call this whenever the `TxBuffer` or stream state
+    /// changes in a way that could affect whether there are unsent data bytes.
+    fn update_has_data(&mut self) {
+        self.has_data = self.compute_has_data();
+    }
+
+    /// Returns true iff the stream has unsent data bytes at `self.priority`.
+    /// Does NOT account for `fc.is_blocked()` or `ResetSent` — those are checked
+    /// live in `has_data_at`.
+    fn compute_has_data(&mut self) -> bool {
+        self.has_next_bytes(false)
     }
 
     /// Return `false` if the builder is full and the caller should stop iterating.
@@ -843,8 +867,23 @@ impl SendStream {
         transmission: TransmissionPriority,
         retransmission: RetransmissionPriority,
     ) {
+        let new_effective = transmission + retransmission;
+        // If a RESET_STREAM is pending, keep its stored priority aligned with
+        // the updated stream priority so it remains schedulable.
+        if let State::ResetSent {
+            priority: Some(ref mut p),
+            ..
+        } = self.state
+        {
+            if *p == self.priority {
+                *p = transmission;
+            } else if *p == self.effective_priority {
+                *p = new_effective;
+            }
+        }
         self.priority = transmission;
-        self.effective_priority = transmission + retransmission;
+        self.effective_priority = new_effective;
+        self.update_has_data();
     }
 
     #[must_use]
@@ -1168,6 +1207,7 @@ impl SendStream {
             }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
+        self.update_has_data();
     }
 
     pub fn reset_lost(&mut self) {
@@ -1183,6 +1223,7 @@ impl SendStream {
             State::ResetRecvd { .. } => (),
             _ => unreachable!(),
         }
+        self.update_has_data();
     }
 
     /// Maybe write a `RESET_STREAM` or `RESET_STREAM_AT` frame.
@@ -1245,6 +1286,9 @@ impl SendStream {
             }
             *priority = None;
         }
+        if written {
+            self.update_has_data();
+        }
         // Even if the write was successful, if we have reliable data pending, return false.
         written && !matches!(self.state, State::ResetSentReliable { .. })
     }
@@ -1252,6 +1296,8 @@ impl SendStream {
     pub fn blocked_lost(&mut self, limit: u64) {
         if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
             fc.frame_lost(limit);
+            // frame_lost re-arms blocked_frame, so the cache needs refreshing.
+            self.update_has_data();
         } else {
             qtrace!("[{self}] Ignoring lost STREAM_DATA_BLOCKED({limit})");
         }
@@ -1270,6 +1316,8 @@ impl SendStream {
             && let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state
         {
             fc.write_frames(builder, tokens, stats);
+            // write_frames may clear blocked_frame; refresh the cache.
+            self.update_has_data();
         }
     }
 
@@ -1284,10 +1332,13 @@ impl SendStream {
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
             self.send_blocked_if_space_needed(0);
+            // `send_blocked_if_space_needed` already calls `update_has_data`.
         }
 
         if fin && let State::DataSent { fin_sent, .. } = &mut self.state {
             *fin_sent = true;
+            // fin_sent may affect has_next_bytes; refresh the cache.
+            self.update_has_data();
         }
     }
 
@@ -1361,6 +1412,7 @@ impl SendStream {
             }
             _ => qtrace!("[{self}] mark_as_acked called from state {:?}", self.state),
         }
+        self.update_has_data();
     }
 
     #[allow(
@@ -1387,6 +1439,7 @@ impl SendStream {
         {
             *fin_sent = *fin_acked;
         }
+        self.update_has_data();
     }
 
     /// Bytes sendable on stream. Constrained by stream credit available,
@@ -1451,6 +1504,7 @@ impl SendStream {
                 conn_fc.borrow_mut().blocked();
             }
         }
+        self.update_has_data();
     }
 
     fn send_internal(&mut self, buf: &[u8], atomic: bool) -> Res<usize> {
@@ -1487,7 +1541,7 @@ impl SendStream {
             buf
         };
 
-        match &mut self.state {
+        let result = match &mut self.state {
             State::Ready { .. } => unreachable!(),
             State::Send {
                 fc,
@@ -1501,7 +1555,11 @@ impl SendStream {
                 Ok(sent)
             }
             _ => Err(Error::FinalSize),
+        };
+        if result.is_ok() {
+            self.update_has_data();
         }
+        result
     }
 
     pub fn close(&mut self) {
@@ -1536,6 +1594,7 @@ impl SendStream {
             }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
+        self.update_has_data();
     }
 
     /// Commit to reliably delivering all data buffered so far: that prefix is delivered even if
@@ -1700,6 +1759,7 @@ impl SendStream {
             }
             _ => {}
         }
+        self.update_has_data();
     }
 
     #[cfg(test)]
