@@ -254,6 +254,10 @@ impl Http3ServerHandler {
         )
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -261,13 +265,19 @@ impl Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .webtransport_send_datagram(session_id, conn, buf, id, now)
+            .webtransport_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
             .map(|_| ())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -275,10 +285,12 @@ impl Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<()> {
         self.needs_processing = true;
         self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id, now)
+            .connect_udp_send_datagram(session_id, conn, buf, id, now, send_group_id, send_order)
             .map(|_| ())
     }
 
