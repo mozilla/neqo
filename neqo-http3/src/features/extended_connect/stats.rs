@@ -14,6 +14,7 @@
 )]
 #[derive(Debug, Clone, Default)]
 pub struct SessionStats {
+    /// Payload bytes sent (excludes framing overhead and retransmissions).
     pub bytes_sent: u64,
     pub bytes_received: u64,
     pub datagrams_sent: u64,
