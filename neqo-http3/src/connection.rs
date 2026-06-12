@@ -1386,6 +1386,18 @@ impl Http3Connection {
         self.extended_connect_close_session(conn, session_id, error, message, now)
     }
 
+    /// Invoked when GOAWAY is received. It flags all open WebTransport
+    /// sessions as draining and returns any sessions that were newly
+    /// marked as draining
+    pub(crate) fn drain_webtransport_sessions(&self) -> impl Iterator<Item = StreamId> + use<'_> {
+        self.recv_streams.iter().filter_map(|(id, s)| {
+            let sess = s.extended_connect_session()?;
+            let mut s = sess.borrow_mut();
+            (s.connect_type() == ExtendedConnectType::WebTransport && s.set_draining())
+                .then_some(*id)
+        })
+    }
+
     pub(crate) fn connect_udp_close_session(
         &mut self,
         conn: &mut Connection,

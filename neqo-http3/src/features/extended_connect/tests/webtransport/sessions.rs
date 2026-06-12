@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
-use neqo_transport::StreamType;
+use neqo_transport::{StreamId, StreamType};
 use test_fixture::now;
 
 use crate::{
@@ -427,4 +427,125 @@ fn wt_close_session_cannot_be_sent_at_once() {
         )),
     );
     wt.check_events_after_closing_session_server(&[], None, &[], None, None);
+}
+
+/// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
+/// "a signal to applications to initiate shutdown for all WebTransport sessions":
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
+///
+/// An active session (stream ID < `goaway_stream_id`) should receive a `Draining`
+/// event and remain open — no `SessionClosed`.
+#[test]
+fn wt_goaway_draining_active_session() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Send GOAWAY with a stream ID higher than the active session, so the
+    // session is considered processed (still active, but connection draining).
+    let goaway_stream_id = StreamId::new(session_id.as_u64() + 4);
+    wt.server.send_goaway(goaway_stream_id);
+    wt.exchange_packets();
+
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+
+    let has_draining = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                if *sid == session_id
+        )
+    });
+    assert!(has_draining, "expected Draining event for active session");
+
+    // The active session should NOT have been closed.
+    let has_closed = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed { .. })
+        )
+    });
+    assert!(!has_closed, "active session should not be closed by GOAWAY");
+}
+
+/// Repeated GOAWAYs with decreasing stream IDs (per RFC 9114 §5.2) should
+/// not produce duplicate Draining events for the same session.
+#[test]
+fn wt_goaway_repeated_no_duplicate_draining() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // First GOAWAY — session stays active.
+    let first = StreamId::new(session_id.as_u64() + 8);
+    wt.server.send_goaway(first);
+    wt.exchange_packets();
+    wt.client.events().for_each(drop);
+
+    // Second GOAWAY with lower stream ID — still above the session.
+    let second = StreamId::new(session_id.as_u64() + 4);
+    wt.server.send_goaway(second);
+    wt.exchange_packets();
+
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+    let draining_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Draining { .. })
+            )
+        })
+        .count();
+    assert_eq!(
+        draining_count, 0,
+        "second GOAWAY should not produce a duplicate Draining event"
+    );
+}
+
+/// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
+/// "a signal to applications to initiate shutdown for all WebTransport sessions":
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
+///
+/// A rejected session (stream ID >= `goaway_stream_id`) should receive both a
+/// `Draining` event and eventually a `SessionClosed` event.
+#[test]
+fn wt_goaway_draining_rejected_session() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Send GOAWAY with a stream ID equal to the session's stream ID, so the
+    // session is considered NOT processed (rejected).
+    wt.server.send_goaway(session_id);
+    wt.exchange_packets();
+
+    // Collect all events.
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+
+    let draining_pos = events
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                    if *sid == session_id
+            )
+        })
+        .expect("expected Draining event for rejected session");
+    let closed_pos = events
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
+                    stream_id: sid, ..
+                }) if *sid == session_id
+            )
+        })
+        .expect("expected SessionClosed event for rejected session");
+    assert!(
+        draining_pos < closed_pos,
+        "Draining must be emitted before SessionClosed for rejected sessions"
+    );
 }
