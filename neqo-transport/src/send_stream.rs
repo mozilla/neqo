@@ -1937,7 +1937,37 @@ impl SendStreams {
         // groups.  Within a group, the highest-sendOrder stream is served first (starving
         // lower sendOrder within the same group), matching the spec starvation requirement.
         let num_groups = self.per_group.len();
-        if num_groups > 0 {
+        if num_groups == 0 {
+            // No fair streams are registered (the common non-WebTransport case), so
+            // there is nothing left to send.  Returning here avoids a wasteful second
+            // walk of `map` searching for fair streams that don't exist.
+            return;
+        }
+        let single_group_no_sendorder = num_groups == 1
+            && self
+                .per_group
+                .first()
+                .is_some_and(|(_, grp)| grp.sendordered.is_empty());
+        if single_group_no_sendorder {
+            // Fast path: a single group with no sendOrder set (typical case).
+            // Iterate the group's `regular` OrderGroup rather than `map` directly so
+            // its round-robin cursor advances: when the builder fills mid-pass we
+            // resume at the next stream on the following call instead of always
+            // restarting from the first, which would starve later streams (per the
+            // WebTransport spec write-chunk 6.3 step 6.1, null-sendOrder streams MUST
+            // NOT starve).  We still skip the per_group round-robin loop below.
+            let (per_group, map) = (&mut self.per_group, &mut self.map);
+            if let Some((_, grp)) = per_group.get_index_mut(0) {
+                for stream_id in grp.regular.iter() {
+                    if let Some(stream) = map.get_mut(&stream_id)
+                        && stream.has_data_at(priority)
+                        && !stream.write_frames(priority, builder, tokens, stats)
+                    {
+                        break;
+                    }
+                }
+            }
+        } else {
             if self.per_group_next >= num_groups {
                 self.per_group_next = 0;
             }
