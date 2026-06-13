@@ -404,14 +404,25 @@ impl PushController {
 
     pub fn maybe_send_max_push_id_frame(&mut self, base_handler: &mut Http3Connection) {
         let push_done = self.push_streams.number_done();
-        if self.max_concurent_push > 0
-            && (self.current_max_push_id - push_done) <= (self.max_concurent_push / 2).into()
-        {
+        if self.max_concurent_push > 0 && self.push_capacity_low(push_done) {
             self.current_max_push_id = push_done + self.max_concurent_push;
             base_handler.queue_control_frame(&HFrame::MaxPushId {
                 push_id: self.current_max_push_id,
             });
         }
+    }
+
+    /// Whether at most half of the advertised push slots remain unused, the point
+    /// at which a new `MAX_PUSH_ID` frame is sent.
+    ///
+    /// `push_done` can reach `current_max_push_id + 1` when the peer completes
+    /// every push it was permitted before this runs, so the remaining capacity is
+    /// computed with a saturating subtraction. `PushId`'s plain `Sub` would
+    /// underflow there, panicking in debug and wrapping to a huge value in
+    /// release, which leaves the frame unsent and freezes the push id limit.
+    fn push_capacity_low(&self, push_done: PushId) -> bool {
+        let remaining = u64::from(self.current_max_push_id).saturating_sub(u64::from(push_done));
+        remaining <= self.max_concurent_push / 2
     }
 
     pub const fn handle_zero_rtt_rejected(&mut self) {
@@ -519,5 +530,20 @@ mod tests {
 
         let enabled = PushController::new(1, events);
         assert!(enabled.can_receive_push());
+    }
+
+    // The peer can complete every push it was permitted (push_id 0 through the
+    // advertised maximum) before a MAX_PUSH_ID update goes out, leaving the count
+    // of completed pushes one beyond current_max_push_id. The capacity check must
+    // treat that as "no capacity left" rather than underflow.
+    #[test]
+    fn push_capacity_low_when_all_pushes_done() {
+        use super::PushId;
+        let mut pc = PushController::new(5, Http3ClientEvents::default());
+        pc.current_max_push_id = PushId::new(5);
+        pc.push_streams.first_push_id = PushId::new(6);
+        let push_done = pc.push_streams.number_done();
+        assert_eq!(u64::from(push_done), 6);
+        assert!(pc.push_capacity_low(push_done));
     }
 }
