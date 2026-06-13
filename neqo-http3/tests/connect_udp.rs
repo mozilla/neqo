@@ -669,3 +669,13 @@ fn session_lifecycle_with_http_datagram_capsule() {
 
     qinfo!("HTTP DATAGRAM Capsule test completed successfully");
 }
+
+#[test]
+fn connect_udp_session_protocol_returns_none() {
+    fixture_init();
+    let (client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_session_protocol(session_id).unwrap(),
+        None
+    );
+}
