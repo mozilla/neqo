@@ -27,6 +27,14 @@ const MAX_STREAM_DATA: u64 = 1 << 20; // 1 MiB credit
 const DATA: &[u8] = &[0x5a; 200];
 
 fn make_streams(n_streams: usize) -> SendStreams {
+    make_streams_inner(n_streams, false, false)
+}
+
+fn make_fair_streams(n_streams: usize) -> SendStreams {
+    make_streams_inner(n_streams, true, true)
+}
+
+fn make_streams_inner(n_streams: usize, all_have_data: bool, fair: bool) -> SendStreams {
     let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));
     let conn_events = ConnectionEvents::default();
     let mut ss = SendStreams::default();
@@ -38,11 +46,13 @@ fn make_streams(n_streams: usize) -> SendStreams {
             Rc::clone(&conn_fc),
             conn_events.clone(),
         );
-        if i == 0 {
-            // Only stream 0 has data; the rest are idle.
+        if i == 0 || all_have_data {
             s.send(DATA).expect("send failed");
         }
         ss.insert(id, s);
+        if fair {
+            ss.set_fairness(id, true).expect("set_fairness failed");
+        }
     }
     ss
 }
@@ -83,10 +93,39 @@ fn write_frames_20_streams(c: &mut Criterion) {
     });
 }
 
+/// `SendStreams::write_frames` with 5 fair streams, all with data.
+/// Measures per-packet utilization when multiple ungrouped fair streams
+/// compete for the same packet-builder pass.
+fn write_frames_5_fair_all_active(c: &mut Criterion) {
+    c.bench_function("SendStreams::write_frames 5-fair-streams all-active", |b| {
+        b.iter_batched_ref(
+            || make_fair_streams(5),
+            do_write_frames,
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+/// `SendStreams::write_frames` with 20 fair streams, all with data.
+fn write_frames_20_fair_all_active(c: &mut Criterion) {
+    c.bench_function(
+        "SendStreams::write_frames 20-fair-streams all-active",
+        |b| {
+            b.iter_batched_ref(
+                || make_fair_streams(20),
+                do_write_frames,
+                BatchSize::SmallInput,
+            );
+        },
+    );
+}
+
 criterion_group!(
     benches,
     write_frames_1_stream,
     write_frames_5_streams,
     write_frames_20_streams,
+    write_frames_5_fair_all_active,
+    write_frames_20_fair_all_active,
 );
 criterion_main!(benches);
