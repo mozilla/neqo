@@ -19,6 +19,7 @@ use neqo_transport::{
     recovery,
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stream_id::StreamId,
+    streams::{SendGroupId, SendOrder},
 };
 
 const MAX_STREAM_DATA: u64 = 1 << 20; // 1 MiB credit
@@ -120,6 +121,95 @@ fn write_frames_20_fair_all_active(c: &mut Criterion) {
     );
 }
 
+/// Create `n_streams` fair streams with data, distributed across `n_groups` sendGroups.
+fn make_grouped_streams(n_streams: usize, n_groups: usize) -> SendStreams {
+    let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));
+    let conn_events = ConnectionEvents::default();
+    let mut ss = SendStreams::default();
+    for i in 0..n_streams as u64 {
+        let id = StreamId::from(i * 4);
+        let mut s = SendStream::new(
+            id,
+            MAX_STREAM_DATA,
+            Rc::clone(&conn_fc),
+            conn_events.clone(),
+        );
+        s.send(DATA).expect("send failed");
+        ss.insert(id, s);
+        ss.set_fairness(id, true).expect("set_fairness failed");
+        let group_id = (i as usize % n_groups) as SendGroupId + 1;
+        ss.set_sendgroup(id, Some(group_id))
+            .expect("set_sendgroup failed");
+    }
+    ss
+}
+
+/// Create `n_streams` fair streams with data and sendOrder, in a single group.
+fn make_sendordered_streams(n_streams: usize) -> SendStreams {
+    let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));
+    let conn_events = ConnectionEvents::default();
+    let mut ss = SendStreams::default();
+    for i in 0..n_streams as u64 {
+        let id = StreamId::from(i * 4);
+        let mut s = SendStream::new(
+            id,
+            MAX_STREAM_DATA,
+            Rc::clone(&conn_fc),
+            conn_events.clone(),
+        );
+        s.send(DATA).expect("send failed");
+        ss.insert(id, s);
+        ss.set_sendorder(id, Some(i as SendOrder))
+            .expect("set_sendorder failed");
+    }
+    ss
+}
+
+/// 3 sendGroups, 9 streams (3 per group), all active — exercises round-robin.
+fn write_frames_3_groups_9_streams(c: &mut Criterion) {
+    c.bench_function(
+        "SendStreams::write_frames 3-groups 9-streams all-active",
+        |b| {
+            b.iter_batched_ref(
+                || make_grouped_streams(9, 3),
+                do_write_frames,
+                BatchSize::SmallInput,
+            );
+        },
+    );
+}
+
+/// 5 fair streams with sendOrder, no explicit sendGroup — exercises per_group
+/// path (not the fast path).
+fn write_frames_5_sendordered(c: &mut Criterion) {
+    c.bench_function("SendStreams::write_frames 5-sendordered no-group", |b| {
+        b.iter_batched_ref(
+            || make_sendordered_streams(5),
+            do_write_frames,
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+/// 3 sendGroups with sendOrder, 9 streams — full multi-group ordered path.
+fn write_frames_3_groups_9_sendordered(c: &mut Criterion) {
+    c.bench_function("SendStreams::write_frames 3-groups 9-sendordered", |b| {
+        b.iter_batched_ref(
+            || {
+                let mut ss = make_grouped_streams(9, 3);
+                for i in 0..9u64 {
+                    let id = StreamId::from(i * 4);
+                    ss.set_sendorder(id, Some(i as SendOrder))
+                        .expect("set_sendorder failed");
+                }
+                ss
+            },
+            do_write_frames,
+            BatchSize::SmallInput,
+        );
+    });
+}
+
 criterion_group!(
     benches,
     write_frames_1_stream,
@@ -127,5 +217,8 @@ criterion_group!(
     write_frames_20_streams,
     write_frames_5_fair_all_active,
     write_frames_20_fair_all_active,
+    write_frames_3_groups_9_streams,
+    write_frames_5_sendordered,
+    write_frames_3_groups_9_sendordered,
 );
 criterion_main!(benches);
