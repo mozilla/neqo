@@ -76,12 +76,6 @@ impl Session {
     pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.send_groups.contains(&group_id)
     }
-
-    /// Get the session ID for a send group.
-    #[expect(dead_code, reason = "pending send group routing integration")]
-    pub(crate) fn send_group_session(&self, group_id: SendGroupId) -> Option<StreamId> {
-        self.send_groups.contains(&group_id).then_some(self.id)
-    }
 }
 
 impl Protocol for Session {

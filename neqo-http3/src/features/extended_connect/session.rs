@@ -621,7 +621,6 @@ pub(crate) trait Protocol: Debug + Display {
     }
 
     fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
-        // Default implementation returns false
         false
     }
 

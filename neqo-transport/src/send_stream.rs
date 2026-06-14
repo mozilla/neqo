@@ -1615,6 +1615,12 @@ pub struct SendStreams {
 
     per_group: IndexMap<SendGroupId, PerGroupQueues>,
     per_group_next: usize, // round-robin cursor over per_group entries
+
+    // Round-robin cursor (index into `map`) for the single-group no-sendOrder fast
+    // path.  Lets that path iterate `map` by index (cache-friendly, no per-stream
+    // hash lookup) while still resuming after the last-served stream when the packet
+    // builder fills mid-pass, preserving fairness.
+    fair_rr_next: usize,
 }
 
 /// Key used in `per_group` to represent the null sendGroup (ungrouped fair streams).
@@ -1852,6 +1858,7 @@ impl SendStreams {
         self.has_ended = false;
         self.per_group.clear();
         self.per_group_next = 0;
+        self.fair_rr_next = 0;
     }
 
     /// Remove ended streams. Returns `true` if any were removed.
@@ -1875,6 +1882,12 @@ impl SendStreams {
         self.per_group.retain(|_, grp| !grp.is_empty());
         if self.per_group_next >= self.per_group.len() {
             self.per_group_next = 0;
+        }
+        // `extract_if` shifts `map` indices, so the round-robin cursor may now be past
+        // the end; clamp it rather than resetting to 0, which would give the first fair
+        // stream an extra turn after every removal.
+        if self.fair_rr_next >= self.map.len() {
+            self.fair_rr_next = 0;
         }
         removed
     }
@@ -1950,21 +1963,32 @@ impl SendStreams {
                 .is_some_and(|(_, grp)| grp.sendordered.is_empty());
         if single_group_no_sendorder {
             // Fast path: a single group with no sendOrder set (typical case).
-            // Iterate the group's `regular` OrderGroup rather than `map` directly so
-            // its round-robin cursor advances: when the builder fills mid-pass we
-            // resume at the next stream on the following call instead of always
-            // restarting from the first, which would starve later streams (per the
-            // WebTransport spec write-chunk 6.3 step 6.1, null-sendOrder streams MUST
-            // NOT starve).  We still skip the per_group round-robin loop below.
-            let (per_group, map) = (&mut self.per_group, &mut self.map);
-            if let Some((_, grp)) = per_group.get_index_mut(0) {
-                for stream_id in grp.regular.iter() {
-                    if let Some(stream) = map.get_mut(&stream_id)
-                        && stream.has_data_at(priority)
-                        && !stream.write_frames(priority, builder, tokens, stats)
-                    {
-                        break;
-                    }
+            //
+            // Walk `map` by index rather than via the group's `regular` OrderGroup:
+            // `get_index_mut` is direct Vec access (no per-stream hash lookup), giving
+            // the same cache-friendly cost as the original `values_mut()` walk.
+            // `fair_rr_next` is a round-robin cursor into `map`; when the builder fills
+            // mid-pass we resume at the stream *after* the one that filled, so later
+            // fair streams are not starved (WebTransport spec write-chunk 6.3 step 6.1:
+            // null-sendOrder streams MUST NOT starve).
+            let n = self.map.len();
+            if self.fair_rr_next >= n {
+                self.fair_rr_next = 0;
+            }
+            let start = self.fair_rr_next;
+            for off in 0..n {
+                let idx = (start + off) % n;
+                // `idx < n`, so this always succeeds; `else` is just to avoid a panic.
+                let Some((_, stream)) = self.map.get_index_mut(idx) else {
+                    continue;
+                };
+                if !stream.is_fair() || !stream.has_data_at(priority) {
+                    continue;
+                }
+                if !stream.write_frames(priority, builder, tokens, stats) {
+                    // Resume after this stream next call so it can't monopolise.
+                    self.fair_rr_next = (idx + 1) % n;
+                    return;
                 }
             }
         } else {
@@ -2215,6 +2239,64 @@ mod tests {
         assert!(
             order.contains(&regular),
             "regular stream permanently starved by the sendordered stream in the same group"
+        );
+    }
+
+    /// Within a group, a null-sendOrder (regular) stream with enough data to fill a
+    /// packet must not starve a higher-priority sendordered stream in the same group.
+    /// A regular stream that fills the packet must still leave the group's turn to the
+    /// higher-sendOrder stream first (the sendordered stream must get served).
+    ///
+    /// This mirrors `round_robin_serves_regular_and_sendordered_in_group`, but with a
+    /// realistic payload: that test sends only 8 bytes, so the regular stream never fills
+    /// the packet and the inversion stays hidden.
+    #[test]
+    fn regular_stream_must_not_starve_sendordered_in_group() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        let regular = StreamId::from(0);
+        let sendordered = StreamId::from(4);
+
+        // Regular (null-sendOrder) stream with more data than fits in one packet.
+        let mut r = SendStream::new(regular, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+        r.send(&[0; 4096]).unwrap();
+        ss.insert(regular, r);
+        ss.set_fairness(regular, true).unwrap();
+        ss.set_sendgroup(regular, Some(SendGroupId::new(1)))
+            .unwrap();
+
+        // Higher-priority sendordered stream with only a few bytes: it easily fits
+        // alongside the regular stream if the scheduler gives it a turn.
+        let mut s = SendStream::new(sendordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        s.send(&[0; 8]).unwrap();
+        ss.insert(sendordered, s);
+        ss.set_fairness(sendordered, true).unwrap();
+        ss.set_sendgroup(sendordered, Some(SendGroupId::new(1)))
+            .unwrap();
+        ss.set_sendorder(sendordered, Some(100)).unwrap();
+
+        // Constrain the packet so a single stream's frame fills it, forcing the
+        // scheduler to choose which stream to serve first.
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        builder.set_limit(builder.len() + 30);
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        let mut served = std::collections::HashSet::new();
+        while !tokens.is_empty() {
+            served.insert(as_stream_token(&tokens.remove(0)).id);
+        }
+        assert!(
+            served.contains(&sendordered),
+            "higher-priority sendordered stream starved by the regular stream in the same group"
         );
     }
 
@@ -3295,6 +3377,54 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         let f5_token = tokens.remove(0);
         assert!(as_stream_token(&f5_token).fin);
+    }
+
+    /// Several fair streams in the single null sendGroup with no sendOrder, each
+    /// with more data than a (tightly limited) packet can carry.  When the builder
+    /// fills after one stream per call, the single-group fast path must round-robin
+    /// so every stream makes progress: per the WebTransport spec (write-chunk 6.3
+    /// step 6.1) null-sendOrder streams "MUST NOT starve".  The earlier map-order
+    /// fast path always re-served the first stream, starving the rest -- this test
+    /// fails against that behaviour.
+    #[test]
+    fn write_frames_fair_round_robin_no_starvation() {
+        const STREAMS: u64 = 4;
+        let conn_fc = connection_fc(1 << 20);
+        let conn_events = ConnectionEvents::default();
+
+        let mut ss = SendStreams::default();
+        for i in 0..STREAMS {
+            let id = StreamId::from(i * 4);
+            let mut s = SendStream::new(id, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+            s.send(&[0; 4096]).unwrap();
+            ss.insert(id, s);
+            ss.set_fairness(id, true).unwrap();
+        }
+
+        // Each call uses a fresh, tightly limited builder so only one stream's
+        // frame fits, exercising the round-robin cursor across packets.
+        let mut served = std::collections::HashSet::new();
+        for _ in 0..STREAMS {
+            let mut tokens = recovery::Tokens::new();
+            let mut builder =
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+            builder.set_limit(builder.len() + 30);
+            ss.write_frames(
+                TransmissionPriority::default(),
+                &mut builder,
+                &mut tokens,
+                &mut FrameStats::default(),
+            );
+            assert_eq!(tokens.len(), 1, "exactly one stream served per packet");
+            let token = tokens.remove(0);
+            served.insert(as_stream_token(&token).id);
+        }
+
+        assert_eq!(
+            u64::try_from(served.len()).expect("count fits in u64"),
+            STREAMS,
+            "every fair stream must make progress (no starvation); served {served:?}"
+        );
     }
 
     #[test]
