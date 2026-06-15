@@ -529,7 +529,7 @@ mod tests {
 
     #[test]
     #[should_panic(expected = "Do not encode data before the stream is initialized")]
-    fn drop_all() {
+    fn check_underflow_on_closed_pushes() {
         let events = Http3ClientEvents::default();
         let mut pc = PushController::new(1, events);
         assert!(pc.can_receive_push());
