@@ -5794,12 +5794,12 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise. max_push_id is set to 5, to trigger an error we send push_id=6.
+        // Send a push promise. max_push_id is set to 4, to trigger an error we send push_id=5.
         send_push_promise_and_exchange_packets(
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(6),
+            PushId::new(5),
         );
 
         assert_closed(&client, &Error::HttpId);
@@ -5811,8 +5811,8 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server) = connect();
 
-        // Send a push stream. max_push_id is set to 5, to trigger an error we send push_id=6.
-        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(6), true);
+        // Send a push stream. max_push_id is set to 4, to trigger an error we send push_id=5.
+        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(5), true);
 
         assert_closed(&client, &Error::HttpId);
     }
@@ -5823,8 +5823,8 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, _request_stream_id) = connect_and_send_request(true);
 
-        // Send CANCEL_PUSH for push_id 6.
-        send_cancel_push_and_exchange_packets(&mut client, &mut server, PushId::new(6));
+        // Send CANCEL_PUSH for push_id 5.
+        send_cancel_push_and_exchange_packets(&mut client, &mut server, PushId::new(5));
 
         assert_closed(&client, &Error::HttpId);
     }
@@ -5835,7 +5835,7 @@ mod tests {
         // Connect and send a request
         let (mut client, _, _) = connect_and_send_request(true);
 
-        assert_eq!(client.cancel_push(PushId::new(6)), Err(Error::HttpId));
+        assert_eq!(client.cancel_push(PushId::new(5)), Err(Error::HttpId));
         assert_eq!(client.state(), Http3State::Connected);
     }
 
