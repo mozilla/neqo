@@ -25,7 +25,7 @@ impl<'a> BitReader<'a> {
         }
     }
 
-    pub fn read_bit(&mut self) -> Res<u8> {
+    pub const fn read_bit(&mut self) -> Res<u8> {
         if self.input.len() == self.offset {
             return Err(Error::NeedMoreData);
         }
@@ -41,7 +41,7 @@ impl<'a> BitReader<'a> {
         Ok((self.input[self.offset] >> self.current_bit) & 0x01)
     }
 
-    pub fn verify_ending(&mut self, i: u8) -> Res<()> {
+    pub const fn verify_ending(&mut self, i: u8) -> Res<()> {
         if (i + self.current_bit) > 7 {
             return Err(Error::HuffmanDecompression);
         }
