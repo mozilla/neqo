@@ -404,8 +404,11 @@ impl PushController {
 
     pub fn maybe_send_max_push_id_frame(&mut self, base_handler: &mut Http3Connection) {
         let push_done = self.push_streams.number_done();
+        // Note: (1) `current_max_push_id` is not a count, but the maximum possible value,
+        // so the zero-based index needs to have one added.
+        // (2) This relies on rounding toward zero when `max_concurrent_push == 1`.
         if self.max_concurent_push > 0
-            && (self.current_max_push_id - push_done) <= (self.max_concurent_push / 2).into()
+            && (self.current_max_push_id + 1 - push_done) <= (self.max_concurent_push / 2).into()
         {
             self.current_max_push_id = push_done + self.max_concurent_push;
             base_handler.queue_control_frame(&HFrame::MaxPushId {
@@ -509,7 +512,10 @@ impl HttpRecvStreamEvents for RecvPushEvents {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{Http3ClientEvents, PushController};
+    use neqo_common::Role;
+
+    use super::{CloseType, Http3ClientEvents, PushController, PushId, StreamId};
+    use crate::{Http3Parameters, connection::Http3Connection};
 
     #[test]
     fn can_receive_push() {
@@ -519,5 +525,24 @@ mod tests {
 
         let enabled = PushController::new(1, events);
         assert!(enabled.can_receive_push());
+    }
+
+    #[test]
+    #[should_panic(expected = "Do not encode data before the stream is initialized")]
+    fn drop_all() {
+        let events = Http3ClientEvents::default();
+        let mut pc = PushController::new(1, events);
+        assert!(pc.can_receive_push());
+
+        let push = PushId::from(0);
+        let stream = StreamId::from(7);
+        assert!(pc.add_new_push_stream(push, stream).unwrap());
+        pc.push_stream_reset(push, CloseType::Done);
+        assert_eq!(pc.push_streams.number_done(), PushId::from(1));
+
+        // This connection won't need to do anything aside from enqueue a frame.
+        // This fails, but we check that the panic message is correct.
+        let mut conn = Http3Connection::new(Http3Parameters::default(), Role::Client);
+        pc.maybe_send_max_push_id_frame(&mut conn);
     }
 }
