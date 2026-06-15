@@ -433,6 +433,12 @@ enum ReceiveOutput {
 
 trait Stream: Debug {
     fn stream_type(&self) -> Http3StreamType;
+
+    // Unreachable: callers filter by ExtendedConnect before calling.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn session_protocol(&self) -> Option<String> {
+        None
+    }
 }
 
 trait RecvStream: Stream {

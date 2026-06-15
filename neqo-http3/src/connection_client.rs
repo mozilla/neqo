@@ -29,7 +29,7 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::Certifi
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
     ReceiveOutput, Res,
-    client_events::{Http3ClientEvent, Http3ClientEvents},
+    client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::{
         ConnectType, extended_connect::webtransport_session::WebTransportExportKeyingMaterial as _,
@@ -1344,6 +1344,26 @@ impl Http3Client {
             _ => unreachable!("Should not receive Goaway frame in this state"),
         }
 
+        // Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY is "a signal to
+        // applications to initiate shutdown for all WebTransport sessions":
+        // https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3
+        //
+        // Emit Draining BEFORE resetting streams, because handle_stream_reset below
+        // removes sessions with IDs >= goaway_stream_id from the stream tables.
+        // Those sessions will also receive a SessionClosed event via the reset path.
+        if !matches!(
+            self.base_handler.state(),
+            Http3State::Closing(..) | Http3State::Closed(..)
+        ) {
+            for session_id in self.base_handler.drain_webtransport_sessions() {
+                self.events.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::Draining {
+                        stream_id: session_id,
+                    },
+                ));
+            }
+        }
+
         // Issue reset events for streams >= goaway stream id
         let send_ids: Vec<StreamId> = self
             .base_handler
@@ -1393,6 +1413,24 @@ impl Http3Client {
     #[must_use]
     pub const fn webtransport_enabled(&self) -> bool {
         self.base_handler.webtransport_enabled()
+    }
+
+    /// Get the negotiated subprotocol for a WebTransport session.
+    ///
+    /// Returns the parsed protocol string from the server's `wt-protocol` response header
+    /// (an [RFC 8941 Item](https://www.rfc-editor.org/rfc/rfc8941.html#name-items)),
+    /// or `None` if the server did not include a `wt-protocol` header (or its value was
+    /// not a valid sf-string).
+    ///
+    /// **Note:** this returns the server's selected protocol without validating it against the
+    /// list of protocols offered by the client.  Callers are responsible for checking that the
+    /// returned protocol was among those originally offered.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid.
+    pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.base_handler.webtransport_session_protocol(session_id)
     }
 }
 

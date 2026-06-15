@@ -60,6 +60,7 @@ pub(crate) struct Session {
     /// Corresponds to the `:protocol` pseudo-header in the HTTP EXTENDED
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
+    draining: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -119,6 +120,7 @@ impl Session {
             state: State::Negotiating,
             events,
             protocol,
+            draining: false,
         }
     }
 
@@ -148,7 +150,19 @@ impl Session {
             state: State::Active,
             events,
             protocol,
+            draining: false,
         })
+    }
+
+    /// Returns the type of this extended CONNECT session.
+    pub(crate) fn connect_type(&self) -> ExtendedConnectType {
+        self.protocol.connect_type()
+    }
+
+    /// Mark session as draining. Returns `true` if this was the first call
+    /// (i.e. the session was not already draining).
+    pub(crate) const fn set_draining(&mut self) -> bool {
+        !std::mem::replace(&mut self.draining, true)
     }
 
     /// # Errors
@@ -282,6 +296,8 @@ impl Session {
                         );
                         State::Done
                     } else {
+                        self.protocol.process_response_headers(&headers);
+
                         self.events.session_start(
                             self.protocol.connect_type(),
                             self.id,
@@ -445,6 +461,10 @@ impl Stream for Rc<RefCell<Session>> {
     fn stream_type(&self) -> Http3StreamType {
         Http3StreamType::ExtendedConnect
     }
+
+    fn session_protocol(&self) -> Option<String> {
+        self.borrow().protocol.protocol().map(ToString::to_string)
+    }
 }
 
 impl RecvStream for Rc<RefCell<Session>> {
@@ -575,6 +595,12 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
         (HashSet::default(), HashSet::default())
+    }
+
+    fn process_response_headers(&mut self, _headers: &[Header]) {}
+
+    fn protocol(&self) -> Option<&str> {
+        None
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
