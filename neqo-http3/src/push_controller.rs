@@ -512,10 +512,8 @@ impl HttpRecvStreamEvents for RecvPushEvents {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Role;
 
     use super::{CloseType, Http3ClientEvents, PushController, PushId, StreamId};
-    use crate::{Http3Parameters, connection::Http3Connection};
 
     #[test]
     fn can_receive_push() {
@@ -528,8 +526,13 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)] // This relies on tripping a `debug_assert`.
     #[should_panic(expected = "Do not encode data before the stream is initialized")]
     fn check_underflow_on_closed_pushes() {
+        use neqo_common::Role;
+
+        use crate::{Http3Parameters, connection::Http3Connection};
+
         let events = Http3ClientEvents::default();
         let mut pc = PushController::new(1, events);
         assert!(pc.can_receive_push());
