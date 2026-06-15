@@ -2613,13 +2613,14 @@ impl Connection {
         mut closing_frame: Option<&ClosingFrame>,
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
-        let packet_tos = path.borrow().tos();
-        let mtu = path.borrow().plpmtu();
-        // Pre-allocate for one MTU to avoid realloc during the first packet build.
+        let path_ref = path.borrow();
+        let packet_tos = path_ref.tos();
+        let mtu = path_ref.plpmtu();
+        let address_family_max_mtu = path_ref.pmtud().address_family_max_mtu();
+        drop(path_ref);
         let mut send_buffer = Vec::with_capacity(mtu);
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
-        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
