@@ -137,7 +137,7 @@ fn make_grouped_streams(n_streams: usize, n_groups: usize) -> SendStreams {
         s.send(DATA).expect("send failed");
         ss.insert(id, s);
         ss.set_fairness(id, true).expect("set_fairness failed");
-        let group_id = (i as usize % n_groups) as SendGroupId + 1;
+        let group_id = SendGroupId::new((i as usize % n_groups) as u64 + 1);
         ss.set_sendgroup(id, Some(group_id))
             .expect("set_sendgroup failed");
     }

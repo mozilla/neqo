@@ -34,7 +34,29 @@ use crate::{
 };
 
 pub type SendOrder = i64;
-pub type SendGroupId = u64;
+
+/// Identifier for a send group, unique within a connection.
+///
+/// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
+/// cannot be passed where a send-group id is expected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SendGroupId(u64);
+
+impl SendGroupId {
+    /// Creates a new `SendGroupId`. Note: `0` is reserved as a sentinel
+    /// by the transport scheduler (`NULL_GROUP_ID`) and will be rejected
+    /// by [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl From<u64> for SendGroupId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {

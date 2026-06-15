@@ -1488,7 +1488,7 @@ impl Http3Connection {
         // Register the stream with its send group in the transport scheduler so that
         // sendOrder is evaluated per-group and groups get fair bandwidth allocation.
         if let Some(group_id) = send_group {
-            conn.stream_sendgroup(stream_id, Some(group_id.as_u64()))?;
+            conn.stream_sendgroup(stream_id, Some(group_id.as_u64().into()))?;
         }
 
         self.webtransport_create_stream_internal(

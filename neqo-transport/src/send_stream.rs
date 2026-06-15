@@ -1613,14 +1613,14 @@ pub struct SendStreams {
     /// Set when any stream has ended; cleared by `remove_ended`.
     has_ended: bool,
 
-    per_group: IndexMap<u64, PerGroupQueues>,
+    per_group: IndexMap<SendGroupId, PerGroupQueues>,
     per_group_next: usize, // round-robin cursor over per_group entries
 }
 
 /// Key used in `per_group` to represent the null sendGroup (ungrouped fair streams).
 /// Real [`SendGroupId`] values start at 1 (see `neqo-http3` `send_group.rs`), so 0 is safe
 /// as a sentinel here.
-const NULL_GROUP_ID: SendGroupId = 0;
+const NULL_GROUP_ID: SendGroupId = SendGroupId::new(0);
 
 impl SendStreams {
     #[allow(
@@ -1763,7 +1763,7 @@ impl SendStreams {
                 stream.set_sendorder(sendorder);
             }
             self.insert_into_group(gid, stream_id, sendorder);
-            qtrace!("stream {stream_id} sendorder -> {sendorder:?} in group {gid}");
+            qtrace!("stream {stream_id} sendorder -> {sendorder:?} in group {gid:?}");
         }
         Ok(())
     }
@@ -2120,6 +2120,7 @@ mod tests {
             NULL_GROUP_ID, RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer,
         },
         stats::FrameStats,
+        streams::SendGroupId,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
@@ -2139,10 +2140,10 @@ mod tests {
             SendStream::new(id, 100, connection_fc(100), ConnectionEvents::default()),
         );
 
-        assert!(ss.set_sendgroup(id, Some(1)).is_err());
+        assert!(ss.set_sendgroup(id, Some(SendGroupId::new(1))).is_err());
 
         ss.set_fairness(id, true).unwrap();
-        ss.set_sendgroup(id, Some(1)).unwrap();
+        ss.set_sendgroup(id, Some(SendGroupId::new(1))).unwrap();
     }
 
     /// `SendGroupId(0)` is the internal sentinel for ungrouped fair streams, so passing it
@@ -2181,7 +2182,7 @@ mod tests {
             s.send(&[0; 8]).unwrap();
             ss.insert(id, s);
             ss.set_fairness(id, true).unwrap();
-            ss.set_sendgroup(id, Some(1)).unwrap();
+            ss.set_sendgroup(id, Some(SendGroupId::new(1))).unwrap();
         }
         ss.set_sendorder(sendordered, Some(100)).unwrap();
 
@@ -2235,7 +2236,8 @@ mod tests {
         assert_eq!(s.send_atomic(&[0; 8]).unwrap(), 0);
         ss.insert(blocked_high, s);
         ss.set_fairness(blocked_high, true).unwrap();
-        ss.set_sendgroup(blocked_high, Some(1)).unwrap();
+        ss.set_sendgroup(blocked_high, Some(SendGroupId::new(1)))
+            .unwrap();
         ss.set_sendorder(blocked_high, Some(100)).unwrap();
 
         let low = StreamId::from(4);
@@ -2243,7 +2245,7 @@ mod tests {
         s.send(&[0; 8]).unwrap();
         ss.insert(low, s);
         ss.set_fairness(low, true).unwrap();
-        ss.set_sendgroup(low, Some(1)).unwrap();
+        ss.set_sendgroup(low, Some(SendGroupId::new(1))).unwrap();
         ss.set_sendorder(low, Some(50)).unwrap();
 
         // Group 2: a separate group so the multi-group scheduler path is taken.
@@ -2252,7 +2254,7 @@ mod tests {
         s.send(&[0; 8]).unwrap();
         ss.insert(other, s);
         ss.set_fairness(other, true).unwrap();
-        ss.set_sendgroup(other, Some(2)).unwrap();
+        ss.set_sendgroup(other, Some(SendGroupId::new(2))).unwrap();
 
         let mut tokens = recovery::Tokens::new();
         let mut builder =
@@ -2406,9 +2408,9 @@ mod tests {
         let mut ss = SendStreams::default();
 
         let groups = [
-            (StreamId::from(0), 1),
-            (StreamId::from(4), 2),
-            (StreamId::from(8), 3),
+            (StreamId::from(0), SendGroupId::new(1)),
+            (StreamId::from(4), SendGroupId::new(2)),
+            (StreamId::from(8), SendGroupId::new(3)),
         ];
         let toggled = groups[0].0;
         for (id, gid) in groups {
