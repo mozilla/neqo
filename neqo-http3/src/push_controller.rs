@@ -410,7 +410,7 @@ impl PushController {
         if self.max_concurent_push > 0
             && (self.current_max_push_id + 1 - push_done) <= (self.max_concurent_push / 2).into()
         {
-            self.current_max_push_id = push_done + self.max_concurent_push;
+            self.current_max_push_id = push_done + self.max_concurent_push - 1;
             base_handler.queue_control_frame(&HFrame::MaxPushId {
                 push_id: self.current_max_push_id,
             });
