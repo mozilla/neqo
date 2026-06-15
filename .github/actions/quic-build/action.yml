@@ -31,10 +31,10 @@ runs:
       run: |
         {
           echo "CACHE_VERSION=v3"
-          echo "MSQUIC_VERSION=v2.5.7"
-          echo "GOOGLE_QUICHE_REF=ba02ee8fc1c0ab27d55f6bbb9e1ac7c9705c3e69"
-          echo "CLOUDFLARE_QUICHE_VERSION=0.24.5"
-          echo "S2N_QUIC_VERSION=v1.77.0"
+          echo "MSQUIC_VERSION=v2.5.8"
+          echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
+          echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
+          echo "S2N_QUIC_VERSION=v1.82.0"
         } >> "$GITHUB_ENV"
 
     - name: Install Rust
