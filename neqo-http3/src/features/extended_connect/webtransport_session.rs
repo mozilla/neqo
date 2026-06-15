@@ -5,7 +5,6 @@
 // except according to those terms.
 
 use std::{
-    collections::HashSet,
     fmt::{self, Display, Formatter},
     mem,
     time::Instant,
@@ -13,6 +12,7 @@ use std::{
 
 use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
+use rustc_hash::FxHashSet as HashSet;
 use sfv::{BareItem, Item, Parser};
 
 use crate::{

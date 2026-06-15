@@ -6,7 +6,6 @@
 
 use std::{
     cell::RefCell,
-    collections::HashSet,
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
     str::from_utf8,
@@ -15,6 +14,7 @@ use std::{
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
+use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
