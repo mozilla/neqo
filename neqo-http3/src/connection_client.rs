@@ -873,14 +873,10 @@ impl Http3Client {
     /// # Errors
     ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
-    ///
-    /// # Panics
-    ///
-    /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
-        Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
-                .map_err(|_| Error::Internal)?)
+        let prefix_len =
+            u64::try_from(Encoder::varint_len(session_id.as_u64())).map_err(|_| Error::Internal)?;
+        Ok(self.conn.max_datagram_size()?.saturating_sub(prefix_len))
     }
 
     /// Sets the `SendOrder` for a given stream
