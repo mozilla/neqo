@@ -66,10 +66,10 @@ impl Session {
     ///
     /// Returns an error if the ID is already in use.
     pub(crate) fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
-        if !self.send_groups.insert(id) {
-            return Err(Error::InvalidState);
-        }
-        Ok(())
+        self.send_groups
+            .insert(id)
+            .then_some(())
+            .ok_or(Error::InvalidState)
     }
 
     /// Validate that a send group belongs to this session.
