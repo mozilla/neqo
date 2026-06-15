@@ -10,7 +10,7 @@ use test_fixture::now;
 
 use crate::{
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
-    Http3State, Priority, SessionAcceptAction, WebTransportEvent, WebTransportServerEvent,
+    Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
         CloseReason,
         tests::webtransport::{
@@ -18,6 +18,7 @@ use crate::{
         },
     },
     frames::WebTransportFrame,
+    webtransport::WebTransportServerEvent,
 };
 
 #[test]

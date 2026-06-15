@@ -28,9 +28,9 @@ use crate::{
     server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
     server_events::{
         ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents,
-        WebTransportRequest,
     },
     settings::HttpZeroRttChecker,
+    webtransport::{WebTransportRequest, WebTransportServerEvents as _},
 };
 
 type HandlerRef = Rc<RefCell<Http3ServerHandler>>;

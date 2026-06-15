@@ -22,7 +22,6 @@ use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
     Output, OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
-    recv_stream, send_stream, streams::SendOrder,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
 
@@ -31,9 +30,7 @@ use crate::{
     ReceiveOutput, Res,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
-    features::{
-        ConnectType, extended_connect::webtransport_session::WebTransportExportKeyingMaterial as _,
-    },
+    features::ConnectType,
     frames::HFrame,
     push_controller::{PushController, RecvPushEvents},
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -339,6 +336,21 @@ impl Http3Client {
             push_handler: Rc::new(RefCell::new(PushController::new(push_streams, events))),
             base_handler,
         }
+    }
+
+    pub(crate) const fn connection(&self) -> &Connection {
+        &self.conn
+    }
+    pub(crate) const fn connection_mut(&mut self) -> &mut Connection {
+        &mut self.conn
+    }
+    pub(crate) const fn handler(&self) -> &Http3Connection {
+        &self.base_handler
+    }
+    pub(crate) const fn connection_and_handler(
+        &mut self,
+    ) -> (&mut Connection, &mut Http3Connection) {
+        (&mut self.conn, &mut self.base_handler)
     }
 
     /// The function returns the current state of the connection.
@@ -864,106 +876,6 @@ impl Http3Client {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         self.base_handler
             .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)
-    }
-
-    /// Returns the current max size of a datagram that can fit into a packet.
-    /// The value will change over time depending on the encoded size of the
-    /// packet number, ack frames, etc.
-    ///
-    /// # Errors
-    ///
-    /// The function returns `NotAvailable` if datagrams are not enabled.
-    ///
-    /// # Panics
-    ///
-    /// This cannot panic. The max varint length is 8.
-    pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
-        Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
-                .map_err(|_| Error::Internal)?)
-    }
-
-    /// Sets the `SendOrder` for a given stream
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn webtransport_set_sendorder(
-        &mut self,
-        stream_id: StreamId,
-        sendorder: Option<SendOrder>,
-    ) -> Res<()> {
-        Http3Connection::stream_set_sendorder(&mut self.conn, stream_id, sendorder)
-    }
-
-    /// Sets the `Fairness` for a given stream
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    //
-    // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
-    pub fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
-        Http3Connection::stream_set_fairness(&mut self.conn, stream_id, fairness)
-    }
-
-    /// Returns the current `send_stream::Stats` of a `WebTransportSendStream`.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist.
-    pub fn webtransport_send_stream_stats(
-        &mut self,
-        stream_id: StreamId,
-    ) -> Res<send_stream::Stats> {
-        self.base_handler
-            .send_streams_mut()
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?
-            .stats(&mut self.conn)
-    }
-
-    /// Returns the current `recv_stream::Stats` of a `WebTransportRecvStream`.
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist.
-    pub fn webtransport_recv_stream_stats(
-        &mut self,
-        stream_id: StreamId,
-    ) -> Res<recv_stream::Stats> {
-        self.base_handler
-            .recv_streams_mut()
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?
-            .stats(&mut self.conn)
-    }
-
-    /// Export WebTransport keying material per
-    /// [draft-ietf-webtrans-http3 §4.8](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-15.html#section-4.8).
-    ///
-    /// Derives keying material scoped to a specific WebTransport session
-    /// by calling the TLS exporter with label `"EXPORTER-WebTransport"`
-    /// and a context struct that binds the session ID, application label,
-    /// and application context together.
-    ///
-    /// # Errors
-    ///
-    /// Returns `Error::InvalidStreamId` if `session_id` does not
-    /// correspond to an active WebTransport session,
-    /// `Error::InvalidInput` if `out` is empty or `label`/`context`
-    /// exceed 255 bytes, or `Error::Transport` on TLS export failure.
-    pub fn webtransport_export_keying_material(
-        &self,
-        session_id: StreamId,
-        label: &[u8],
-        context: &[u8],
-        out: &mut [u8],
-    ) -> Res<()> {
-        self.base_handler
-            .validate_extended_connect_session(session_id)?;
-        self.conn
-            .webtransport_export_keying_material(session_id, label, context, out)
     }
 
     /// This function combines  `process_input` and `process_output` function.

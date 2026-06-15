@@ -21,7 +21,8 @@ use test_fixture::{
 use crate::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters,
     Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
-    WebTransportRequest, WebTransportServerEvent, features::extended_connect::CloseReason,
+    features::extended_connect::CloseReason,
+    webtransport::{WebTransport as _, WebTransportRequest, WebTransportServerEvent},
 };
 
 // Leave space for large QUIC header.

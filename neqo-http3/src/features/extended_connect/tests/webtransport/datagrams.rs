@@ -9,10 +9,11 @@ use neqo_transport::{ConnectionParameters, Error as TransportError};
 use test_fixture::now;
 
 use crate::{
-    Error, Http3Parameters, WebTransportRequest,
+    Error, Http3Parameters,
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
+    webtransport::WebTransportRequest,
 };
 
 const DGRAM: &[u8] = &[0, 100];
