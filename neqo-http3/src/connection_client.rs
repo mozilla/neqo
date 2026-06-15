@@ -5622,7 +5622,8 @@ mod tests {
         send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(4), true);
         assert_eq!(client.state(), Http3State::Connected);
 
-        // Read push stream with push_id 5 to make it change to closed state.
+>         // Read push stream with push_id 4 to make it change to closed state.
+> 
         read_response_and_push_events(
             &mut client,
             &[PushPromiseInfo {
@@ -5757,7 +5758,8 @@ mod tests {
             request_stream_id,
             PushId::new(4),
         );
-        // Start a push stream with push_id 5.
+>         // Start a push stream with push_id 4.
+> 
         send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(4), true);
 
         read_response_and_push_events(
