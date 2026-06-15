@@ -1166,21 +1166,15 @@ impl Http3Client {
         self.conn.stats()
     }
 
-    /// Register a send group with a caller-provided ID for a WebTransport session.
+    /// Create a send group for a WebTransport session, returning its connection-unique ID.
     ///
     /// Send groups allow organizing streams with shared prioritization.
     ///
     /// # Errors
     ///
-    /// Returns error if the session ID is invalid, is not a WebTransport session,
-    /// or the group ID is already in use.
-    pub fn webtransport_register_send_group(
-        &mut self,
-        session_id: StreamId,
-        group_id: SendGroupId,
-    ) -> Res<()> {
-        self.base_handler
-            .webtransport_register_send_group(session_id, group_id)
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_create_send_group(&mut self, session_id: StreamId) -> Res<SendGroupId> {
+        self.base_handler.webtransport_create_send_group(session_id)
     }
 
     /// Validate that a send group belongs to the specified WebTransport session.

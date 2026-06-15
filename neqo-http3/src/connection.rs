@@ -34,7 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            send_group::Id as SendGroupId,
+            send_group::{Generator as SendGroupGenerator, Id as SendGroupId},
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -300,6 +300,7 @@ pub struct Http3Connection {
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
+    send_group_generator: SendGroupGenerator,
 }
 
 impl Display for Http3Connection {
@@ -334,6 +335,7 @@ impl Http3Connection {
             streams_with_pending_data: HashSet::default(),
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
+            send_group_generator: SendGroupGenerator::default(),
             role,
         }
     }
@@ -1363,21 +1365,21 @@ impl Http3Connection {
         Ok(stream.session_protocol())
     }
 
-    /// Register a send group with a caller-provided ID for a WebTransport session.
+    /// Mint a connection-unique send-group ID and register it with a WebTransport session.
     ///
     /// # Errors
-    /// Returns error if session doesn't exist, is not a WebTransport session, or the ID is already
-    /// in use.
-    pub(crate) fn webtransport_register_send_group(
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_create_send_group(
         &mut self,
         session_id: StreamId,
-        group_id: SendGroupId,
-    ) -> Res<()> {
+    ) -> Res<SendGroupId> {
+        let group_id = self.send_group_generator.next_id();
         self.recv_streams
             .get_mut(&session_id)
             .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
             .ok_or(Error::InvalidStreamId)?
-            .register_send_group(group_id)
+            .register_send_group(group_id)?;
+        Ok(group_id)
     }
 
     /// Validate that a send group belongs to the specified WebTransport session.

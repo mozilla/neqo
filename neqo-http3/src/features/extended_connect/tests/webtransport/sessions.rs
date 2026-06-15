@@ -28,11 +28,9 @@ fn wt_with_session() -> (WtTest, StreamId) {
 }
 
 fn register_group(wt: &mut WtTest, session_id: StreamId) -> send_group::Id {
-    let group = send_group::Id::default();
     wt.client
-        .webtransport_register_send_group(session_id, group)
-        .unwrap();
-    group
+        .webtransport_create_send_group(session_id)
+        .unwrap()
 }
 
 fn data_stream_ids(wt: &WtTest) -> Vec<StreamId> {
