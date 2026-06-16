@@ -1590,11 +1590,6 @@ impl PerGroupQueues {
         self.regular.stream_ids().is_empty()
             && self.sendordered.values().all(|g| g.stream_ids().is_empty())
     }
-
-    fn clear(&mut self) {
-        self.sendordered.clear();
-        self.regular.clear();
-    }
 }
 
 #[derive(Debug, Default)]
@@ -1867,9 +1862,6 @@ impl SendStreams {
         self.sendordered.clear();
         self.regular.clear();
         self.has_ended = false;
-        for (_, grp) in &mut self.per_group {
-            grp.clear();
-        }
         self.per_group.clear();
         self.per_group_next = 0;
     }
