@@ -374,7 +374,7 @@ impl WebTransportRequest {
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
         let prefix_len = u64::try_from(Encoder::varint_len(
-            self.stream_handler.stream_id().as_u64(),
+            self.stream_handler.stream_id().as_u64() >> 2,
         ))
         .map_err(|_| Error::Internal)?;
         Ok(max_size.saturating_sub(prefix_len))

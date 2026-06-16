@@ -874,8 +874,8 @@ impl Http3Client {
     ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
-        let prefix_len =
-            u64::try_from(Encoder::varint_len(session_id.as_u64())).map_err(|_| Error::Internal)?;
+        let qsid = session_id.as_u64() >> 2;
+        let prefix_len = u64::try_from(Encoder::varint_len(qsid)).map_err(|_| Error::Internal)?;
         Ok(self.conn.max_datagram_size()?.saturating_sub(prefix_len))
     }
 
