@@ -2057,9 +2057,14 @@ mod tests {
         let mut cc_stats = CongestionControlStats::default();
         let rtt_estimate = RttEstimate::new(RTT);
 
+        let initial_cwnd = cc.cwnd();
+
         assert!(cc.current.phase.in_slow_start());
         assert_eq!(cc_stats.slow_start_exit_cwnd, None);
         assert_eq!(cc_stats.slow_start_exit_reason, None);
+        assert_eq!(cc_stats.slow_start_exit_bytes_in_flight, None);
+        assert_eq!(cc_stats.slow_start_exit_detection_cwnd, None);
+        assert_eq!(cc_stats.slow_start_exit_loss_amount, None);
 
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now, false);
@@ -2087,6 +2092,15 @@ mod tests {
             cc_stats.slow_start_exit_reason,
             Some(SlowStartExitReason::CongestionEvent)
         );
+        assert_eq!(cc_stats.slow_start_exit_bytes_in_flight, Some(1000));
+        assert_eq!(cc_stats.slow_start_exit_detection_cwnd, Some(initial_cwnd));
+        assert_eq!(
+            cc_stats.slow_start_exit_loss_amount,
+            match congestion_trigger {
+                Loss => Some(1),
+                Ecn => None,
+            }
+        );
 
         // For loss, test that a spurious congestion event resets the stats.
         if congestion_trigger == Loss {
@@ -2101,6 +2115,9 @@ mod tests {
             assert!(cc.current.phase.in_slow_start());
             assert_eq!(cc_stats.slow_start_exit_cwnd, None);
             assert_eq!(cc_stats.slow_start_exit_reason, None);
+            assert_eq!(cc_stats.slow_start_exit_bytes_in_flight, None);
+            assert_eq!(cc_stats.slow_start_exit_detection_cwnd, None);
+            assert_eq!(cc_stats.slow_start_exit_loss_amount, None);
         }
     }
 
