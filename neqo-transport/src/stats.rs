@@ -175,9 +175,21 @@ pub struct CongestionControlStats {
     /// None if we haven't exited slow start or if we re-entered after spurious congestion.
     /// When exiting via congestion event, this is the cwnd AFTER the reduction.
     pub slow_start_exit_cwnd: Option<usize>,
+    /// The congestion window when slow start exit was detected.
+    /// None if we haven't exited slow start or if we re-entered after spurious congestion.
+    /// When exiting via congestion event, this is the cwnd BEFORE the reduction.
+    pub slow_start_exit_detection_cwnd: Option<usize>,
     /// The reason slow start was exited. None if we haven't exited slow start or if we re-entered
     /// after spurious congestion.
     pub slow_start_exit_reason: Option<SlowStartExitReason>,
+    /// Bytes in flight when detecting slow start exit. For exit by packet loss this records the
+    /// bytes in flight BEFORE subtracting the lost bytes, i.e. the amount of bytes in flight when
+    /// the packet loss was first detected. This can be used to reason about path saturation at the
+    /// moment of slow start exit.
+    pub slow_start_exit_bytes_in_flight: Option<usize>,
+    /// Number of packets lost when exiting slow start through loss. Can inform whether the loss is
+    /// random (just a few packets) or congestion based (many packets).
+    pub slow_start_exit_loss_amount: Option<usize>,
     /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
     /// HyStart++ is enabled. Higher values indicate that HyStart++ had many spurious CSS
     /// entries, spending more time throttling slow start growth.

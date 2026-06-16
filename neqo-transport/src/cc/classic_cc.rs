@@ -371,10 +371,12 @@ where
                 now,
             ) {
                 qdebug!("Exited slow start by algorithm");
-                self.current.congestion_window = exit_cwnd;
-                self.current.ssthresh = Some(exit_cwnd);
+                cc_stats.slow_start_exit_bytes_in_flight = Some(self.bytes_in_flight);
+                cc_stats.slow_start_exit_detection_cwnd = Some(self.current.congestion_window);
                 cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
                 cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::Heuristic);
+                self.current.congestion_window = exit_cwnd;
+                self.current.ssthresh = Some(exit_cwnd);
                 self.set_phase(Phase::CongestionAvoidance, None, now);
             } else {
                 let cwnd_increase = self
@@ -466,6 +468,9 @@ where
             return false;
         }
 
+        let bif_before_loss = self.bytes_in_flight;
+        let mut loss_amount = 0;
+
         for pkt in lost_packets {
             if pkt.cc_in_flight() {
                 qdebug!(
@@ -478,6 +483,7 @@ where
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
                 if !pkt.is_pmtud_probe() {
+                    loss_amount += 1;
                     let present = self.maybe_lost_packets.insert(
                         (pkt.pn(), pkt.packet_type()),
                         MaybeLostPacket {
@@ -511,7 +517,14 @@ where
             return false;
         };
 
-        let congestion = self.on_congestion_event(last_lost_packet, Loss, now, cc_stats);
+        let congestion = self.on_congestion_event(
+            last_lost_packet,
+            Loss,
+            bif_before_loss,
+            Some(loss_amount),
+            now,
+            cc_stats,
+        );
         // Persistent congestion checks still need to see lost packets that are not in-flight for
         // continuity checks. That is why only the closure to filter out lost PMTUD probes is used.
         let persistent_congestion = self.detect_persistent_congestion(
@@ -541,7 +554,14 @@ where
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.on_congestion_event(largest_acked_pkt, Ecn, now, cc_stats)
+        self.on_congestion_event(
+            largest_acked_pkt,
+            Ecn,
+            self.bytes_in_flight,
+            None,
+            now,
+            cc_stats,
+        )
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -783,6 +803,9 @@ where
 
         // If we are restoring back to slow start then we should undo the stat recording.
         if self.current.phase.in_slow_start() {
+            cc_stats.slow_start_exit_bytes_in_flight = None;
+            cc_stats.slow_start_exit_detection_cwnd = None;
+            cc_stats.slow_start_exit_loss_amount = None;
             cc_stats.slow_start_exit_cwnd = None;
             cc_stats.slow_start_exit_reason = None;
         }
@@ -887,6 +910,8 @@ where
         &mut self,
         last_packet: &sent::Packet,
         congestion_trigger: CongestionTrigger,
+        bif_before_loss: usize,
+        loss_amount: Option<usize>,
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
@@ -906,6 +931,7 @@ where
             self.congestion_control.save_undo_state();
         }
 
+        let detection_cwnd = self.current.congestion_window;
         let (cwnd, acked_bytes) = self.congestion_control.reduce_cwnd(
             self.current.congestion_window,
             self.current.acked_bytes,
@@ -930,6 +956,9 @@ where
         // If we were in slow start when `on_congestion_event` was called we will exit slow start
         // and should record the exit congestion window.
         if self.current.phase.in_slow_start() {
+            cc_stats.slow_start_exit_detection_cwnd = Some(detection_cwnd);
+            cc_stats.slow_start_exit_bytes_in_flight = Some(bif_before_loss);
+            cc_stats.slow_start_exit_loss_amount = loss_amount;
             cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
             cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::CongestionEvent);
         }
