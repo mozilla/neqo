@@ -31,13 +31,13 @@ runs:
         sudo apt-get install -y --no-install-recommends clang lld
 
     - name: Install Rust
-      uses: mozilla/actions/rust@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+      uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
       with:
         version: stable
         token: ${{ inputs.token }}
 
     - name: Install NSS
-      uses: mozilla/actions/nss@27cbe8fb5d338c2861b787e5de10410559065db1 # v1.1.3
+      uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
       with:
         minimum-version: ${{ inputs.nss-minimum-version }}
         token: ${{ inputs.token }}

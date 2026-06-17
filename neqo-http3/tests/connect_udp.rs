@@ -357,13 +357,12 @@ fn connect_via_proxy() {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, should_panic(expected = "assertion failed: false"))]
 fn send_dgram_on_non_active_session() {
     let (mut client, _proxy, connect_udp_session_id) = initiate_new_session();
 
     assert_eq!(
         client.connect_udp_send_datagram(connect_udp_session_id, &[], None, now()),
-        Err(Error::Unavailable)
+        Err(Error::InvalidStreamId)
     );
 }
 
@@ -669,4 +668,14 @@ fn session_lifecycle_with_http_datagram_capsule() {
     );
 
     qinfo!("HTTP DATAGRAM Capsule test completed successfully");
+}
+
+#[test]
+fn connect_udp_session_protocol_returns_none() {
+    fixture_init();
+    let (client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_session_protocol(session_id).unwrap(),
+        None
+    );
 }

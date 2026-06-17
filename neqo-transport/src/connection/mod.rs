@@ -32,6 +32,7 @@ use strum::IntoEnumIterator as _;
 use crate::{
     AppError, CloseReason, Error, Res, StreamId,
     addr_valid::{AddressValidation, NewTokenState},
+    cc::Phase,
     cid::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore,
@@ -902,6 +903,29 @@ impl Connection {
         self.crypto.tls().peer_certificate()
     }
 
+    /// Export keying material per RFC 8446 §7.5.
+    ///
+    /// `label` is the TLS exporter label, not the WebTransport application label.
+    /// This can only be called after the handshake is complete.
+    /// Per RFC 8446 §7.5, labels SHOULD begin with `"EXPORTER-"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if connection is not in a connected or closing state,
+    /// or export fails.
+    pub fn export_keying_material(&self, label: &str, context: &[u8], out: &mut [u8]) -> Res<()> {
+        if !(self.state.connected() || self.state.closing()) {
+            return Err(Error::NotConnected);
+        }
+        if out.is_empty() || label.is_empty() {
+            return Err(Error::InvalidInput);
+        }
+        self.crypto
+            .tls()
+            .export_keying_material(label.as_bytes(), context, out)
+            .map_err(Into::into)
+    }
+
     /// Call by application when the peer cert has been verified.
     ///
     /// This panics if there is no active peer.  It's OK to call this
@@ -944,6 +968,7 @@ impl Connection {
     #[must_use]
     pub fn stats(&self) -> Stats {
         let mut v = self.stats.borrow().clone();
+        v.version = self.version;
         if let Some(p) = self.paths.primary() {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
@@ -1105,6 +1130,10 @@ impl Connection {
             return;
         }
 
+        // Snapshot timer type before ACKs can alter loss state.
+        if let Some(path) = self.paths.primary() {
+            self.loss_recovery.note_timeout_type(&path.borrow(), now);
+        }
         for d in dgrams {
             self.input(d, now, now);
         }
@@ -1263,6 +1292,10 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         if let Some(d) = dgram {
+            // Snapshot timer type before ACKs can alter loss state.
+            if let Some(path) = self.paths.primary() {
+                self.loss_recovery.note_timeout_type(&path.borrow(), now);
+            }
             self.input(d, now, now);
             self.process_saved(now);
         }
@@ -2923,6 +2956,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         }
         qlog::client_version_information_initiated(
             &mut self.qlog,
@@ -3625,6 +3665,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         } else {
             self.zero_rtt_state = if self
                 .crypto
@@ -3858,20 +3905,14 @@ impl Connection {
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        let rb = stream.read(data)?;
-        Ok(rb)
+        self.streams.recv(stream_id, data)
     }
 
     /// Application is no longer interested in this stream.
     /// # Errors
     /// When the stream ID is invalid.
     pub fn stream_stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        stream.stop_sending(err);
-        Ok(())
+        self.streams.stop_sending(stream_id, err)
     }
 
     /// Increases `max_stream_data` for a `stream_id`.

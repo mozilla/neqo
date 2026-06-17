@@ -29,9 +29,11 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::Certifi
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
     ReceiveOutput, Res,
-    client_events::{Http3ClientEvent, Http3ClientEvents},
+    client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
-    features::ConnectType,
+    features::{
+        ConnectType, extended_connect::webtransport_session::WebTransportExportKeyingMaterial as _,
+    },
     frames::HFrame,
     push_controller::{PushController, RecvPushEvents},
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -871,14 +873,10 @@ impl Http3Client {
     /// # Errors
     ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
-    ///
-    /// # Panics
-    ///
-    /// This cannot panic. The max varint length is 8.
     pub fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
-        Ok(self.conn.max_datagram_size()?
-            - u64::try_from(Encoder::varint_len(session_id.as_u64()))
-                .map_err(|_| Error::Internal)?)
+        let qsid = session_id.as_u64() >> 2;
+        let prefix_len = u64::try_from(Encoder::varint_len(qsid)).map_err(|_| Error::Internal)?;
+        Ok(self.conn.max_datagram_size()?.saturating_sub(prefix_len))
     }
 
     /// Sets the `SendOrder` for a given stream
@@ -935,6 +933,33 @@ impl Http3Client {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(&mut self.conn)
+    }
+
+    /// Export WebTransport keying material per
+    /// [draft-ietf-webtrans-http3 §4.8](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-15.html#section-4.8).
+    ///
+    /// Derives keying material scoped to a specific WebTransport session
+    /// by calling the TLS exporter with label `"EXPORTER-WebTransport"`
+    /// and a context struct that binds the session ID, application label,
+    /// and application context together.
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidStreamId` if `session_id` does not
+    /// correspond to an active WebTransport session,
+    /// `Error::InvalidInput` if `out` is empty or `label`/`context`
+    /// exceed 255 bytes, or `Error::Transport` on TLS export failure.
+    pub fn webtransport_export_keying_material(
+        &self,
+        session_id: StreamId,
+        label: &[u8],
+        context: &[u8],
+        out: &mut [u8],
+    ) -> Res<()> {
+        self.base_handler
+            .validate_extended_connect_session(session_id)?;
+        self.conn
+            .webtransport_export_keying_material(session_id, label, context, out)
     }
 
     /// This function combines  `process_input` and `process_output` function.
@@ -1315,6 +1340,26 @@ impl Http3Client {
             _ => unreachable!("Should not receive Goaway frame in this state"),
         }
 
+        // Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY is "a signal to
+        // applications to initiate shutdown for all WebTransport sessions":
+        // https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3
+        //
+        // Emit Draining BEFORE resetting streams, because handle_stream_reset below
+        // removes sessions with IDs >= goaway_stream_id from the stream tables.
+        // Those sessions will also receive a SessionClosed event via the reset path.
+        if !matches!(
+            self.base_handler.state(),
+            Http3State::Closing(..) | Http3State::Closed(..)
+        ) {
+            for session_id in self.base_handler.drain_webtransport_sessions() {
+                self.events.insert(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::Draining {
+                        stream_id: session_id,
+                    },
+                ));
+            }
+        }
+
         // Issue reset events for streams >= goaway stream id
         let send_ids: Vec<StreamId> = self
             .base_handler
@@ -1364,6 +1409,24 @@ impl Http3Client {
     #[must_use]
     pub const fn webtransport_enabled(&self) -> bool {
         self.base_handler.webtransport_enabled()
+    }
+
+    /// Get the negotiated subprotocol for a WebTransport session.
+    ///
+    /// Returns the parsed protocol string from the server's `wt-protocol` response header
+    /// (an [RFC 8941 Item](https://www.rfc-editor.org/rfc/rfc8941.html#name-items)),
+    /// or `None` if the server did not include a `wt-protocol` header (or its value was
+    /// not a valid sf-string).
+    ///
+    /// **Note:** this returns the server's selected protocol without validating it against the
+    /// list of protocols offered by the client.  Callers are responsible for checking that the
+    /// returned protocol was among those originally offered.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid.
+    pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.base_handler.webtransport_session_protocol(session_id)
     }
 }
 
@@ -1705,7 +1768,7 @@ mod tests {
             assert!(dec.decode_vvec().unwrap().len() < 8);
 
             assert_eq!(dec.decode_varint().unwrap(), 0xd); // MAX_PUSH_ID
-            assert_eq!(dec.decode_vvec().unwrap(), &[5]);
+            assert_eq!(dec.decode_vvec().unwrap(), &[4]);
 
             assert_eq!(dec.remaining(), 0);
             assert!(!fin);
@@ -5464,7 +5527,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(5),
+            PushId::new(4),
         );
 
         send_push_promise_and_exchange_packets(
@@ -5482,7 +5545,7 @@ mod tests {
             &mut client,
             &[
                 PushPromiseInfo {
-                    push_id: PushId::new(5),
+                    push_id: PushId::new(4),
                     ref_stream_id: request_stream_id,
                 },
                 PushPromiseInfo {
@@ -5508,7 +5571,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(5),
+            PushId::new(4),
         );
 
         send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(3), true);
@@ -5523,7 +5586,7 @@ mod tests {
             &mut client,
             &[
                 PushPromiseInfo {
-                    push_id: PushId::new(5),
+                    push_id: PushId::new(4),
                     ref_stream_id: request_stream_id,
                 },
                 PushPromiseInfo {
@@ -5550,19 +5613,19 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(5),
+            PushId::new(4),
         );
-        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(5), true);
+        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(4), true);
         assert_eq!(client.state(), Http3State::Connected);
 
-        // Read push stream with push_id 5 to make it change to closed state.
+        // Read push stream with push_id 4 to make it change to closed state.
         read_response_and_push_events(
             &mut client,
             &[PushPromiseInfo {
-                push_id: PushId::new(5),
+                push_id: PushId::new(4),
                 ref_stream_id: request_stream_id,
             }],
-            &[PushId::new(5)],
+            &[PushId::new(4)],
             request_stream_id,
         );
 
@@ -5596,7 +5659,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(5),
+            PushId::new(4),
         );
 
         // make a second request.
@@ -5610,18 +5673,18 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id_2,
-            PushId::new(5),
+            PushId::new(4),
         );
 
         read_response_and_push_events(
             &mut client,
             &[
                 PushPromiseInfo {
-                    push_id: PushId::new(5),
+                    push_id: PushId::new(4),
                     ref_stream_id: request_stream_id,
                 },
                 PushPromiseInfo {
-                    push_id: PushId::new(5),
+                    push_id: PushId::new(4),
                     ref_stream_id: request_stream_id_2,
                 },
             ],
@@ -5641,9 +5704,9 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(5),
+            PushId::new(4),
         );
-        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(5), true);
+        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(4), true);
 
         // make a second request.
         let request_stream_id_2 = make_request(&mut client, false, &[]);
@@ -5656,22 +5719,22 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id_2,
-            PushId::new(5),
+            PushId::new(4),
         );
 
         read_response_and_push_events(
             &mut client,
             &[
                 PushPromiseInfo {
-                    push_id: PushId::new(5),
+                    push_id: PushId::new(4),
                     ref_stream_id: request_stream_id,
                 },
                 PushPromiseInfo {
-                    push_id: PushId::new(5),
+                    push_id: PushId::new(4),
                     ref_stream_id: request_stream_id_2,
                 },
             ],
-            &[PushId::new(5)],
+            &[PushId::new(4)],
             request_stream_id,
         );
         assert_eq!(client.state(), Http3State::Connected);
@@ -5688,18 +5751,17 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(5),
+            PushId::new(4),
         );
-        // Start a push stream with push_id 5.
-        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(5), true);
+        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(4), true);
 
         read_response_and_push_events(
             &mut client,
             &[PushPromiseInfo {
-                push_id: PushId::new(5),
+                push_id: PushId::new(4),
                 ref_stream_id: request_stream_id,
             }],
-            &[PushId::new(5)],
+            &[PushId::new(4)],
             request_stream_id,
         );
 
@@ -5714,7 +5776,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id_2,
-            PushId::new(5),
+            PushId::new(4),
         );
 
         // Check that we do not have a Http3ClientEvent::PushPromise.
@@ -5728,12 +5790,12 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
-        // Send a push promise. max_push_id is set to 5, to trigger an error we send push_id=6.
+        // Send a push promise. max_push_id is set to 4, to trigger an error we send push_id=5.
         send_push_promise_and_exchange_packets(
             &mut client,
             &mut server,
             request_stream_id,
-            PushId::new(6),
+            PushId::new(5),
         );
 
         assert_closed(&client, &Error::HttpId);
@@ -5745,8 +5807,8 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server) = connect();
 
-        // Send a push stream. max_push_id is set to 5, to trigger an error we send push_id=6.
-        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(6), true);
+        // Send a push stream. max_push_id is set to 4, to trigger an error we send push_id=5.
+        send_push_data_and_exchange_packets(&mut client, &mut server, PushId::new(5), true);
 
         assert_closed(&client, &Error::HttpId);
     }
@@ -5757,8 +5819,8 @@ mod tests {
         // Connect and send a request
         let (mut client, mut server, _request_stream_id) = connect_and_send_request(true);
 
-        // Send CANCEL_PUSH for push_id 6.
-        send_cancel_push_and_exchange_packets(&mut client, &mut server, PushId::new(6));
+        // Send CANCEL_PUSH for push_id 5.
+        send_cancel_push_and_exchange_packets(&mut client, &mut server, PushId::new(5));
 
         assert_closed(&client, &Error::HttpId);
     }
@@ -5769,13 +5831,14 @@ mod tests {
         // Connect and send a request
         let (mut client, _, _) = connect_and_send_request(true);
 
-        assert_eq!(client.cancel_push(PushId::new(6)), Err(Error::HttpId));
+        assert_eq!(client.cancel_push(PushId::new(5)), Err(Error::HttpId));
         assert_eq!(client.state(), Http3State::Connected);
     }
 
     #[test]
     fn max_push_id_frame_update_is_sent() {
-        const MAX_PUSH_ID_FRAME: &[u8] = &[0xd, 0x1, 0x8];
+        // Max concurrent is 5, sent after >5/2 (3) pushes are closed.
+        const MAX_PUSH_ID_FRAME: &[u8] = &[0xd, 0x1, 0x7];
 
         // Connect and send a request
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
@@ -5824,9 +5887,9 @@ mod tests {
         assert_eq!(amount, MAX_PUSH_ID_FRAME.len());
         assert_eq!(&buf[..3], MAX_PUSH_ID_FRAME);
 
-        // Check that we can send push_id=8 now
-        send_push_promise(&mut server.conn, request_stream_id, PushId::new(8));
-        send_push_data(&mut server.conn, PushId::new(8), true);
+        // Check that we can send push_id=7 now
+        send_push_promise(&mut server.conn, request_stream_id, PushId::new(7));
+        send_push_data(&mut server.conn, PushId::new(7), true);
 
         let out = server.conn.process_output(now());
         let out = client.process(out.dgram(), now());
@@ -5837,10 +5900,10 @@ mod tests {
         read_response_and_push_events(
             &mut client,
             &[PushPromiseInfo {
-                push_id: PushId::new(8),
+                push_id: PushId::new(7),
                 ref_stream_id: request_stream_id,
             }],
-            &[PushId::new(8)],
+            &[PushId::new(7)],
             request_stream_id,
         );
 

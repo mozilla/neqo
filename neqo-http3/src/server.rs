@@ -344,6 +344,27 @@ impl Http3Server {
     pub fn next_event(&self) -> Option<Http3ServerEvent> {
         self.events.next_event()
     }
+
+    /// Queue a GOAWAY frame to be sent to all connected clients.
+    ///
+    /// `stream_id` is the first stream ID that was **not** processed.
+    ///
+    /// **Note:** The same `stream_id` is sent to every connection. Callers
+    /// must ensure that `stream_id` is valid across all connections and that
+    /// subsequent calls use non-increasing values (per RFC 9114 §5.2).
+    pub fn send_goaway(&self, stream_id: neqo_transport::StreamId) {
+        debug_assert!(
+            !stream_id.is_uni() && !stream_id.is_server_initiated(),
+            "GOAWAY stream ID must be client-initiated bidirectional (RFC 9114 S5.2)"
+        );
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to iterate over handlers in undefined order for goaway"
+        )]
+        for handler in self.http3_handlers.values() {
+            handler.borrow_mut().queue_goaway(stream_id);
+        }
+    }
 }
 fn prepare_data(
     stream_info: Http3StreamInfo,

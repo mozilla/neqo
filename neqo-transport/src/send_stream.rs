@@ -19,6 +19,7 @@ use std::{
 
 use indexmap::IndexMap;
 use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
+use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
 
@@ -455,6 +456,11 @@ impl RangeTracker {
             usize::try_from(self.highest_offset()).expect("u64 fits in usize"),
         );
     }
+
+    #[cfg(feature = "bench")]
+    pub fn mark_as_lost(&mut self, off: u64, len: usize) {
+        self.unmark_range(off, len);
+    }
 }
 
 /// Buffer to contain queued bytes and track their state.
@@ -497,6 +503,16 @@ impl TxBuffer {
 
     pub fn is_empty(&mut self) -> bool {
         self.first_unmarked_range().is_none()
+    }
+
+    pub fn has_next_bytes(&mut self) -> bool {
+        !self.is_empty()
+    }
+
+    /// Returns `true` if there are unsent bytes before `limit`.
+    pub fn has_next_bytes_before(&mut self, limit: u64) -> bool {
+        self.first_unmarked_range()
+            .is_some_and(|(start, _)| start < limit)
     }
 
     pub fn next_bytes(&mut self) -> Option<(u64, &[u8])> {
@@ -722,7 +738,40 @@ impl SendStream {
         ss
     }
 
-    // return false if the builder is full and the caller should stop iterating
+    /// Returns `true` if [`Self::write_frames`] at this priority has a frame queued:
+    /// a pending `RESET_STREAM`, `STREAM_DATA_BLOCKED`, or `STREAM` frame.
+    ///
+    /// Must mirror every frame-emission path in [`Self::write_frames`]; any new
+    /// frame type added there must also be reflected here.
+    fn has_data_at(&mut self, priority: TransmissionPriority) -> bool {
+        // RESET_STREAM pending?
+        if let State::ResetSent {
+            priority: Some(p), ..
+        } = self.state
+        {
+            return p == priority;
+        }
+        // STREAM_DATA_BLOCKED pending?
+        if priority == self.priority
+            && let State::Ready { fc, .. } | State::Send { fc, .. } = &self.state
+            && fc.is_blocked()
+        {
+            return true;
+        }
+        // STREAM pending?
+        let retransmission = if priority == self.priority {
+            false
+        } else if priority == self.effective_priority {
+            true
+        } else {
+            return false;
+        };
+        self.has_next_bytes(retransmission)
+    }
+
+    /// Return `false` if the builder is full and the caller should stop iterating.
+    ///
+    /// Any new frame type added here must also be reflected in `has_data_at`.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
@@ -822,6 +871,27 @@ impl SendStream {
                 *final_retired
             }
             State::Ready { .. } => 0,
+        }
+    }
+
+    /// Returns whether [`Self::next_bytes`] would yield data, without locating the exact range.
+    fn has_next_bytes(&mut self, retransmission_only: bool) -> bool {
+        match self.state {
+            State::Send {
+                ref mut send_buf, ..
+            } => {
+                if retransmission_only {
+                    send_buf.has_next_bytes_before(self.retransmission_offset)
+                } else {
+                    send_buf.has_next_bytes()
+                }
+            }
+            State::DataSent {
+                ref mut send_buf,
+                fin_sent,
+                ..
+            } => send_buf.has_next_bytes() || !fin_sent,
+            _ => false,
         }
     }
 
@@ -1185,7 +1255,7 @@ impl SendStream {
     }
 
     #[must_use]
-    pub const fn is_terminal(&self) -> bool {
+    pub const fn is_ended(&self) -> bool {
         matches!(
             self.state,
             State::DataRecvd { .. } | State::ResetRecvd { .. }
@@ -1466,7 +1536,7 @@ impl Iterator for OrderGroupIter<'_> {
 
 #[derive(Debug, Default)]
 pub struct SendStreams {
-    map: IndexMap<StreamId, SendStream>,
+    map: IndexMap<StreamId, SendStream, FxBuildHasher>,
 
     // What we really want is a Priority Queue that we can do arbitrary
     // removes from (so we can reprioritize). BinaryHeap doesn't work,
@@ -1498,6 +1568,8 @@ pub struct SendStreams {
     // Streams which are owned by the IndexMap.
     sendordered: BTreeMap<SendOrder, OrderGroup>,
     regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
+    /// Set when any stream has ended; cleared by `remove_ended`.
+    has_ended: bool,
 }
 
 impl SendStreams {
@@ -1611,12 +1683,14 @@ impl SendStreams {
     pub fn acked(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
             ss.mark_as_acked(token.offset, token.length, token.fin);
+            self.has_ended |= ss.is_ended();
         }
     }
 
     pub fn reset_acked(&mut self, id: StreamId) {
         if let Some(ss) = self.map.get_mut(&id) {
             ss.reset_acked();
+            self.has_ended |= ss.is_ended();
         }
     }
 
@@ -1642,29 +1716,38 @@ impl SendStreams {
         self.map.clear();
         self.sendordered.clear();
         self.regular.clear();
+        self.has_ended = false;
     }
 
-    pub fn remove_terminal(&mut self) {
-        self.map.retain(|stream_id, stream| {
-            if stream.is_terminal() {
-                if stream.is_fair() {
-                    match stream.sendorder() {
-                        None => self.regular.remove(*stream_id),
-                        Some(sendorder) => {
-                            if let Some(group) = self.sendordered.get_mut(&sendorder) {
-                                group.remove(*stream_id);
-                            }
+    /// Remove ended streams. Returns `true` if any were removed.
+    #[must_use]
+    pub fn remove_ended(&mut self) -> bool {
+        if !self.has_ended {
+            return false;
+        }
+        self.has_ended = false;
+        let mut removed = false;
+        for (stream_id, stream) in self
+            .map
+            .extract_if(.., |_, stream: &mut SendStream| stream.is_ended())
+        {
+            removed = true;
+            if stream.is_fair() {
+                match stream.sendorder() {
+                    None => self.regular.remove(stream_id),
+                    Some(sendorder) => {
+                        if let Some(group) = self.sendordered.get_mut(&sendorder) {
+                            group.remove(stream_id);
                         }
                     }
                 }
-                // if unfair, we're done
-                return false;
             }
-            true
-        });
+            // if unfair, we're done
+        }
+        removed
     }
 
-    pub(crate) fn write_frames<B: Buffer>(
+    pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
@@ -1706,11 +1789,12 @@ impl SendStreams {
         // OrderGroups, then iterate each group
         qtrace!("processing streams...  unfair:");
         for stream in self.map.values_mut() {
-            if !stream.is_fair() {
-                qtrace!("   {stream}");
-                if !stream.write_frames(priority, builder, tokens, stats) {
-                    break;
-                }
+            if stream.is_fair() || !stream.has_data_at(priority) {
+                continue;
+            }
+            qtrace!("   {stream}");
+            if !stream.write_frames(priority, builder, tokens, stats) {
+                break;
             }
         }
         qtrace!("fair streams:");
@@ -1722,6 +1806,9 @@ impl SendStreams {
         );
         for stream_id in stream_ids {
             if let Some(stream) = self.map.get_mut(&stream_id) {
+                if !stream.has_data_at(priority) {
+                    continue;
+                }
                 if let Some(order) = stream.sendorder() {
                     qtrace!("   {stream_id} ({order})");
                 } else {
@@ -2869,7 +2956,7 @@ mod tests {
         // Ack the fin, then the data.
         s.mark_as_acked(len_u64, 0, true);
         s.mark_as_acked(0, MESSAGE.len(), false);
-        assert!(s.is_terminal());
+        assert!(s.is_ended());
     }
 
     #[test]
@@ -3239,7 +3326,7 @@ mod tests {
         check_stats(&s, len_u64, len_u64, len_u64);
 
         s.mark_as_acked(len_u64, 0, true);
-        assert!(s.is_terminal());
+        assert!(s.is_ended());
     }
 
     fn stream_with_priority(tx: TransmissionPriority, rx: RetransmissionPriority) -> SendStream {
@@ -3309,5 +3396,123 @@ mod tests {
             &mut s,
             TransmissionPriority::Normal + RetransmissionPriority::MuchHigher,
         ));
+    }
+
+    const ALL_PRIORITIES: [TransmissionPriority; 5] = [
+        TransmissionPriority::Critical,
+        TransmissionPriority::Important,
+        TransmissionPriority::High,
+        TransmissionPriority::Normal,
+        TransmissionPriority::Low,
+    ];
+
+    fn assert_has_data_only_at(s: &mut SendStream, expected: &[TransmissionPriority]) {
+        for &prio in &ALL_PRIORITIES {
+            assert_eq!(
+                s.has_data_at(prio),
+                expected.contains(&prio),
+                "has_data_at({prio:?})",
+            );
+        }
+    }
+
+    // An idle stream (no data, no pending frames) reports false at every priority.
+    #[test]
+    fn has_data_at_idle() {
+        let mut s =
+            stream_with_priority(TransmissionPriority::Normal, RetransmissionPriority::Higher);
+        assert_has_data_only_at(&mut s, &[]);
+    }
+
+    // A stream with buffered data reports true only at its transmission priority.
+    #[test]
+    fn has_data_at_with_data() {
+        let mut s =
+            stream_with_priority(TransmissionPriority::Normal, RetransmissionPriority::Higher);
+        s.send(b"hello").unwrap();
+        assert_has_data_only_at(&mut s, &[TransmissionPriority::Normal]);
+    }
+
+    // A stream with lost data reports true at effective_priority.
+    // Lost bytes are also visible at the transmission priority because mark_as_lost
+    // marks them as unsent in TxBuffer, making them discoverable by both paths.
+    #[test]
+    fn has_data_at_retransmission() {
+        let mut s = stream_with_priority(
+            TransmissionPriority::Low,
+            RetransmissionPriority::MuchHigher,
+        );
+        // Low + MuchHigher = High
+        let eff = TransmissionPriority::Low + RetransmissionPriority::MuchHigher;
+        assert_eq!(eff, TransmissionPriority::High);
+
+        s.send(&[0u8; 10]).unwrap();
+        // Before sending: new data is only visible at the transmission priority.
+        assert_has_data_only_at(&mut s, &[TransmissionPriority::Low]);
+
+        // After writing (mark_as_sent), all data is in-flight — nothing to write.
+        assert_eq!(stream_frames_written(&mut s, TransmissionPriority::Low), 1);
+        assert_has_data_only_at(&mut s, &[]);
+
+        // After loss: bytes are back in the unsent range, visible at both priorities.
+        s.mark_as_lost(0, 10, false);
+        assert_has_data_only_at(&mut s, &[TransmissionPriority::Low, eff]);
+    }
+
+    // A flow-control-blocked stream reports true at its transmission priority.
+    #[test]
+    fn has_data_at_blocked() {
+        let conn_fc = connection_fc(100);
+        let mut s = SendStream::new(
+            StreamId::from(0),
+            2, // stream FC limit: only 2 bytes
+            Rc::clone(&conn_fc),
+            ConnectionEvents::default(),
+        );
+        // Atomic write of 5 bytes exceeds the 2-byte credit → triggers blocking.
+        assert_eq!(s.send_atomic(b"hello").unwrap(), 0);
+        assert_has_data_only_at(&mut s, &[TransmissionPriority::Normal]);
+    }
+
+    // A stream in ResetSent state reports true only at the stored reset priority.
+    #[test]
+    fn has_data_at_reset_pending() {
+        let mut s =
+            stream_with_priority(TransmissionPriority::Normal, RetransmissionPriority::Higher);
+        s.send(b"hello").unwrap();
+        s.reset(0); // ResetSent { priority: Some(Normal) }
+        assert_has_data_only_at(&mut s, &[TransmissionPriority::Normal]);
+    }
+
+    // A closed stream (DataSent) with a pending FIN reports true at its transmission priority.
+    // Use RetransmissionPriority::Same so effective_priority == priority == Normal,
+    // giving an unambiguous single-element expectation.
+    #[test]
+    fn has_data_at_data_sent_fin_pending() {
+        let mut s =
+            stream_with_priority(TransmissionPriority::Normal, RetransmissionPriority::Same);
+        s.close(); // Ready → DataSent { fin_sent: false }
+        assert_has_data_only_at(&mut s, &[TransmissionPriority::Normal]);
+    }
+
+    // After a reset frame is sent and then lost, the stream reports true at
+    // effective_priority and false at transmission priority.
+    #[test]
+    fn has_data_at_reset_lost() {
+        let mut s =
+            stream_with_priority(TransmissionPriority::Normal, RetransmissionPriority::Higher);
+        // Normal + Higher = High
+        let eff = TransmissionPriority::Normal + RetransmissionPriority::Higher;
+        assert_eq!(eff, TransmissionPriority::High);
+
+        s.send(b"hello").unwrap();
+        s.reset(0);
+        // Send the reset frame (clears priority to None).
+        assert!(reset_frame_written(&mut s, TransmissionPriority::Normal));
+        // Reset is in flight: no frames pending.
+        assert_has_data_only_at(&mut s, &[]);
+        // Reset lost: priority set back to Some(effective_priority).
+        s.reset_lost();
+        assert_has_data_only_at(&mut s, &[eff]);
     }
 }

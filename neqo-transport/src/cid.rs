@@ -470,7 +470,7 @@ impl ConnectionIdManager {
             // it is first possible to send `NEW_CONNECTION_ID` is 2.  One is the client-generated
             // destination connection (stored with a sequence number of `HANDSHAKE_SEQNO`); the
             // other being the handshake value (seqno 0).  As a result, `NEW_CONNECTION_ID`
-            // won't be sent until until after the handshake completes, because this initial
+            // won't be sent until after the handshake completes, because this initial
             // value remains until the connection completes and transport parameters are handled.
             limit: 2,
             next_seqno: 1,

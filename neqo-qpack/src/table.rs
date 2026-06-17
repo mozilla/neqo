@@ -362,10 +362,14 @@ impl HeaderTable {
     /// `IncrementAck` if ack is greater than actual number of inserts.
     pub fn increment_acked(&mut self, increment: u64) -> Res<()> {
         qtrace!("[{self}] increment acked by {increment}");
-        self.acked_inserts_cnt += increment;
-        if self.base < self.acked_inserts_cnt {
+        let acked = self
+            .acked_inserts_cnt
+            .checked_add(increment)
+            .ok_or(Error::IncrementAck)?;
+        if self.base < acked {
             return Err(Error::IncrementAck);
         }
+        self.acked_inserts_cnt = acked;
         Ok(())
     }
 
@@ -424,6 +428,25 @@ mod tests {
             assert!(table.can_evict_to(first_entry_size));
             assert!(!table.can_evict_to(0));
         }
+    }
+
+    /// A peer can send an `Insert Count Increment` on the decoder stream with an
+    /// increment large enough to overflow the running acknowledged-inserts count.
+    /// The increment is range-checked against `base`, but only after the add, so
+    /// the overflow has to be caught explicitly.
+    #[test]
+    fn increment_acked_overflow_is_rejected() {
+        let mut table = HeaderTable::new(true);
+        table.set_capacity(10000).unwrap();
+        table.insert(b"header1", b"42").unwrap();
+        table.insert(b"header2", b"42").unwrap();
+
+        // Acknowledge both inserts legitimately so acked_inserts_cnt > 0.
+        table.increment_acked(2).unwrap();
+
+        // A malicious increment that would push the count past u64::MAX must be
+        // reported as an error, not overflow.
+        assert_eq!(table.increment_acked(u64::MAX), Err(Error::IncrementAck));
     }
 
     #[test]

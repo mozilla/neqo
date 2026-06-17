@@ -22,7 +22,10 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, Priority, Res,
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
-    features::extended_connect,
+    features::{
+        extended_connect,
+        extended_connect::webtransport_session::WebTransportExportKeyingMaterial as _,
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -368,17 +371,34 @@ impl WebTransportRequest {
     /// # Errors
     ///
     /// The function returns `NotAvailable` if datagrams are not enabled.
-    ///
-    /// # Panics
-    ///
-    /// This cannot panic. The max varint length is 8.
     pub fn max_datagram_size(&self) -> Res<u64> {
         let max_size = self.stream_handler.conn.borrow().max_datagram_size()?;
-        Ok(max_size
-            - u64::try_from(Encoder::varint_len(
-                self.stream_handler.stream_id().as_u64(),
-            ))
-            .map_err(|_| Error::Internal)?)
+        let prefix_len = u64::try_from(Encoder::varint_len(
+            self.stream_handler.stream_id().as_u64() >> 2,
+        ))
+        .map_err(|_| Error::Internal)?;
+        Ok(max_size.saturating_sub(prefix_len))
+    }
+
+    /// Export keying material for this WebTransport session
+    /// (draft-ietf-webtrans-http3 §4.8).
+    ///
+    /// # Errors
+    ///
+    /// Returns `Error::InvalidStreamId` if the session is no longer active,
+    /// `Error::InvalidInput` if `out` is empty or `label`/`context`
+    /// exceed 255 bytes, or `Error::Transport` if the connection is not ready
+    /// or the TLS export fails.
+    pub fn export_keying_material(&self, label: &[u8], context: &[u8], out: &mut [u8]) -> Res<()> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow()
+            .validate_extended_connect_session(session_id)?;
+        self.stream_handler
+            .conn
+            .borrow()
+            .webtransport_export_keying_material(session_id, label, context, out)
     }
 }
 

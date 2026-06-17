@@ -5,14 +5,15 @@
 // except according to those terms.
 
 use std::{
-    collections::HashSet,
     fmt::{self, Display, Formatter},
     mem,
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Role, qtrace};
-use neqo_transport::{Connection, StreamId};
+use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
+use neqo_transport::{Connection, Error as TransportError, StreamId};
+use rustc_hash::FxHashSet as HashSet;
+use sfv::{BareItem, Item, Parser};
 
 use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
@@ -34,6 +35,8 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// The negotiated protocol from server response headers.
+    negotiated_protocol: Option<String>,
 }
 
 impl Display for Session {
@@ -52,6 +55,7 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            negotiated_protocol: None,
         }
     }
 }
@@ -201,6 +205,24 @@ impl Protocol for Session {
         )
     }
 
+    fn process_response_headers(&mut self, headers: &[Header]) {
+        self.negotiated_protocol = headers
+            .iter()
+            .find(|h| h.name().eq_ignore_ascii_case("wt-protocol"))
+            .and_then(|h| Parser::new(h.value()).parse::<Item>().ok())
+            .and_then(|item| {
+                if let BareItem::String(s) = item.bare_item {
+                    Some(s.into())
+                } else {
+                    None
+                }
+            });
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
+    }
+
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
         // WebTransport does not add prefix (i.e. context ID).
     }
@@ -235,5 +257,43 @@ impl Protocol for Session {
             "[{self}] WebTransport does not support datagram capsules."
         );
         Ok(())
+    }
+}
+
+pub trait WebTransportExportKeyingMaterial {
+    fn webtransport_export_keying_material(
+        &self,
+        session_id: StreamId,
+        label: &[u8],
+        context: &[u8],
+        out: &mut [u8],
+    ) -> Res<()>;
+}
+
+impl WebTransportExportKeyingMaterial for Connection {
+    fn webtransport_export_keying_material(
+        &self,
+        session_id: StreamId,
+        label: &[u8],
+        context: &[u8],
+        out: &mut [u8],
+    ) -> Res<()> {
+        // encode_vec(1, …) uses a 1-byte length prefix, so max 255 bytes.
+        if out.is_empty() || label.len() > 255 || context.len() > 255 {
+            return Err(Error::InvalidInput);
+        }
+
+        let mut wt_context = Encoder::with_capacity(
+            Encoder::varint_len(session_id.as_u64()) + 1 + label.len() + 1 + context.len(),
+        );
+        wt_context.encode_varint(session_id.as_u64());
+        wt_context.encode_vec(1, label);
+        wt_context.encode_vec(1, context);
+
+        self.export_keying_material("EXPORTER-WebTransport", wt_context.as_ref(), out)
+            .map_err(|e| match e {
+                TransportError::InvalidInput => Error::InvalidInput,
+                other => Error::Transport(other),
+            })
     }
 }

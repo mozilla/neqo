@@ -22,7 +22,9 @@ mod hystart;
 mod new_reno;
 mod search;
 
-pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
+pub use classic_cc::{
+    CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH, Phase,
+};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};
@@ -90,7 +92,7 @@ pub trait CongestionController: Display + Debug {
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant);
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant);
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant, pacing_limited: bool);
 
     fn discard_in_flight(&mut self, now: Instant);
 }
@@ -222,8 +224,8 @@ impl CongestionController for CongestionControlImplementation {
         dispatch!(self.discard(pkt, now));
     }
 
-    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        dispatch!(self.on_packet_sent(pkt, now));
+    fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant, pacing_limited: bool) {
+        dispatch!(self.on_packet_sent(pkt, now, pacing_limited));
     }
 
     fn discard_in_flight(&mut self, now: Instant) {

@@ -6,6 +6,14 @@
 
 // Directly relating to QUIC frames.
 
+#![cfg_attr(
+    any(fuzzing, feature = "bench"),
+    expect(
+        clippy::module_name_repetitions,
+        reason = "`frame` is only public API when fuzzing or the `bench` feature is enabled."
+    )
+)]
+
 use std::ops::RangeInclusive;
 
 use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};

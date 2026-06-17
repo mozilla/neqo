@@ -23,6 +23,17 @@ updates:
       - "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 99
+    groups:
+      mozilla-actions:
+        patterns:
+          - "mozilla/actions*"
+      docker-actions:
+        patterns:
+          - "docker/*"
+      vm-actions:
+        patterns:
+          - "vmactions/*"
     cooldown:
       default-days: 10
       # "semver" not supported for github-actions; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown
@@ -35,6 +46,7 @@ updates:
     directory: "/qns"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 99
     cooldown:
       default-days: 10
       # "semver" not supported for docker; see https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#configuration-of-cooldown

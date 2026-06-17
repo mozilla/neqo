@@ -72,7 +72,7 @@ fn fill_cwnd(
 ) -> u64 {
     while cc.bytes_in_flight() < cc.cwnd() {
         let sent = sent::make_packet(next_pn, now, cc.max_datagram_size());
-        cc.on_packet_sent(&sent, now);
+        cc.on_packet_sent(&sent, now, false);
         next_pn += 1;
     }
     next_pn
