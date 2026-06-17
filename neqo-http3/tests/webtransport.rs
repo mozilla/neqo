@@ -12,7 +12,7 @@ use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
-    webtransport::{ServerSession, ClientSession as _, ServerEvent},
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use nss::AuthenticationStatus;
@@ -92,10 +92,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> Serv
     let mut wt_server_session = None;
     while let Some(event) = server.next_event() {
         match event {
-            Http3ServerEvent::WebTransport(ServerEvent::NewSession {
-                session,
-                headers,
-            }) => {
+            Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) => {
                 assert!(
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "webtransport")
@@ -355,10 +352,8 @@ fn wt_race_condition_server_stream_before_confirmation() {
         let wt_server_session = server
             .events()
             .find_map(|event| {
-                if let Http3ServerEvent::WebTransport(ServerEvent::NewSession {
-                    session,
-                    ..
-                }) = event
+                if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) =
+                    event
                 {
                     Some(session)
                 } else {
@@ -458,11 +453,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     let wt_server_session = server
         .events()
         .find_map(|event| {
-            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession {
-                session,
-                ..
-            }) = event
-            {
+            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
                 Some(session)
             } else {
                 None
