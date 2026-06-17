@@ -151,7 +151,7 @@ impl WebTransport for Http3Client {
     }
 }
 
-pub trait WebTransportExportKeyingMaterial {
+pub(crate) trait WebTransportExportKeyingMaterial {
     /// Export keying material for WebTransport.
     ///
     /// # Errors
@@ -389,7 +389,7 @@ pub enum WebTransportServerEvent {
     },
 }
 
-pub trait WebTransportServerEvents {
+pub(crate) trait WebTransportServerEvents {
     fn webtransport_new_session(&self, session: WebTransportRequest, headers: Vec<Header>);
     fn webtransport_session_closed(
         &self,
