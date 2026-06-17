@@ -341,12 +341,15 @@ impl Http3Client {
     pub(crate) const fn connection(&self) -> &Connection {
         &self.conn
     }
+
     pub(crate) const fn connection_mut(&mut self) -> &mut Connection {
         &mut self.conn
     }
+
     pub(crate) const fn handler(&self) -> &Http3Connection {
         &self.base_handler
     }
+
     pub(crate) const fn connection_and_handler(
         &mut self,
     ) -> (&mut Connection, &mut Http3Connection) {
