@@ -875,7 +875,6 @@ impl SendStream {
         }
         self.priority = transmission;
         self.effective_priority = new_effective;
-        self.update_has_data();
     }
 
     #[must_use]
@@ -1545,7 +1544,7 @@ impl SendStream {
             _ => Err(Error::FinalSize),
         };
         if result.is_ok() {
-            self.update_has_data();
+            self.has_data = true;
         }
         result
     }
