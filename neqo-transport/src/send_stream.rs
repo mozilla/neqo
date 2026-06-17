@@ -19,6 +19,7 @@ use std::{
 
 use indexmap::IndexMap;
 use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
+use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
 
@@ -1535,7 +1536,7 @@ impl Iterator for OrderGroupIter<'_> {
 
 #[derive(Debug, Default)]
 pub struct SendStreams {
-    map: IndexMap<StreamId, SendStream>,
+    map: IndexMap<StreamId, SendStream, FxBuildHasher>,
 
     // What we really want is a Priority Queue that we can do arbitrary
     // removes from (so we can reprioritize). BinaryHeap doesn't work,

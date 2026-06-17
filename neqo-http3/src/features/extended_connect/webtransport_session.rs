@@ -5,14 +5,15 @@
 // except according to those terms.
 
 use std::{
-    collections::HashSet,
     fmt::{self, Display, Formatter},
     mem,
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Role, qtrace};
+use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
+use rustc_hash::FxHashSet as HashSet;
+use sfv::{BareItem, Item, Parser};
 
 use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
@@ -34,6 +35,8 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// The negotiated protocol from server response headers.
+    negotiated_protocol: Option<String>,
 }
 
 impl Display for Session {
@@ -52,6 +55,7 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            negotiated_protocol: None,
         }
     }
 }
@@ -199,6 +203,24 @@ impl Protocol for Session {
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
         )
+    }
+
+    fn process_response_headers(&mut self, headers: &[Header]) {
+        self.negotiated_protocol = headers
+            .iter()
+            .find(|h| h.name().eq_ignore_ascii_case("wt-protocol"))
+            .and_then(|h| Parser::new(h.value()).parse::<Item>().ok())
+            .and_then(|item| {
+                if let BareItem::String(s) = item.bare_item {
+                    Some(s.into())
+                } else {
+                    None
+                }
+            });
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
