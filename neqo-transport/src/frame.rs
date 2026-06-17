@@ -611,8 +611,11 @@ impl<'a> Frame<'a> {
             FrameType::NewConnectionId => {
                 let sequence_number = dv(dec)?;
                 let retire_prior = dv(dec)?;
+                if retire_prior > sequence_number {
+                    return Err(Error::FrameEncoding);
+                }
                 let connection_id = d(dec.decode_vec(1))?;
-                if connection_id.len() > ConnectionId::MAX_LEN {
+                if connection_id.is_empty() || connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
                 let stateless_reset_token = Srt::try_from(dec)?;
@@ -956,6 +959,29 @@ mod tests {
     fn too_large_new_connection_id() {
         let mut enc = Encoder::from_hex("18523400"); // up to the CID
         enc.encode_vvec(&[0x0c; ConnectionId::MAX_LEN + 10]);
+        enc.encode(&[0x11; 16][..]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
+    fn zero_length_new_connection_id() {
+        let mut enc = Encoder::from_hex("18523400"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[]); // zero-length connection ID
+        enc.encode(&[0x11; 16][..]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
+    fn new_connection_id_retire_prior_after_sequence_number() {
+        // retire_prior (5) greater than sequence_number (2).
+        let mut enc = Encoder::from_hex("180205"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[0x01, 0x02]);
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
