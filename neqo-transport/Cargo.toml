@@ -79,6 +79,7 @@ codspeed.mode = "simulation"
 [[package.metadata.bench]]
 name = "sent_packets"
 codspeed.mode = "simulation"
+codspeed.memory = false # Near-zero allocation in the measured path; memory numbers are noise.
 
 [[package.metadata.bench]]
 name = "min_bandwidth"
