@@ -49,6 +49,14 @@ impl Sub for PushId {
     }
 }
 
+impl Sub<u64> for PushId {
+    type Output = Self;
+
+    fn sub(self, rhs: u64) -> Self {
+        Self(self.0 - rhs)
+    }
+}
+
 impl Add<u64> for PushId {
     type Output = Self;
 

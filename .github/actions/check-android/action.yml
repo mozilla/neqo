@@ -43,14 +43,14 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: mozilla/actions/rust@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+    - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
         token: ${{ inputs.github-token }}
 
-    - uses: mozilla/actions/nss@312d300af3fb2b6551389bf1cb40b10e86294ec2 # v1.1.4
+    - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
       if: ${{ inputs.minimum-nss-version != '' }}
       with:
         minimum-version: ${{ inputs.minimum-nss-version }}

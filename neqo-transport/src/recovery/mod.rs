@@ -261,7 +261,6 @@ impl LossRecoverySpace {
     fn remove_acked<R>(&mut self, acked_ranges: R, stats: &mut Stats) -> (Vec<sent::Packet>, bool)
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
-        R::IntoIter: ExactSizeIterator,
     {
         let acked = self.sent_packets.take_ranges(acked_ranges);
         let mut eliciting = false;
@@ -326,7 +325,6 @@ impl LossRecoverySpace {
         for packet in self
             .sent_packets
             .iter_mut()
-            // BTreeMap iterates in order of ascending PN
             .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
         {
             // Packets sent before now - loss_delay are deemed lost.
@@ -485,6 +483,8 @@ pub struct Loss {
     /// The factor by which the PTO period is reduced.
     /// This enables faster probing at a cost in additional lost packets.
     fast_pto: u8,
+    /// Snapshotted before input processing; see [`Self::note_timeout_type`].
+    pending_timer_type: Option<qlog::LossTimerType>,
 }
 
 impl Loss {
@@ -497,6 +497,7 @@ impl Loss {
             qlog: Qlog::default(),
             stats,
             fast_pto,
+            pending_timer_type: None,
         }
     }
 
@@ -624,7 +625,6 @@ impl Loss {
     ) -> (Vec<sent::Packet>, Vec<sent::Packet>)
     where
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
-        R::IntoIter: ExactSizeIterator,
     {
         let Some(space) = self.spaces.get_mut(pn_space) else {
             qinfo!("ACK on discarded space");
@@ -787,6 +787,25 @@ impl Loss {
         }
     }
 
+    /// Snapshot which timer type is due before input processing, so that ACKs
+    /// in the same `process()` call cannot clear loss candidates and cause
+    /// [`Self::timeout`] to misattribute the expiry as PTO.
+    pub(crate) fn note_timeout_type(&mut self, path: &Path, now: Instant) {
+        if self.qlog.is_enabled() && self.pending_timer_type.is_none() {
+            self.pending_timer_type = self.expired_timer_type(path.rtt(), now);
+        }
+    }
+
+    fn expired_timer_type(&self, rtt: &RttEstimate, now: Instant) -> Option<qlog::LossTimerType> {
+        if self.earliest_loss_time(rtt).is_some_and(|t| t <= now) {
+            Some(qlog::LossTimerType::Ack)
+        } else if self.earliest_pto(rtt).is_some_and(|t| t <= now) {
+            Some(qlog::LossTimerType::Pto)
+        } else {
+            None
+        }
+    }
+
     /// Find when the earliest sent packet should be considered lost.
     fn earliest_loss_time(&self, rtt: &RttEstimate) -> Option<Instant> {
         self.spaces
@@ -939,18 +958,13 @@ impl Loss {
         has_handshake_keys: bool,
     ) -> Vec<sent::Packet> {
         qtrace!("[{self}] timeout {now:?}");
-        let timer_type = {
-            let path = primary_path.borrow();
-            if self
-                .earliest_loss_time(path.rtt())
-                .is_some_and(|t| t <= now)
-            {
-                qlog::LossTimerType::Ack
-            } else {
-                qlog::LossTimerType::Pto
-            }
-        };
-        qlog::loss_timer_expired(&mut self.qlog, timer_type, now);
+        if let Some(timer_type) = self
+            .pending_timer_type
+            .take()
+            .or_else(|| self.expired_timer_type(primary_path.borrow().rtt(), now))
+        {
+            qlog::loss_timer_expired(&mut self.qlog, timer_type, now);
+        }
 
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let confirmed = self.confirmed();
@@ -1025,6 +1039,11 @@ impl Display for Loss {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[allow(
+    clippy::allow_attributes,
+    clippy::single_range_in_vec_init,
+    reason = "TODO: false positive in clippy 1.98-nightly; re-check when bumping MSRV"
+)]
 mod tests {
     use std::{
         cell::RefCell,
@@ -1086,6 +1105,10 @@ mod tests {
 
         pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
             self.lr.timeout(&self.path, now, true)
+        }
+
+        pub fn note_timeout_type(&mut self, now: Instant) {
+            self.lr.note_timeout_type(&self.path.borrow(), now);
         }
 
         pub fn next_timeout(&self) -> Option<Instant> {
@@ -1718,7 +1741,7 @@ mod tests {
         lr.on_packet_sent(
             sent::Packet::new(
                 packet::Type::Handshake,
-                0,
+                1,
                 now,
                 true,
                 recovery::Tokens::new(),
@@ -2118,6 +2141,38 @@ mod tests {
         assert!(
             log.contains(r#""event_type":"cancelled""#),
             "Expected loss_timer_updated Cancelled event in qlog: {log}"
+        );
+    }
+
+    #[test]
+    fn note_timeout_type_survives_ack() {
+        let (log, contents) = test_fixture::new_neqo_qlog();
+        let mut lr = Fixture::default();
+        lr.lr.set_qlog(log);
+
+        pace(&mut lr, 3);
+
+        // ACK PN 0 to establish RTT, then ACK PN 2 — PN 1 becomes a loss
+        // candidate with a time-based loss timer.
+        ack(&mut lr, 0, TEST_RTT);
+        ack(&mut lr, 2, TEST_RTT);
+        lr.timeout(pn_time(2) + TEST_RTT);
+
+        let pn1_loss_time = pn_time(1) + (TEST_RTT * 9 / 8);
+        assert_eq!(lr.next_timeout(), Some(pn1_loss_time));
+
+        // Snapshot the Ack timer type, then ACK PN 1 to clear the loss candidate.
+        lr.note_timeout_type(pn1_loss_time);
+        ack(&mut lr, 1, TEST_RTT * 9 / 8);
+
+        // timeout() should use the snapshot (Ack), not recompute (would be Pto).
+        lr.timeout(pn1_loss_time);
+        drop(lr);
+
+        let log = contents.to_string();
+        assert!(
+            log.contains(r#""timer_type":"ack""#),
+            "Expected timer_type ack from snapshot, got: {log}"
         );
     }
 }

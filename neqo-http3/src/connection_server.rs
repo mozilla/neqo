@@ -280,6 +280,12 @@ impl Http3ServerHandler {
             .connect_udp_send_datagram(session_id, conn, buf, id, now)
     }
 
+    pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {
+        self.base_handler
+            .validate_extended_connect_session(session_id)
+            .map(|_| ())
+    }
+
     /// Process HTTTP3 layer.
     pub fn process_http3(&mut self, conn: &mut Connection, now: Instant) {
         qtrace!("[{self}] Process http3 internal");
@@ -297,6 +303,13 @@ impl Http3ServerHandler {
     /// Take the next available event.
     pub(crate) fn next_event(&self) -> Option<Http3ServerConnEvent> {
         self.events.next_event()
+    }
+
+    /// Queue a GOAWAY frame on the local control stream.
+    pub(crate) fn queue_goaway(&mut self, stream_id: StreamId) {
+        self.base_handler
+            .queue_control_frame(&HFrame::Goaway { stream_id });
+        self.needs_processing = true;
     }
 
     /// Whether this connection has events to process or data to send.
