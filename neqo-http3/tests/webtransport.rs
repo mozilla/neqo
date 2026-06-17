@@ -714,3 +714,55 @@ fn wt_export_keying_material_transport_error() {
         ))
     ));
 }
+
+#[test]
+fn wt_send_goaway() {
+    let (mut client, mut server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    let goaway_stream_id = StreamId::new(session_id.as_u64() + 4);
+    server.send_goaway(goaway_stream_id);
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let events: Vec<Http3ClientEvent> = client.events().collect();
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::GoawayReceived)),
+        "client should receive GoawayReceived"
+    );
+    assert_eq!(client.state(), Http3State::GoingAway(goaway_stream_id));
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::WebTransport(
+                WebTransportEvent::Draining { stream_id: id }
+            ) if *id == session_id)),
+        "active WT session should receive a Draining event"
+    );
+}
+
+#[test]
+fn wt_goaway_no_sessions_no_draining_events() {
+    let (mut client, mut server) = connect();
+
+    server.send_goaway(StreamId::new(0));
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let events: Vec<Http3ClientEvent> = client.events().collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::GoawayReceived)),
+        "client should receive GoawayReceived"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { .. })
+        )),
+        "no Draining events when no WT sessions exist"
+    );
+}

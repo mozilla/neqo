@@ -310,6 +310,11 @@ pub const fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> 
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
+#[allow(
+    clippy::allow_attributes,
+    clippy::single_range_in_vec_init,
+    reason = "TODO: false positive in clippy 1.98-nightly; re-check when bumping MSRV"
+)]
 mod tests {
     use std::{
         cell::OnceCell,
