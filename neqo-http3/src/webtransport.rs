@@ -27,7 +27,7 @@ use crate::{
     server_events::{Http3ServerEvents, StreamHandler},
 };
 
-pub trait WebTransport {
+pub trait ClientSession {
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
@@ -98,7 +98,7 @@ pub trait WebTransport {
     ) -> Res<()>;
 }
 
-impl WebTransport for Http3Client {
+impl ClientSession for Http3Client {
     fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         let qsid_len = Encoder::varint_len(session_id.as_u64() >> 2);
         Ok(self
@@ -151,7 +151,7 @@ impl WebTransport for Http3Client {
     }
 }
 
-pub(crate) trait WebTransportExportKeyingMaterial {
+trait ExportKeyingMaterial {
     /// Export keying material for WebTransport.
     ///
     /// # Errors
@@ -165,7 +165,7 @@ pub(crate) trait WebTransportExportKeyingMaterial {
     ) -> Res<()>;
 }
 
-impl WebTransportExportKeyingMaterial for Connection {
+impl ExportKeyingMaterial for Connection {
     fn webtransport_export_keying_material(
         &self,
         session_id: StreamId,
@@ -194,17 +194,17 @@ impl WebTransportExportKeyingMaterial for Connection {
 }
 
 #[derive(Debug, Clone)]
-pub struct WebTransportRequest {
+pub struct ServerSession {
     stream_handler: StreamHandler,
 }
 
-impl Display for WebTransportRequest {
+impl Display for ServerSession {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "WebTransport session {}", self.stream_handler)
     }
 }
 
-impl WebTransportRequest {
+impl ServerSession {
     pub(crate) const fn new(
         conn: ConnectionRef,
         handler: Rc<RefCell<Http3ServerHandler>>,
@@ -364,7 +364,7 @@ impl WebTransportRequest {
     }
 }
 
-impl Deref for WebTransportRequest {
+impl Deref for ServerSession {
     type Target = StreamHandler;
     fn deref(&self) -> &Self::Target {
         &self.stream_handler
@@ -372,66 +372,66 @@ impl Deref for WebTransportRequest {
 }
 
 #[derive(Debug, Clone)]
-pub enum WebTransportServerEvent {
+pub enum ServerEvent {
     NewSession {
-        session: WebTransportRequest,
+        session: ServerSession,
         headers: Vec<Header>,
     },
     SessionClosed {
-        session: WebTransportRequest,
+        session: ServerSession,
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
     NewStream(Http3OrWebTransportStream),
     Datagram {
-        session: WebTransportRequest,
+        session: ServerSession,
         datagram: Bytes,
     },
 }
 
-pub(crate) trait WebTransportServerEvents {
-    fn webtransport_new_session(&self, session: WebTransportRequest, headers: Vec<Header>);
+pub trait ServerEvents {
+    fn webtransport_new_session(&self, session: ServerSession, headers: Vec<Header>);
     fn webtransport_session_closed(
         &self,
-        session: WebTransportRequest,
+        session: ServerSession,
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     );
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream);
-    fn webtransport_datagram(&self, session: WebTransportRequest, datagram: Bytes);
+    fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes);
 }
 
-impl WebTransportServerEvents for Http3ServerEvents {
-    fn webtransport_new_session(&self, session: WebTransportRequest, headers: Vec<Header>) {
-        self.insert(Http3ServerEvent::WebTransport(
-            WebTransportServerEvent::NewSession { session, headers },
-        ));
+impl ServerEvents for Http3ServerEvents {
+    fn webtransport_new_session(&self, session: ServerSession, headers: Vec<Header>) {
+        self.insert(Http3ServerEvent::WebTransport(ServerEvent::NewSession {
+            session,
+            headers,
+        }));
     }
 
     fn webtransport_session_closed(
         &self,
-        session: WebTransportRequest,
+        session: ServerSession,
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        self.insert(Http3ServerEvent::WebTransport(
-            WebTransportServerEvent::SessionClosed {
-                session,
-                reason,
-                headers,
-            },
-        ));
+        self.insert(Http3ServerEvent::WebTransport(ServerEvent::SessionClosed {
+            session,
+            reason,
+            headers,
+        }));
     }
 
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream) {
-        self.insert(Http3ServerEvent::WebTransport(
-            WebTransportServerEvent::NewStream(stream),
-        ));
+        self.insert(Http3ServerEvent::WebTransport(ServerEvent::NewStream(
+            stream,
+        )));
     }
 
-    fn webtransport_datagram(&self, session: WebTransportRequest, datagram: Bytes) {
-        self.insert(Http3ServerEvent::WebTransport(
-            WebTransportServerEvent::Datagram { session, datagram },
-        ));
+    fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes) {
+        self.insert(Http3ServerEvent::WebTransport(ServerEvent::Datagram {
+            session,
+            datagram,
+        }));
     }
 }

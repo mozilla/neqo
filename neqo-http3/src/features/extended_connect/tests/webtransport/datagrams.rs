@@ -13,7 +13,7 @@ use crate::{
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
-    webtransport::WebTransportRequest,
+    webtransport::ServerSession,
 };
 
 const DGRAM: &[u8] = &[0, 100];
@@ -55,7 +55,7 @@ fn no_datagrams() {
     wt.check_no_datagram_received_server();
 }
 
-fn do_datagram_test(wt: &mut WtTest, wt_session: &WebTransportRequest) {
+fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
     assert_eq!(
         wt_session.max_datagram_size(),
         Ok(DATAGRAM_SIZE

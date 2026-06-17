@@ -21,7 +21,6 @@ use crate::{
     connection::{Http3State, SessionAcceptAction},
     connection_server::Http3ServerHandler,
     features::extended_connect,
-    webtransport::WebTransportServerEvent,
 };
 
 #[derive(Debug, Clone)]
@@ -401,7 +400,7 @@ pub enum Http3ServerEvent {
         stream_id: StreamId,
         priority: Priority,
     },
-    WebTransport(WebTransportServerEvent),
+    WebTransport(crate::webtransport::ServerEvent),
     ConnectUdp(ConnectUdpServerEvent),
 }
 

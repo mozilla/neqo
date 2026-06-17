@@ -9,7 +9,7 @@ use neqo_transport::StreamType;
 use crate::{
     Error,
     features::extended_connect::{CloseReason, tests::webtransport::WtTest},
-    webtransport::WebTransport as _,
+    webtransport::ClientSession as _,
 };
 
 #[test]

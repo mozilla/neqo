@@ -18,7 +18,7 @@ use crate::{
         },
     },
     frames::WebTransportFrame,
-    webtransport::WebTransportServerEvent,
+    webtransport::ServerEvent,
 };
 
 #[test]
@@ -120,7 +120,7 @@ fn wt_session_response_with_1xx() {
 
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession {
             session,
             headers,
         }) = event
@@ -184,7 +184,7 @@ fn wt_session_respone_200_with_fin() {
     wt.exchange_packets();
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession {
             session,
             headers,
         }) = event
