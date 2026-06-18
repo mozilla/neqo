@@ -13,14 +13,11 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Header, qdebug};
-use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, server::ConnectionRef};
+use neqo_common::{Header, qdebug};
+use neqo_transport::{AppError, Connection, StreamId, server::ConnectionRef};
 
 use crate::{
-    Http3StreamInfo, Http3StreamType, Priority, Res,
-    connection::{Http3State, SessionAcceptAction},
-    connection_server::Http3ServerHandler,
-    features::extended_connect,
+    Http3StreamInfo, Priority, Res, connection::Http3State, connection_server::Http3ServerHandler,
 };
 
 #[derive(Debug, Clone)]
@@ -231,140 +228,6 @@ impl PartialEq for Http3OrWebTransportStream {
 
 impl Eq for Http3OrWebTransportStream {}
 
-#[derive(Debug, Clone)]
-pub struct ConnectUdpRequest {
-    stream_handler: StreamHandler,
-}
-
-impl Display for ConnectUdpRequest {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdp session {}", self.stream_handler)
-    }
-}
-
-impl ConnectUdpRequest {
-    pub(crate) const fn new(
-        conn: ConnectionRef,
-        handler: Rc<RefCell<Http3ServerHandler>>,
-        stream_id: StreamId,
-    ) -> Self {
-        Self {
-            stream_handler: StreamHandler {
-                conn,
-                handler,
-                stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::Http),
-            },
-        }
-    }
-
-    #[must_use]
-    pub fn state(&self) -> Http3State {
-        self.stream_handler.handler.borrow().state()
-    }
-
-    /// Respond to a `ConnectUdp` session request.
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn response(&self, accept: &SessionAcceptAction, now: Instant) -> Res<()> {
-        qdebug!("[{self}] Set a response for a ConnectUdp session");
-        self.stream_handler
-            .handler
-            .borrow_mut()
-            .connect_udp_session_accept(
-                &mut self.stream_handler.conn.borrow_mut(),
-                self.stream_handler.stream_info.stream_id(),
-                accept,
-                now,
-            )
-    }
-
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// Also return an error if the stream was closed on the transport layer,
-    /// but that information is not yet consumed on the  http/3 layer.
-    pub fn close_session(&self, error: u32, message: &str, now: Instant) -> Res<()> {
-        self.stream_handler
-            .handler
-            .borrow_mut()
-            .connect_udp_close_session(
-                &mut self.stream_handler.conn.borrow_mut(),
-                self.stream_handler.stream_info.stream_id(),
-                error,
-                message,
-                now,
-            )
-    }
-
-    #[must_use]
-    pub const fn stream_id(&self) -> StreamId {
-        self.stream_handler.stream_id()
-    }
-
-    /// Send connect-udp datagram.
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size.
-    pub fn send_datagram<I: Into<DatagramTracking>>(
-        &self,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        let session_id = self.stream_handler.stream_id();
-        self.stream_handler
-            .handler
-            .borrow_mut()
-            .connect_udp_send_datagram(
-                &mut self.stream_handler.conn.borrow_mut(),
-                session_id,
-                buf,
-                id,
-                now,
-            )
-    }
-
-    #[must_use]
-    pub fn remote_datagram_size(&self) -> u64 {
-        self.stream_handler.conn.borrow().remote_datagram_size()
-    }
-
-    /// Used for testing only.
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    pub fn reset_send(&self) -> Res<()> {
-        self.stream_handler.handler.borrow_mut().stream_reset_send(
-            self.stream_id(),
-            0,
-            &mut self.stream_handler.conn.borrow_mut(),
-        )
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ConnectUdpServerEvent {
-    NewSession {
-        session: ConnectUdpRequest,
-        headers: Vec<Header>,
-    },
-    SessionClosed {
-        session: ConnectUdpRequest,
-        reason: extended_connect::session::CloseReason,
-        headers: Option<Vec<Header>>,
-    },
-    Datagram {
-        session: ConnectUdpRequest,
-        datagram: Bytes,
-    },
-}
-
 /// Server events for one or more connections.
 #[derive(Debug, Clone)]
 pub enum Http3ServerEvent {
@@ -401,7 +264,7 @@ pub enum Http3ServerEvent {
         priority: Priority,
     },
     WebTransport(crate::webtransport::ServerEvent),
-    ConnectUdp(ConnectUdpServerEvent),
+    ConnectUdp(crate::connect_udp::ServerEvent),
 }
 
 #[derive(Debug, Default, Clone)]
@@ -506,32 +369,5 @@ impl Http3ServerEvents {
             stream_id,
             priority,
         });
-    }
-
-    pub(crate) fn connect_udp_new_session(&self, session: ConnectUdpRequest, headers: Vec<Header>) {
-        self.insert(Http3ServerEvent::ConnectUdp(
-            ConnectUdpServerEvent::NewSession { session, headers },
-        ));
-    }
-
-    pub(crate) fn connect_udp_session_closed(
-        &self,
-        session: ConnectUdpRequest,
-        reason: extended_connect::session::CloseReason,
-        headers: Option<Vec<Header>>,
-    ) {
-        self.insert(Http3ServerEvent::ConnectUdp(
-            ConnectUdpServerEvent::SessionClosed {
-                session,
-                reason,
-                headers,
-            },
-        ));
-    }
-
-    pub(crate) fn connect_udp_datagram(&self, session: ConnectUdpRequest, datagram: Bytes) {
-        self.insert(Http3ServerEvent::ConnectUdp(
-            ConnectUdpServerEvent::Datagram { session, datagram },
-        ));
     }
 }
