@@ -11,15 +11,110 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Header, qdebug};
+use neqo_common::{Bytes, Header, qdebug, qtrace};
 use neqo_transport::{DatagramTracking, StreamId, server::ConnectionRef};
 
 use crate::{
-    Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Res, SessionAcceptAction,
+    Http3Client, Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Res,
+    SessionAcceptAction,
     connection_server::Http3ServerHandler,
     features::extended_connect,
+    request_target::RequestTarget,
     server_events::{Http3ServerEvents, StreamHandler},
 };
+
+pub trait ClientSession {
+    /// Create a MASQUE connect-udp session.
+    ///
+    /// # Errors
+    ///
+    /// If MASQUE connect-udp session cannot be created, e.g. the HTTP CONNECT
+    /// setting is not negotiated or the HTTP/3 connection is closed.
+    fn connect_udp_create_session<T: RequestTarget>(
+        &mut self,
+        now: Instant,
+        target: T,
+        headers: &[Header],
+    ) -> Res<StreamId>;
+
+    /// Close a connect-udp session cleanly.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::InvalidStreamId`](crate::Error::InvalidStreamId) if the stream
+    /// does not exist,
+    /// [`Error::TransportStreamDoesNotExist`](crate::Error::TransportStreamDoesNotExist) if the
+    /// transport stream does not exist (this may happen if [`Http3Client::process_output`] has
+    /// not been called when needed, and HTTP3 layer has not picked up the info that the stream
+    /// has been closed.)
+    fn connect_udp_close_session(
+        &mut self,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()>;
+
+    /// Send a connect-udp datagram.
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// the allowed remote datagram size.
+    fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        session_id: StreamId,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()>;
+}
+
+impl ClientSession for Http3Client {
+    fn connect_udp_create_session<T: RequestTarget>(
+        &mut self,
+        now: Instant,
+        target: T,
+        headers: &[Header],
+    ) -> Res<StreamId> {
+        let events = Box::new(self.client_events().clone());
+        let output = {
+            let (conn, handler) = self.connection_and_handler();
+            handler.connect_udp_create_session(conn, events, target, headers)
+        };
+
+        if let Err(e) = &output
+            && e.connection_error()
+        {
+            self.close(now, e.code(), "");
+        }
+        output
+    }
+
+    fn connect_udp_close_session(
+        &mut self,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.connect_udp_close_session(conn, session_id, error, message, now)
+    }
+
+    fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        session_id: StreamId,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()> {
+        qtrace!("connect_udp_send_datagram session:{session_id:?}");
+        let (conn, handler) = self.connection_and_handler();
+        handler.connect_udp_send_datagram(session_id, conn, buf, id, now)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ServerSession {

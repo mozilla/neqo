@@ -11,7 +11,7 @@ use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _, 
 use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction,
-    connect_udp::{ServerEvent, ServerSession},
+    connect_udp::{ClientSession as _, ServerEvent, ServerSession},
 };
 use neqo_transport::ConnectionParameters;
 use nss::AuthenticationStatus;
