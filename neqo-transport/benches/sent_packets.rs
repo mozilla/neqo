@@ -17,7 +17,7 @@ use std::{
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use neqo_transport::{
     packet,
-    recovery::{self, sent},
+    recovery::{self, sent, sent::LossTrigger},
 };
 
 const MTU: usize = 1_350;
@@ -34,11 +34,15 @@ fn make_packet(i: u64, now: Instant) -> sent::Packet {
     )
 }
 
-fn make_packets(count: u64, now: Instant) -> sent::Packets {
+fn make_lost_packet(i: u64, now: Instant) -> sent::Packet {
+    let mut p = make_packet(i, now);
+    p.declare_lost(now, LossTrigger::TimeThreshold);
+    p
+}
+
+fn collect_packets(iter: impl IntoIterator<Item = sent::Packet>) -> sent::Packets {
     let mut pkts = sent::Packets::default();
-    for i in 0..count {
-        pkts.track(make_packet(i, now));
-    }
+    iter.into_iter().for_each(|p| pkts.track(p));
     pkts
 }
 
@@ -52,7 +56,7 @@ fn take_ranges(c: &mut Criterion) {
     let now = Instant::now();
     c.bench_function("sent::Packets::take_ranges", |b| {
         b.iter_batched_ref(
-            || make_packets(PACKETS, now),
+            || collect_packets((0..PACKETS).map(|i| make_packet(i, now))),
             // Take the first 90 packets, minus some gaps.
             |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29])),
             BatchSize::SmallInput,
@@ -88,9 +92,9 @@ fn remove_expired(c: &mut Criterion) {
     let cd = Duration::from_millis(300);
 
     c.bench_function("sent::Packets::remove_expired none-expired", |b| {
+        // All packets lost at `now`: loss_info is populated but not yet expired — fast exit.
         b.iter_batched_ref(
-            || make_packets(PACKETS, now),
-            // now + cd/2 means nothing has expired yet — fast exit.
+            || collect_packets((0..PACKETS).map(|i| make_lost_packet(i, now))),
             |pkts| black_box(pkts.remove_expired(now + cd / 2, cd)),
             BatchSize::SmallInput,
         );
@@ -99,17 +103,13 @@ fn remove_expired(c: &mut Criterion) {
     c.bench_function("sent::Packets::remove_expired half-expired", |b| {
         b.iter_batched_ref(
             || {
-                // First half sent at `now - 2*cd` (expired);
-                // remaining half sent at `now` (not expired).
-                let mut pkts = sent::Packets::default();
+                // First half lost at `now - 2*cd` (expired); second half lost at `now` (not yet).
                 let old = now - cd * 2;
-                for i in 0..PACKETS / 2 {
-                    pkts.track(make_packet(i, old));
-                }
-                for i in PACKETS / 2..PACKETS {
-                    pkts.track(make_packet(i, now));
-                }
-                pkts
+                collect_packets(
+                    (0..PACKETS / 2)
+                        .map(|i| make_lost_packet(i, old))
+                        .chain((PACKETS / 2..PACKETS).map(|i| make_lost_packet(i, now))),
+                )
             },
             |pkts| black_box(pkts.remove_expired(now, cd)),
             BatchSize::SmallInput,
