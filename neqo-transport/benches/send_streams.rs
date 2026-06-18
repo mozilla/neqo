@@ -22,6 +22,8 @@ use neqo_transport::{
 };
 
 const MAX_STREAM_DATA: u64 = 1 << 20; // 1 MiB credit
+// Must be small enough that a STREAM frame fits inside `packet::LIMIT` with room to spare,
+// so the packet builder doesn't fill before idle streams are visited.
 const DATA: &[u8] = &[0x5a; 200];
 
 fn make_streams(n_streams: usize) -> SendStreams {
