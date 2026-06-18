@@ -222,6 +222,76 @@ impl Handler for Http3Connection {
     }
 }
 
+/// Server-handler connect-udp operations, exposed on [`Http3ServerHandler`].
+pub(crate) trait ServerHandler {
+    fn connect_udp_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        accept: &SessionAcceptAction,
+        now: Instant,
+    ) -> Res<()>;
+
+    fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()>;
+
+    fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()>;
+}
+
+impl ServerHandler for Http3ServerHandler {
+    fn connect_udp_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        accept: &SessionAcceptAction,
+        now: Instant,
+    ) -> Res<()> {
+        self.mark_needs_processing();
+        let events = Box::new(self.server_events().clone());
+        self.base_handler_mut()
+            .connect_udp_session_accept(conn, stream_id, events, accept, now)
+    }
+
+    fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
+        self.mark_needs_processing();
+        self.base_handler_mut()
+            .connect_udp_close_session(conn, session_id, error, message, now)
+    }
+
+    fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()> {
+        self.mark_needs_processing();
+        self.base_handler_mut()
+            .connect_udp_send_datagram(session_id, conn, buf, id, now)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ServerSession {
     stream_handler: StreamHandler,

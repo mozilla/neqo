@@ -18,7 +18,6 @@ use neqo_transport::{
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
     ReceiveOutput, Res,
-    connect_udp::Handler as _,
     connection::{Http3Connection, Http3State, SessionAcceptAction},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -51,6 +50,18 @@ impl Http3ServerHandler {
     #[must_use]
     pub fn state(&self) -> Http3State {
         self.base_handler.state().clone()
+    }
+
+    pub(crate) const fn base_handler_mut(&mut self) -> &mut Http3Connection {
+        &mut self.base_handler
+    }
+
+    pub(crate) const fn server_events(&self) -> &Http3ServerConnEvents {
+        &self.events
+    }
+
+    pub(crate) const fn mark_needs_processing(&mut self) {
+        self.needs_processing = true;
     }
 
     /// Supply a response for a request.
@@ -177,24 +188,6 @@ impl Http3ServerHandler {
         )
     }
 
-    /// Accept a `ConnectUdp` Session request
-    pub(crate) fn connect_udp_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        accept: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler.connect_udp_session_accept(
-            conn,
-            stream_id,
-            Box::new(self.events.clone()),
-            accept,
-            now,
-        )
-    }
-
     /// Close `WebTransport` cleanly
     ///
     /// # Errors
@@ -215,28 +208,6 @@ impl Http3ServerHandler {
         self.needs_processing = true;
         self.base_handler
             .webtransport_close_session(conn, session_id, error, message, now)
-    }
-
-    /// Close `ConnectUdp` cleanly
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist,
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
-    pub fn connect_udp_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler
-            .connect_udp_close_session(conn, session_id, error, message, now)
     }
 
     pub fn webtransport_create_stream(
@@ -266,19 +237,6 @@ impl Http3ServerHandler {
         self.needs_processing = true;
         self.base_handler
             .webtransport_send_datagram(session_id, conn, buf, id, now)
-    }
-
-    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id, now)
     }
 
     pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {
