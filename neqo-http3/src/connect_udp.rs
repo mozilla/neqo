@@ -118,7 +118,7 @@ impl ClientSession for Http3Client {
 }
 
 /// Connection-level connect-udp operations shared by the client and server.
-pub(crate) trait Handler {
+trait Handler {
     fn connect_udp_create_session<T: RequestTarget>(
         &mut self,
         conn: &mut Connection,
