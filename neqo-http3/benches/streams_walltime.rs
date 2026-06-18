@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Benchmark with walltime, i.e., measure the compute efficiency.
+//! Benchmark over a simulated network, measuring wall-clock time on a hardware runner.
 
 #![expect(
     clippy::significant_drop_tightening,
@@ -17,7 +17,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 mod common;
 
 fn benchmark(c: &mut Criterion) {
-    common::walltime(c);
+    common::bench(c, "walltime");
 }
 
 criterion_group!(benches, benchmark);
