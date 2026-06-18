@@ -707,7 +707,7 @@ pub enum ServerEvent {
     },
 }
 
-pub trait ServerEvents {
+pub(crate) trait ServerEvents {
     fn webtransport_new_session(&self, session: ServerSession, headers: Vec<Header>);
     fn webtransport_session_closed(
         &self,
