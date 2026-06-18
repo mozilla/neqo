@@ -29,6 +29,26 @@ use crate::{
 };
 
 pub trait ClientSession {
+    /// Whether WebTransport has been enabled at the connection level.
+    #[must_use]
+    fn webtransport_enabled(&self) -> bool;
+
+    /// Get the negotiated subprotocol for a WebTransport session.
+    ///
+    /// Returns the parsed protocol string from the server's `wt-protocol` response header
+    /// (an [RFC 8941 Item](https://www.rfc-editor.org/rfc/rfc8941.html#name-items)),
+    /// or `None` if the server did not include a `wt-protocol` header (or its value was
+    /// not a valid sf-string).
+    ///
+    /// **Note:** this returns the server's selected protocol without validating it against the
+    /// list of protocols offered by the client.  Callers are responsible for checking that the
+    /// returned protocol was among those originally offered.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid.
+    fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>>;
+
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
@@ -157,6 +177,14 @@ pub trait ClientSession {
 }
 
 impl ClientSession for Http3Client {
+    fn webtransport_enabled(&self) -> bool {
+        self.handler().webtransport_enabled()
+    }
+
+    fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
+        self.handler().webtransport_session_protocol(session_id)
+    }
+
     fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64> {
         let qsid_len = Encoder::varint_len(session_id.as_u64() >> 2);
         Ok(self

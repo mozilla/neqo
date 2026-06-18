@@ -12,6 +12,7 @@ use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
+    webtransport::ClientSession as _,
 };
 use neqo_transport::ConnectionParameters;
 use nss::AuthenticationStatus;
@@ -653,7 +654,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
 }
 
 #[test]
-fn connect_udp_session_protocol_returns_none() {
+fn connect_udp_session_protocol_is_not_webtransport() {
     fixture_init();
     let (client, _proxy, session_id, _proxy_session) = establish_new_session();
     assert_eq!(
