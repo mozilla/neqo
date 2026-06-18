@@ -139,7 +139,7 @@ jobs:
         uses: mozilla/actions/rust@25cb84d060946c0ad6d2c3f79da479b16d180d71 # v1.1.0
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: hyperfine, flamegraph, samply
+          tools: hyperfine, inferno, samply
           token: ${{ secrets.GITHUB_TOKEN }}
           sccache: true
 
@@ -217,8 +217,8 @@ jobs:
           for f in *.perf; do
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
-            # Generate flamegraphs
-            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
+            # Generate flamegraphs from the cycles event (perf.data has multiple events)
+            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
 
       - name: Format results as Markdown
