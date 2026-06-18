@@ -65,7 +65,7 @@ codspeed.memory = false # FIXME: Disabled due to high variance in results.
 
 [[package.metadata.bench]]
 name = "transfer_simulated"
-codspeed.mode = "simulation"
+codspeed.mode = "walltime" # iter_custom is a no-op in instrumentation mode; exclude from CodSpeed matrix entirely.
 codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
 
 [[package.metadata.bench]]
@@ -89,10 +89,12 @@ codspeed.memory = false # Not a Criterion benchmark; plain fn main() with simula
 [[package.metadata.bench]]
 name = "pacer"
 codspeed.mode = "simulation"
+codspeed.memory = false # Pure arithmetic in the measured path; no allocation to profile.
 
 [[package.metadata.bench]]
 name = "frame_decode"
 codspeed.mode = "simulation"
+codspeed.memory = false # Frame::decode borrows the input slice; no allocation to profile.
 
 [[package.metadata.bench]]
 name = "packet_codec"
