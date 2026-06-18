@@ -271,20 +271,22 @@ fn congestion_avoidance_no_two_mss_cap() {
     let cwnd0 = cc.cwnd();
     cc.set_ssthresh(cwnd0);
 
-    // Send 3 * cwnd / mtu packets. This keeps BIF well above the app-limited
-    // threshold so that is_app_limited is false when all packets are acked.
-    let n = 3 * (cwnd0 / mtu);
+    // Send 3 * cwnd / mtu + 1 packets. The +1 makes new_acked a non-multiple of
+    // cwnd so we can verify the carry (remainder) is preserved correctly.
+    // BIF stays well above the app-limited threshold so is_app_limited is false.
+    let n = 3 * (cwnd0 / mtu) + 1;
     let mut pkts = Vec::with_capacity(n);
-    for pn in 0..n as u64 {
-        let p = sent::make_packet(pn, now, mtu);
+    for pn in 0..n {
+        let p = sent::make_packet(u64::try_from(pn).unwrap(), now, mtu);
         cc.on_packet_sent(&p, now, false);
         pkts.push(p);
     }
 
-    // ACK all packets in one call: new_acked = 3 * cwnd.
+    // ACK all packets in one call: new_acked = 3 * cwnd + mtu.
     cc.on_packets_acked(&pkts, &RttEstimate::new(RTT), now + RTT, &mut cc_stats);
 
-    // new_acked / bytes_for_increase = 3*cwnd0 / cwnd0 = 3 increments.
+    // new_acked / bytes_for_increase = (3*cwnd0 + mtu) / cwnd0 = 3 increments,
+    // remainder = mtu (one MTU of carry preserved for the next ACK).
     assert_eq!(cc.cwnd(), cwnd0 + 3 * mtu);
-    assert_eq!(cc.acked_bytes(), 0);
+    assert_eq!(cc.acked_bytes(), mtu);
 }

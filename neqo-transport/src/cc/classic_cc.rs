@@ -7,7 +7,7 @@
 // Congestion control
 
 use std::{
-    cmp::max,
+    cmp::{max, min},
     fmt::{Debug, Display},
     time::{Duration, Instant},
 };
@@ -418,7 +418,7 @@ where
             // Cap prior credit to one increment (in case bytes_for_increase dropped between
             // calls), then apply all increments earned, allowing >1 MSS of growth when a large
             // burst is acknowledged (RFC 9002 has no 2-MSS cap; RFC 3465 §2.3 is TCP-only).
-            let acked = self.current.acked_bytes.min(bytes_for_increase) + new_acked;
+            let acked = min(self.current.acked_bytes, bytes_for_increase) + new_acked;
             let n = acked / bytes_for_increase;
             self.current.acked_bytes = acked % bytes_for_increase;
             self.current.congestion_window += n * self.max_datagram_size();
