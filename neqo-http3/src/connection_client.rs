@@ -20,8 +20,8 @@ use neqo_common::{
 };
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
-    Output, OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
+    OutputBatch, Stats as TransportStats, StreamId, Version, ZeroRttState,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
 
@@ -724,98 +724,6 @@ impl Http3Client {
             .ok_or(Error::InvalidStreamId)?;
         self.conn.stream_keep_alive(stream_id, true)?;
         self.read_data(now, stream_id, buf)
-    }
-
-    // API WebTransport
-
-    /// # Errors
-    ///
-    /// If `WebTransport` cannot be created, e.g. the `WebTransport` support is
-    /// not negotiated or the HTTP/3 connection is closed.
-    pub fn webtransport_create_session<T>(
-        &mut self,
-        now: Instant,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        let output = self.base_handler.webtransport_create_session(
-            &mut self.conn,
-            Box::new(self.events.clone()),
-            target,
-            headers,
-        );
-
-        if let Err(e) = &output
-            && e.connection_error()
-        {
-            self.close(now, e.code(), "");
-        }
-        output
-    }
-
-    /// Close `WebTransport` cleanly
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist,
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
-    pub fn webtransport_close_session(
-        &mut self,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        self.base_handler.webtransport_close_session(
-            &mut self.conn,
-            session_id,
-            error,
-            message,
-            now,
-        )
-    }
-
-    /// # Errors
-    ///
-    /// This may return an error if the particular session does not exist
-    /// or the connection is not in the active state.
-    pub fn webtransport_create_stream(
-        &mut self,
-        session_id: StreamId,
-        stream_type: StreamType,
-    ) -> Res<StreamId> {
-        self.base_handler.webtransport_create_stream_local(
-            &mut self.conn,
-            session_id,
-            stream_type,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-        )
-    }
-
-    /// Send `WebTransport` datagram.
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size.
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        session_id: StreamId,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
-        self.base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)
     }
 
     /// This function combines  `process_input` and `process_output` function.
