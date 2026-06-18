@@ -19,8 +19,8 @@ const CHUNK: usize = 1000;
 fn build_coalesce(count: usize) -> RangeTracker {
     let mut used = RangeTracker::default();
     used.mark_acked(0, CHUNK); // frontier at CHUNK
-    // One big Sent range covering the gap + all the acked chunks placed below.
-    used.mark_sent(CHUNK as u64, (2 * count + 1) * CHUNK);
+    // One big Sent range covering exactly the gap and all the acked chunks placed below.
+    used.mark_sent(CHUNK as u64, 2 * count * CHUNK);
     // ACK every *other* chunk so the acked ranges stay separate (a Sent chunk between
     // each prevents merging); the gap at [CHUNK, 2*CHUNK) keeps the frontier blocked.
     for i in 1..=count {
