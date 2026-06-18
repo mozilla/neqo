@@ -25,7 +25,7 @@ use crate::{
 };
 
 pub trait ClientSession {
-    /// Whether `CONNECT_UDP` is enabled on the connection;
+    /// Whether `CONNECT_UDP` is enabled on the connection.
     fn connect_udp_enabled(&self) -> bool;
 
     /// Create a MASQUE connect-udp session.
