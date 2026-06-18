@@ -38,7 +38,7 @@ neqo-transport = { path = ".", default-features = false, features = ["draft-29"]
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["neqo-common/bench", "nss/bench", "blapi", "test-fixture/bench", "log/release_max_level_info"]
+bench = ["neqo-common/bench", "nss/bench", "nss/static", "blapi", "test-fixture/bench", "log/release_max_level_info"]
 blapi = ["nss/blapi"]
 default = ["blapi"]
 build-fuzzing-corpus = [

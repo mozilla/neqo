@@ -87,18 +87,9 @@ runs:
         if [[ "$BENCHES" == "true" ]]; then build_walltime_benches ../dist/neqo; fi
         cp target/release/neqo-client target/release/neqo-server ../dist/neqo/
 
-    - name: Bundle NSS libraries and test fixture
+    - name: Bundle test fixture
       shell: bash
       run: |
-        mkdir -p dist/lib
-        if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
-          cp -L "$NSS_DIR"/../dist/Release/lib/*.so dist/lib/ 2>/dev/null || true
-          cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* dist/lib/ 2>/dev/null || true
-        else
-          for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
-            cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
-          done
-        fi
         NSS_DB=$(cd neqo && cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
         mkdir -p dist/test-fixture
         cp -r "$NSS_DB" dist/test-fixture/

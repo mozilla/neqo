@@ -95,11 +95,7 @@ jobs:
           mkdir -p binaries/neqo binaries/neqo-baseline
           cp dist/neqo/* binaries/neqo/
           cp dist/neqo-baseline/* binaries/neqo-baseline/
-          {
-            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
-            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
-            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/dist/test-fixture/db" # TODO: Remove once baseline uses nss-rs >= 0.11.0
-          } >> "$GITHUB_ENV"
+          echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db" >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
       - name: Prepare machine
@@ -112,8 +108,7 @@ jobs:
         env:
           BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          # TODO: Remove NSS_DB_PATH once baseline uses nss-rs >= 0.11.0
-          bench_exec() { sudo nice -n -20 env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" "NSS_DB_PATH=$NSS_DB_PATH" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          bench_exec() { sudo nice -n -20 env "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
           filter_cset() { grep -v '^cset' || test $? = 1; }
           shopt -s extglob nullglob
 
