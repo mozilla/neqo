@@ -80,12 +80,10 @@ fn transfer(c: &mut Criterion) {
                         ));
                         (server_handle, client)
                     },
-                    |(server_handle, client)| {
-                        black_box(async move {
-                            client.await.unwrap();
-                            // Tell server to shut down.
-                            server_handle.send(()).unwrap();
-                        })
+                    |(server_handle, client)| async move {
+                        black_box(client.await.unwrap());
+                        // Tell server to shut down.
+                        server_handle.send(()).unwrap();
                     },
                     BatchSize::PerIteration,
                 );
