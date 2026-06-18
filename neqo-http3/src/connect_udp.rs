@@ -42,9 +42,9 @@ pub trait ClientSession {
     ///
     /// # Errors
     ///
-    /// [`Error::InvalidStreamId`](crate::Error::InvalidStreamId) if the stream
+    /// [`Error::InvalidStreamId`] if the stream
     /// does not exist,
-    /// [`Error::TransportStreamDoesNotExist`](crate::Error::TransportStreamDoesNotExist) if the
+    /// [`Error::TransportStreamDoesNotExist`] if the
     /// transport stream does not exist (this may happen if [`Http3Client::process_output`] has
     /// not been called when needed, and HTTP3 layer has not picked up the info that the stream
     /// has been closed.)
@@ -60,7 +60,7 @@ pub trait ClientSession {
     ///
     /// # Errors
     ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
@@ -113,7 +113,7 @@ impl ClientSession for Http3Client {
     ) -> Res<()> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
-        handler.connect_udp_send_datagram(session_id, conn, buf, id, now)
+        handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
     }
 }
 
@@ -147,8 +147,8 @@ trait Handler {
 
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &self,
-        session_id: StreamId,
         conn: &mut Connection,
+        session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
@@ -212,8 +212,8 @@ impl Handler for Http3Connection {
 
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &self,
-        session_id: StreamId,
         conn: &mut Connection,
+        session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
@@ -288,7 +288,7 @@ impl ServerHandler for Http3ServerHandler {
     ) -> Res<()> {
         self.mark_needs_processing();
         self.base_handler_mut()
-            .connect_udp_send_datagram(session_id, conn, buf, id, now)
+            .connect_udp_send_datagram(conn, session_id, buf, id, now)
     }
 }
 
