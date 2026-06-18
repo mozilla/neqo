@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F2999 --call-graph fp -g
+  PERF_OPT: record -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -80,7 +80,7 @@ jobs:
         uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: flamegraph, samply
+          tools: inferno, samply
           token: ${{ secrets.GITHUB_TOKEN }}
           sccache: true
 
@@ -164,8 +164,8 @@ jobs:
           for f in *.perf; do
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
-            # Generate flamegraphs
-            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
+            # Generate flamegraphs from the cycles event (perf.data has multiple events)
+            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
 
       - name: Format results as Markdown
