@@ -28,9 +28,9 @@ use crate::{
     server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
     server_events::{
         ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents,
-        WebTransportRequest,
     },
     settings::HttpZeroRttChecker,
+    webtransport::{ServerEvents as _, ServerSession},
 };
 
 type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
@@ -257,7 +257,7 @@ impl Http3Server {
                         headers,
                     }) => {
                         self.events.webtransport_new_session(
-                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                            ServerSession::new(conn.clone(), Rc::clone(handler), stream_id),
                             headers,
                         );
                     }
@@ -276,7 +276,7 @@ impl Http3Server {
                         headers,
                         ..
                     }) => self.events.webtransport_session_closed(
-                        WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                        ServerSession::new(conn.clone(), Rc::clone(handler), stream_id),
                         reason,
                         headers,
                     ),
@@ -304,7 +304,7 @@ impl Http3Server {
                         datagram,
                     }) => {
                         self.events.webtransport_datagram(
-                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            ServerSession::new(conn.clone(), Rc::clone(handler), session_id),
                             datagram,
                         );
                     }

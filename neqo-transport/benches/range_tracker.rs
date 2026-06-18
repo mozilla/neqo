@@ -15,36 +15,33 @@ use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use neqo_transport::send_stream::RangeTracker;
 
 const CHUNK: usize = 1000;
-const END: usize = 100_000;
 
-fn build_coalesce(len: usize) -> RangeTracker {
+fn build_coalesce(count: usize) -> RangeTracker {
     let mut used = RangeTracker::default();
-    used.mark_acked(0, CHUNK);
-    used.mark_sent(CHUNK as u64, END);
-    // leave a gap or it will coalesce here
-    for i in 2..=len {
-        // These do not get immediately coalesced when marking since they're not at the end or start
-        used.mark_acked((i * CHUNK) as u64, CHUNK);
+    used.mark_acked(0, CHUNK); // frontier at CHUNK
+    // One big Sent range covering exactly the gap and all the acked chunks placed below.
+    used.mark_sent(CHUNK as u64, 2 * count * CHUNK);
+    // ACK every *other* chunk so the acked ranges stay separate (a Sent chunk between
+    // each prevents merging); the gap at [CHUNK, 2*CHUNK) keeps the frontier blocked.
+    for i in 1..=count {
+        used.mark_acked((2 * i * CHUNK) as u64, CHUNK);
     }
     used
 }
 
 fn coalesce(c: &mut Criterion, count: usize) {
-    c.bench_function(
-        &format!("coalesce_acked_from_zero {count}+1 entries"),
-        |b| {
-            b.iter_batched_ref(
-                || build_coalesce(count),
-                black_box(|used: &mut RangeTracker| {
-                    used.mark_acked(CHUNK as u64, CHUNK);
-                    let tail = (count + 1) * CHUNK;
-                    used.mark_sent(tail as u64, CHUNK);
-                    used.mark_acked(tail as u64, CHUNK);
-                }),
-                BatchSize::SmallInput,
-            );
-        },
-    );
+    c.bench_function(&format!("coalesce_acked_from_zero {count} ranges"), |b| {
+        b.iter_batched_ref(
+            || build_coalesce(count),
+            // Fill the gap and jump the frontier past all `count` acked ranges in one
+            // call; coalesce_acked then walks every entry below the new frontier.
+            |used: &mut RangeTracker| {
+                used.mark_acked(CHUNK as u64, 2 * count * CHUNK);
+                black_box(used);
+            },
+            BatchSize::SmallInput,
+        );
+    });
 }
 
 fn benchmark_coalesce(c: &mut Criterion) {
