@@ -155,7 +155,7 @@ pub enum ServerEvent {
     },
 }
 
-pub trait ServerEvents {
+pub(crate) trait ServerEvents {
     fn connect_udp_new_session(&self, session: ServerSession, headers: Vec<Header>);
     fn connect_udp_session_closed(
         &self,
