@@ -25,6 +25,9 @@ use crate::{
 };
 
 pub trait ClientSession {
+    /// Whether `CONNECT_UDP` is enabled on the connection;
+    fn connect_udp_enabled(&self) -> bool;
+
     /// Create a MASQUE connect-udp session.
     ///
     /// # Errors
@@ -73,6 +76,10 @@ pub trait ClientSession {
 }
 
 impl ClientSession for Http3Client {
+    fn connect_udp_enabled(&self) -> bool {
+        self.handler().connect_udp_enabled()
+    }
+
     fn connect_udp_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
