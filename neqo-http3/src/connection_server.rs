@@ -18,6 +18,7 @@ use neqo_transport::{
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
     ReceiveOutput, Res,
+    connect_udp::Handler as _,
     connection::{Http3Connection, Http3State, SessionAcceptAction},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},

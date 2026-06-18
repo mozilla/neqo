@@ -11,12 +11,13 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Header, qdebug, qtrace};
-use neqo_transport::{DatagramTracking, StreamId, server::ConnectionRef};
+use neqo_common::{Bytes, Header, qdebug, qinfo, qtrace};
+use neqo_transport::{Connection, DatagramTracking, StreamId, server::ConnectionRef};
 
 use crate::{
-    Http3Client, Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Res,
+    Error, Http3Client, Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Res,
     SessionAcceptAction,
+    connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
     request_target::RequestTarget,
@@ -113,6 +114,111 @@ impl ClientSession for Http3Client {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(session_id, conn, buf, id, now)
+    }
+}
+
+/// Connection-level connect-udp operations shared by the client and server.
+pub(crate) trait Handler {
+    fn connect_udp_create_session<T: RequestTarget>(
+        &mut self,
+        conn: &mut Connection,
+        events: Box<dyn extended_connect::ExtendedConnectEvents>,
+        target: T,
+        headers: &[Header],
+    ) -> Res<StreamId>;
+
+    fn connect_udp_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        events: Box<dyn extended_connect::ExtendedConnectEvents>,
+        accept_res: &SessionAcceptAction,
+        now: Instant,
+    ) -> Res<()>;
+
+    fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()>;
+
+    fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()>;
+}
+
+impl Handler for Http3Connection {
+    fn connect_udp_create_session<T: RequestTarget>(
+        &mut self,
+        conn: &mut Connection,
+        events: Box<dyn extended_connect::ExtendedConnectEvents>,
+        target: T,
+        headers: &[Header],
+    ) -> Res<StreamId> {
+        qinfo!("[{self}] Create ConnectUdp");
+        if !self.connect_udp_enabled() {
+            return Err(Error::Unavailable);
+        }
+        self.extended_connect_create_session(
+            conn,
+            events,
+            target,
+            headers,
+            extended_connect::ExtendedConnectType::ConnectUdp,
+        )
+    }
+
+    fn connect_udp_session_accept(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        events: Box<dyn extended_connect::ExtendedConnectEvents>,
+        accept_res: &SessionAcceptAction,
+        now: Instant,
+    ) -> Res<()> {
+        qtrace!("Respond to ConnectUdp session with accept={accept_res}");
+        if !self.connect_udp_enabled() {
+            return Err(Error::Unavailable);
+        }
+        self.extended_connect_session_accept(
+            conn,
+            stream_id,
+            events,
+            accept_res,
+            extended_connect::ExtendedConnectType::ConnectUdp,
+            now,
+        )
+    }
+
+    fn connect_udp_close_session(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<()> {
+        qtrace!("Close ConnectUdp session {session_id:?}");
+        self.extended_connect_close_session(conn, session_id, error, message, now)
+    }
+
+    fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<()> {
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
 
