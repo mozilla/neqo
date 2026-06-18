@@ -22,7 +22,7 @@ use neqo_transport::{
 };
 
 const MAX_STREAM_DATA: u64 = 1 << 20; // 1 MiB credit
-const DATA: &[u8] = &[0x5a; 4_096];
+const DATA: &[u8] = &[0x5a; 200];
 
 fn make_streams(n_streams: usize) -> SendStreams {
     let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));

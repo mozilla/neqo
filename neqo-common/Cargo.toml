@@ -49,6 +49,7 @@ bench = false
 [[package.metadata.bench]]
 name = "decoder"
 codspeed.mode = "simulation"
+codspeed.memory = false # decode_varint only reads from the input slice; no allocation to profile.
 
 [[bench]]
 name = "decoder"
