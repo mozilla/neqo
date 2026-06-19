@@ -18,7 +18,7 @@ use crate::{
         },
     },
     frames::WebTransportFrame,
-    webtransport::ServerEvent,
+    webtransport::{ClientSession as _, ServerEvent},
 };
 
 #[test]

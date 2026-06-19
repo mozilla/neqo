@@ -20,8 +20,8 @@ use neqo_common::{
 };
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
-    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, DatagramTracking,
-    Output, OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
+    OutputBatch, Stats as TransportStats, StreamId, Version, ZeroRttState,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
 
@@ -92,11 +92,7 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///   - [`Http3Client::stream_stop_sending`]
 /// - priority feature:
 ///   - [`Http3Client::priority_update`]
-/// - `WebTransport` feature:
-///   - [`Http3Client::webtransport_create_session`]
-///   - [`Http3Client::webtransport_close_session`]
-///   - [`Http3Client::webtransport_create_stream`]
-///   - [`Http3Client::webtransport_enabled`]
+/// - `WebTransport` feature, see [`crate::webtransport::ClientSession`]
 ///
 /// ## Examples
 ///
@@ -726,98 +722,6 @@ impl Http3Client {
         self.read_data(now, stream_id, buf)
     }
 
-    // API WebTransport
-
-    /// # Errors
-    ///
-    /// If `WebTransport` cannot be created, e.g. the `WebTransport` support is
-    /// not negotiated or the HTTP/3 connection is closed.
-    pub fn webtransport_create_session<T>(
-        &mut self,
-        now: Instant,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        let output = self.base_handler.webtransport_create_session(
-            &mut self.conn,
-            Box::new(self.events.clone()),
-            target,
-            headers,
-        );
-
-        if let Err(e) = &output
-            && e.connection_error()
-        {
-            self.close(now, e.code(), "");
-        }
-        output
-    }
-
-    /// Close `WebTransport` cleanly
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist,
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
-    pub fn webtransport_close_session(
-        &mut self,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        self.base_handler.webtransport_close_session(
-            &mut self.conn,
-            session_id,
-            error,
-            message,
-            now,
-        )
-    }
-
-    /// # Errors
-    ///
-    /// This may return an error if the particular session does not exist
-    /// or the connection is not in the active state.
-    pub fn webtransport_create_stream(
-        &mut self,
-        session_id: StreamId,
-        stream_type: StreamType,
-    ) -> Res<StreamId> {
-        self.base_handler.webtransport_create_stream_local(
-            &mut self.conn,
-            session_id,
-            stream_type,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-        )
-    }
-
-    /// Send `WebTransport` datagram.
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size.
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        session_id: StreamId,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
-        self.base_handler
-            .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)
-    }
-
     /// This function combines  `process_input` and `process_output` function.
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
@@ -1260,29 +1164,6 @@ impl Http3Client {
     #[must_use]
     pub fn transport_stats(&self) -> TransportStats {
         self.conn.stats()
-    }
-
-    #[must_use]
-    pub const fn webtransport_enabled(&self) -> bool {
-        self.base_handler.webtransport_enabled()
-    }
-
-    /// Get the negotiated subprotocol for a WebTransport session.
-    ///
-    /// Returns the parsed protocol string from the server's `wt-protocol` response header
-    /// (an [RFC 8941 Item](https://www.rfc-editor.org/rfc/rfc8941.html#name-items)),
-    /// or `None` if the server did not include a `wt-protocol` header (or its value was
-    /// not a valid sf-string).
-    ///
-    /// **Note:** this returns the server's selected protocol without validating it against the
-    /// list of protocols offered by the client.  Callers are responsible for checking that the
-    /// returned protocol was among those originally offered.
-    ///
-    /// # Errors
-    ///
-    /// Returns error if the session ID is invalid.
-    pub fn webtransport_session_protocol(&self, session_id: StreamId) -> Res<Option<String>> {
-        self.base_handler.webtransport_session_protocol(session_id)
     }
 }
 

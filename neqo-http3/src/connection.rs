@@ -1161,29 +1161,6 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_session<T>(
-        &mut self,
-        conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        qinfo!("[{self}] Create WebTransport");
-        if !self.webtransport_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_create_session(
-            conn,
-            events,
-            target,
-            headers,
-            ExtendedConnectType::WebTransport,
-        )
-    }
-
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
@@ -1223,28 +1200,6 @@ impl Http3Connection {
             .send_request(&final_headers, conn)?;
         self.streams_with_pending_data.insert(id);
         Ok(id)
-    }
-
-    pub(crate) fn webtransport_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
-        accept_res: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={accept_res}");
-        if !self.webtransport_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_session_accept(
-            conn,
-            stream_id,
-            events,
-            accept_res,
-            ExtendedConnectType::WebTransport,
-            now,
-        )
     }
 
     pub(crate) fn extended_connect_session_accept(
@@ -1348,18 +1303,6 @@ impl Http3Connection {
             return Err(Error::InvalidStreamId);
         }
         Ok(())
-    }
-
-    pub(crate) fn webtransport_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
     }
 
     /// Invoked when GOAWAY is received. It flags all open WebTransport
@@ -1538,17 +1481,6 @@ impl Http3Connection {
             );
         }
         Ok(())
-    }
-
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &self,
-        session_id: StreamId,
-        conn: &mut Connection,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
