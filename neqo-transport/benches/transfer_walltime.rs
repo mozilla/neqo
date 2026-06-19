@@ -4,31 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Benchmark with walltime, i.e., measure the compute efficiency.
+//! Benchmark over a simulated network, measuring wall-clock time on a hardware runner.
 
 #![expect(
     clippy::significant_drop_tightening,
     reason = "Inherent in codspeed criterion_group! macro."
 )]
 
-use std::hint::black_box;
-
-use criterion::{BatchSize::SmallInput, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main};
 
 #[path = "transfer_common.rs"]
 mod common;
 
 fn benchmark(c: &mut criterion::Criterion) {
-    common::benchmark(c, |group, label, seed, pacing| {
-        let bench_name = format!("walltime/pacing-{pacing}/{label}");
-        group.bench_function(&bench_name, |b| {
-            b.iter_batched(
-                || common::setup(label, seed, pacing),
-                |sim| black_box(sim.run()),
-                SmallInput,
-            );
-        });
-    });
+    common::bench(c, "walltime");
 }
 
 criterion_group! {
