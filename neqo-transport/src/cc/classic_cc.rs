@@ -471,7 +471,7 @@ where
         }
 
         let bif_at_detection = self.bytes_in_flight;
-        let mut loss_amount = 0;
+        let maybe_lost_before = self.maybe_lost_packets.len();
 
         for pkt in lost_packets {
             if pkt.cc_in_flight() {
@@ -485,7 +485,6 @@ where
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
                 if !pkt.is_pmtud_probe() {
-                    loss_amount += 1;
                     let present = self.maybe_lost_packets.insert(
                         (pkt.pn(), pkt.packet_type()),
                         MaybeLostPacket {
@@ -502,6 +501,8 @@ where
                 }
             }
         }
+
+        let lost_packets_amount = self.maybe_lost_packets.len() - maybe_lost_before;
 
         qlog::metrics_updated(
             &mut self.qlog,
@@ -521,7 +522,7 @@ where
 
         let congestion = self.on_congestion_event(
             last_lost_packet,
-            Loss(loss_amount),
+            Loss(lost_packets_amount),
             bif_at_detection,
             now,
             cc_stats,
