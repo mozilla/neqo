@@ -23,12 +23,11 @@ use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     Http3Parameters, Http3StreamInfo, Res,
+    connect_udp::{self, ServerEvents as _},
     connection::Http3State,
     connection_server::Http3ServerHandler,
     server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
-    server_events::{
-        ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents,
-    },
+    server_events::{Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents},
     settings::HttpZeroRttChecker,
     webtransport::{ServerEvents as _, ServerSession},
 };
@@ -266,7 +265,11 @@ impl Http3Server {
                         headers,
                     }) => {
                         self.events.connect_udp_new_session(
-                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                stream_id,
+                            ),
                             headers,
                         );
                     }
@@ -286,7 +289,11 @@ impl Http3Server {
                         headers,
                         ..
                     }) => self.events.connect_udp_session_closed(
-                        ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                        connect_udp::ServerSession::new(
+                            conn.clone(),
+                            Rc::clone(handler),
+                            stream_id,
+                        ),
                         reason,
                         headers,
                     ),
@@ -313,7 +320,11 @@ impl Http3Server {
                         datagram,
                     }) => {
                         self.events.connect_udp_datagram(
-                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ),
                             datagram,
                         );
                     }

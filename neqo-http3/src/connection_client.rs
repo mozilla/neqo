@@ -356,6 +356,10 @@ impl Http3Client {
         (&mut self.conn, &mut self.base_handler)
     }
 
+    pub(crate) const fn client_events(&self) -> &Http3ClientEvents {
+        &self.events
+    }
+
     /// The function returns the current state of the connection.
     #[must_use]
     pub fn state(&self) -> Http3State {
@@ -752,34 +756,6 @@ impl Http3Client {
         output
     }
 
-    /// # Errors
-    ///
-    /// If MASQUE connect-udp session cannot be created, e.g. the HTTP CONNECT
-    /// setting is not negotiated or the HTTP/3 connection is closed.
-    pub fn connect_udp_create_session<T>(
-        &mut self,
-        now: Instant,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        let output = self.base_handler.connect_udp_create_session(
-            &mut self.conn,
-            Box::new(self.events.clone()),
-            target,
-            headers,
-        );
-
-        if let Err(e) = &output
-            && e.connection_error()
-        {
-            self.close(now, e.code(), "");
-        }
-        output
-    }
-
     /// Close `WebTransport` cleanly
     ///
     /// # Errors
@@ -803,26 +779,6 @@ impl Http3Client {
             message,
             now,
         )
-    }
-
-    /// Close `ConnectUdp` cleanly
-    ///
-    /// # Errors
-    ///
-    /// [`Error::InvalidStreamId`] if the stream does not exist,
-    /// [`Error::TransportStreamDoesNotExist`] if the transport stream does not
-    /// exist (this may happen if [`Http3Client::process_output`] has not been
-    /// called when needed, and HTTP3 layer has not picked up the info that the
-    /// stream has been closed.)
-    pub fn connect_udp_close_session(
-        &mut self,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        self.base_handler
-            .connect_udp_close_session(&mut self.conn, session_id, error, message, now)
     }
 
     /// # Errors
@@ -860,25 +816,6 @@ impl Http3Client {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         self.base_handler
             .webtransport_send_datagram(session_id, &mut self.conn, buf, id, now)
-    }
-
-    /// Send `ConnectUdp` datagram.
-    ///
-    /// # Errors
-    ///
-    /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size.
-    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        session_id: StreamId,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("connect_udp_send_datagram session:{session_id:?}");
-        self.base_handler
-            .connect_udp_send_datagram(session_id, &mut self.conn, buf, id, now)
     }
 
     /// This function combines  `process_input` and `process_output` function.

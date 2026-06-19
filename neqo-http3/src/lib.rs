@@ -136,6 +136,7 @@ while let Some(event) = client.next_event() {
 mod buffered_send_stream;
 mod client_events;
 mod conn_params;
+pub mod connect_udp;
 mod connection;
 mod connection_client;
 mod connection_server;
@@ -179,9 +180,7 @@ pub use neqo_transport::{Output, StreamId, streams::SendOrder};
 pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
-pub use server_events::{
-    ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
-};
+pub use server_events::{Http3OrWebTransportStream, Http3ServerEvent};
 #[cfg(fuzzing)]
 pub use settings::HSettings;
 use stream_type_reader::NewStreamType;
