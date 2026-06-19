@@ -24,6 +24,15 @@ use test_fixture::{
 const PING: &[u8] = b"ping";
 const PONG: &[u8] = b"pong";
 
+#[test]
+fn disabled_by_default() {
+    let mut client = default_http3_client();
+    let mut server = default_http3_server();
+    // Connect client and proxy.
+    let _out = test_fixture::connect_peers(&mut client, &mut server);
+    assert!(!client.connect_udp_enabled());
+}
+
 fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
     let conn_params = ConnectionParameters::default()
         .pmtud(true)
@@ -45,6 +54,7 @@ fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
     let out = test_fixture::connect_peers(&mut client, &mut proxy);
     let out = proxy.process(out, now()).dgram().unwrap();
     client.process_input(out, now());
+    assert!(client.connect_udp_enabled());
 
     // Establish connect-udp session.
     let connect_udp_session_id = client
