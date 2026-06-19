@@ -23,7 +23,7 @@ use crate::{
     recovery::sent,
     rtt::RttEstimate,
     sender::PACING_BURST_SIZE,
-    stats::{CongestionControlStats, SlowStartExitReason},
+    stats::{CongestionControlStats, SlowStartExitReason, SlowStartExitStats},
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -371,10 +371,12 @@ where
                 now,
             ) {
                 qdebug!("Exited slow start by algorithm");
-                cc_stats.slow_start_exit_bytes_in_flight = Some(self.bytes_in_flight);
-                cc_stats.slow_start_exit_detection_cwnd = Some(self.current.congestion_window);
-                cc_stats.slow_start_exit_cwnd = Some(exit_cwnd);
-                cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::Heuristic);
+                cc_stats.slow_start_exit = Some(SlowStartExitStats {
+                    reason: SlowStartExitReason::Heuristic,
+                    detection_cwnd: self.current.congestion_window,
+                    exit_cwnd,
+                    bytes_in_flight: self.bytes_in_flight,
+                });
                 self.current.congestion_window = exit_cwnd;
                 self.current.ssthresh = Some(exit_cwnd);
                 self.set_phase(Phase::CongestionAvoidance, None, now);
@@ -468,7 +470,7 @@ where
             return false;
         }
 
-        let bif_before_loss = self.bytes_in_flight;
+        let bif_at_detection = self.bytes_in_flight;
         let mut loss_amount = 0;
 
         for pkt in lost_packets {
@@ -519,9 +521,8 @@ where
 
         let congestion = self.on_congestion_event(
             last_lost_packet,
-            Loss,
-            bif_before_loss,
-            Some(loss_amount),
+            Loss(loss_amount),
+            bif_at_detection,
             now,
             cc_stats,
         );
@@ -554,14 +555,7 @@ where
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
-        self.on_congestion_event(
-            largest_acked_pkt,
-            Ecn,
-            self.bytes_in_flight,
-            None,
-            now,
-            cc_stats,
-        )
+        self.on_congestion_event(largest_acked_pkt, Ecn, self.bytes_in_flight, now, cc_stats)
     }
 
     fn discard(&mut self, pkt: &sent::Packet, now: Instant) {
@@ -803,11 +797,7 @@ where
 
         // If we are restoring back to slow start then we should undo the stat recording.
         if self.current.phase.in_slow_start() {
-            cc_stats.slow_start_exit_bytes_in_flight = None;
-            cc_stats.slow_start_exit_detection_cwnd = None;
-            cc_stats.slow_start_exit_loss_amount = None;
-            cc_stats.slow_start_exit_cwnd = None;
-            cc_stats.slow_start_exit_reason = None;
+            cc_stats.slow_start_exit = None;
         }
         qinfo!("[{self}] Spurious cong event -> RESTORED;");
     }
@@ -910,8 +900,7 @@ where
         &mut self,
         last_packet: &sent::Packet,
         congestion_trigger: CongestionTrigger,
-        bif_before_loss: usize,
-        loss_amount: Option<usize>,
+        bif_at_detection: usize,
         now: Instant,
         cc_stats: &mut CongestionControlStats,
     ) -> bool {
@@ -949,18 +938,19 @@ where
         );
 
         match congestion_trigger {
-            Loss => cc_stats.congestion_events.loss += 1,
+            Loss(_) => cc_stats.congestion_events.loss += 1,
             Ecn => cc_stats.congestion_events.ecn += 1,
         }
         cc_stats.cwnd = Some(self.current.congestion_window);
         // If we were in slow start when `on_congestion_event` was called we will exit slow start
-        // and should record the exit congestion window.
+        // and should record the exit stats.
         if self.current.phase.in_slow_start() {
-            cc_stats.slow_start_exit_detection_cwnd = Some(detection_cwnd);
-            cc_stats.slow_start_exit_bytes_in_flight = Some(bif_before_loss);
-            cc_stats.slow_start_exit_loss_amount = loss_amount;
-            cc_stats.slow_start_exit_cwnd = Some(self.current.congestion_window);
-            cc_stats.slow_start_exit_reason = Some(SlowStartExitReason::CongestionEvent);
+            cc_stats.slow_start_exit = Some(SlowStartExitStats {
+                reason: SlowStartExitReason::CongestionEvent(congestion_trigger),
+                detection_cwnd,
+                exit_cwnd: self.current.congestion_window,
+                bytes_in_flight: bif_at_detection,
+            });
         }
 
         qlog::metrics_updated(
@@ -1721,11 +1711,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
-        assert_eq!(
-            cc_stats.slow_start_exit_reason,
-            Some(SlowStartExitReason::CongestionEvent)
-        );
+        assert!(cc_stats.slow_start_exit.is_some());
         assert_eq!(cc_stats.congestion_events.loss, 1);
         #[expect(
             clippy::cast_sign_loss,
@@ -1776,8 +1762,7 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-        assert_eq!(cc_stats.slow_start_exit_reason, None);
+        assert_eq!(cc_stats.slow_start_exit, None);
         assert_eq!(cc_stats.congestion_events.loss, 1);
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cc.cwnd_initial());
@@ -1821,7 +1806,7 @@ mod tests {
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
         assert_eq!(cc_stats.congestion_events.loss, 1);
         let cwnd_after_loss = cc.cwnd();
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
+        assert!(cc_stats.slow_start_exit.is_some());
 
         // 3. Send packet (3) --> `Recovery`
         let pkt3 = sent::make_packet(3, now, 1000);
@@ -1857,8 +1842,7 @@ mod tests {
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.cwnd(), cwnd_after_loss);
         assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
-        assert!(cc_stats.slow_start_exit_cwnd.is_some());
-        assert!(cc_stats.slow_start_exit_reason.is_some());
+        assert!(cc_stats.slow_start_exit.is_some());
         assert!(cc_stats.w_max.is_some());
     }
 
@@ -2060,11 +2044,7 @@ mod tests {
         let initial_cwnd = cc.cwnd();
 
         assert!(cc.current.phase.in_slow_start());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-        assert_eq!(cc_stats.slow_start_exit_reason, None);
-        assert_eq!(cc_stats.slow_start_exit_bytes_in_flight, None);
-        assert_eq!(cc_stats.slow_start_exit_detection_cwnd, None);
-        assert_eq!(cc_stats.slow_start_exit_loss_amount, None);
+        assert_eq!(cc_stats.slow_start_exit, None);
 
         let pkt1 = sent::make_packet(1, now, 1000);
         cc.on_packet_sent(&pkt1, now, false);
@@ -2073,7 +2053,7 @@ mod tests {
             Ecn => {
                 cc.on_ecn_ce_received(&pkt1, now, &mut cc_stats);
             }
-            Loss => {
+            Loss(_) => {
                 cc.on_packets_lost(
                     Some(now),
                     None,
@@ -2085,25 +2065,22 @@ mod tests {
             }
         }
 
-        // Should have exited slow start with cwnd captured AFTER reduction.
+        // Should have exited slow start and recorded stats.
         assert!(!cc.current.phase.in_slow_start());
-        assert_eq!(cc_stats.slow_start_exit_cwnd, Some(cc.cwnd()));
+        let exit_stats = cc_stats
+            .slow_start_exit
+            .as_ref()
+            .expect("slow_start_exit must be set after congestion exit");
+        assert_eq!(exit_stats.exit_cwnd, cc.cwnd());
+        assert_eq!(exit_stats.detection_cwnd, initial_cwnd);
+        assert_eq!(exit_stats.bytes_in_flight, 1000);
         assert_eq!(
-            cc_stats.slow_start_exit_reason,
-            Some(SlowStartExitReason::CongestionEvent)
-        );
-        assert_eq!(cc_stats.slow_start_exit_bytes_in_flight, Some(1000));
-        assert_eq!(cc_stats.slow_start_exit_detection_cwnd, Some(initial_cwnd));
-        assert_eq!(
-            cc_stats.slow_start_exit_loss_amount,
-            match congestion_trigger {
-                Loss => Some(1),
-                Ecn => None,
-            }
+            exit_stats.reason,
+            SlowStartExitReason::CongestionEvent(congestion_trigger)
         );
 
         // For loss, test that a spurious congestion event resets the stats.
-        if congestion_trigger == Loss {
+        if matches!(congestion_trigger, Loss(_)) {
             // Send recovery packet and ack it to exit recovery.
             let pkt2 = sent::make_packet(2, now, 1000);
             cc.on_packet_sent(&pkt2, now, false);
@@ -2113,17 +2090,13 @@ mod tests {
             cc.on_packets_acked(&[pkt1], &rtt_estimate, now, &mut cc_stats);
 
             assert!(cc.current.phase.in_slow_start());
-            assert_eq!(cc_stats.slow_start_exit_cwnd, None);
-            assert_eq!(cc_stats.slow_start_exit_reason, None);
-            assert_eq!(cc_stats.slow_start_exit_bytes_in_flight, None);
-            assert_eq!(cc_stats.slow_start_exit_detection_cwnd, None);
-            assert_eq!(cc_stats.slow_start_exit_loss_amount, None);
+            assert_eq!(cc_stats.slow_start_exit, None);
         }
     }
 
     #[test]
     fn slow_start_exit_stats_loss() {
-        slow_start_exit_stats(Loss);
+        slow_start_exit_stats(Loss(1));
     }
 
     #[test]
@@ -2313,7 +2286,7 @@ mod tests {
 
         // there should be no reaction to the non-ack-eliciting packet
         assert_eq!(cc.cwnd(), initial_cwnd);
-        assert_eq!(cc_stats.slow_start_exit_cwnd, None);
+        assert_eq!(cc_stats.slow_start_exit, None);
     }
 
     fn send_single_packet_and_ack(pacing_limited: bool) -> (usize, usize) {
