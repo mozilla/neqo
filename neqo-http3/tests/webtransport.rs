@@ -11,8 +11,8 @@ use std::{cell::RefCell, rc::Rc};
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent, WebTransportRequest,
-    WebTransportServerEvent,
+    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use nss::AuthenticationStatus;
@@ -77,13 +77,13 @@ fn connect() -> (Http3Client, Http3Server) {
     (client, server)
 }
 
-fn setup_wt() -> (Http3Client, Http3Server, WebTransportRequest) {
+fn setup_wt() -> (Http3Client, Http3Server, ServerSession) {
     let (mut client, mut server) = connect();
     let wt_session = create_wt_session(&mut client, &mut server);
     (client, server, wt_session)
 }
 
-fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
+fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> ServerSession {
     let wt_session_id = client
         .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
         .unwrap();
@@ -92,10 +92,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
     let mut wt_server_session = None;
     while let Some(event) = server.next_event() {
         match event {
-            Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                session,
-                headers,
-            }) => {
+            Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) => {
                 assert!(
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "webtransport")
@@ -206,7 +203,7 @@ fn receive_data_server(
     let mut recv_data = Vec::new();
     while let Some(event) = server.next_event() {
         match event {
-            Http3ServerEvent::WebTransport(WebTransportServerEvent::NewStream(request)) => {
+            Http3ServerEvent::WebTransport(ServerEvent::NewStream(request)) => {
                 assert_eq!(stream_id, request.stream_id());
                 new_stream_received = true;
             }
@@ -355,10 +352,8 @@ fn wt_race_condition_server_stream_before_confirmation() {
         let wt_server_session = server
             .events()
             .find_map(|event| {
-                if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                    session,
-                    ..
-                }) = event
+                if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) =
+                    event
                 {
                     Some(session)
                 } else {
@@ -458,11 +453,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     let wt_server_session = server
         .events()
         .find_map(|event| {
-            if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                session,
-                ..
-            }) = event
-            {
+            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
                 Some(session)
             } else {
                 None

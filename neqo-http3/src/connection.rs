@@ -1161,52 +1161,6 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_create_session<T>(
-        &mut self,
-        conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        qinfo!("[{self}] Create WebTransport");
-        if !self.webtransport_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_create_session(
-            conn,
-            events,
-            target,
-            headers,
-            ExtendedConnectType::WebTransport,
-        )
-    }
-
-    pub fn connect_udp_create_session<T>(
-        &mut self,
-        conn: &mut Connection,
-        events: Box<dyn ExtendedConnectEvents>,
-        target: T,
-        headers: &[Header],
-    ) -> Res<StreamId>
-    where
-        T: RequestTarget,
-    {
-        qinfo!("[{self}] Create ConnectUdp");
-        if !self.connect_udp_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_create_session(
-            conn,
-            events,
-            target,
-            headers,
-            ExtendedConnectType::ConnectUdp,
-        )
-    }
-
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
@@ -1248,51 +1202,7 @@ impl Http3Connection {
         Ok(id)
     }
 
-    pub(crate) fn webtransport_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
-        accept_res: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={accept_res}");
-        if !self.webtransport_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_session_accept(
-            conn,
-            stream_id,
-            events,
-            accept_res,
-            ExtendedConnectType::WebTransport,
-            now,
-        )
-    }
-
-    pub(crate) fn connect_udp_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        events: Box<dyn ExtendedConnectEvents>,
-        accept_res: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Respond to ConnectUdp session with accept={accept_res}");
-        if !self.connect_udp_enabled() {
-            return Err(Error::Unavailable);
-        }
-        self.extended_connect_session_accept(
-            conn,
-            stream_id,
-            events,
-            accept_res,
-            ExtendedConnectType::ConnectUdp,
-            now,
-        )
-    }
-
-    fn extended_connect_session_accept(
+    pub(crate) fn extended_connect_session_accept(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
@@ -1395,18 +1305,6 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub(crate) fn webtransport_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
-    }
-
     /// Invoked when GOAWAY is received. It flags all open WebTransport
     /// sessions as draining and returns any sessions that were newly
     /// marked as draining
@@ -1435,19 +1333,7 @@ impl Http3Connection {
         Ok(stream.session_protocol())
     }
 
-    pub(crate) fn connect_udp_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        qtrace!("Close ConnectUdp session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
-    }
-
-    fn extended_connect_close_session(
+    pub(crate) fn extended_connect_close_session(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
@@ -1597,29 +1483,7 @@ impl Http3Connection {
         Ok(())
     }
 
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &self,
-        session_id: StreamId,
-        conn: &mut Connection,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
-    }
-
-    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
-        &self,
-        session_id: StreamId,
-        conn: &mut Connection,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
-    }
-
-    fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
+    pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
         conn: &mut Connection,

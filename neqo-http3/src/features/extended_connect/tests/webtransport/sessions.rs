@@ -10,7 +10,7 @@ use test_fixture::now;
 
 use crate::{
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
-    Http3State, Priority, SessionAcceptAction, WebTransportEvent, WebTransportServerEvent,
+    Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
         CloseReason,
         tests::webtransport::{
@@ -18,6 +18,7 @@ use crate::{
         },
     },
     frames::WebTransportFrame,
+    webtransport::{ClientSession as _, ServerEvent},
 };
 
 #[test]
@@ -119,10 +120,7 @@ fn wt_session_response_with_1xx() {
 
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-            session,
-            headers,
-        }) = event
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) = event
         {
             assert_wt(&headers);
             wt_server_session = Some(session);
@@ -183,10 +181,7 @@ fn wt_session_respone_200_with_fin() {
     wt.exchange_packets();
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-            session,
-            headers,
-        }) = event
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) = event
         {
             assert_wt(&headers);
             wt_server_session = Some(session);

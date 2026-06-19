@@ -409,8 +409,8 @@ where
             .ssthresh
             .is_some_and(|s| self.current.congestion_window >= s)
         {
-            // The following function return the amount acked bytes a controller needs
-            // to collect to be allowed to increase its cwnd by MAX_DATAGRAM_SIZE.
+            // The following function returns the amount of acked bytes a controller
+            // needs to collect to be allowed to increase its cwnd by one datagram.
             let bytes_for_increase = self.congestion_control.bytes_for_cwnd_increase(
                 self.current.congestion_window,
                 new_acked,
@@ -419,21 +419,13 @@ where
                 now,
             );
             debug_assert!(bytes_for_increase > 0);
-            // If enough credit has been accumulated already, apply them gradually.
-            // If we have sudden increase in allowed rate we actually increase cwnd gently.
-            if self.current.acked_bytes >= bytes_for_increase {
-                self.current.acked_bytes = 0;
-                self.current.congestion_window += self.max_datagram_size();
-            }
-            self.current.acked_bytes += new_acked;
-            if self.current.acked_bytes >= bytes_for_increase {
-                self.current.acked_bytes -= bytes_for_increase;
-                self.current.congestion_window += self.max_datagram_size(); // or is this the current MTU?
-            }
-            // The number of bytes we require can go down over time with Cubic.
-            // That might result in an excessive rate of increase, so limit the number of unused
-            // acknowledged bytes after increasing the congestion window twice.
-            self.current.acked_bytes = min(bytes_for_increase, self.current.acked_bytes);
+            // Cap prior credit to one increment (in case bytes_for_increase dropped between
+            // calls), then apply all increments earned, allowing >1 MSS of growth when a large
+            // burst is acknowledged (RFC 9002 has no 2-MSS cap; RFC 3465 §2.3 is TCP-only).
+            let acked = min(self.current.acked_bytes, bytes_for_increase) + new_acked;
+            let n = acked / bytes_for_increase;
+            self.current.acked_bytes = acked % bytes_for_increase;
+            self.current.congestion_window += n * self.max_datagram_size();
         }
 
         cc_stats.cwnd = Some(self.current.congestion_window);
