@@ -33,9 +33,12 @@ pub use new_reno::NewReno;
 pub use search::Outcome;
 pub use search::Search;
 
+/// How a congestion event was triggered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CongestionTrigger {
-    Loss,
+    /// Triggered by packet loss. Carries the number of lost packets.
+    Loss(usize),
+    /// Triggered by an ECN CE mark.
     Ecn,
 }
 
