@@ -494,7 +494,7 @@ where
             }
         }
 
-        let lost_packets_amount = self.maybe_lost_packets.len() - maybe_lost_before;
+        let lost_packets_count = self.maybe_lost_packets.len() - maybe_lost_before;
 
         qlog::metrics_updated(
             &mut self.qlog,
@@ -514,7 +514,7 @@ where
 
         let congestion = self.on_congestion_event(
             last_lost_packet,
-            Loss(lost_packets_amount),
+            Loss(lost_packets_count),
             bif_at_detection,
             now,
             cc_stats,
