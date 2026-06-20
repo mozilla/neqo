@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace, qwarn};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
@@ -370,6 +370,20 @@ impl TransportParameters {
         while d.remaining() > 0 {
             match TransportParameter::decode(d) {
                 Ok(Some((tipe, tp))) => {
+                    // RFC 9000, Section 7.4:
+                    //
+                    // > An endpoint MUST NOT send a parameter more than once in a given transport
+                    // > parameters extension. An endpoint SHOULD treat receipt of duplicate
+                    // > transport parameters as a connection error of type
+                    // > TRANSPORT_PARAMETER_ERROR.
+                    //
+                    // The SHOULD only exists to let endpoints skip tracking parameters they do
+                    // not understand (see RFC 9413), not for robustness, so reject a duplicate of
+                    // a parameter we have already parsed.
+                    if tps.params[tipe].is_some() {
+                        qwarn!("Duplicate transport parameter {tipe}");
+                        return Err(Error::TransportParameter);
+                    }
                     tps.set(tipe, tp);
                 }
                 Ok(None) => {}
@@ -1195,6 +1209,30 @@ mod tests {
         // the result should be an error.
         let invalid_decode_result = TransportParameters::decode(&mut enc.as_decoder());
         assert!(invalid_decode_result.is_err());
+    }
+
+    /// RFC 9000, Section 7.4: a duplicate transport parameter is a connection
+    /// error of type TRANSPORT_PARAMETER_ERROR.
+    #[test]
+    fn duplicate_tp_rejected() {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
+        TransportParameter::Integer(20).encode(&mut enc, IdleTimeout);
+        assert_eq!(
+            TransportParameters::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::TransportParameter
+        );
+    }
+
+    /// Distinct transport parameters next to each other still decode.
+    #[test]
+    fn distinct_tps_accepted() {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
+        TransportParameter::Integer(20).encode(&mut enc, InitialMaxData);
+        let tps = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
+        assert_eq!(tps.get_integer(IdleTimeout), 10);
+        assert_eq!(tps.get_integer(InitialMaxData), 20);
     }
 
     #[test]
