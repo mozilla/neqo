@@ -10,8 +10,8 @@ use test_fixture::fixture_init;
 
 use super::enc_dec_hframe;
 use crate::{
-    Priority, PushId,
-    frames::HFrame,
+    Error, Priority, PushId,
+    frames::{HFrame, hframe::HFrameType, reader::FrameDecoder as _},
     settings::{HSetting, HSettingType, HSettings},
 };
 
@@ -106,6 +106,39 @@ fn priority_update_request_urgency_default() {
         priority: Priority::new(3, true),
     };
     enc_dec_hframe(&f, "800f0700020869", 0); // "i"
+}
+
+/// RFC 9114 Section 7.1: a frame payload with bytes after the identified fields
+/// must be a connection error. `CANCEL_PUSH`, `GOAWAY`, and `MAX_PUSH_ID` each
+/// carry a single varint, so any trailing byte is rejected.
+#[test]
+fn single_field_frames_reject_trailing_data() {
+    // push_id/stream_id = 5 (0x05) followed by an extra byte.
+    let payload = &[0x05, 0xff];
+    for ft in [
+        HFrameType::CANCEL_PUSH,
+        HFrameType::GOAWAY,
+        HFrameType::MAX_PUSH_ID,
+    ] {
+        assert_eq!(
+            HFrame::decode(ft, payload.len() as u64, Some(payload)),
+            Err(Error::HttpFrame),
+            "frame type {ft:?}"
+        );
+    }
+
+    // The same frames without trailing data still decode.
+    let payload = &[0x05];
+    for ft in [
+        HFrameType::CANCEL_PUSH,
+        HFrameType::GOAWAY,
+        HFrameType::MAX_PUSH_ID,
+    ] {
+        assert!(
+            HFrame::decode(ft, payload.len() as u64, Some(payload)).is_ok(),
+            "frame type {ft:?}"
+        );
+    }
 }
 
 #[test]

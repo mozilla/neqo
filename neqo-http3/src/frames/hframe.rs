@@ -174,9 +174,15 @@ impl FrameDecoder<Self> for HFrame {
                 HFrameType::HEADERS => Some(Self::Headers {
                     header_block: dec.decode_remainder().to_vec(),
                 }),
-                HFrameType::CANCEL_PUSH => Some(Self::CancelPush {
-                    push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
-                }),
+                HFrameType::CANCEL_PUSH => {
+                    let push_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
+                    if dec.remaining() != 0 {
+                        return Err(Error::HttpFrame);
+                    }
+                    Some(Self::CancelPush {
+                        push_id: push_id.into(),
+                    })
+                }
                 HFrameType::SETTINGS => {
                     let mut settings = HSettings::default();
                     settings.decode_frame_contents(&mut dec).map_err(|e| {
@@ -192,12 +198,24 @@ impl FrameDecoder<Self> for HFrame {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
                     header_block: dec.decode_remainder().to_vec(),
                 }),
-                HFrameType::GOAWAY => Some(Self::Goaway {
-                    stream_id: StreamId::new(dec.decode_varint().ok_or(Error::HttpFrame)?),
-                }),
-                HFrameType::MAX_PUSH_ID => Some(Self::MaxPushId {
-                    push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
-                }),
+                HFrameType::GOAWAY => {
+                    let stream_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
+                    if dec.remaining() != 0 {
+                        return Err(Error::HttpFrame);
+                    }
+                    Some(Self::Goaway {
+                        stream_id: StreamId::new(stream_id),
+                    })
+                }
+                HFrameType::MAX_PUSH_ID => {
+                    let push_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
+                    if dec.remaining() != 0 {
+                        return Err(Error::HttpFrame);
+                    }
+                    Some(Self::MaxPushId {
+                        push_id: push_id.into(),
+                    })
+                }
                 HFrameType::PRIORITY_UPDATE_REQUEST | HFrameType::PRIORITY_UPDATE_PUSH => {
                     let element_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
                     let priority = dec.decode_remainder();
