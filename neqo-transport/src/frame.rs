@@ -603,9 +603,13 @@ impl<'a> Frame<'a> {
                 stream_data_limit: dv(dec)?,
             }),
             FrameType::StreamsBlockedBiDi | FrameType::StreamsBlockedUniDi => {
+                let m = dv(dec)?;
+                if m > (1 << 60) {
+                    return Err(Error::StreamLimit);
+                }
                 Ok(Self::StreamsBlocked {
                     stream_type: t.try_into()?,
-                    stream_limit: dv(dec)?,
+                    stream_limit: m,
                 })
             }
             FrameType::NewConnectionId => {
@@ -1446,6 +1450,18 @@ mod tests {
     fn decode_max_streams_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x12); // MaxStreamsBiDi
+        enc.encode_varint((1u64 << 60) + 1);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::StreamLimit
+        );
+    }
+
+    /// A `StreamsBlocked` frame with value > 2^60 is rejected.
+    #[test]
+    fn decode_streams_blocked_exceeds_limit() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x16); // StreamsBlockedBiDi
         enc.encode_varint((1u64 << 60) + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
