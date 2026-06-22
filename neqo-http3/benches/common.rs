@@ -49,7 +49,10 @@ fn setup_with_link(
         Delay::new(RTT),
     ];
     let mut sim = Simulator::new("", nodes);
-    sim.seed_str(FIXED_SEED);
+    // Simulator::new() applies SIMULATION_SEED when set; only use constant otherwise.
+    if std::env::var("SIMULATION_SEED").is_err() {
+        sim.seed_str(FIXED_SEED);
+    }
     sim.setup()
 }
 
