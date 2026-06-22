@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-fn add_extra_byte<T: FrameDecoder<T> + Debug>(st: &str) -> Encoder {
+fn add_extra_byte(st: &str) -> Encoder {
     let e_in = Encoder::from_hex(st);
     let mut dec = e_in.as_decoder();
     let frame_type = dec.decode_varint().unwrap();
@@ -90,7 +90,7 @@ pub fn enc_dec<T: FrameDecoder<T> + Debug>(
     // Now construct a frame with an extra byte in it.
     // That should be rejected.
     // This doesn't work for `DATA`, which happily takes all extra bytes.
-    let e_out = add_extra_byte::<T>(st);
+    let e_out = add_extra_byte(st);
     conn_s.stream_send(stream_id, e_out.as_ref()).unwrap();
     let dgram = conn_s.process_output(now()).dgram();
     drop(conn_c.process(dgram, now()));
