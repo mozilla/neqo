@@ -17,6 +17,7 @@ use test_fixture::{
 };
 
 const RTT: Duration = Duration::from_millis(10);
+const FIXED_SEED: &str = "62df6933ba1f543cece01db8f27fb2025529b27f93df39e19f006e1db3b8c843";
 
 /// Benchmark parameters: `(streams, data_size)`.
 ///
@@ -47,7 +48,9 @@ fn setup_with_link(
         link(),
         Delay::new(RTT),
     ];
-    Simulator::new("", nodes).setup()
+    let mut sim = Simulator::new("", nodes);
+    sim.seed_str(FIXED_SEED);
+    sim.setup()
 }
 
 /// Creates a ready simulator over a DSL-like link.
