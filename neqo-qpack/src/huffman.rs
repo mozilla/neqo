@@ -120,7 +120,7 @@ pub fn encode(input: &[u8]) -> Vec<u8> {
     let mut left: u8 = 8;
     let mut saved: u8 = 0;
     for c in input {
-        let mut e = HUFFMAN_TABLE[*c as usize];
+        let mut e = HUFFMAN_TABLE[usize::from(*c)];
 
         // Fill the previous byte
         if e.len < left {

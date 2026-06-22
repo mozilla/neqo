@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Buffer, Encoder, Header, MessageType, qdebug, qtrace};
+use neqo_common::{Buffer, Encoder, Header, MessageType, qdebug, qtrace, to_u64};
 use neqo_qpack as qpack;
 use neqo_transport::{Connection, StreamId};
 
@@ -207,7 +207,7 @@ impl SendStream for SendMessage {
         qdebug!("[{self}] send_request_body: available={available} to_send={to_send}");
 
         let data_frame = HFrame::Data {
-            len: to_send as u64,
+            len: to_u64(to_send),
         };
         let sent_fh = self
             .stream
@@ -295,7 +295,7 @@ impl SendStream for SendMessage {
 
     fn send_data_atomic(&mut self, conn: &mut Connection, buf: &[u8], now: Instant) -> Res<()> {
         let data_frame = HFrame::Data {
-            len: buf.len() as u64,
+            len: to_u64(buf.len()),
         };
         self.stream.encode_with(|e| data_frame.encode(e));
         self.stream.buffer(buf);

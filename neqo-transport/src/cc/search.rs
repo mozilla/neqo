@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qdebug;
+use neqo_common::{qdebug, to_u64};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -217,8 +217,10 @@ impl Search {
     /// Computes delivered bytes between two bin indices. Widens the result to `u64` to avoid
     /// saturation or overflow further down the line on 32-bit systems with large bandwidths.
     const fn compute_delv(&self, old: usize, new: usize) -> u64 {
-        self.acked_bins[new % Self::NUM_ACKED_BINS]
-            .saturating_sub(self.acked_bins[old % Self::NUM_ACKED_BINS]) as u64
+        to_u64(
+            self.acked_bins[new % Self::NUM_ACKED_BINS]
+                .saturating_sub(self.acked_bins[old % Self::NUM_ACKED_BINS]),
+        )
     }
 
     /// Computes sent bytes between two (previous) bin indices. Interpolates a fraction of each bin
@@ -230,14 +232,16 @@ impl Search {
         // NOTE: SEARCH draft-09 does forward interpolation here, i.e. `new + 1` or `old + 1`. That
         // is a mistake in the draft and has been discussed with the SEARCH team. Subtracting is
         // correct.
-        let low_idx = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
-            as u64;
-        let high_idx = (self.sent_bins[new % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
-            as u64;
-        let sent = low_idx * fraction + high_idx * (Self::SCALE as u64 - fraction);
-        sent / Self::SCALE as u64
+        let low_idx = to_u64(
+            self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
+                .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]),
+        );
+        let high_idx = to_u64(
+            self.sent_bins[new % Self::NUM_SENT_BINS]
+                .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]),
+        );
+        let sent = low_idx * fraction + high_idx * (to_u64(Self::SCALE) - fraction);
+        sent / to_u64(Self::SCALE)
     }
 
     /// Evaluates whether SEARCH should exit slow start.
@@ -271,7 +275,7 @@ impl Search {
 
         let diff = prev_sent.saturating_sub(curr_delv);
         let norm_diff =
-            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
+            usize::try_from(diff * to_u64(Self::SCALE) / prev_sent).unwrap_or(usize::MAX);
 
         if norm_diff < Self::THRESH {
             qdebug!(

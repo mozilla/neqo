@@ -6,6 +6,8 @@
 
 use std::{cmp::max, time::Duration};
 
+use neqo_common::to_u64;
+
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
@@ -64,7 +66,7 @@ pub const INITIAL_LOCAL_MAX_STREAM_DATA: usize = 1024 * 1024;
 /// implementation for details.
 ///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
-pub const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * CONNECTION_FACTOR;
+pub const INITIAL_LOCAL_MAX_DATA: u64 = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) * CONNECTION_FACTOR;
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
 /// for the size of the stream receive window.
@@ -167,12 +169,9 @@ impl Default for ConnectionParameters {
             slow_start: SlowStart::Classic,
             hystart_css_baseline: HyStartCssBaseline::CurrentRoundMinRtt,
             max_data: INITIAL_LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
-                .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
-                .expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
-                .expect("usize fits in u64"),
+            max_stream_data_bidi_remote: to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
+            max_stream_data_bidi_local: to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
+            max_stream_data_uni: to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: Self::DEFAULT_ACK_RATIO,

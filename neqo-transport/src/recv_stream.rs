@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace};
+use neqo_common::{Buffer, Role, qtrace, to_u64, to_usize};
 use smallvec::SmallVec;
 use strum::Display;
 
@@ -209,7 +209,7 @@ impl RxStreamOrderer {
         // Get entry before where new entry would go, so we can see if we already
         // have the new bytes.
         // Avoid copies and duplicated data.
-        let new_end = new_start + u64::try_from(new_data.len()).expect("usize fits in u64");
+        let new_end = new_start + to_u64(new_data.len());
 
         if new_end <= self.retired {
             // Range already read by application, this frame is very late and unneeded.
@@ -217,8 +217,7 @@ impl RxStreamOrderer {
         }
 
         if new_start < self.retired {
-            new_data =
-                &new_data[usize::try_from(self.retired - new_start).expect("u64 fits in usize")..];
+            new_data = &new_data[to_usize(self.retired - new_start)..];
             new_start = self.retired;
         }
 
@@ -233,12 +232,10 @@ impl RxStreamOrderer {
                 self.end,
                 self.data_ranges
                     .last_key_value()
-                    .map_or(self.retired, |(&k, v)| {
-                        k + u64::try_from(v.len()).expect("usize fits in u64")
-                    }),
+                    .map_or(self.retired, |(&k, v)| { k + to_u64(v.len()) }),
                 "end must equal the end of the last range, or retired if empty"
             );
-            self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
+            self.received += to_u64(new_data.len());
             // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
             // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
             // (by up to one frame). Gap (new_start > end): falls through to insert.
@@ -261,7 +258,7 @@ impl RxStreamOrderer {
         let extend = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
-            let prev_end = prev_start + u64::try_from(prev_vec.len()).expect("usize fits in u64");
+            let prev_end = prev_start + to_u64(prev_vec.len());
             if new_end > prev_end {
                 // PPPPPP    ->  PPPPPP
                 //   NNNNNN            NN
@@ -270,7 +267,7 @@ impl RxStreamOrderer {
                 let overlap = prev_end.saturating_sub(new_start);
                 qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
-                new_data = &new_data[usize::try_from(overlap).expect("u64 fits in usize")..];
+                new_data = &new_data[to_usize(overlap)..];
                 // If it is small enough, extend the previous buffer.
                 // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
                 // to one frame). This can't always extend, because otherwise the
@@ -316,8 +313,7 @@ impl RxStreamOrderer {
             let mut to_remove = SmallVec::<[_; 8]>::new();
 
             for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
-                let next_end =
-                    next_start + u64::try_from(next_data.len()).expect("usize fits in u64");
+                let next_end = next_start + to_u64(next_data.len());
                 let overlap = new_end.saturating_sub(next_start);
                 if overlap == 0 {
                     // Fills in the hole, exactly (probably common)
@@ -326,8 +322,7 @@ impl RxStreamOrderer {
                     qtrace!(
                         "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
-                    let truncate_to =
-                        new_data.len() - usize::try_from(overlap).expect("u64 fits in usize");
+                    let truncate_to = new_data.len() - to_usize(overlap);
                     to_add = &new_data[..truncate_to];
                     break;
                 }
@@ -344,7 +339,7 @@ impl RxStreamOrderer {
         }
 
         if !to_add.is_empty() {
-            self.received += u64::try_from(to_add.len()).expect("usize fits in u64");
+            self.received += to_u64(to_add.len());
             if extend {
                 if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
                     buf.extend_from_slice(to_add);
@@ -376,7 +371,7 @@ impl RxStreamOrderer {
             .map(|(start_offset, data)| {
                 // All ranges don't overlap but we could have partially
                 // retired some of the first entry's data.
-                let data_len = data.len() as u64 - self.retired.saturating_sub(*start_offset);
+                let data_len = to_u64(data.len()) - self.retired.saturating_sub(*start_offset);
                 (start_offset, data_len)
             })
             .take_while(|(start_offset, data_len)| {
@@ -409,7 +404,7 @@ impl RxStreamOrderer {
     fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
-            .map(|(&start, data)| data.len() as u64 - (self.retired.saturating_sub(start)))
+            .map(|(&start, data)| to_u64(data.len()) - (self.retired.saturating_sub(start)))
             .sum()
     }
 
@@ -422,8 +417,7 @@ impl RxStreamOrderer {
             let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
-                let copy_offset = usize::try_from(max(range_start, self.retired) - range_start)
-                    .expect("u64 fits in usize");
+                let copy_offset = to_usize(max(range_start, self.retired) - range_start);
                 assert!(range_data.len() >= copy_offset);
                 let available = range_data.len() - copy_offset;
                 let space = buf.len() - copied;
@@ -438,7 +432,7 @@ impl RxStreamOrderer {
                     let copy_slc = &range_data[copy_offset..copy_offset + copy_bytes];
                     buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
                     copied += copy_bytes;
-                    self.retired += u64::try_from(copy_bytes).expect("usize fits in u64");
+                    self.retired += to_u64(copy_bytes);
                 }
             } else {
                 // The data in the buffer isn't contiguous.
@@ -722,7 +716,7 @@ impl RecvStream {
                 recv_buf.inbound_frame(offset, data);
                 if fin {
                     let all_recv =
-                        fc.consumed() == recv_buf.retired() + recv_buf.bytes_ready() as u64;
+                        fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready());
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -747,7 +741,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data);
-                if fc.consumed() == recv_buf.retired() + recv_buf.bytes_ready() as u64 {
+                if fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready()) {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -1092,7 +1086,7 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{Encoder, qtrace};
+    use neqo_common::{Encoder, qtrace, to_u64, to_usize};
     use test_fixture::now;
 
     use super::RecvStream;
@@ -1591,7 +1585,7 @@ mod tests {
 
     #[test]
     fn stream_flowc_update() {
-        let mut s = create_stream(1024 * INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+        let mut s = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let mut buf = vec![0u8; INITIAL_LOCAL_MAX_STREAM_DATA + 100]; // Make it overlarge
 
         assert!(!s.has_frames_to_write());
@@ -1627,7 +1621,7 @@ mod tests {
         let conn_events = ConnectionEvents::default();
         RecvStream::new(
             StreamId::from(67),
-            INITIAL_LOCAL_MAX_STREAM_DATA as u64,
+            to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
         )
@@ -1635,11 +1629,11 @@ mod tests {
 
     #[test]
     fn stream_max_stream_data() {
-        let mut s = create_stream(1024 * INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+        let mut s = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         assert!(!s.has_frames_to_write());
         let big_buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
-        s.inbound_stream_frame(false, INITIAL_LOCAL_MAX_STREAM_DATA as u64, &[1; 1])
+        s.inbound_stream_frame(false, to_u64(INITIAL_LOCAL_MAX_STREAM_DATA), &[1; 1])
             .unwrap_err();
     }
 
@@ -1680,14 +1674,14 @@ mod tests {
 
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
-        let mut s = create_stream(1024 * INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+        let mut s = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let mut buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
         // Write from buf at first.
         s.inbound_stream_frame(false, 0, &buf).unwrap();
         // Then read into it.
         s.read(&mut buf).unwrap();
         assert!(s.has_frames_to_write());
-        s.inbound_stream_frame(true, INITIAL_LOCAL_MAX_STREAM_DATA as u64, &[])
+        s.inbound_stream_frame(true, to_u64(INITIAL_LOCAL_MAX_STREAM_DATA), &[])
             .unwrap();
         assert!(!s.has_frames_to_write());
     }
@@ -1711,7 +1705,10 @@ mod tests {
             u64::try_from(SESSION_WINDOW).unwrap(),
         )));
         (
-            create_stream_with_fc(Rc::clone(&session_fc), INITIAL_LOCAL_MAX_STREAM_DATA as u64),
+            create_stream_with_fc(
+                Rc::clone(&session_fc),
+                to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
+            ),
             session_fc,
         )
     }
@@ -1773,7 +1770,7 @@ mod tests {
         )));
         let mut s = RecvStream::new(
             StreamId::from(567),
-            INITIAL_LOCAL_MAX_STREAM_DATA as u64,
+            to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
             Rc::clone(&session_fc),
             ConnectionEvents::default(),
         );
@@ -1960,20 +1957,16 @@ mod tests {
     }
 
     /// Test that the flow controls will send updates.
-    #[expect(
-        clippy::too_many_lines,
-        clippy::cast_possible_truncation,
-        reason = "This is test code."
-    )]
+    #[expect(clippy::too_many_lines, reason = "This is test code.")]
     #[test]
     fn fc_state_recv_7() {
         const CONNECTION_WINDOW: u64 = 1024;
-        const CONNECTION_WINDOW_US: usize = CONNECTION_WINDOW as usize;
+        const CONNECTION_WINDOW_US: usize = to_usize(CONNECTION_WINDOW);
 
         const STREAM_WINDOW: u64 = CONNECTION_WINDOW / 2;
-        const STREAM_WINDOW_US: usize = STREAM_WINDOW as usize;
+        const STREAM_WINDOW_US: usize = to_usize(STREAM_WINDOW);
 
-        const WINDOW_UPDATE_FRACTION_US: usize = WINDOW_UPDATE_FRACTION as usize;
+        const WINDOW_UPDATE_FRACTION_US: usize = to_usize(WINDOW_UPDATE_FRACTION);
 
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),

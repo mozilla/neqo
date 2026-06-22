@@ -22,6 +22,7 @@ pub mod tos;
 use std::fmt::Write as _;
 
 use enum_map::Enum;
+use static_assertions::const_assert_eq;
 use strum::Display;
 
 #[cfg(feature = "build-fuzzing-corpus")]
@@ -82,6 +83,30 @@ pub const fn const_max(a: usize, b: usize) -> usize {
 #[must_use]
 pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a > b) as usize]
+}
+
+// Both conversions below are safe on all targets where usize and u64 are the
+// same width (i.e., 64-bit targets). The assertion enforces this at compile time.
+const_assert_eq!(usize::BITS, u64::BITS);
+
+/// Convert a `usize` to `u64`.
+#[expect(clippy::inline_always, reason = "trivial numeric conversion")]
+#[inline(always)]
+#[must_use]
+pub const fn to_u64(v: usize) -> u64 {
+    v as u64
+}
+
+/// Convert a `u64` to `usize`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "const_assert_eq above ensures usize::BITS == u64::BITS"
+)]
+#[expect(clippy::inline_always, reason = "trivial numeric conversion")]
+#[inline(always)]
+#[must_use]
+pub const fn to_usize(v: u64) -> usize {
+    v as usize
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]

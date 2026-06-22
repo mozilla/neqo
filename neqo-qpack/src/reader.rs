@@ -398,7 +398,7 @@ pub(crate) mod test_receiver {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
-    use neqo_common::Encoder;
+    use neqo_common::{Encoder, to_u64};
     use test_receiver::TestReceiver;
 
     use super::{
@@ -737,7 +737,7 @@ mod tests {
         let mut data = Encoder::default();
         data.encode_prefixed_encoded_int(
             Prefix::new(0x00, PREFIX_LEN + 1),
-            (LiteralReader::MAX_LEN + 1) as u64,
+            to_u64(LiteralReader::MAX_LEN + 1),
         );
         let mut buffer = ReceiverBufferWrapper::new(data.as_ref());
         assert_eq!(

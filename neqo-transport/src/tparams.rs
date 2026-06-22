@@ -910,7 +910,7 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     use TransportParameterId::*;
-    use neqo_common::{Decoder, Encoder, qdebug};
+    use neqo_common::{Decoder, Encoder, qdebug, to_u64};
 
     use super::PreferredAddress;
     use crate::{
@@ -1315,7 +1315,7 @@ mod tests {
 
     #[test]
     fn max_udp_payload_size_boundary() {
-        let min = crate::packet::MIN_INITIAL_PACKET_SIZE as u64;
+        let min = to_u64(crate::packet::MIN_INITIAL_PACKET_SIZE);
         assert!(decode_tp_integer(MaxUdpPayloadSize, min).is_ok());
         assert!(decode_tp_integer(MaxUdpPayloadSize, min - 1).is_err());
     }

@@ -1013,7 +1013,7 @@ mod tests {
     const SUB_PC: Duration = Duration::from_millis(100 * PERSISTENT_CONG_THRESH as u64);
     /// The minimum time between packets to cause persistent congestion.
     /// Uses an odd expression because `Duration` arithmetic isn't `const`.
-    const PC: Duration = Duration::from_nanos(100_000_000 * (PERSISTENT_CONG_THRESH as u64) + 1);
+    const PC: Duration = Duration::from_nanos(100_000_000 * PERSISTENT_CONG_THRESH as u64 + 1);
 
     fn cwnd_is_default(cc: &ClassicCongestionController<ClassicSlowStart, NewReno>) {
         assert_eq!(cc.cwnd(), cc.cwnd_initial());

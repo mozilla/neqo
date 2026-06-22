@@ -25,7 +25,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace, to_u64};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
@@ -1630,8 +1630,7 @@ impl CryptoStreams {
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
-            header_len +=
-                Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
+            header_len += Encoder::varint_len(to_u64(length)) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_frame(FrameType::Crypto, |b| {
@@ -1674,7 +1673,7 @@ impl CryptoStreams {
                 // `left` is short enough to fit into this packet. So send from the *end*
                 // of `right`, so that the second half of the SNI is in another packet.
                 let right_len = right.len() + left.len() - limit;
-                right_offset += right_len as u64;
+                right_offset += to_u64(right_len);
                 (_, right) = right.split_at(right_len);
             } else if right.len() <= limit {
                 // `right` is short enough to fit into this packet. So only send a part of `left`.
@@ -1706,7 +1705,7 @@ impl CryptoStreams {
                     let packets_needed = data.len().div_ceil(builder.limit());
                     let limit = data.len() / packets_needed;
                     let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                        limit_chunks((offset, left), (offset + to_u64(mid), right), limit);
                     (
                         write_chunk(right_offset, right, builder),
                         write_chunk(left_offset, left, builder),

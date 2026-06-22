@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, to_u64};
 
 use crate::{
     Error, Res,
@@ -253,7 +253,7 @@ impl HeaderTable {
             if !e.can_reduce(self.acked_inserts_cnt) {
                 return false;
             }
-            self.used -= u64::try_from(e.size()).expect("usize fits in u64");
+            self.used -= to_u64(e.size());
             self.dynamic.pop_back();
         }
         true
@@ -268,11 +268,11 @@ impl HeaderTable {
             .map(DynamicTableEntry::size)
             .sum();
 
-        self.used - u64::try_from(evictable_size).expect("usize fits in u64") <= reduce
+        self.used - to_u64(evictable_size) <= reduce
     }
 
     pub fn insert_possible(&self, size: usize) -> bool {
-        let size = u64::try_from(size).expect("usize fits in u64");
+        let size = to_u64(size);
         size <= self.capacity && self.can_evict_to(self.capacity - size)
     }
 
@@ -423,7 +423,7 @@ mod tests {
 
             table.increment_acked(1).unwrap();
 
-            let first_entry_size = table.get_dynamic_with_abs_index(0).unwrap().size() as u64;
+            let first_entry_size = to_u64(table.get_dynamic_with_abs_index(0).unwrap().size());
 
             assert!(table.can_evict_to(first_entry_size));
             assert!(!table.can_evict_to(0));

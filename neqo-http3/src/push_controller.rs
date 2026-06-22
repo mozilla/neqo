@@ -13,7 +13,7 @@ use std::{
     slice::SliceIndex,
 };
 
-use neqo_common::{Header, qerror, qinfo, qtrace};
+use neqo_common::{Header, qerror, qinfo, qtrace, to_u64};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -112,13 +112,12 @@ impl ActivePushStreams {
     #[must_use]
     pub fn number_done(&self) -> PushId {
         self.first_push_id
-            + u64::try_from(
+            + to_u64(
                 self.push_streams
                     .iter()
                     .filter(|&e| e == &PushState::Closed)
                     .count(),
             )
-            .expect("usize fits in u64")
     }
 
     pub fn clear(&mut self) {

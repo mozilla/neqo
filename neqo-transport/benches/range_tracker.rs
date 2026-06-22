@@ -12,6 +12,7 @@
 use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use neqo_common::to_u64;
 use neqo_transport::send_stream::RangeTracker;
 
 const CHUNK: usize = 1000;
@@ -20,11 +21,11 @@ fn build_coalesce(count: usize) -> RangeTracker {
     let mut used = RangeTracker::default();
     used.mark_acked(0, CHUNK); // frontier at CHUNK
     // One big Sent range covering exactly the gap and all the acked chunks placed below.
-    used.mark_sent(CHUNK as u64, 2 * count * CHUNK);
+    used.mark_sent(to_u64(CHUNK), 2 * count * CHUNK);
     // ACK every *other* chunk so the acked ranges stay separate (a Sent chunk between
     // each prevents merging); the gap at [CHUNK, 2*CHUNK) keeps the frontier blocked.
     for i in 1..=count {
-        used.mark_acked((2 * i * CHUNK) as u64, CHUNK);
+        used.mark_acked(to_u64(2 * i * CHUNK), CHUNK);
     }
     used
 }
@@ -36,7 +37,7 @@ fn coalesce(c: &mut Criterion, count: usize) {
             // Fill the gap and jump the frontier past all `count` acked ranges in one
             // call; coalesce_acked then walks every entry below the new frontier.
             |used: &mut RangeTracker| {
-                used.mark_acked(CHUNK as u64, 2 * count * CHUNK);
+                used.mark_acked(to_u64(CHUNK), 2 * count * CHUNK);
                 black_box(used);
             },
             BatchSize::SmallInput,
@@ -60,7 +61,7 @@ fn mark_sent_sequential(c: &mut Criterion) {
             RangeTracker::default,
             |mut rt| {
                 for i in 0..SENDS {
-                    rt.mark_sent((i * CHUNK) as u64, CHUNK);
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
                 }
                 black_box(rt)
             },
@@ -78,18 +79,18 @@ fn mark_sent_retransmit(c: &mut Criterion) {
             || {
                 let mut rt = RangeTracker::default();
                 for i in 0..SENDS {
-                    rt.mark_sent((i * CHUNK) as u64, CHUNK);
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
                 }
                 // Simulate loss: unmark every 10th chunk.
                 for i in (0..SENDS).step_by(10) {
-                    rt.mark_as_lost((i * CHUNK) as u64, CHUNK);
+                    rt.mark_as_lost(to_u64(i * CHUNK), CHUNK);
                 }
                 rt
             },
             |mut rt| {
                 // Retransmit the lost chunks.
                 for i in (0..SENDS).step_by(10) {
-                    rt.mark_sent((i * CHUNK) as u64, CHUNK);
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
                 }
                 black_box(rt)
             },
@@ -114,7 +115,7 @@ fn mark_acked_gap_empty_covered(c: &mut Criterion) {
             |mut rt| {
                 // ACK every other chunk starting from chunk 1 (above frontier).
                 for i in (1..SENDS).step_by(2) {
-                    rt.mark_acked((i * CHUNK) as u64, CHUNK);
+                    rt.mark_acked(to_u64(i * CHUNK), CHUNK);
                 }
                 black_box(rt)
             },
@@ -133,14 +134,14 @@ fn mark_acked_fragmented(c: &mut Criterion) {
                 let mut rt = RangeTracker::default();
                 // Send only even chunks, creating a fragmented Sent map.
                 for i in (0..SENDS).step_by(2) {
-                    rt.mark_sent((i * CHUNK) as u64, CHUNK);
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
                 }
                 rt
             },
             |mut rt| {
                 // ACK the sent (even) chunks — covered is non-empty each time.
                 for i in (0..SENDS).step_by(2) {
-                    rt.mark_acked((i * CHUNK) as u64, CHUNK);
+                    rt.mark_acked(to_u64(i * CHUNK), CHUNK);
                 }
                 black_box(rt)
             },

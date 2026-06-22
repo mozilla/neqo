@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, to_u64};
 
 use crate::rtt::GRANULARITY;
 
@@ -104,7 +104,7 @@ impl Pacer {
             return self.t;
         };
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
-        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        let divisor = to_u64(cwnd).saturating_mul(Self::SPEEDUP);
         let w_ns = rtt_ns.saturating_mul(deficit) / divisor;
 
         // If the increment is below the timer granularity, send immediately.
@@ -134,7 +134,7 @@ impl Pacer {
     fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u64> {
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
         let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
-        let factor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        let factor = to_u64(cwnd).saturating_mul(Self::SPEEDUP);
         elapsed_ns.saturating_mul(factor).checked_div(rtt_ns)
     }
 

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Decoder, Encoder, to_u64};
 
 use super::hframe::HFrameType;
 use crate::{Error, Res, frames::reader::FrameDecoder};
@@ -33,7 +33,7 @@ impl WebTransportFrame {
 
         enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
-        enc.encode_varint(4 + message.len() as u64);
+        enc.encode_varint(4 + to_u64(message.len()));
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
 
@@ -74,6 +74,8 @@ impl FrameDecoder<Self> for WebTransportFrame {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::to_u64;
+
     use super::{HFrameType, WebTransportFrame};
     use crate::frames::reader::FrameDecoder as _;
 
@@ -96,7 +98,7 @@ mod tests {
         let large_message = vec![0u8; 1025];
         let mut payload = vec![0, 0, 0, 0]; // 4-byte error code
         payload.extend(&large_message);
-        let frame_len = payload.len() as u64;
+        let frame_len = to_u64(payload.len());
 
         let result = WebTransportFrame::decode(
             HFrameType(WebTransportFrame::CLOSE_SESSION),
@@ -112,7 +114,7 @@ mod tests {
         let message = vec![b'a'; 1024];
         let mut payload = vec![0, 0, 0, 0]; // 4-byte error code
         payload.extend(&message);
-        let frame_len = payload.len() as u64;
+        let frame_len = to_u64(payload.len());
 
         let result = WebTransportFrame::decode(
             HFrameType(WebTransportFrame::CLOSE_SESSION),

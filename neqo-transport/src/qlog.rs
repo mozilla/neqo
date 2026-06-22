@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
+use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog, to_u64};
 use qlog::events::{
     ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
     connectivity::{
@@ -225,7 +225,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
-                length: Some(meta.length() as u64),
+                length: Some(to_u64(meta.length())),
                 payload_length: None,
                 data: None,
             };
@@ -264,7 +264,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
             let header =
                 PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(decrypt_err.len() as u64),
+                length: Some(to_u64(decrypt_err.len())),
                 ..Default::default()
             };
 
@@ -642,7 +642,7 @@ impl From<Frame<'_>> for QuicFrame {
             },
             Frame::Crypto { offset, data } => Self::Crypto {
                 offset,
-                length: data.len() as u64,
+                length: to_u64(data.len()),
             },
             Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
@@ -650,7 +650,7 @@ impl From<Frame<'_>> for QuicFrame {
                     details: None,
                     raw: Some(RawInfo {
                         data: Some(hex(token)),
-                        length: Some(token.len() as u64),
+                        length: Some(to_u64(token.len())),
                         payload_length: None,
                     }),
                 },
@@ -664,7 +664,7 @@ impl From<Frame<'_>> for QuicFrame {
             } => Self::Stream {
                 stream_id: stream_id.as_u64(),
                 offset,
-                length: data.len() as u64,
+                length: to_u64(data.len()),
                 fin: Some(fin),
                 raw: None,
             },
@@ -739,7 +739,7 @@ impl From<Frame<'_>> for QuicFrame {
                 raw: None,
             },
             Frame::Datagram { data, .. } => Self::Datagram {
-                length: data.len() as u64,
+                length: to_u64(data.len()),
                 raw: None,
             },
         }

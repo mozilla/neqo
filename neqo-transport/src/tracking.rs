@@ -626,7 +626,7 @@ impl Default for AckTracker {
 mod tests {
     use std::collections::HashSet;
 
-    use neqo_common::{Decoder, Encoder};
+    use neqo_common::{Decoder, Encoder, to_u64};
     use test_fixture::now;
 
     use super::{
@@ -706,7 +706,7 @@ mod tests {
 
         // This will add one too many disjoint ranges.
         for i in 0..=MAX_TRACKED_RANGES {
-            rp.set_received(now(), (i * 2) as u64, true, &mut stats)
+            rp.set_received(now(), to_u64(i * 2), true, &mut stats)
                 .unwrap();
         }
 
@@ -1205,7 +1205,7 @@ mod tests {
         let mut stats = Stats::default();
         // Fill with MAX_TRACKED_RANGES + 2 disjoint ack-eliciting packets.
         for i in 0..=(MAX_TRACKED_RANGES + 1) {
-            rp.set_received(now(), (i * 2) as u64, true, &mut stats)
+            rp.set_received(now(), to_u64(i * 2), true, &mut stats)
                 .unwrap();
         }
         // Two ranges should have been dropped.

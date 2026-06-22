@@ -8,7 +8,7 @@
 
 use std::{cmp::min, fmt::Debug};
 
-use neqo_common::Encoder;
+use neqo_common::{Encoder, to_u64};
 use neqo_transport::{Connection, StreamId, StreamType};
 use test_fixture::{connect, now};
 
@@ -155,7 +155,7 @@ fn unknown_frame() {
 
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<HFrame>(&buf).is_none());
@@ -199,7 +199,7 @@ fn unknown_wt_frame() {
 
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<WebTransportFrame>(&buf).is_none());
@@ -283,7 +283,7 @@ fn complete_and_incomplete_unknown_frame() {
     const UNKNOWN_FRAME_LEN: usize = 832;
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
 
@@ -400,7 +400,7 @@ fn complete_and_incomplete_frames() {
 
     // HFrameType::DATA len=FRAME_LEN
     let f = HFrame::Data {
-        len: FRAME_LEN as u64,
+        len: to_u64(FRAME_LEN),
     };
     let mut enc = Encoder::with_capacity(2);
     f.encode(&mut enc);

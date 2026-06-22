@@ -12,7 +12,7 @@
 use std::{cell::RefCell, hint::black_box, rc::Rc};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use neqo_common::Encoder;
+use neqo_common::{Encoder, to_u64};
 use neqo_transport::{
     ConnectionEvents, FrameStats, SenderFlowControl,
     packet::{self, Builder},
@@ -30,7 +30,7 @@ fn make_streams(n_streams: usize) -> SendStreams {
     let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));
     let conn_events = ConnectionEvents::default();
     let mut ss = SendStreams::default();
-    for i in 0..n_streams as u64 {
+    for i in 0..to_u64(n_streams) {
         let id = StreamId::from(i * 4); // client-initiated bidi IDs
         let mut s = SendStream::new(
             id,
