@@ -162,9 +162,9 @@ dependencies = [
 
 [[package]]
 name = "clang-sys"
-version = "1.7.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67523a3b4be3ce1989d607a828d036249522dd9c1c8de7f4dd2dae43a37369d1"
+checksum = "0b023947811758c97c59bf9d1c188fd619ad4718dcaa767947df1cadb14f39f4"
 dependencies = [
  "glob",
  "libc",
@@ -501,7 +501,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -509,7 +509,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.29.0",
+ "test-fixture 0.29.1",
 ]
 
 [[package]]
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -742,14 +742,14 @@ dependencies = [
  "rustc-hash",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.29.0",
+ "test-fixture 0.29.1",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -759,14 +759,14 @@ dependencies = [
  "qlog",
  "sha1",
  "strum",
- "test-fixture 0.29.0",
+ "test-fixture 0.29.1",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -781,13 +781,13 @@ dependencies = [
  "rustc-hash",
  "sfv",
  "strum",
- "test-fixture 0.29.0",
+ "test-fixture 0.29.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -795,13 +795,13 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.29.0",
+ "test-fixture 0.29.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -817,13 +817,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.29.0",
+ "test-fixture 0.29.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -857,8 +857,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.13.0"
-source = "git+https://github.com/mozilla/nss-rs#2395138084a8892129f024ab813d6c92bb9e1409"
+version = "0.13.2"
+source = "git+https://github.com/mozilla/nss-rs#a77e4287a92ba310b1542be2f53fcde3552a79e3"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -1223,7 +1223,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs#2395138084a8892129f024ab813d6c92bb9e1409"
+source = "git+https://github.com/mozilla/nss-rs#a77e4287a92ba310b1542be2f53fcde3552a79e3"
 dependencies = [
  "log",
  "nss-rs",
@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.29.0"
+version = "0.29.1"
 dependencies = [
  "log",
  "neqo-common",

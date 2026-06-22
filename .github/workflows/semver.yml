@@ -15,6 +15,6 @@ jobs:
     name: Check semver
     runs-on: ubuntu-24.04
     steps:
-      - uses: mozilla/actions/semver@95b043d77461064eed6fbffa7b3f240bcbf19d3b # v1.1.5
+      - uses: mozilla/actions/semver@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
         with:
           package: mtu

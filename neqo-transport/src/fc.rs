@@ -7,6 +7,14 @@
 // Tracks possibly-redundant flow control signals from other code and converts
 // into flow control frames needing to be sent to the remote.
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_panics_doc,
+        reason = "`SenderFlowControl` is only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -142,6 +150,11 @@ where
     fn blocked_needed(&self) -> Option<u64> {
         self.blocked_at
             .filter(|&l| self.blocked_frame && self.limit <= l)
+    }
+
+    /// Returns whether a blocking frame needs to be sent.
+    pub(crate) fn is_blocked(&self) -> bool {
+        self.blocked_needed().is_some()
     }
 
     /// Clear the need to send a blocked frame.

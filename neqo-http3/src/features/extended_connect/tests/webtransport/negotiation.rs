@@ -16,6 +16,7 @@ use crate::{
     Error, HFrame, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State,
     WebTransportEvent,
     settings::{HSetting, HSettingType, HSettings},
+    webtransport::ClientSession as _,
 };
 
 fn check_wt_event(client: &mut Http3Client, wt_enable_client: bool, wt_enable_server: bool) {

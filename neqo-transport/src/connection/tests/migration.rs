@@ -1128,6 +1128,38 @@ fn retire_all() {
     assert_ne!(get_cid(&retire), original_cid);
 }
 
+/// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
+struct RetireUnissued(u64);
+
+impl crate::connection::test_internal::FrameWriter for RetireUnissued {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder
+            .encode_varint(FrameType::RetireConnectionId)
+            .encode_varint(self.0);
+    }
+}
+
+/// RFC 9000, Section 19.16: a `RETIRE_CONNECTION_ID` frame carrying a sequence number
+/// greater than any connection ID the receiver has issued is a connection error.
+#[test]
+fn retire_unissued_connection_id() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // The largest sequence number the client could have issued is far below this,
+    // so it has never been sent to the server.
+    let retire = send_with_extra(&mut server, RetireUnissued(1000), now());
+    client.process_input(retire, now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ProtocolViolation),
+            ..
+        }
+    ));
+}
+
 /// During a graceful migration, if the probed path can't get a new connection ID due
 /// to being forced to retire the one it is using, the migration will fail.
 #[test]

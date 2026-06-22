@@ -744,7 +744,7 @@ fn integration_full_slow_start_to_css_to_ca() {
                 "We should be using CA growth once we detected exit to CA."
             );
             assert_eq!(
-                stats.slow_start_exit_reason,
+                stats.slow_start_exit.map(|e| e.reason),
                 Some(SlowStartExitReason::Heuristic)
             );
             assert_eq!(stats.hystart_css_rounds_finished, HyStart::CSS_ROUNDS);

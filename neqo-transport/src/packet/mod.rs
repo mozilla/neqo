@@ -1116,7 +1116,7 @@ impl Deref for Decrypted<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "bench"))]
 pub const LIMIT: usize = 2048;
 
 #[cfg(all(test, not(feature = "disable-encryption")))]

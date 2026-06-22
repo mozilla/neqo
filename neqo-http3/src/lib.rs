@@ -24,8 +24,8 @@ implementation is not meant to be used in production and its only purpose is to 
 of the client-side code.
 
 __`WebTransport`__
-([draft version 2](https://datatracker.ietf.org/doc/html/draft-vvv-webtransport-http3-02)) is
-supported and can be enabled using [`Http3Parameters`](struct.Http3Parameters.html).
+WebTransport is supported
+and can be enabled using [`Http3Parameters`](struct.Http3Parameters.html).
 
 ## Interaction with an application
 
@@ -136,6 +136,7 @@ while let Some(event) = client.next_event() {
 mod buffered_send_stream;
 mod client_events;
 mod conn_params;
+pub mod connect_udp;
 mod connection;
 mod connection_client;
 mod connection_server;
@@ -161,6 +162,7 @@ mod server_connection_events;
 mod server_events;
 mod settings;
 mod stream_type_reader;
+pub mod webtransport;
 
 use std::{cell::RefCell, fmt::Debug, rc::Rc, time::Instant};
 
@@ -178,10 +180,7 @@ pub use neqo_transport::{Output, StreamId, streams::SendOrder};
 pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
-pub use server_events::{
-    ConnectUdpRequest, ConnectUdpServerEvent, Http3OrWebTransportStream, Http3ServerEvent,
-    WebTransportRequest, WebTransportServerEvent,
-};
+pub use server_events::{Http3OrWebTransportStream, Http3ServerEvent};
 #[cfg(fuzzing)]
 pub use settings::HSettings;
 use stream_type_reader::NewStreamType;
@@ -433,6 +432,12 @@ enum ReceiveOutput {
 
 trait Stream: Debug {
     fn stream_type(&self) -> Http3StreamType;
+
+    // Unreachable: callers filter by ExtendedConnect before calling.
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn session_protocol(&self) -> Option<String> {
+        None
+    }
 }
 
 trait RecvStream: Stream {
