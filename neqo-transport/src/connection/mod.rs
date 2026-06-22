@@ -3424,7 +3424,7 @@ impl Connection {
             }
             Frame::RetireConnectionId { sequence_number } => {
                 self.stats.borrow_mut().frame_rx.retire_connection_id += 1;
-                self.cid_manager.retire(sequence_number);
+                self.cid_manager.retire(sequence_number)?;
             }
             Frame::PathChallenge { data } => {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
