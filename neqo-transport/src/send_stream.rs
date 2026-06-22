@@ -808,7 +808,7 @@ impl SendStream {
         self.send_group
     }
 
-    pub const fn set_send_group(&mut self, group_id: Option<SendGroupId>) {
+    pub(crate) const fn set_send_group(&mut self, group_id: Option<SendGroupId>) {
         self.send_group = group_id;
     }
 
