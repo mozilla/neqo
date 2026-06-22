@@ -232,7 +232,7 @@ impl RxStreamOrderer {
                 self.end,
                 self.data_ranges
                     .last_key_value()
-                    .map_or(self.retired, |(&k, v)| { k + to_u64(v.len()) }),
+                    .map_or(self.retired, |(&k, v)| k + to_u64(v.len())),
                 "end must equal the end of the last range, or retired if empty"
             );
             self.received += to_u64(new_data.len());
