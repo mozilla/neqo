@@ -4,33 +4,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-/// A send-group identifier, unique within the connection that minted it.
-///
-/// `Id(0)` is never valid; 0 is reserved as a sentinel by the transport scheduler.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Id(u64);
+use neqo_transport::streams::SendGroupId;
 
-impl Id {
-    #[must_use]
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
-}
-
-/// Mints connection-unique send-group [`Id`]s. Owned by the connection rather than a
+/// Mints connection-unique send-group [`SendGroupId`]s. Owned by the connection rather than a
 /// global, so uniqueness holds within a connection no matter which thread it runs on.
 #[derive(Debug, Default)]
 pub struct Generator(u64);
 
 impl Generator {
-    /// Mint the next send-group [`Id`]. IDs start at 1; 0 is reserved as a sentinel.
+    /// Mint the next send-group [`SendGroupId`]. IDs start at 1; 0 is reserved as a sentinel.
     ///
     /// # Panics
     ///
     /// Panics if the counter overflows `u64::MAX`.
-    pub const fn next_id(&mut self) -> Id {
+    pub const fn next_id(&mut self) -> SendGroupId {
         let id = self.0.checked_add(1).expect("SendGroup ID overflow");
         self.0 = id;
-        Id(id)
+        SendGroupId::new(id)
     }
 }

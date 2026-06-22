@@ -171,13 +171,15 @@ pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, SessionAcceptAction};
 pub use connection_client::Http3Client;
-pub use features::extended_connect::send_group::Id as SendGroupId;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
 use neqo_qpack::Error as QpackError;
 use neqo_transport::{AppError, Connection, Error as TransportError, recv_stream, send_stream};
-pub use neqo_transport::{Output, StreamId, streams::SendOrder};
+pub use neqo_transport::{
+    Output, StreamId,
+    streams::{SendGroupId, SendOrder},
+};
 pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;

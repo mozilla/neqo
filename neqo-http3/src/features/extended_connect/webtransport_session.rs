@@ -11,7 +11,7 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, StreamId, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 use sfv::{BareItem, Item, Parser};
 
@@ -19,7 +19,6 @@ use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
-        send_group::Id as SendGroupId,
         session::{DgramContextIdError, Protocol, State},
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},

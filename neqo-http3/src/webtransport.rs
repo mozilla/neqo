@@ -234,7 +234,7 @@ impl ClientSession for Http3Client {
         // transport update fails (e.g. the stream was closed), that is self-healing:
         // stream teardown clears both layers.
         handler.stream_set_sendgroup(stream_id, sendgroup)?;
-        conn.stream_sendgroup(stream_id, Some(sendgroup.as_u64().into()))
+        conn.stream_sendgroup(stream_id, Some(sendgroup))
             .map_err(|_| Error::InvalidStreamId)
     }
 

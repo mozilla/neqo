@@ -13,7 +13,7 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
-use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
+use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
@@ -21,7 +21,6 @@ use crate::{
     SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
-        send_group::Id as SendGroupId,
     },
     frames::HFrame,
     priority::PriorityHandler,

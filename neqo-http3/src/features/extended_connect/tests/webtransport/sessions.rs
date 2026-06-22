@@ -5,14 +5,17 @@
 // except according to those terms.
 
 use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
-use neqo_transport::{StreamId, StreamType, streams::SendOrder};
+use neqo_transport::{
+    StreamId, StreamType,
+    streams::{SendGroupId, SendOrder},
+};
 use test_fixture::now;
 
 use crate::{
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
     Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
-        CloseReason, send_group,
+        CloseReason,
         tests::webtransport::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
@@ -27,7 +30,7 @@ fn wt_with_session() -> (WtTest, StreamId) {
     (wt, session_id)
 }
 
-fn register_group(wt: &mut WtTest, session_id: StreamId) -> send_group::Id {
+fn register_group(wt: &mut WtTest, session_id: StreamId) -> SendGroupId {
     wt.client
         .webtransport_create_send_group(session_id)
         .unwrap()
@@ -43,7 +46,7 @@ fn data_stream_ids(wt: &WtTest) -> Vec<StreamId> {
     ids
 }
 
-fn create_stream(wt: &mut WtTest, session_id: StreamId, group: Option<send_group::Id>) -> StreamId {
+fn create_stream(wt: &mut WtTest, session_id: StreamId, group: Option<SendGroupId>) -> StreamId {
     wt.client
         .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, group)
         .unwrap()

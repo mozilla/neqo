@@ -18,7 +18,7 @@ use neqo_common::{
 use neqo_qpack as qpack;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
-    streams::SendOrder,
+    streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
@@ -34,7 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            send_group::{Generator as SendGroupGenerator, Id as SendGroupId},
+            send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -1490,7 +1490,7 @@ impl Http3Connection {
         // Register the stream with its send group in the transport scheduler so that
         // sendOrder is evaluated per-group and groups get fair bandwidth allocation.
         if let Some(group_id) = send_group {
-            conn.stream_sendgroup(stream_id, Some(group_id.as_u64().into()))?;
+            conn.stream_sendgroup(stream_id, Some(group_id))?;
         }
 
         self.webtransport_create_stream_internal(

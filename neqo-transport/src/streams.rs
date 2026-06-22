@@ -50,11 +50,11 @@ impl SendGroupId {
     pub const fn new(id: u64) -> Self {
         Self(id)
     }
-}
 
-impl From<u64> for SendGroupId {
-    fn from(id: u64) -> Self {
-        Self(id)
+    /// The underlying integer, e.g. for wire encoding.
+    #[must_use]
+    pub const fn as_u64(self) -> u64 {
+        self.0
     }
 }
 

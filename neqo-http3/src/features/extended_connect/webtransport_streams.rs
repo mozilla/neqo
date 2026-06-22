@@ -7,9 +7,9 @@
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId, recv_stream, send_stream};
+use neqo_transport::{Connection, StreamId, recv_stream, send_stream, streams::SendGroupId};
 
-use super::{send_group::Id as SendGroupId, session::Session};
+use super::session::Session;
 use crate::{
     CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, RecvStreamEvents, Res,
     SendStream, SendStreamEvents, Stream,
