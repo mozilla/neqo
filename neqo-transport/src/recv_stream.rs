@@ -180,14 +180,17 @@ pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
-    /// Offset of the rightmost received byte (the end of the last entry in
-    /// `data_ranges`, or `retired` if the map is empty).
+    /// Exclusive end offset of the rightmost received range (the end of the
+    /// last entry in `data_ranges`, or `retired` if the map is empty).
     end: u64,
 }
 
 impl RxStreamOrderer {
-    /// Maximum length of a buffered range before a new entry is created instead of extending.
-    const RANGE_LEN: usize = 4096;
+    /// Target maximum length of a buffered range before a new entry is created instead of
+    /// extending. This is a target, not a hard maximum: a single frame larger than this value is
+    /// still buffered whole. Because the extend check tests the *existing* entry length, an
+    /// extended chunk can end up slightly larger than `RANGE_TARGET` (by up to one frame's worth).
+    const RANGE_TARGET: usize = 4096;
 
     #[must_use]
     pub fn new() -> Self {
@@ -237,15 +240,18 @@ impl RxStreamOrderer {
             );
             self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
             // Adjacent: try to extend the last entry to avoid a BTreeMap insert.
-            // Gap (new_start > end): short-circuits straight to insert.
-            if new_start != self.end
-                || self
+            // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
+            // (by up to one frame). Gap (new_start > end): not extended, falls through to insert.
+            let extended = new_start == self.end
+                && self
                     .data_ranges
                     .last_entry()
-                    .filter(|e| e.get().len() < Self::RANGE_LEN)
-                    .map(|mut e| e.get_mut().extend_from_slice(new_data))
-                    .is_none()
-            {
+                    .filter(|e| e.get().len() < Self::RANGE_TARGET)
+                    .is_some_and(|mut e| {
+                        e.get_mut().extend_from_slice(new_data);
+                        true
+                    });
+            if !extended {
                 self.data_ranges.insert(new_start, new_data.to_vec());
             }
             // new_end > new_start >= end, so direct assignment is correct.
@@ -268,9 +274,10 @@ impl RxStreamOrderer {
                 new_start += overlap;
                 new_data = &new_data[usize::try_from(overlap).expect("u64 fits in usize")..];
                 // If it is small enough, extend the previous buffer.
-                // This can't always extend, because otherwise the buffer could end up
-                // growing indefinitely without being released.
-                prev_vec.len() < Self::RANGE_LEN && prev_end == new_start
+                // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
+                // to one frame). This can't always extend, because otherwise the
+                // buffer could end up growing indefinitely without being released.
+                prev_vec.len() < Self::RANGE_TARGET && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
