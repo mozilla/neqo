@@ -66,7 +66,6 @@ codspeed.memory = false # FIXME: Disabled due to high variance in results.
 [[package.metadata.bench]]
 name = "transfer_simulated"
 codspeed.mode = "simulation"
-codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
 
 [[package.metadata.bench]]
 name = "rx_stream_orderer"
@@ -79,6 +78,7 @@ codspeed.mode = "simulation"
 [[package.metadata.bench]]
 name = "sent_packets"
 codspeed.mode = "simulation"
+codspeed.memory = false # Near-zero allocation in the measured path; memory numbers are noise.
 
 [[package.metadata.bench]]
 name = "min_bandwidth"
@@ -88,10 +88,12 @@ codspeed.memory = false # Not a Criterion benchmark; plain fn main() with simula
 [[package.metadata.bench]]
 name = "pacer"
 codspeed.mode = "simulation"
+codspeed.memory = false # Pure arithmetic in the measured path; no allocation to profile.
 
 [[package.metadata.bench]]
 name = "frame_decode"
 codspeed.mode = "simulation"
+codspeed.memory = false # Frame::decode borrows the input slice; no allocation to profile.
 
 [[package.metadata.bench]]
 name = "packet_codec"

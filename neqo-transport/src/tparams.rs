@@ -295,10 +295,14 @@ impl TransportParameter {
             | TransportParameterId::InitialMaxStreamDataBidiLocal
             | TransportParameterId::InitialMaxStreamDataBidiRemote
             | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::MaxAckDelay
             | TransportParameterId::MaxDatagramFrameSize => match d.decode_varint() {
                 Some(v) => Self::Integer(v),
                 None => return Err(Error::TransportParameter),
+            },
+            TransportParameterId::MaxAckDelay => match d.decode_varint() {
+                // RFC 9000, Section 18.2: "Values of 2^14 or greater are invalid."
+                Some(v) if v < (1 << 14) => Self::Integer(v),
+                _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::InitialMaxStreamsBidi
             | TransportParameterId::InitialMaxStreamsUni => match d.decode_varint() {
@@ -1320,6 +1324,14 @@ mod tests {
     fn ack_delay_exponent_boundary() {
         assert!(decode_tp_integer(AckDelayExponent, 20).is_ok());
         assert!(decode_tp_integer(AckDelayExponent, 21).is_err());
+    }
+
+    #[test]
+    fn max_ack_delay_boundary() {
+        // Just below the limit is valid.
+        assert!(decode_tp_integer(MaxAckDelay, (1 << 14) - 1).is_ok());
+        // At the limit (2^14) and above is an error.
+        assert!(decode_tp_integer(MaxAckDelay, 1 << 14).is_err());
     }
 
     #[test]

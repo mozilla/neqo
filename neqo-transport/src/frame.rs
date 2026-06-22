@@ -603,16 +603,23 @@ impl<'a> Frame<'a> {
                 stream_data_limit: dv(dec)?,
             }),
             FrameType::StreamsBlockedBiDi | FrameType::StreamsBlockedUniDi => {
+                let m = dv(dec)?;
+                if m > (1 << 60) {
+                    return Err(Error::StreamLimit);
+                }
                 Ok(Self::StreamsBlocked {
                     stream_type: t.try_into()?,
-                    stream_limit: dv(dec)?,
+                    stream_limit: m,
                 })
             }
             FrameType::NewConnectionId => {
                 let sequence_number = dv(dec)?;
                 let retire_prior = dv(dec)?;
+                if retire_prior > sequence_number {
+                    return Err(Error::FrameEncoding);
+                }
                 let connection_id = d(dec.decode_vec(1))?;
-                if connection_id.len() > ConnectionId::MAX_LEN {
+                if connection_id.is_empty() || connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
                 let stateless_reset_token = Srt::try_from(dec)?;
@@ -956,6 +963,29 @@ mod tests {
     fn too_large_new_connection_id() {
         let mut enc = Encoder::from_hex("18523400"); // up to the CID
         enc.encode_vvec(&[0x0c; ConnectionId::MAX_LEN + 10]);
+        enc.encode(&[0x11; 16][..]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
+    fn zero_length_new_connection_id() {
+        let mut enc = Encoder::from_hex("18523400"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[]); // zero-length connection ID
+        enc.encode(&[0x11; 16][..]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
+    fn new_connection_id_retire_prior_after_sequence_number() {
+        // retire_prior (5) greater than sequence_number (2).
+        let mut enc = Encoder::from_hex("180205"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[0x01, 0x02]);
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
@@ -1420,6 +1450,18 @@ mod tests {
     fn decode_max_streams_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x12); // MaxStreamsBiDi
+        enc.encode_varint((1u64 << 60) + 1);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::StreamLimit
+        );
+    }
+
+    /// A `StreamsBlocked` frame with value > 2^60 is rejected.
+    #[test]
+    fn decode_streams_blocked_exceeds_limit() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x16); // StreamsBlockedBiDi
         enc.encode_varint((1u64 << 60) + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),

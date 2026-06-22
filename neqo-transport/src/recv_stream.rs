@@ -180,9 +180,18 @@ pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
+    /// Exclusive end offset of the rightmost received range (the end of the
+    /// last entry in `data_ranges`, or `retired` if the map is empty).
+    end: u64,
 }
 
 impl RxStreamOrderer {
+    /// Target maximum length of a buffered range before a new entry is created instead of
+    /// extending. This is a target, not a hard maximum: a single frame larger than this value is
+    /// still buffered whole. Because the extend check tests the *existing* entry length, an
+    /// extended chunk can end up slightly larger than `RANGE_TARGET` (by up to one frame's worth).
+    const RANGE_TARGET: usize = 4096;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -218,6 +227,37 @@ impl RxStreamOrderer {
             return;
         }
 
+        // Common case: new_start >= end
+        if new_start >= self.end {
+            debug_assert_eq!(
+                self.end,
+                self.data_ranges
+                    .last_key_value()
+                    .map_or(self.retired, |(&k, v)| {
+                        k + u64::try_from(v.len()).expect("usize fits in u64")
+                    }),
+                "end must equal the end of the last range, or retired if empty"
+            );
+            self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
+            // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
+            // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
+            // (by up to one frame). Gap (new_start > end): falls through to insert.
+            if new_start == self.end
+                && let Some(mut e) = self
+                    .data_ranges
+                    .last_entry()
+                    .filter(|e| e.get().len() < Self::RANGE_TARGET)
+            {
+                e.get_mut().extend_from_slice(new_data);
+            } else {
+                self.data_ranges.insert(new_start, new_data.to_vec());
+            }
+            // new_end > new_start >= end, so direct assignment is correct.
+            self.end = new_end;
+            return;
+        }
+
+        // Retransmission/overlap: new_start < end
         let extend = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
@@ -227,15 +267,15 @@ impl RxStreamOrderer {
                 //   NNNNNN            NN
                 // NNNNNNNN            NN
                 // Add a range containing only new data
-                // (In-order frames will take this path, with no overlap)
                 let overlap = prev_end.saturating_sub(new_start);
                 qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
                 new_data = &new_data[usize::try_from(overlap).expect("u64 fits in usize")..];
                 // If it is small enough, extend the previous buffer.
-                // This can't always extend, because otherwise the buffer could end up
-                // growing indefinitely without being released.
-                prev_vec.len() < 4096 && prev_end == new_start
+                // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
+                // to one frame). This can't always extend, because otherwise the
+                // buffer could end up growing indefinitely without being released.
+                prev_vec.len() < Self::RANGE_TARGET && prev_end == new_start
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
@@ -312,6 +352,10 @@ impl RxStreamOrderer {
             } else {
                 self.data_ranges.insert(new_start, to_add.to_vec());
             }
+            // new_start was advanced by overlap, so new_end is still the real end.
+            // When to_add is empty, a surviving forward entry with next_end >= new_end
+            // exists, so self.end is already correct — the max() is a no-op in that case.
+            self.end = max(self.end, new_end);
         }
     }
 
@@ -408,6 +452,7 @@ impl RxStreamOrderer {
         }
 
         self.data_ranges.clear();
+        self.end = self.retired; // All entries were consumed.
         copied
     }
 

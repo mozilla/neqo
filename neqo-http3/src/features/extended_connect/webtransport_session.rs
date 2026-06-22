@@ -11,7 +11,7 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
-use neqo_transport::{Connection, Error as TransportError, StreamId};
+use neqo_transport::{Connection, StreamId};
 use rustc_hash::FxHashSet as HashSet;
 use sfv::{BareItem, Item, Parser};
 
@@ -257,43 +257,5 @@ impl Protocol for Session {
             "[{self}] WebTransport does not support datagram capsules."
         );
         Ok(())
-    }
-}
-
-pub trait WebTransportExportKeyingMaterial {
-    fn webtransport_export_keying_material(
-        &self,
-        session_id: StreamId,
-        label: &[u8],
-        context: &[u8],
-        out: &mut [u8],
-    ) -> Res<()>;
-}
-
-impl WebTransportExportKeyingMaterial for Connection {
-    fn webtransport_export_keying_material(
-        &self,
-        session_id: StreamId,
-        label: &[u8],
-        context: &[u8],
-        out: &mut [u8],
-    ) -> Res<()> {
-        // encode_vec(1, …) uses a 1-byte length prefix, so max 255 bytes.
-        if out.is_empty() || label.len() > 255 || context.len() > 255 {
-            return Err(Error::InvalidInput);
-        }
-
-        let mut wt_context = Encoder::with_capacity(
-            Encoder::varint_len(session_id.as_u64()) + 1 + label.len() + 1 + context.len(),
-        );
-        wt_context.encode_varint(session_id.as_u64());
-        wt_context.encode_vec(1, label);
-        wt_context.encode_vec(1, context);
-
-        self.export_keying_material("EXPORTER-WebTransport", wt_context.as_ref(), out)
-            .map_err(|e| match e {
-                TransportError::InvalidInput => Error::InvalidInput,
-                other => Error::Transport(other),
-            })
     }
 }
