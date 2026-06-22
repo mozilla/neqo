@@ -1212,7 +1212,7 @@ mod tests {
     }
 
     /// RFC 9000, Section 7.4: a duplicate transport parameter is a connection
-    /// error of type TRANSPORT_PARAMETER_ERROR.
+    /// error of type [`TRANSPORT_PARAMETER_ERROR`].
     #[test]
     fn duplicate_tp_rejected() {
         let mut enc = Encoder::default();
