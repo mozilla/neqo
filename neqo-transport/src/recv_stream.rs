@@ -239,19 +239,17 @@ impl RxStreamOrderer {
                 "end must equal the end of the last range, or retired if empty"
             );
             self.received += u64::try_from(new_data.len()).expect("usize fits in u64");
-            // Adjacent: try to extend the last entry to avoid a BTreeMap insert.
+            // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
             // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
-            // (by up to one frame). Gap (new_start > end): not extended, falls through to insert.
-            let extended = new_start == self.end
-                && self
+            // (by up to one frame). Gap (new_start > end): falls through to insert.
+            if new_start == self.end
+                && let Some(mut e) = self
                     .data_ranges
                     .last_entry()
                     .filter(|e| e.get().len() < Self::RANGE_TARGET)
-                    .is_some_and(|mut e| {
-                        e.get_mut().extend_from_slice(new_data);
-                        true
-                    });
-            if !extended {
+            {
+                e.get_mut().extend_from_slice(new_data);
+            } else {
                 self.data_ranges.insert(new_start, new_data.to_vec());
             }
             // new_end > new_start >= end, so direct assignment is correct.
@@ -355,6 +353,8 @@ impl RxStreamOrderer {
                 self.data_ranges.insert(new_start, to_add.to_vec());
             }
             // new_start was advanced by overlap, so new_end is still the real end.
+            // When to_add is empty, a surviving forward entry with next_end >= new_end
+            // exists, so self.end is already correct — the max() is a no-op in that case.
             self.end = max(self.end, new_end);
         }
     }
