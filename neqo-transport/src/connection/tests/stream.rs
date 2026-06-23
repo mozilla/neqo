@@ -566,6 +566,36 @@ fn illegal_stream_related_frames() {
 }
 
 #[test]
+/// Server sends a stream-related frame for the wrong half of an existing
+/// unidirectional stream. This should cause the client to close the connection
+/// with `STREAM_STATE_ERROR`.
+fn wrong_directional_stream_frames() {
+    // Frames a sender may not receive. A send-only stream is client-initiated
+    // unidirectional (id 2); it has to exist so the directional check is what
+    // closes the connection rather than the not-yet-created check.
+    for frame_type in [FrameType::ResetStream, FrameType::Stream] {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
+        let dgram = send_with_extra(&mut server, Writer(vec![frame_type.into(), 2, 0, 0]), now());
+        client.process_input(dgram, now());
+        assert!(client.state().closed());
+    }
+
+    // Frames a receiver may not receive. A receive-only stream is
+    // server-initiated unidirectional (id 3); obtain_stream creates it.
+    for frame_type in [FrameType::StopSending, FrameType::MaxStreamData] {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect(&mut client, &mut server);
+        let dgram = send_with_extra(&mut server, Writer(vec![frame_type.into(), 3, 0, 0]), now());
+        client.process_input(dgram, now());
+        assert!(client.state().closed());
+    }
+}
+
+#[test]
 /// Regression <https://github.com/mozilla/neqo/pull/2358>.
 fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
     const REQUEST: &[u8] = b"ping";
