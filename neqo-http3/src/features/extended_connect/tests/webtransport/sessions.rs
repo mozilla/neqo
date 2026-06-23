@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _, to_u64};
+use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{StreamId, StreamType};
 use test_fixture::now;
 
@@ -267,7 +267,7 @@ fn wt_unknown_session_frame_client() {
     // Send an unknown frame.
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     wt.client

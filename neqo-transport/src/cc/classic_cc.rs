@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
+use neqo_common::{Length, const_max, const_min, qdebug, qinfo, qlog::Qlog, qtrace};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::CongestionController;
@@ -120,7 +120,7 @@ pub trait SlowStart: Display + Debug {
 
     /// This is needed by SEARCH to keep its cumulative byte counters in sync during app-limited
     /// periods, when [`SlowStart::on_packets_acked`] is not called.
-    fn record_acked_bytes(&mut self, _new_acked_bytes: usize) {}
+    fn record_acked_bytes<T: Length>(&mut self, _new_acked_bytes: T) {}
 
     /// Handle packets being acknowledged during slow start. Returns the congestion window in bytes
     /// that slow start should be exited with. If slow start isn't exited returns `None`.

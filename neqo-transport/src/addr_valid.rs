@@ -399,7 +399,7 @@ struct NewTokenFrameStatus {
 }
 
 impl NewTokenFrameStatus {
-    fn len(&self) -> usize {
+    const fn len(&self) -> usize {
         1 + Encoder::vvec_len(self.token.len())
     }
 }

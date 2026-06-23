@@ -6,7 +6,7 @@
 
 use std::fmt::{Debug, Write as _};
 
-use neqo_common::{Buffer, Decoder, Encoder, to_u64};
+use neqo_common::{Buffer, Decoder, Encoder};
 use neqo_transport::StreamId;
 use nss::random;
 
@@ -115,9 +115,7 @@ impl HFrame {
                 push_id,
                 header_block,
             } => {
-                enc.encode_varint(to_u64(
-                    header_block.len() + (Encoder::varint_len(u64::from(*push_id))),
-                ));
+                enc.encode_len(header_block.len() + Encoder::varint_len(u64::from(*push_id)));
                 enc.encode_varint(*push_id);
                 enc.encode(header_block);
             }

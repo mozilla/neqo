@@ -155,7 +155,7 @@ fn unknown_frame() {
 
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<HFrame>(&buf).is_none());
@@ -199,7 +199,7 @@ fn unknown_wt_frame() {
 
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<WebTransportFrame>(&buf).is_none());
@@ -283,7 +283,7 @@ fn complete_and_incomplete_unknown_frame() {
     const UNKNOWN_FRAME_LEN: usize = 832;
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(to_u64(UNKNOWN_FRAME_LEN));
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
 

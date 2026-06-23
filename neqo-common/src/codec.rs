@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
 };
 
-use crate::hex_with_len;
+use crate::{Length, hex_with_len, to_u64};
 
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 
@@ -315,17 +315,18 @@ impl<B: Buffer> Encoder<B> {
         }
     }
 
+    /// Encode a length or byte count as a QUIC varint, accepting either `usize` or `u64`.
+    pub fn encode_len<T: Length>(&mut self, v: T) -> &mut Self {
+        self.encode_varint(v.as_u64())
+    }
+
     /// Encode a vector in TLS style.
     ///
     /// # Panics
     ///
     /// When `v` is longer than 2^n.
     pub fn encode_vec(&mut self, n: usize, v: &[u8]) -> &mut Self {
-        self.encode_uint(
-            n,
-            u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"),
-        )
-        .encode(v)
+        self.encode_uint(n, to_u64(v.as_ref().len())).encode(v)
     }
 
     /// Encode a vector in TLS style using a closure for the contents.
@@ -356,8 +357,7 @@ impl<B: Buffer> Encoder<B> {
     ///
     /// When `v` is longer than 2^62.
     pub fn encode_vvec(&mut self, v: &[u8]) -> &mut Self {
-        self.encode_varint(u64::try_from(v.as_ref().len()).expect("v is longer than 2^64"))
-            .encode(v)
+        self.encode_len(v.as_ref().len()).encode(v)
     }
 
     /// Encode a vector with a varint length using a closure.
@@ -452,8 +452,8 @@ impl Encoder<Vec<u8>> {
     ///
     /// When `len` doesn't fit in a `u64`.
     #[must_use]
-    pub fn vvec_len(len: usize) -> usize {
-        Self::varint_len(u64::try_from(len).expect("usize should fit into u64")) + len
+    pub const fn vvec_len(len: usize) -> usize {
+        Self::varint_len(to_u64(len)) + len
     }
 
     /// Construction of a buffer with a predetermined capacity.

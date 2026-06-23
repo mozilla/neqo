@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Decoder, Encoder, to_u64};
+use neqo_common::{Decoder, Encoder};
 
 use super::hframe::HFrameType;
 use crate::{Error, Res, frames::reader::FrameDecoder};
@@ -33,7 +33,7 @@ impl WebTransportFrame {
 
         enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
-        enc.encode_varint(4 + to_u64(message.len()));
+        enc.encode_len(4 + message.len());
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
 
