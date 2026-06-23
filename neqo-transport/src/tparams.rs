@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace, qwarn};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
@@ -381,7 +381,7 @@ impl TransportParameters {
                     // not understand (see RFC 9413), not for robustness, so reject a duplicate of
                     // a parameter we have already parsed.
                     if tps.params[tipe].is_some() {
-                        qwarn!("Duplicate transport parameter {tipe}");
+                        qinfo!("Duplicate transport parameter {tipe}");
                         return Err(Error::TransportParameter);
                     }
                     tps.set(tipe, tp);
