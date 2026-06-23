@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Length, qdebug, to_u64, to_usize};
+use neqo_common::{qdebug, to_u64, to_usize};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -442,8 +442,8 @@ impl SlowStart for Search {
         }
     }
 
-    fn record_acked_bytes<T: Length>(&mut self, new_acked_bytes: T) {
-        self.acked_bytes = self.acked_bytes.saturating_add(new_acked_bytes.as_u64());
+    fn record_acked_bytes(&mut self, new_acked_bytes: usize) {
+        self.acked_bytes = self.acked_bytes.saturating_add(to_u64(new_acked_bytes));
     }
 
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {

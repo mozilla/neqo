@@ -90,18 +90,14 @@ pub const fn const_min(a: usize, b: usize) -> usize {
 const_assert_eq!(usize::BITS, u64::BITS);
 
 /// A trait for values that represent a length or byte count, convertible
-/// between the wire domain (`u64`) and the in-memory domain (`usize`).
+/// to the wire domain (`u64`).
 pub trait Length: Copy {
     fn as_u64(self) -> u64;
-    fn as_usize(self) -> usize;
 }
 
 impl Length for u64 {
     fn as_u64(self) -> u64 {
         self
-    }
-    fn as_usize(self) -> usize {
-        to_usize(self)
     }
 }
 
@@ -109,18 +105,15 @@ impl Length for usize {
     fn as_u64(self) -> u64 {
         to_u64(self)
     }
-    fn as_usize(self) -> usize {
-        self
-    }
 }
 
 /// Convert a `usize` to `u64`.
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "const_assert_eq above ensures usize::BITS == u64::BITS"
+    reason = "debug_assert roundtrip `v as u64 as usize` contains a u64→usize cast; \
+              const_assert_eq above ensures it is lossless on all supported targets"
 )]
-#[expect(clippy::inline_always, reason = "trivial numeric conversion")]
-#[inline(always)]
+#[inline]
 #[must_use]
 pub const fn to_u64(v: usize) -> u64 {
     debug_assert!(v as u64 as usize == v);
@@ -132,8 +125,7 @@ pub const fn to_u64(v: usize) -> u64 {
     clippy::cast_possible_truncation,
     reason = "const_assert_eq above ensures usize::BITS == u64::BITS"
 )]
-#[expect(clippy::inline_always, reason = "trivial numeric conversion")]
-#[inline(always)]
+#[inline]
 #[must_use]
 pub const fn to_usize(v: u64) -> usize {
     debug_assert!(v as usize as u64 == v);
