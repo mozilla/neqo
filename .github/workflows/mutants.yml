@@ -33,12 +33,12 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: nightly
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -72,12 +72,12 @@ jobs:
         uses: ./.github/actions/minimum-version
         with:
           directory: .
-      - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: nightly
           tools: cargo-mutants
