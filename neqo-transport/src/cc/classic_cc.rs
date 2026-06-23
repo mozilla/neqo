@@ -985,7 +985,7 @@ where
 mod tests {
     use std::time::{Duration, Instant};
 
-    use neqo_common::qinfo;
+    use neqo_common::{qinfo, to_u64};
     use test_fixture::{new_neqo_qlog, now};
 
     use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
@@ -1231,7 +1231,7 @@ mod tests {
             .map(|(i, &t)| {
                 sent::Packet::new(
                     packet::Type::Short,
-                    u64::try_from(i).unwrap(),
+                    to_u64(i),
                     by_pto(t),
                     true,
                     recovery::Tokens::new(),

@@ -328,9 +328,7 @@ pub fn recovery_parameters_set(
                 timer_granularity: Some(u16::try_from(GRANULARITY.as_millis()).expect("fits")),
                 initial_rtt: Some(DEFAULT_INITIAL_RTT.as_secs_f32() * 1000.0),
                 max_datagram_size: Some(u32::try_from(plpmtu).expect("MTU fits in u32")),
-                initial_congestion_window: Some(
-                    u64::try_from(CWND_INITIAL_PKTS * plpmtu).expect("fits"),
-                ),
+                initial_congestion_window: Some(to_u64(CWND_INITIAL_PKTS * plpmtu)),
                 minimum_congestion_window: Some(
                     u32::try_from(2 * plpmtu).expect("MTU fits in u32"),
                 ),
@@ -429,13 +427,13 @@ pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
                         pto_count = Some(u16::try_from(v).expect("fits in u16"));
                     }
                     Metric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(v).expect("fits in u64"));
+                        congestion_window = Some(to_u64(v));
                     }
                     Metric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(v).expect("fits in u64"));
+                        bytes_in_flight = Some(to_u64(v));
                     }
                     Metric::SsThresh(v) => {
-                        ssthresh = Some(u64::try_from(v).expect("fits in u64"));
+                        ssthresh = Some(to_u64(v));
                     }
                     Metric::PacketsInFlight(v) => packets_in_flight = Some(v),
                     Metric::PacingRate(v) => pacing_rate = Some(v),

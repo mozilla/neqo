@@ -669,7 +669,7 @@ fn continue_when_delivery_rate_steady() {
     let mut cc_stats = CongestionControlStats::default();
     search.on_packet_sent(pn, to_usize(MIN_INITIAL_PACKET_SIZE));
     now += bin_duration + Duration::from_nanos(1);
-    search.record_acked_bytes(to_usize(MIN_INITIAL_PACKET_SIZE / 4));
+    search.record_acked_bytes(MIN_INITIAL_PACKET_SIZE / 4);
     search.on_packets_acked(&rtt_est, pn, INITIAL_CWND, &mut cc_stats, now);
     let max = cc_stats.search_max_norm_diff;
     assert!(max > Some(0));

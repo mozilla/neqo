@@ -13,7 +13,7 @@ use std::{
     slice::SliceIndex,
 };
 
-use neqo_common::{Header, qerror, qinfo, qtrace, to_u64};
+use neqo_common::{Header, qerror, qinfo, qtrace, to_u64, to_usize};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{
@@ -79,7 +79,7 @@ impl ActivePushStreams {
             return None;
         }
 
-        let inx = usize::try_from(u64::from(push_id - self.first_push_id)).ok()?;
+        let inx = to_usize(u64::from(push_id - self.first_push_id));
         if inx >= self.push_streams.len() {
             self.push_streams.resize(inx + 1, PushState::Init);
         }

@@ -290,14 +290,13 @@ impl HeaderTable {
             base: self.base,
             refs: 0,
         };
-        if u64::try_from(entry.size()).map_err(|_| Error::Internal)? > self.capacity
-            || !self
-                .evict_to(self.capacity - u64::try_from(entry.size()).map_err(|_| Error::Internal)?)
+        if to_u64(entry.size()) > self.capacity
+            || !self.evict_to(self.capacity - to_u64(entry.size()))
         {
             return Err(Error::DynamicTableFull);
         }
         self.base += 1;
-        self.used += u64::try_from(entry.size()).map_err(|_| Error::Internal)?;
+        self.used += to_u64(entry.size());
         let index = entry.index();
         self.dynamic.push_front(entry);
         Ok(index)

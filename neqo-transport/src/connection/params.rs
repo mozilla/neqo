@@ -555,7 +555,7 @@ impl ConnectionParameters {
         // default parameters
         tps.local_mut().set_integer(
             ActiveConnectionIdLimit,
-            u64::try_from(ConnectionIdManager::ACTIVE_LIMIT)?,
+            to_u64(ConnectionIdManager::ACTIVE_LIMIT),
         );
         if self.disable_migration {
             tps.local_mut().set_empty(DisableMigration);

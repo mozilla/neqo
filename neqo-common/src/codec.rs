@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
 };
 
-use crate::{Length, hex_with_len, to_u64};
+use crate::{Length, hex_with_len, to_u64, to_usize};
 
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 
@@ -52,8 +52,7 @@ impl<'a> Decoder<'a> {
     /// Only use this for tests because we panic rather than reporting a result.
     #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
-        #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
-        self.skip(usize::try_from(n.expect("invalid length")).unwrap());
+        self.skip(to_usize(n.expect("invalid length")));
     }
 
     /// Skip a vector.  Panics if there isn't enough space.
@@ -386,7 +385,7 @@ impl<B: Buffer> Encoder<B> {
         // As long as encoding more than 63 bytes is rare, this won't cost much relative
         // to the convenience of being able to use this function.
 
-        let v = u64::try_from(len).expect("encoded value fits in a u64");
+        let v = to_u64(len);
         // The lower order byte fits before the inserted block of bytes.
         self.buf.write_at(start, (v & 0xff) as u8);
         let (count, bits) = match () {
@@ -662,7 +661,7 @@ impl Buffer for &mut Vec<u8> {
 
 impl Buffer for Cursor<&mut [u8]> {
     fn position(&self) -> usize {
-        usize::try_from(self.position()).expect("memory allocation not to exceed usize")
+        to_usize(self.position())
     }
 
     fn as_slice(&self) -> &[u8] {
@@ -677,16 +676,16 @@ impl Buffer for Cursor<&mut [u8]> {
     fn truncate(&mut self, len: usize) {
         let old_position = Buffer::position(self);
         if len < old_position {
-            self.set_position(u64::try_from(len).expect("Position cannot exceed u64"));
+            self.set_position(to_u64(len));
             self.get_mut()[len..old_position].fill(0);
         }
     }
 
     fn pad_to(&mut self, n: usize, v: u8) {
-        let start = usize::try_from(self.position()).expect("Buffer length does not exceed usize");
+        let start = to_usize(self.position());
 
         self.get_mut()[start..n].fill(v);
-        self.set_position(u64::try_from(n).expect("Position cannot exceed u64"));
+        self.set_position(to_u64(n));
     }
 
     fn write_at(&mut self, pos: usize, data: u8) {

@@ -6441,7 +6441,7 @@ mod tests {
         let mut d = Encoder::default();
         hframe.encode(&mut d);
         let d_frame = HFrame::Data {
-            len: u64::try_from(data.len()).unwrap(),
+            len: to_u64(data.len()),
         };
         d_frame.encode(&mut d);
         d.encode(data);

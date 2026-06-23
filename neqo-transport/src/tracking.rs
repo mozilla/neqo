@@ -16,7 +16,7 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{Level, log_enabled};
-use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn};
+use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn, to_u64};
 use nss::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
@@ -468,9 +468,7 @@ impl RecvdPackets {
         // We use the default exponent, so delay is in multiples of 8 microseconds.
         let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
         let ack_delay = min(MAX_VARINT, ack_delay);
-        let Ok(extra_ranges) = u64::try_from(ranges.len() - 1) else {
-            return;
-        };
+        let extra_ranges = to_u64(ranges.len() - 1);
 
         builder.encode_frame(
             if self.ecn_count.is_some() {

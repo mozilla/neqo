@@ -384,7 +384,7 @@ impl RxStreamOrderer {
             })
             // Accumulate, but saturate at usize::MAX.
             .fold(0, |acc: usize, (_, data_len)| {
-                acc.saturating_add(usize::try_from(data_len).unwrap_or(usize::MAX))
+                acc.saturating_add(to_usize(data_len))
             })
     }
 
@@ -1106,7 +1106,7 @@ mod tests {
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
-            let data = &ZEROES[..usize::try_from(r.end - r.start).unwrap()];
+            let data = &ZEROES[..to_usize(r.end - r.start)];
             s.inbound_frame(r.start, data);
         }
 
@@ -1280,9 +1280,9 @@ mod tests {
 
         // Add three chunks.
         s.inbound_frame(0, &[0; CHUNK_SIZE]);
-        let offset = u64::try_from(CHUNK_SIZE).unwrap();
+        let offset = to_u64(CHUNK_SIZE);
         s.inbound_frame(offset, &[0; EXTRA_SIZE]);
-        let offset = u64::try_from(CHUNK_SIZE + EXTRA_SIZE).unwrap();
+        let offset = to_u64(CHUNK_SIZE + EXTRA_SIZE);
         s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         // Read, providing only enough space for the first.
@@ -1325,7 +1325,7 @@ mod tests {
 
         // Add three chunks.
         s.inbound_frame(0, &[0; CHUNK_SIZE]);
-        let offset = u64::try_from(CHUNK_SIZE + EXTRA_SIZE).unwrap();
+        let offset = to_u64(CHUNK_SIZE + EXTRA_SIZE);
         s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         // Read, providing only enough space for the first chunk.
@@ -1334,7 +1334,7 @@ mod tests {
         assert_eq!(count, CHUNK_SIZE);
 
         // Now fill the gap and ensure that everything can be read.
-        let offset = u64::try_from(CHUNK_SIZE).unwrap();
+        let offset = to_u64(CHUNK_SIZE);
         s.inbound_frame(offset, &[0; EXTRA_SIZE]);
         let count = s.read(&mut buf[..]);
         assert_eq!(count, EXTRA_SIZE * 2);
@@ -1349,7 +1349,7 @@ mod tests {
 
         // Add two chunks.
         s.inbound_frame(0, &[0; CHUNK_SIZE]);
-        let offset = u64::try_from(CHUNK_SIZE).unwrap();
+        let offset = to_u64(CHUNK_SIZE);
         s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         // Read, providing only enough space for some of the first chunk.
@@ -1370,7 +1370,7 @@ mod tests {
 
         // Add two chunks.
         s.inbound_frame(0, &[0; CHUNK_SIZE]);
-        let offset = u64::try_from(CHUNK_SIZE).unwrap();
+        let offset = to_u64(CHUNK_SIZE);
         s.inbound_frame(offset, &[0; EXTRA_SIZE]);
 
         let mut buf = [0; 1];
@@ -1702,7 +1702,7 @@ mod tests {
         static_assertions::const_assert!(INITIAL_LOCAL_MAX_STREAM_DATA > SESSION_WINDOW);
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
-            u64::try_from(SESSION_WINDOW).unwrap(),
+            to_u64(SESSION_WINDOW),
         )));
         (
             create_stream_with_fc(
@@ -1738,16 +1738,12 @@ mod tests {
         );
 
         // Switch to SizeKnown state
-        s.inbound_stream_frame(true, 2 * u64::try_from(SESSION_WINDOW).unwrap() - 1, &[0])
+        s.inbound_stream_frame(true, 2 * to_u64(SESSION_WINDOW) - 1, &[0])
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
         // Receive new data that can be read.
-        s.inbound_stream_frame(
-            false,
-            u64::try_from(SESSION_WINDOW).unwrap(),
-            &[0; SESSION_WINDOW / 2 + 1],
-        )
-        .unwrap();
+        s.inbound_stream_frame(false, to_u64(SESSION_WINDOW), &[0; SESSION_WINDOW / 2 + 1])
+            .unwrap();
         assert!(!session_fc.borrow().frame_needed());
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
@@ -1766,7 +1762,7 @@ mod tests {
         // Test DataRecvd state
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
-            u64::try_from(SESSION_WINDOW).unwrap(),
+            to_u64(SESSION_WINDOW),
         )));
         let mut s = RecvStream::new(
             StreamId::from(567),
@@ -1790,8 +1786,7 @@ mod tests {
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
 
-        s.reset(Error::None.code(), u64::try_from(SESSION_WINDOW).unwrap())
-            .unwrap();
+        s.reset(Error::None.code(), to_u64(SESSION_WINDOW)).unwrap();
         assert!(session_fc.borrow().frame_needed());
     }
 

@@ -493,7 +493,7 @@ impl TxBuffer {
 
     fn first_unmarked_range(&mut self) -> Option<(u64, Option<u64>)> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
-        let buffered = u64::try_from(self.buffered()).ok()?;
+        let buffered = to_u64(self.buffered());
         (start != self.retired() + buffered).then_some((start, maybe_len))
     }
 
@@ -516,7 +516,7 @@ impl TxBuffer {
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = usize::try_from(start - self.retired()).ok()?;
+        let buff_off = to_usize(start - self.retired());
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.
@@ -526,9 +526,7 @@ impl TxBuffer {
             &self.send_buf.as_slices().1[buff_off - self.send_buf.as_slices().0.len()..]
         };
 
-        let len = maybe_len.map_or(slc.len(), |range_len| {
-            min(usize::try_from(range_len).unwrap_or(usize::MAX), slc.len())
-        });
+        let len = maybe_len.map_or(slc.len(), |range_len| min(to_usize(range_len), slc.len()));
 
         debug_assert!(len > 0);
         debug_assert!(len <= slc.len());
@@ -1854,7 +1852,9 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace, to_u64};
+    use neqo_common::{
+        Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace, to_u64, to_usize,
+    };
 
     use super::RecoveryToken;
     use crate::{
@@ -2341,7 +2341,7 @@ mod tests {
 
         // Mark almost all as sent. Get what's left
         let one_byte_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 1;
-        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
+        txb.mark_as_sent(0, to_usize(one_byte_from_end));
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
                          && start == one_byte_from_end
@@ -2370,7 +2370,7 @@ mod tests {
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, to_usize(five_bytes_from_end));
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
@@ -2403,7 +2403,7 @@ mod tests {
         // As above
         let forty_bytes_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 40;
 
-        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, to_usize(forty_bytes_from_end));
         assert!(matches!(txb.next_bytes(),
                  Some((start, x)) if x.len() == 40
                  && start == forty_bytes_from_end
@@ -2431,7 +2431,7 @@ mod tests {
 
         // Ack entire first slice and into second slice
         let ten_bytes_past_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) + 10;
-        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
+        txb.mark_as_acked(0, to_usize(ten_bytes_past_end));
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
@@ -3144,7 +3144,7 @@ mod tests {
 
         // The minimum amount of extra space for getting another frame in.
         let mut enc = Encoder::default();
-        enc.encode_varint(u64::try_from(data.len()).unwrap());
+        enc.encode_len(data.len());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;
 

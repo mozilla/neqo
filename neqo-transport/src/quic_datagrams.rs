@@ -163,7 +163,7 @@ impl QuicDatagrams {
         tracking: DatagramTracking,
         stats: &mut Stats,
     ) -> Res<()> {
-        if u64::try_from(data.len())? > self.remote_datagram_size {
+        if to_u64(data.len()) > self.remote_datagram_size {
             qdebug!(
                 "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
                 data.len(),
@@ -187,7 +187,7 @@ impl QuicDatagrams {
     }
 
     pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
-        if self.local_datagram_size < u64::try_from(data.len())? {
+        if self.local_datagram_size < to_u64(data.len()) {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events

@@ -485,7 +485,7 @@ fn multiple_datagram_events() {
 
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(u64::try_from(DATA_SIZE).unwrap())
+            .datagram_size(to_u64(DATA_SIZE))
             .incoming_datagram_queue(MAX_QUEUE),
     );
     let mut server = default_server();
@@ -531,7 +531,7 @@ fn too_many_datagram_events() {
 
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(u64::try_from(DATA_SIZE).unwrap())
+            .datagram_size(to_u64(DATA_SIZE))
             .incoming_datagram_queue(MAX_QUEUE),
     );
     let mut server = default_server();
