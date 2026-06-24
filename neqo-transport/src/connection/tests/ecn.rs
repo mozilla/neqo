@@ -441,7 +441,6 @@ fn ecn_migration_zero_burst_all_cases() {
             // Too few packets sent before and after migration to conclude ECN validation.
             assert_ecn_enabled(before);
             assert_ecn_enabled(after);
-            // Migration succeeds except if the new path drops ECN.
             assert!(migrated);
         }
 
