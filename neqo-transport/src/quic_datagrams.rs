@@ -188,7 +188,10 @@ impl QuicDatagrams {
     }
 
     pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
-        if self.local_datagram_size < u64::try_from(data.len())? {
+        // A `local_datagram_size` of 0 means we advertised a
+        // max_datagram_frame_size of 0, i.e. no DATAGRAM frame support
+        // (RFC 9221, Section 3).
+        if self.local_datagram_size == 0 || self.local_datagram_size < u64::try_from(data.len())? {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events
