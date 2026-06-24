@@ -673,7 +673,11 @@ impl Loss {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
-        self.stats.borrow_mut().lost += lost.len();
+        {
+            let mut stats = self.stats.borrow_mut();
+            stats.lost += lost.len();
+            stats.bytes_lost += lost.iter().map(sent::Packet::len).sum::<usize>();
+        }
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
@@ -988,7 +992,11 @@ impl Loss {
                 now,
             );
         }
-        self.stats.borrow_mut().lost += lost_packets.len();
+        {
+            let mut stats = self.stats.borrow_mut();
+            stats.lost += lost_packets.len();
+            stats.bytes_lost += lost_packets.iter().map(sent::Packet::len).sum::<usize>();
+        }
 
         self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets

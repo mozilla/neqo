@@ -1408,6 +1408,26 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)
     }
 
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::SessionStats> {
+        let session = self
+            .recv_streams
+            .get(&session_id)
+            .and_then(|s| s.extended_connect_session())
+            .ok_or(Error::InvalidStreamId)?;
+        let borrowed = session.borrow();
+        if borrowed.connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
+        Ok(borrowed.stats())
+    }
+
     pub(crate) fn extended_connect_close_session(
         &mut self,
         conn: &mut Connection,
@@ -1415,7 +1435,13 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
+        // Snapshot the session's stats before it is torn down so the caller can read the
+        // final values. Non-WebTransport sessions (connect-udp) have no stats; the value is
+        // discarded there, so a default is fine.
+        let stats = self
+            .webtransport_session_stats(session_id)
+            .unwrap_or_default();
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1428,7 +1454,7 @@ impl Http3Connection {
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
         }
-        Ok(())
+        Ok(stats)
     }
 
     fn get_extended_connect_session(

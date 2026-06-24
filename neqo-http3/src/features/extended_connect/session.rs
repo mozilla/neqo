@@ -20,7 +20,7 @@ use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers, stats::SessionStats,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -61,6 +61,8 @@ pub(crate) struct Session {
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
     draining: bool,
+    role: Role,
+    stats: SessionStats,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -121,6 +123,8 @@ impl Session {
             events,
             protocol,
             draining: false,
+            role,
+            stats: SessionStats::default(),
         }
     }
 
@@ -151,6 +155,8 @@ impl Session {
             events,
             protocol,
             draining: false,
+            role,
+            stats: SessionStats::default(),
         })
     }
 
@@ -323,7 +329,15 @@ impl Session {
 
     pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         self.protocol
-            .add_stream(stream_id, &mut self.events, self.state)
+            .add_stream(stream_id, &mut self.events, self.state)?;
+        if !self.state.closing_state() {
+            if stream_id.is_self_initiated(self.role) {
+                self.stats.streams_opened_local += 1;
+            } else {
+                self.stats.streams_opened_remote += 1;
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -426,11 +440,13 @@ impl Session {
         dgram_data.encode(buf);
 
         conn.send_datagram(dgram_data.into(), id)?;
+        self.stats.datagrams_sent += 1;
+        self.stats.datagram_bytes_sent += buf.len() as u64;
         qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
 
-    pub(crate) fn datagram(&self, datagram: Bytes) {
+    pub(crate) fn datagram(&mut self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -439,6 +455,8 @@ impl Session {
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
+                self.stats.datagrams_received += 1;
+                self.stats.datagram_bytes_received += slice.len() as u64;
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
             }
@@ -454,6 +472,11 @@ impl Session {
 
     pub(crate) fn local_stream_count(&self, stream_type: neqo_transport::StreamType) -> u64 {
         self.protocol.local_stream_count(stream_type)
+    }
+
+    #[must_use]
+    pub(crate) fn stats(&self) -> SessionStats {
+        self.stats.clone()
     }
 
     fn has_data_to_send(&self) -> bool {
