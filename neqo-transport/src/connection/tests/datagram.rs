@@ -54,6 +54,15 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
     }
 }
 
+struct InsertEmptyDatagram;
+
+impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::DatagramWithLen);
+        builder.encode_vvec(&[]);
+    }
+}
+
 #[test]
 fn datagram_disabled_both() {
     let mut client = new_client(ConnectionParameters::default().datagram_size(0));
@@ -409,6 +418,23 @@ fn dgram_too_big() {
 
     let out = server
         .test_write_frames(InsertDatagram { data: DATA_MTU }, now())
+        .dgram()
+        .unwrap();
+    client.process_input(out, now());
+
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+#[test]
+fn dgram_unsupported() {
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // The client advertised max_datagram_frame_size=0, so any DATAGRAM frame,
+    // including an empty one, is a connection error (RFC 9221, Section 3).
+    let out = server
+        .test_write_frames(InsertEmptyDatagram, now())
         .dgram()
         .unwrap();
     client.process_input(out, now());
