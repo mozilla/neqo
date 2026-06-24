@@ -6,7 +6,7 @@
 
 use std::{cmp::max, collections::HashMap, fmt::Debug};
 
-use neqo_common::{event::Provider as _, qdebug};
+use neqo_common::{Role, event::Provider as _, qdebug};
 use test_fixture::now;
 
 use super::{
@@ -570,28 +570,39 @@ fn illegal_stream_related_frames() {
 /// unidirectional stream. This should cause the client to close the connection
 /// with `STREAM_STATE_ERROR`.
 fn wrong_directional_stream_frames() {
-    // Frames a sender may not receive. A send-only stream is client-initiated
-    // unidirectional (id 2); it has to exist so the directional check is what
-    // closes the connection rather than the not-yet-created check.
-    for frame_type in [FrameType::ResetStream, FrameType::Stream] {
+    // The directional check only fires once the targeted half exists, so the
+    // creating role makes the stream before the offending frame is injected.
+    fn client_rejects(frame_type: FrameType, stream_creator: Role) {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
-        assert_eq!(client.stream_create(StreamType::UniDi).unwrap(), 2);
-        let dgram = send_with_extra(&mut server, Writer(vec![frame_type.into(), 2, 0, 0]), now());
+        let creator = match stream_creator {
+            Role::Client => &mut client,
+            Role::Server => &mut server,
+        };
+        let stream_id = creator.stream_create(StreamType::UniDi).unwrap().as_u64();
+        // The trailing 0s are PADDING for the frames that don't need them.
+        let dgram = send_with_extra(
+            &mut server,
+            Writer(vec![frame_type.into(), stream_id, 0, 0]),
+            now(),
+        );
         client.process_input(dgram, now());
-        assert!(client.state().closed());
+        assert_error(&client, &CloseReason::Transport(Error::StreamState));
     }
 
-    // Frames a receiver may not receive. A receive-only stream is
-    // server-initiated unidirectional (id 3); obtain_stream creates it.
+    // Frames a sender may not receive, on a client-initiated send-only stream.
+    for frame_type in [
+        FrameType::ResetStream,
+        FrameType::Stream,
+        FrameType::StreamDataBlocked,
+    ] {
+        client_rejects(frame_type, Role::Client);
+    }
+
+    // Frames a receiver may not receive, on a server-initiated receive-only stream.
     for frame_type in [FrameType::StopSending, FrameType::MaxStreamData] {
-        let mut client = default_client();
-        let mut server = default_server();
-        connect(&mut client, &mut server);
-        let dgram = send_with_extra(&mut server, Writer(vec![frame_type.into(), 3, 0, 0]), now());
-        client.process_input(dgram, now());
-        assert!(client.state().closed());
+        client_rejects(frame_type, Role::Server);
     }
 }
 
