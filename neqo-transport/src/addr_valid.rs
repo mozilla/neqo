@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Decoder, Encoder, Role, qinfo, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, Role, qinfo, qtrace, to_usize};
 use nss::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
@@ -208,7 +208,7 @@ impl AddressValidation {
             .zip(TOKEN_IDENTIFIER_RETRY.iter())
             .map(|(a, b)| (a ^ b).count_ones())
             .sum();
-        (difference as usize) < TOKEN_IDENTIFIER_RETRY.len()
+        to_usize(u64::from(difference)) < TOKEN_IDENTIFIER_RETRY.len()
     }
 
     pub fn validate(

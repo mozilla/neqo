@@ -86,7 +86,7 @@ impl Search {
     /// current delivered bytes, as an integer out of [`Self::SCALE`] (= 0.26).
     const THRESH: usize = 26;
     /// Scale factor for integer approximation of fractional values.
-    const SCALE: usize = 100;
+    const SCALE: u32 = 100;
 
     /// Creates a new SEARCH slow start instance.
     pub const fn new() -> Self {
@@ -110,8 +110,7 @@ impl Search {
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
         self.initial_rtt = Some(initial_rtt);
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
-        self.bin_duration =
-            initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE as u32 / Self::W as u32;
+        self.bin_duration = initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE / Self::W as u32;
         if self.bin_duration.is_zero() {
             qdebug!(
                 "skipping initialization because bin_duration.is_zero() but bin_duration must be non-zero - initial_rtt: {initial_rtt:?}",
@@ -208,8 +207,8 @@ impl Search {
         let bin_nanos = self.bin_duration.as_nanos();
         let bins_last_rtt = usize::try_from(rtt_nanos / bin_nanos).unwrap_or(usize::MAX);
         let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
-        let fraction =
-            u64::try_from((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos).unwrap_or(0);
+        let fraction = u64::try_from((rtt_nanos % bin_nanos) * u128::from(Self::SCALE) / bin_nanos)
+            .unwrap_or(0);
 
         (prev_idx, fraction)
     }
@@ -231,8 +230,8 @@ impl Search {
             .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]);
         let high_idx = self.sent_bins[new % Self::NUM_SENT_BINS]
             .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]);
-        let sent = low_idx * fraction + high_idx * (to_u64(Self::SCALE) - fraction);
-        sent / to_u64(Self::SCALE)
+        let sent = low_idx * fraction + high_idx * (Self::SCALE as u64 - fraction);
+        sent / Self::SCALE as u64
     }
 
     /// Evaluates whether SEARCH should exit slow start.
@@ -265,7 +264,7 @@ impl Search {
         }
 
         let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff = to_usize(diff * to_u64(Self::SCALE) / prev_sent);
+        let norm_diff = to_usize(diff * u64::from(Self::SCALE) / prev_sent);
 
         if norm_diff < Self::THRESH {
             qdebug!(
