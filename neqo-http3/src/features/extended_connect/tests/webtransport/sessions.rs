@@ -5,12 +5,15 @@
 // except according to those terms.
 
 use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
-use neqo_transport::StreamType;
+use neqo_transport::{
+    StreamId, StreamType,
+    streams::{SendGroupId, SendOrder},
+};
 use test_fixture::now;
 
 use crate::{
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
-    Http3State, Priority, SessionAcceptAction, WebTransportEvent, WebTransportServerEvent,
+    Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
         CloseReason,
         tests::webtransport::{
@@ -18,7 +21,49 @@ use crate::{
         },
     },
     frames::WebTransportFrame,
+    webtransport::{ClientSession as _, ServerEvent},
 };
+
+fn wt_with_session() -> (WtTest, StreamId) {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+    (wt, session_id)
+}
+
+fn register_group(wt: &mut WtTest, session_id: StreamId) -> SendGroupId {
+    wt.client
+        .webtransport_create_send_group(session_id)
+        .unwrap()
+}
+
+fn data_stream_ids(wt: &WtTest) -> Vec<StreamId> {
+    let mut ids = Vec::new();
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::Data { stream, .. } = event {
+            ids.push(stream.stream_id());
+        }
+    }
+    ids
+}
+
+fn create_stream(wt: &mut WtTest, session_id: StreamId, group: Option<SendGroupId>) -> StreamId {
+    wt.client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, group)
+        .unwrap()
+}
+
+fn set_sendorder(wt: &mut WtTest, stream: StreamId, sendorder: SendOrder) {
+    wt.client
+        .webtransport_set_sendorder(stream, Some(sendorder))
+        .unwrap();
+}
+
+fn send_all(wt: &mut WtTest, stream: StreamId, data: &[u8]) {
+    assert_eq!(
+        wt.client.send_data(stream, data, now()).unwrap(),
+        data.len()
+    );
+}
 
 #[test]
 fn wt_session() {
@@ -119,10 +164,7 @@ fn wt_session_response_with_1xx() {
 
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-            session,
-            headers,
-        }) = event
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) = event
         {
             assert_wt(&headers);
             wt_server_session = Some(session);
@@ -183,10 +225,7 @@ fn wt_session_respone_200_with_fin() {
     wt.exchange_packets();
     let mut wt_server_session = None;
     while let Some(event) = wt.server.next_event() {
-        if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-            session,
-            headers,
-        }) = event
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) = event
         {
             assert_wt(&headers);
             wt_server_session = Some(session);
@@ -272,7 +311,7 @@ fn wt_unknown_session_frame_client() {
     // Send an unknown frame.
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     wt.client
@@ -427,4 +466,639 @@ fn wt_close_session_cannot_be_sent_at_once() {
         )),
     );
     wt.check_events_after_closing_session_server(&[], None, &[], None, None);
+}
+
+/// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
+/// "a signal to applications to initiate shutdown for all WebTransport sessions":
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
+///
+/// An active session (stream ID < `goaway_stream_id`) should receive a `Draining`
+/// event and remain open — no `SessionClosed`.
+#[test]
+fn wt_goaway_draining_active_session() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Send GOAWAY with a stream ID higher than the active session, so the
+    // session is considered processed (still active, but connection draining).
+    let goaway_stream_id = StreamId::new(session_id.as_u64() + 4);
+    wt.server.send_goaway(goaway_stream_id);
+    wt.exchange_packets();
+
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+
+    let has_draining = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                if *sid == session_id
+        )
+    });
+    assert!(has_draining, "expected Draining event for active session");
+
+    // The active session should NOT have been closed.
+    let has_closed = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed { .. })
+        )
+    });
+    assert!(!has_closed, "active session should not be closed by GOAWAY");
+}
+
+/// Repeated GOAWAYs with decreasing stream IDs (per RFC 9114 §5.2) should
+/// not produce duplicate Draining events for the same session.
+#[test]
+fn wt_goaway_repeated_no_duplicate_draining() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // First GOAWAY — session stays active.
+    let first = StreamId::new(session_id.as_u64() + 8);
+    wt.server.send_goaway(first);
+    wt.exchange_packets();
+    wt.client.events().for_each(drop);
+
+    // Second GOAWAY with lower stream ID — still above the session.
+    let second = StreamId::new(session_id.as_u64() + 4);
+    wt.server.send_goaway(second);
+    wt.exchange_packets();
+
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+    let draining_count = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Draining { .. })
+            )
+        })
+        .count();
+    assert_eq!(
+        draining_count, 0,
+        "second GOAWAY should not produce a duplicate Draining event"
+    );
+}
+
+/// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
+/// "a signal to applications to initiate shutdown for all WebTransport sessions":
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
+///
+/// A rejected session (stream ID >= `goaway_stream_id`) should receive both a
+/// `Draining` event and eventually a `SessionClosed` event.
+#[test]
+fn wt_goaway_draining_rejected_session() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Send GOAWAY with a stream ID equal to the session's stream ID, so the
+    // session is considered NOT processed (rejected).
+    wt.server.send_goaway(session_id);
+    wt.exchange_packets();
+
+    // Collect all events.
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+
+    let draining_pos = events
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                    if *sid == session_id
+            )
+        })
+        .expect("expected Draining event for rejected session");
+    let closed_pos = events
+        .iter()
+        .position(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
+                    stream_id: sid, ..
+                }) if *sid == session_id
+            )
+        })
+        .expect("expected SessionClosed event for rejected session");
+    assert!(
+        draining_pos < closed_pos,
+        "Draining must be emitted before SessionClosed for rejected sessions"
+    );
+}
+
+#[test]
+fn wt_session_protocol_none_when_no_header() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn wt_session_protocol_quoted_value() {
+    let mut wt = WtTest::new();
+    let (session_id, _) =
+        wt.negotiate_wt_session(&SessionAcceptAction::AcceptWith(vec![Header::new(
+            "wt-protocol",
+            r#""myproto""#,
+        )]));
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        Some("myproto".to_string())
+    );
+}
+
+#[test]
+fn wt_session_protocol_parameters_stripped() {
+    let mut wt = WtTest::new();
+    let (session_id, _) =
+        wt.negotiate_wt_session(&SessionAcceptAction::AcceptWith(vec![Header::new(
+            "wt-protocol",
+            r#""myproto"; foo=bar; baz=2"#,
+        )]));
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        Some("myproto".to_string())
+    );
+}
+
+#[test]
+fn wt_session_protocol_malformed_unquoted_rejected() {
+    let mut wt = WtTest::new();
+    let (session_id, _) =
+        wt.negotiate_wt_session(&SessionAcceptAction::AcceptWith(vec![Header::new(
+            "wt-protocol",
+            "myproto",
+        )]));
+    assert_eq!(
+        wt.client.webtransport_session_protocol(session_id).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn wt_create_send_group() {
+    // Test that we can create a send group for a WebTransport session.
+    let (mut wt, session_id) = wt_with_session();
+
+    let group = register_group(&mut wt, session_id);
+    assert!(group.as_u64() > 0);
+}
+
+#[test]
+fn wt_validate_send_group() {
+    // Test that we can validate a send group belongs to a session.
+    let (mut wt, session_id) = wt_with_session();
+
+    let group = register_group(&mut wt, session_id);
+
+    // Validate that the group belongs to this session
+    let valid = wt
+        .client
+        .webtransport_validate_send_group(session_id, group);
+    assert!(valid.is_ok());
+    assert!(valid.unwrap());
+}
+
+#[test]
+fn wt_cross_session_send_group_rejected() {
+    // Test that a send group from one session is not valid for another session.
+    let (mut wt, session_id1) = wt_with_session();
+
+    // Create second session
+    let wt_session2_id = wt.create_second_wt_session();
+
+    // Create send group for session 1
+    let group1 = register_group(&mut wt, session_id1);
+
+    // Try to validate group1 with session2 - should return false
+    let valid = wt
+        .client
+        .webtransport_validate_send_group(wt_session2_id, group1);
+    assert!(valid.is_ok());
+    assert!(!valid.unwrap());
+}
+
+#[test]
+fn wt_session_protocol_invalid_stream_id() {
+    let wt = WtTest::new();
+    assert_eq!(
+        wt.client
+            .webtransport_session_protocol(StreamId::new(9999))
+            .unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+#[test]
+fn wt_session_protocol_non_webtransport_session() {
+    let mut wt = WtTest::new();
+    let stream_id = wt
+        .client
+        .fetch(
+            now(),
+            "GET",
+            ("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    assert_eq!(
+        wt.client
+            .webtransport_session_protocol(stream_id)
+            .unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+#[test]
+fn wt_create_stream_with_send_group() {
+    // Test that we can create a stream with a send group.
+    let (mut wt, session_id) = wt_with_session();
+
+    // Create a send group
+    let group = register_group(&mut wt, session_id);
+
+    // Create a stream with the send group
+    let stream = wt.client.webtransport_create_stream_with_send_group(
+        session_id,
+        StreamType::UniDi,
+        Some(group),
+    );
+    assert!(stream.is_ok());
+}
+
+#[test]
+fn wt_create_stream_without_send_group() {
+    // Test that we can create a stream without a send group (backward compatibility).
+    let (mut wt, session_id) = wt_with_session();
+
+    // Create a stream without a send group
+    let stream =
+        wt.client
+            .webtransport_create_stream_with_send_group(session_id, StreamType::UniDi, None);
+    assert!(stream.is_ok());
+}
+
+#[test]
+fn wt_create_stream_with_invalid_send_group() {
+    // Test that creating a stream with an invalid send group fails.
+    let (mut wt, session_id1) = wt_with_session();
+
+    let wt_session2_id = wt.create_second_wt_session();
+
+    // Create send group for session 1
+    let group1 = register_group(&mut wt, session_id1);
+
+    // Try to create stream in session2 with group from session1 - should fail
+    let result = wt.client.webtransport_create_stream_with_send_group(
+        wt_session2_id,
+        StreamType::UniDi,
+        Some(group1),
+    );
+    assert_eq!(result.unwrap_err(), Error::InvalidState);
+}
+
+#[test]
+fn wt_set_sendgroup_on_existing_stream() {
+    // Move an already-created (ungrouped) stream into a send group, then verify it is
+    // still served by the scheduler.
+    const DATA: &[u8] = &[0x42; 2000];
+    let (mut wt, session_id) = wt_with_session();
+    let group = register_group(&mut wt, session_id);
+
+    let stream = create_stream(&mut wt, session_id, None);
+    wt.client.webtransport_set_sendgroup(stream, group).unwrap();
+
+    send_all(&mut wt, stream, DATA);
+    wt.exchange_packets();
+    assert!(
+        data_stream_ids(&wt).contains(&stream),
+        "stream moved into a send group should still be served"
+    );
+}
+
+#[test]
+fn wt_clear_sendgroup_keeps_stream_served() {
+    // Clearing a stream's send group must move it back to the ungrouped (null-group)
+    // queue, not orphan it from the scheduler.
+    const DATA: &[u8] = &[0x42; 2000];
+    let (mut wt, session_id) = wt_with_session();
+    let group = register_group(&mut wt, session_id);
+
+    let stream = create_stream(&mut wt, session_id, Some(group));
+    wt.client.webtransport_clear_sendgroup(stream).unwrap();
+
+    send_all(&mut wt, stream, DATA);
+    wt.exchange_packets();
+    assert!(
+        data_stream_ids(&wt).contains(&stream),
+        "stream cleared of its send group should still be served"
+    );
+}
+
+#[test]
+fn wt_move_stream_between_send_groups() {
+    // Moving a stream from one explicit send group to another exercises the
+    // remove-from-old-group then insert-into-new-group path in set_sendgroup.
+    const DATA: &[u8] = &[0x42; 2000];
+    let (mut wt, session_id) = wt_with_session();
+    let group_a = register_group(&mut wt, session_id);
+    let group_b = register_group(&mut wt, session_id);
+
+    let stream = create_stream(&mut wt, session_id, Some(group_a));
+    wt.client
+        .webtransport_set_sendgroup(stream, group_b)
+        .unwrap();
+
+    send_all(&mut wt, stream, DATA);
+    wt.exchange_packets();
+    assert!(
+        data_stream_ids(&wt).contains(&stream),
+        "stream moved between send groups should still be served"
+    );
+}
+
+#[test]
+fn wt_set_invalid_sendgroup_on_existing_stream() {
+    // A send group from another session cannot be assigned to an existing stream.
+    let (mut wt, session_id1) = wt_with_session();
+    let wt_session2_id = wt.create_second_wt_session();
+
+    // group1 belongs to session 1.
+    let group1 = register_group(&mut wt, session_id1);
+
+    // A stream in session 2 must not accept session 1's group.
+    let stream2 = create_stream(&mut wt, wt_session2_id, None);
+    assert_eq!(
+        wt.client
+            .webtransport_set_sendgroup(stream2, group1)
+            .unwrap_err(),
+        Error::InvalidState
+    );
+}
+
+#[test]
+fn wt_multiple_streams_same_send_group() {
+    // Test that multiple streams can belong to the same send group.
+    let (mut wt, session_id) = wt_with_session();
+
+    // Create a send group
+    let group = register_group(&mut wt, session_id);
+
+    // Create multiple streams with the same send group
+    let stream1 = create_stream(&mut wt, session_id, Some(group));
+    let stream2 = create_stream(&mut wt, session_id, Some(group));
+    let stream3 = wt
+        .client
+        .webtransport_create_stream_with_send_group(session_id, StreamType::BiDi, Some(group))
+        .unwrap();
+
+    // All streams should be created successfully
+    assert_ne!(stream1, stream2);
+    assert_ne!(stream2, stream3);
+    assert_ne!(stream1, stream3);
+}
+
+#[test]
+fn wt_send_group_with_sendorder() {
+    // Test that send groups work with sendOrder.
+    // This test verifies streams can be created with both send groups and sendOrder set.
+    let (mut wt, session_id) = wt_with_session();
+
+    // Create two send groups
+    let group1 = register_group(&mut wt, session_id);
+    let group2 = register_group(&mut wt, session_id);
+
+    // Create streams with sendOrder. According to spec, sendOrder is evaluated within the
+    // context of the send group, so the two group1 streams compete with each other while
+    // the group2 and ungrouped streams (same sendOrder value) live in independent namespaces.
+    for (group, sendorder) in [
+        (Some(group1), 100),
+        (Some(group1), 200),
+        (Some(group2), 100),
+        (None, 100),
+    ] {
+        let stream = create_stream(&mut wt, session_id, group);
+        set_sendorder(&mut wt, stream, sendorder);
+    }
+
+    // All operations should succeed
+    // Note: The actual prioritization logic (treating groups equally, sendOrder within groups)
+    // would require transport-layer changes and is beyond the scope of this test.
+    // This test verifies the API works correctly.
+}
+
+#[test]
+fn wt_send_groups_fair_bandwidth_allocation() {
+    // Test that two send groups receive interleaved bandwidth, even when streams in
+    // different groups have very different sendOrder values.
+    //
+    // Spec: "The user agent considers WebTransportSendGroups as equals when allocating
+    // bandwidth for sending WebTransportSendStreams."
+    //
+    // group_high has sendOrder 1000/900; group_low has sendOrder 100/50.
+    // Without group-level fairness the scheduler would prefer group_high streams
+    // globally and completely starve group_low.  With per-group round-robin, the
+    // server receives Data events from both groups interleaved throughout the transfer.
+    //
+    // We verify fairness by checking that the FIRST group_low Data event arrives
+    // before the LAST group_high Data event — proving they overlap in delivery
+    // (group_low is not held back until after group_high finishes).
+    //
+    // DATA_SIZE must produce multiple packets per stream so the interleaving is visible:
+    // 10 KB / ~1280 B packets ≈ 8 packets per stream → 16+ Data events per group.
+    const DATA_SIZE: usize = 10_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let (mut wt, session_id) = wt_with_session();
+
+    let group_high = register_group(&mut wt, session_id);
+    let group_low = register_group(&mut wt, session_id);
+
+    let mut grouped_streams = |group, sendorders: [SendOrder; 2]| {
+        sendorders.map(|sendorder| {
+            let stream = create_stream(&mut wt, session_id, Some(group));
+            set_sendorder(&mut wt, stream, sendorder);
+            stream
+        })
+    };
+    let high = grouped_streams(group_high, [1000, 900]);
+    let low = grouped_streams(group_low, [100, 50]);
+
+    for &stream in high.iter().chain(low.iter()) {
+        send_all(&mut wt, stream, BUF);
+    }
+
+    wt.exchange_packets();
+
+    // Collect Data events in arrival order.  With fair round-robin scheduling the
+    // server sees data from both groups interleaved (not group_high completely first).
+    let events_in_order = data_stream_ids(&wt);
+
+    // Both groups must have received data.
+    let first_group_low = events_in_order.iter().position(|id| low.contains(id));
+    let last_group_high = events_in_order.iter().rposition(|id| high.contains(id));
+
+    assert!(
+        first_group_low.is_some(),
+        "group_low received no data; it was starved by group_high \
+         (total events: {}, all for group_high)",
+        events_in_order.len()
+    );
+    assert!(
+        last_group_high.is_some(),
+        "group_high received no data (total events: {})",
+        events_in_order.len()
+    );
+
+    // The key fairness invariant: group_low's first delivery overlaps with group_high's
+    // ongoing delivery.  If group_low was starved, its first event would come *after*
+    // group_high's last event.
+    assert!(
+        first_group_low.unwrap() < last_group_high.unwrap(),
+        "group_low was starved: first group_low event at position {} comes after \
+         last group_high event at position {} (total {} events)",
+        first_group_low.unwrap(),
+        last_group_high.unwrap(),
+        events_in_order.len()
+    );
+}
+
+#[test]
+fn wt_sendorder_within_send_group() {
+    // Test that sendOrder prioritizes streams WITHIN a send group, and that lower-
+    // priority streams are not permanently starved once higher-priority data is sent.
+    //
+    // Spec: "sendOrder values are evaluated within the context of the send group."
+    // Spec: "this sending MUST starve until all bytes queued for sending on
+    //        WebTransportSendStreams with a non-null and higher [[SendOrder]]… have
+    //        been sent."  After those bytes are sent, the lower stream must proceed.
+    //
+    // DATA_SIZE is large enough that stream_high's data spans many packets, making
+    // the ordering deterministic: server Data events for stream_high will precede
+    // those for stream_low regardless of congestion-window size.
+
+    const DATA_SIZE: usize = 50_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let (mut wt, session_id) = wt_with_session();
+
+    let group = register_group(&mut wt, session_id);
+
+    let stream_high = create_stream(&mut wt, session_id, Some(group));
+    let stream_low = create_stream(&mut wt, session_id, Some(group));
+
+    set_sendorder(&mut wt, stream_high, 1000);
+    set_sendorder(&mut wt, stream_low, 10);
+
+    send_all(&mut wt, stream_low, BUF);
+    send_all(&mut wt, stream_high, BUF);
+
+    wt.exchange_packets();
+
+    // Collect all Data events in arrival order.
+    let ids = data_stream_ids(&wt);
+    let first_readable = ids.first().copied();
+    let stream_high_delivered = ids.contains(&stream_high);
+    let stream_low_delivered = ids.contains(&stream_low);
+
+    // stream_high (sendOrder=1000) must be served before stream_low (sendOrder=10).
+    assert_eq!(
+        first_readable,
+        Some(stream_high),
+        "stream with higher sendOrder should be served first within the group"
+    );
+
+    // Both streams must eventually deliver all their data: stream_high because it has
+    // highest priority, stream_low because it must not be permanently starved once
+    // stream_high's queued bytes have been sent.
+    assert!(stream_high_delivered, "stream_high data was not delivered");
+    assert!(
+        stream_low_delivered,
+        "stream_low was permanently starved even after stream_high exhausted its data"
+    );
+}
+
+#[test]
+fn wt_ungrouped_streams_independent_namespace() {
+    // Test that ungrouped streams have their own sendOrder namespace,
+    // independent from grouped streams.
+
+    const DATA_SIZE: usize = 5_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let (mut wt, session_id) = wt_with_session();
+
+    // Create a send group
+    let group = register_group(&mut wt, session_id);
+
+    // Create a grouped stream with sendOrder 100
+    let stream_grouped = create_stream(&mut wt, session_id, Some(group));
+    set_sendorder(&mut wt, stream_grouped, 100);
+
+    // Create an ungrouped stream with sendOrder 100 (same value, different namespace)
+    let stream_ungrouped = create_stream(&mut wt, session_id, None);
+    set_sendorder(&mut wt, stream_ungrouped, 100);
+
+    // Fill both streams
+    send_all(&mut wt, stream_grouped, BUF);
+    send_all(&mut wt, stream_ungrouped, BUF);
+
+    wt.exchange_packets();
+
+    // Both streams should become readable despite having the same sendOrder value,
+    // because they're in different namespaces (grouped vs ungrouped).
+    let ids = data_stream_ids(&wt);
+    let grouped_readable = ids.contains(&stream_grouped);
+    let ungrouped_readable = ids.contains(&stream_ungrouped);
+
+    // Both should have received data
+    assert!(grouped_readable, "grouped stream should receive data");
+    assert!(ungrouped_readable, "ungrouped stream should receive data");
+}
+
+#[test]
+fn wt_multiple_groups_separate_sendorder_namespaces() {
+    // Test that different send groups maintain separate sendOrder namespaces.
+    // Streams in different groups with the same sendOrder value should not interfere.
+
+    const DATA_SIZE: usize = 5_000;
+    const BUF: &[u8] = &[0x42; DATA_SIZE];
+
+    let (mut wt, session_id) = wt_with_session();
+
+    // Create three send groups, one stream in each, all with the SAME sendOrder value
+    // (different namespaces!).
+    let mut streams = Vec::new();
+    for _ in 0..3 {
+        let group = register_group(&mut wt, session_id);
+        let stream = create_stream(&mut wt, session_id, Some(group));
+        set_sendorder(&mut wt, stream, 500);
+        streams.push(stream);
+    }
+
+    // Fill all streams
+    for &stream in &streams {
+        send_all(&mut wt, stream, BUF);
+    }
+
+    wt.exchange_packets();
+
+    // All three streams should become readable, demonstrating that they're in
+    // separate namespaces and don't compete with each other based on sendOrder alone.
+    let ids = data_stream_ids(&wt);
+    for (i, &stream) in streams.iter().enumerate() {
+        assert!(
+            ids.contains(&stream),
+            "stream in group{} should receive data",
+            i + 1
+        );
+    }
 }

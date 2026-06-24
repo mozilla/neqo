@@ -18,7 +18,7 @@ use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
 use strum::IntoEnumIterator as _;
 
-use crate::{ecn, packet};
+use crate::{cc::CongestionTrigger, ecn, packet, version::Version};
 
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct FrameStats {
@@ -134,12 +134,28 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlowStartExitReason {
-    /// Exited due to a congestion event (loss or ECN).
-    CongestionEvent,
-    /// Exited due to a heuristic algorithm (e.g., HyStart++).
+    /// Exited due to a congestion event. Carries the trigger (loss or ECN).
+    CongestionEvent(CongestionTrigger),
+    /// Exited due to a heuristic algorithm.
     Heuristic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlowStartExitStats {
+    /// The reason slow start was exited. The `CongestionEvent` variant carries a
+    /// `CongestionTrigger` (`Loss` or `Ecn`) and `Loss` carries the amount of lost packets.
+    pub reason: SlowStartExitReason,
+    /// The congestion window when the exit was detected. For a congestion event this is the cwnd
+    /// BEFORE the reduction.
+    pub detection_cwnd: usize,
+    /// The congestion window after exiting. For a congestion event this is the cwnd AFTER the
+    /// reduction.
+    pub exit_cwnd: usize,
+    /// Bytes in flight when the exit was detected. For an exit by packet loss this is the bytes in
+    /// flight BEFORE subtracting the lost bytes, i.e. the path saturation at the moment of loss.
+    pub bytes_in_flight: usize,
 }
 
 /// Congestion event counters.
@@ -171,13 +187,9 @@ pub struct SearchResetStats {
 pub struct CongestionControlStats {
     /// Congestion event counters. Includes trigger type and other qualifier flags.
     pub congestion_events: CongestionEventStats,
-    /// The congestion window size (in bytes) when we exited slow start.
-    /// None if we haven't exited slow start or if we re-entered after spurious congestion.
-    /// When exiting via congestion event, this is the cwnd AFTER the reduction.
-    pub slow_start_exit_cwnd: Option<usize>,
-    /// The reason slow start was exited. None if we haven't exited slow start or if we re-entered
-    /// after spurious congestion.
-    pub slow_start_exit_reason: Option<SlowStartExitReason>,
+    /// Statistics captured at the moment a connection exits slow start. Set once on exit and is
+    /// reset to `None` if the triggering congestion event is later found to be spurious.
+    pub slow_start_exit: Option<SlowStartExitStats>,
     /// Number of times HyStart++ entered CSS (Conservative Slow Start). Only meaningful when
     /// HyStart++ is enabled. Higher values indicate that HyStart++ had many spurious CSS
     /// entries, spending more time throttling slow start growth.
@@ -322,6 +334,10 @@ impl DerefMut for DscpCount {
 pub struct Stats {
     pub info: String,
 
+    /// The QUIC version in use. After the handshake completes this reflects the
+    /// version negotiated via compatible version negotiation (RFC 9368).
+    pub version: Version,
+
     /// Total packets received, including all the bad ones.
     pub packets_rx: usize,
     /// Duplicate packets received.
@@ -449,6 +465,7 @@ impl Stats {
 impl Debug for Stats {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "stats for {}", self.info)?;
+        writeln!(f, "  version: {:?}", self.version)?;
         writeln!(
             f,
             "  rx: {} drop {} dup {} saved {}",
@@ -470,7 +487,9 @@ impl Debug for Stats {
         writeln!(
             f,
             "    final_cwnd {:?} ss_exit_cwnd {:?} ss_exit_reason {:?}",
-            self.cc.cwnd, self.cc.slow_start_exit_cwnd, self.cc.slow_start_exit_reason
+            self.cc.cwnd,
+            self.cc.slow_start_exit.as_ref().map(|e| e.exit_cwnd),
+            self.cc.slow_start_exit.as_ref().map(|e| &e.reason),
         )?;
         writeln!(
             f,
@@ -574,6 +593,7 @@ fn debug() {
     assert_eq!(
         format!("{stats:?}"),
         "stats for\u{0020}
+  version: Version1
   rx: 0 drop 0 dup 0 saved 0
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:

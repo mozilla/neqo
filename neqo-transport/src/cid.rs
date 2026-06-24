@@ -15,7 +15,7 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qdebug, qinfo};
+use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qdebug, qinfo, to_usize};
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
 
@@ -513,7 +513,14 @@ impl ConnectionIdManager {
         self.connection_ids.contains(cid)
     }
 
-    pub fn retire(&mut self, seqno: u64) {
+    pub fn retire(&mut self, seqno: u64) -> Res<()> {
+        // RFC 9000, Section 19.16: receipt of a RETIRE_CONNECTION_ID frame whose
+        // sequence number is greater than any we have issued (i.e. not below the
+        // next sequence number to be used) is a connection error.
+        if seqno >= self.next_seqno {
+            return Err(Error::ProtocolViolation);
+        }
+
         // TODO(mt) - consider keeping connection IDs around for a short while.
 
         let empty_cid = seqno == Self::SEQNO_EMPTY
@@ -528,6 +535,7 @@ impl ConnectionIdManager {
             self.connection_ids.retire(seqno);
             self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
         }
+        Ok(())
     }
 
     /// During the handshake, a server needs to regard the client's choice of destination
@@ -546,10 +554,7 @@ impl ConnectionIdManager {
 
     pub fn set_limit(&mut self, limit: u64) {
         debug_assert!(limit >= 2);
-        self.limit = min(
-            Self::ACTIVE_LIMIT,
-            usize::try_from(limit).unwrap_or(Self::ACTIVE_LIMIT),
-        );
+        self.limit = min(Self::ACTIVE_LIMIT, to_usize(limit));
     }
 
     pub fn write_frames<B: Buffer>(

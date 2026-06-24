@@ -22,7 +22,9 @@ mod hystart;
 mod new_reno;
 mod search;
 
-pub use classic_cc::{CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH};
+pub use classic_cc::{
+    CWND_INITIAL_PKTS, ClassicCongestionController, PERSISTENT_CONG_THRESH, Phase,
+};
 pub use classic_slow_start::ClassicSlowStart;
 pub use cubic::Cubic;
 pub use hystart::{HyStart, HyStartCssBaseline};
@@ -31,9 +33,12 @@ pub use new_reno::NewReno;
 pub use search::Outcome;
 pub use search::Search;
 
+/// How a congestion event was triggered.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CongestionTrigger {
-    Loss,
+    /// Triggered by packet loss. Carries the number of lost packets.
+    Loss(usize),
+    /// Triggered by an ECN CE mark.
     Ecn,
 }
 

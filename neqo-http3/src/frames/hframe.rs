@@ -115,9 +115,7 @@ impl HFrame {
                 push_id,
                 header_block,
             } => {
-                enc.encode_varint(
-                    (header_block.len() + (Encoder::varint_len(u64::from(*push_id)))) as u64,
-                );
+                enc.encode_len(header_block.len() + Encoder::varint_len(u64::from(*push_id)));
                 enc.encode_varint(*push_id);
                 enc.encode(header_block);
             }
@@ -169,14 +167,14 @@ impl FrameDecoder<Self> for HFrame {
             Ok(Some(Self::Data { len: frame_len }))
         } else if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
-            Ok(match frame_type {
+            let f = match frame_type {
                 HFrameType::DATA => unreachable!("DATA frame has been handled already"),
-                HFrameType::HEADERS => Some(Self::Headers {
+                HFrameType::HEADERS => Self::Headers {
                     header_block: dec.decode_remainder().to_vec(),
-                }),
-                HFrameType::CANCEL_PUSH => Some(Self::CancelPush {
+                },
+                HFrameType::CANCEL_PUSH => Self::CancelPush {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
-                }),
+                },
                 HFrameType::SETTINGS => {
                     let mut settings = HSettings::default();
                     settings.decode_frame_contents(&mut dec).map_err(|e| {
@@ -186,36 +184,41 @@ impl FrameDecoder<Self> for HFrame {
                             Error::HttpFrame
                         }
                     })?;
-                    Some(Self::Settings { settings })
+                    Self::Settings { settings }
                 }
-                HFrameType::PUSH_PROMISE => Some(Self::PushPromise {
+                HFrameType::PUSH_PROMISE => Self::PushPromise {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
                     header_block: dec.decode_remainder().to_vec(),
-                }),
-                HFrameType::GOAWAY => Some(Self::Goaway {
+                },
+                HFrameType::GOAWAY => Self::Goaway {
                     stream_id: StreamId::new(dec.decode_varint().ok_or(Error::HttpFrame)?),
-                }),
-                HFrameType::MAX_PUSH_ID => Some(Self::MaxPushId {
+                },
+                HFrameType::MAX_PUSH_ID => Self::MaxPushId {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
-                }),
+                },
                 HFrameType::PRIORITY_UPDATE_REQUEST | HFrameType::PRIORITY_UPDATE_PUSH => {
                     let element_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
                     let priority = dec.decode_remainder();
                     let priority = Priority::from_bytes(priority)?;
                     if frame_type == HFrameType::PRIORITY_UPDATE_REQUEST {
-                        Some(Self::PriorityUpdateRequest {
+                        Self::PriorityUpdateRequest {
                             element_id,
                             priority,
-                        })
+                        }
                     } else {
-                        Some(Self::PriorityUpdatePush {
+                        Self::PriorityUpdatePush {
                             element_id,
                             priority,
-                        })
+                        }
                     }
                 }
-                _ => None,
-            })
+                _ => return Ok(None),
+            };
+            if dec.remaining() > 0 {
+                Err(Error::HttpFrame)
+            } else {
+                Ok(Some(f))
+            }
         } else {
             Ok(None)
         }

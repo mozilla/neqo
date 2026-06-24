@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use neqo_common::qdebug;
+use neqo_common::{qdebug, to_u64};
 use test_fixture::now;
 
 use super::make_cc_hystart;
@@ -46,7 +46,7 @@ fn maybe_enter_css(
     cc_stats: &mut CongestionControlStats,
 ) {
     // First round with base RTT
-    let window_end = HyStart::N_RTT_SAMPLE as u64;
+    let window_end = HyStart::N_RTT_SAMPLE;
     hystart.on_packet_sent(window_end, MIN_INITIAL_PACKET_SIZE);
 
     assert!(hystart.window_end().is_some_and(|pn| pn == window_end));
@@ -65,7 +65,7 @@ fn maybe_enter_css(
     assert!(hystart.window_end().is_none());
 
     // Second round with new RTT value
-    let window_end2 = 2 * HyStart::N_RTT_SAMPLE as u64;
+    let window_end2 = 2 * HyStart::N_RTT_SAMPLE;
     hystart.on_packet_sent(window_end2, MIN_INITIAL_PACKET_SIZE);
 
     assert!(hystart.window_end().is_some_and(|pn| pn == window_end2));
@@ -210,10 +210,6 @@ fn rtt_sample_collection_tracks_minimum() {
 }
 
 #[test]
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "No truncation will happen for values from 1 to 10."
-)]
 fn rtt_sample_count_increments_per_ack() {
     let mut hystart = make_hystart_paced();
 
@@ -227,7 +223,7 @@ fn rtt_sample_count_increments_per_ack() {
             &mut CongestionControlStats::default(),
             now(),
         );
-        assert_eq!(hystart.rtt_sample_count(), (i + 1) as usize);
+        assert_eq!(hystart.rtt_sample_count(), i + 1);
     }
 }
 
@@ -236,7 +232,7 @@ fn css_entry_not_triggered_with_insufficient_samples() {
     let mut hystart = make_hystart_paced();
 
     // First round to set baseline RTT
-    let window_end1 = (HyStart::N_RTT_SAMPLE) as u64;
+    let window_end1 = HyStart::N_RTT_SAMPLE;
     hystart.on_packet_sent(window_end1, MIN_INITIAL_PACKET_SIZE);
 
     for i in 0..=window_end1 {
@@ -250,7 +246,7 @@ fn css_entry_not_triggered_with_insufficient_samples() {
     }
 
     // Second round with increased RTT but insufficient samples
-    let window_end2 = window_end1 + HyStart::N_RTT_SAMPLE as u64;
+    let window_end2 = window_end1 + HyStart::N_RTT_SAMPLE;
     hystart.on_packet_sent(window_end2, MIN_INITIAL_PACKET_SIZE);
 
     // Collect only N_RTT_SAMPLE - 1 samples, not enough to enter CSS with
@@ -385,14 +381,14 @@ fn css_exit_after_n_rounds() {
     // round 2.
     for round in 2..=HyStart::CSS_ROUNDS {
         // Start a new round
-        let new_window_end = round as u64 * 100;
+        let new_window_end = to_u64(round) * 100;
         hystart.on_packet_sent(new_window_end, MIN_INITIAL_PACKET_SIZE);
 
         // Collect samples
         for i in 0..HyStart::N_RTT_SAMPLE {
             hystart.on_packets_acked(
                 &RttEstimate::new(HIGH_RTT),
-                i as u64,
+                i,
                 INITIAL_CWND,
                 &mut cc_stats,
                 now(),
@@ -445,7 +441,7 @@ fn css_back_to_slow_start_on_rtt_decrease() {
     for i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
             &RttEstimate::new(LOWER_RTT),
-            i as u64, // Less than window_end
+            i, // Less than window_end
             INITIAL_CWND,
             &mut cc_stats,
             now(),
@@ -468,7 +464,7 @@ fn css_exit_only_with_new_samples() {
     let mut hystart = make_hystart_paced();
 
     // First round with base RTT to set a baseline that we can compare RTT against
-    let window_end = HyStart::N_RTT_SAMPLE as u64;
+    let window_end = HyStart::N_RTT_SAMPLE;
     hystart.on_packet_sent(window_end, MIN_INITIAL_PACKET_SIZE);
 
     assert!(hystart.window_end().is_some_and(|pn| pn == window_end));
@@ -491,7 +487,7 @@ fn css_exit_only_with_new_samples() {
     hystart.on_packet_sent(window_end2, MIN_INITIAL_PACKET_SIZE);
 
     // Collect N_RTT_SAMPLE samples with higher RTT to enter CSS
-    for _i in 0..HyStart::N_RTT_SAMPLE as u64 {
+    for _i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
             &RttEstimate::new(HIGH_RTT),
             0,
@@ -518,7 +514,7 @@ fn css_exit_only_with_new_samples() {
     );
 
     // Collect N_RTT_SAMPLE-1 more samples with low RTT
-    for _i in 1..HyStart::N_RTT_SAMPLE as u64 {
+    for _i in 1..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
             &RttEstimate::new(LOW_RTT),
             0,
@@ -555,7 +551,7 @@ fn css_alternative_baseline() {
     for i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
             &RttEstimate::new(CSS_ENTRY_RTT.checked_sub(Duration::from_micros(1)).unwrap()),
-            i as u64, // Less than window_end
+            i, // Less than window_end
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -613,7 +609,7 @@ fn css_exit_to_slow_start_restores_normal_growth() {
     for i in 0..HyStart::N_RTT_SAMPLE {
         hystart.on_packets_acked(
             &RttEstimate::new(LOWER_RTT),
-            i as u64, // Less than window_end
+            i, // Less than window_end
             INITIAL_CWND,
             &mut CongestionControlStats::default(),
             now(),
@@ -673,7 +669,7 @@ fn integration_full_slow_start_to_css_to_ca() {
     let base_rtt_est = RttEstimate::new(base_rtt);
     let increased_rtt_est = RttEstimate::new(increased_rtt);
 
-    assert_eq!(cc.ssthresh(), usize::MAX, "Should start in slow start");
+    assert_eq!(cc.ssthresh(), None, "Should start in slow start");
 
     let mut next_send: u64 = 0;
     let mut next_ack: u64 = 0;
@@ -700,12 +696,12 @@ fn integration_full_slow_start_to_css_to_ca() {
 
         // Have `base_rtt` for the first cwnd that was sent before the loop. Have `increased_rtt`
         // for all subsequent packets to trigger and go through CSS.
-        let rtt_to_use = if ack_pn < initial_cwnd_packets as u64 {
+        let rtt_to_use = if ack_pn < to_u64(initial_cwnd_packets) {
             base_rtt
         } else {
             increased_rtt
         };
-        let rtt_est = if ack_pn < initial_cwnd_packets as u64 {
+        let rtt_est = if ack_pn < to_u64(initial_cwnd_packets) {
             &base_rtt_est
         } else {
             &increased_rtt_est
@@ -734,7 +730,7 @@ fn integration_full_slow_start_to_css_to_ca() {
         }
 
         // Detect CA: ssthresh has been set
-        if ssthresh_before == usize::MAX && ssthresh_after != usize::MAX {
+        if ssthresh_before.is_none() && ssthresh_after.is_some() {
             ca_detected = true;
             qdebug!("CA entered at ack_pn={ack_pn}, iteration={iteration}");
             // This assert makes sure that the ACK that we decided to move to CA on does not apply
@@ -744,7 +740,7 @@ fn integration_full_slow_start_to_css_to_ca() {
                 "We should be using CA growth once we detected exit to CA."
             );
             assert_eq!(
-                stats.slow_start_exit_reason,
+                stats.slow_start_exit.map(|e| e.reason),
                 Some(SlowStartExitReason::Heuristic)
             );
             assert_eq!(stats.hystart_css_rounds_finished, HyStart::CSS_ROUNDS);
@@ -767,5 +763,9 @@ fn integration_full_slow_start_to_css_to_ca() {
 
     assert!(css_detected, "Should have entered CSS");
     assert!(ca_detected, "Should have entered CA after CSS rounds");
-    assert_eq!(cc.ssthresh(), cc.cwnd(), "ssthresh should be set in CA");
+    assert_eq!(
+        cc.ssthresh(),
+        Some(cc.cwnd()),
+        "ssthresh should be set in CA"
+    );
 }

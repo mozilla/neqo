@@ -1181,7 +1181,6 @@ decompress("__DATA_B64GZ__").then((D) => {
                 syncing = true;
                 try {
                   for (const ch of charts) {
-                    ch.setSelect({ left: 0, width: 0, top: 0, height: 0 }, false);
                     ch.batch(() => {
                       ch.setScale("x", { min: nMin, max: nMax });
                       forYScales(ch, (k) =>
@@ -1192,6 +1191,10 @@ decompress("__DATA_B64GZ__").then((D) => {
                 } finally {
                   syncing = false;
                 }
+                requestAnimationFrame(() => {
+                  for (const ch of charts)
+                    ch.setSelect({ left: 0, width: 0, top: 0, height: 0 }, false);
+                });
               },
             ],
             ready: [
@@ -1264,6 +1267,7 @@ decompress("__DATA_B64GZ__").then((D) => {
       c._initY[k] = { min: r.min, max: r.max };
     c._rangeLock = rangeLock;
     c._activeScale = null;
+    c._panelId = el;
     charts.push(c);
     return c;
   }
@@ -2072,11 +2076,62 @@ decompress("__DATA_B64GZ__").then((D) => {
   const thinTargetPts = Math.max(10, Math.round(initW / 40));
   const spatialGridScale = Math.max(initH, initW) * 10;
 
+  // ── URL state (zoom/pan persistence) ────────────────────────────────
+  const encRange = (min, max) => `${+min.toFixed(3)},${+max.toFixed(3)}`;
+  const decRange = (str) => {
+    if (!str) return null;
+    const [a, b] = str.split(",").map(Number);
+    return isFinite(a) && isFinite(b) && b > a ? { min: a, max: b } : null;
+  };
+  const isZoomed = (range, full) => full > 0 && range < full * zoomResetThreshold;
+  const applyRange = (ch, k, str) => {
+    const r = decRange(str);
+    if (r) ch.setScale(k, r);
+  };
+  const saveRange = (params, key, { min, max }, full) => {
+    if (min != null && isZoomed(max - min, full)) params.set(key, encRange(min, max));
+  };
+  const saveUrlState = (() => {
+    let timer;
+    return () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const params = new URLSearchParams();
+        const fullX = globalXMax - globalXMin;
+        for (const ch of charts) {
+          saveRange(params, `${ch._panelId}.x`, ch.scales.x, fullX);
+          forYScales(ch, (k, s) => {
+            const init = ch._initY[k];
+            if (init) saveRange(params, k, s, init.max - init.min);
+          });
+        }
+        const str = params.toString();
+        const url = str ? "#" + str : location.pathname + location.search;
+        try { history.replaceState(null, "", url); } catch (_) {
+          if (str) location.hash = str;
+        }
+      }, 300);
+    };
+  })();
+  function applyUrlState() {
+    const hash = location.hash.slice(1);
+    if (!hash) return;
+    const params = new URLSearchParams(hash);
+    for (const ch of charts) {
+      ch.batch(() => {
+        applyRange(ch, "x", params.get(`${ch._panelId}.x`));
+        forYScales(ch, (k) => applyRange(ch, k, params.get(k)));
+      });
+    }
+  }
+
   function init() {
     for (const p of panels) mkChart(p, initW, initH);
     for (const c of charts) c.redraw(false);
   }
   init();
+  for (const ch of charts) (ch.hooks.setScale ??= []).push(saveUrlState);
+  requestAnimationFrame(applyUrlState);
 
   window.addEventListener("resize", () => {
     const { W, H } = layoutDims();

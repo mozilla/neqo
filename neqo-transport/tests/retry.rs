@@ -478,7 +478,7 @@ fn mitm_retry() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload.len()).unwrap());
+        .encode_len(payload.len());
     let pn_offset = enc.len();
     let notoken_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
     qtrace!("notoken_header={}", hex_with_len(&notoken_header));
@@ -561,7 +561,7 @@ fn retry_short_dcid() {
         .encode_vec(1, short_dcid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload.len()).unwrap());
+        .encode_len(payload.len());
     let pn_offset = enc.len();
     let short_dcid_header = enc.encode_uint(pn_len, pn).as_ref().to_vec();
 

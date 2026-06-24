@@ -11,41 +11,38 @@
 
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use neqo_common::to_u64;
 use neqo_transport::send_stream::RangeTracker;
 
-const CHUNK: u64 = 1000;
-const END: u64 = 100_000;
-fn build_coalesce(len: u64) -> RangeTracker {
+const CHUNK: usize = 1000;
+
+fn build_coalesce(count: usize) -> RangeTracker {
     let mut used = RangeTracker::default();
-    let chunk = usize::try_from(CHUNK).expect("should fit");
-    used.mark_acked(0, chunk);
-    used.mark_sent(CHUNK, usize::try_from(END).expect("should fit"));
-    // leave a gap or it will coalesce here
-    for i in 2..=len {
-        // These do not get immediately coalesced when marking since they're not at the end or start
-        used.mark_acked(i * CHUNK, chunk);
+    used.mark_acked(0, CHUNK); // frontier at CHUNK
+    // One big Sent range covering exactly the gap and all the acked chunks placed below.
+    used.mark_sent(to_u64(CHUNK), 2 * count * CHUNK);
+    // ACK every *other* chunk so the acked ranges stay separate (a Sent chunk between
+    // each prevents merging); the gap at [CHUNK, 2*CHUNK) keeps the frontier blocked.
+    for i in 1..=count {
+        used.mark_acked(to_u64(2 * i * CHUNK), CHUNK);
     }
     used
 }
 
-fn coalesce(c: &mut Criterion, count: u64) {
-    let chunk = usize::try_from(CHUNK).expect("should fit");
-    c.bench_function(
-        &format!("coalesce_acked_from_zero {count}+1 entries"),
-        |b| {
-            b.iter_batched_ref(
-                || build_coalesce(count),
-                black_box(|used: &mut RangeTracker| {
-                    used.mark_acked(CHUNK, chunk);
-                    let tail = (count + 1) * CHUNK;
-                    used.mark_sent(tail, chunk);
-                    used.mark_acked(tail, chunk);
-                }),
-                criterion::BatchSize::SmallInput,
-            );
-        },
-    );
+fn coalesce(c: &mut Criterion, count: usize) {
+    c.bench_function(&format!("coalesce_acked_from_zero {count} ranges"), |b| {
+        b.iter_batched_ref(
+            || build_coalesce(count),
+            // Fill the gap and jump the frontier past all `count` acked ranges in one
+            // call; coalesce_acked then walks every entry below the new frontier.
+            |used: &mut RangeTracker| {
+                used.mark_acked(to_u64(CHUNK), 2 * count * CHUNK);
+                black_box(used);
+            },
+            BatchSize::SmallInput,
+        );
+    });
 }
 
 fn benchmark_coalesce(c: &mut Criterion) {
@@ -55,5 +52,110 @@ fn benchmark_coalesce(c: &mut Criterion) {
     coalesce(c, 1000);
 }
 
-criterion_group!(benches, benchmark_coalesce);
+/// Sequential sending — `used` merges into one contiguous Sent entry,
+/// so the range scan `[new_off, new_off+len)` always finds nothing.
+fn mark_sent_sequential(c: &mut Criterion) {
+    const SENDS: usize = 1_000;
+    c.bench_function("RangeTracker::mark_sent sequential", |b| {
+        b.iter_batched(
+            RangeTracker::default,
+            |mut rt| {
+                for i in 0..SENDS {
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
+                }
+                black_box(rt)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+/// After packet loss, `mark_as_lost` removes the affected bytes from `used` before `mark_sent` is
+/// called again.  The range scan is therefore still empty for the retransmit.
+fn mark_sent_retransmit(c: &mut Criterion) {
+    const SENDS: usize = 500;
+    c.bench_function("RangeTracker::mark_sent retransmit", |b| {
+        b.iter_batched(
+            || {
+                let mut rt = RangeTracker::default();
+                for i in 0..SENDS {
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
+                }
+                // Simulate loss: unmark every 10th chunk.
+                for i in (0..SENDS).step_by(10) {
+                    rt.mark_as_lost(to_u64(i * CHUNK), CHUNK);
+                }
+                rt
+            },
+            |mut rt| {
+                // Retransmit the lost chunks.
+                for i in (0..SENDS).step_by(10) {
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
+                }
+                black_box(rt)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+/// Gap-ACK with a single contiguous Sent entry — `new_off != self.acked`
+/// (not at the frontier) but the range scan `[new_off, new_end)` returns empty
+/// because the entry key starts *below* the acked range.
+fn mark_acked_gap_empty_covered(c: &mut Criterion) {
+    const SENDS: usize = 500;
+    c.bench_function("RangeTracker::mark_acked gap-ack empty-covered", |b| {
+        b.iter_batched(
+            || {
+                let mut rt = RangeTracker::default();
+                // One big contiguous Sent range.
+                rt.mark_sent(0, SENDS * CHUNK);
+                rt
+            },
+            |mut rt| {
+                // ACK every other chunk starting from chunk 1 (above frontier).
+                for i in (1..SENDS).step_by(2) {
+                    rt.mark_acked(to_u64(i * CHUNK), CHUNK);
+                }
+                black_box(rt)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+/// Fragmented `used` map with non-contiguous Sent entries — the range
+/// scan finds entries starting inside the acked range (non-empty `covered`).
+fn mark_acked_fragmented(c: &mut Criterion) {
+    const SENDS: usize = 500;
+    c.bench_function("RangeTracker::mark_acked fragmented", |b| {
+        b.iter_batched(
+            || {
+                let mut rt = RangeTracker::default();
+                // Send only even chunks, creating a fragmented Sent map.
+                for i in (0..SENDS).step_by(2) {
+                    rt.mark_sent(to_u64(i * CHUNK), CHUNK);
+                }
+                rt
+            },
+            |mut rt| {
+                // ACK the sent (even) chunks — covered is non-empty each time.
+                for i in (0..SENDS).step_by(2) {
+                    rt.mark_acked(to_u64(i * CHUNK), CHUNK);
+                }
+                black_box(rt)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+criterion_group!(
+    benches,
+    benchmark_coalesce,
+    mark_sent_sequential,
+    mark_sent_retransmit,
+    mark_acked_gap_empty_covered,
+    mark_acked_fragmented,
+);
 criterion_main!(benches);

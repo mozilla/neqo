@@ -6,7 +6,7 @@
 
 use std::{mem, str};
 
-use neqo_common::{qdebug, qerror};
+use neqo_common::qdebug;
 use neqo_transport::{Connection, StreamId};
 
 use crate::{Error, Res, huffman, prefix::Prefix};
@@ -211,7 +211,7 @@ impl IntReader {
             b = s.read_byte()?;
 
             if (self.cnt == 63) && (b > 1 || (b == 1 && ((self.value >> 63) == 1))) {
-                qerror!("Error decoding prefixed encoded int - IntegerOverflow");
+                qdebug!("Error decoding prefixed encoded int - IntegerOverflow");
                 return Err(Error::IntegerOverflow);
             }
             self.value += u64::from(b & 0x7f) << self.cnt;
@@ -398,7 +398,7 @@ pub(crate) mod test_receiver {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
-    use neqo_common::Encoder;
+    use neqo_common::{Encoder, to_u64};
     use test_receiver::TestReceiver;
 
     use super::{
@@ -461,7 +461,8 @@ mod tests {
     }
 
     type TestSetup = (&'static [u8], u8, Res<u64>);
-    const TEST_CASES_BIG_NUMBERS: [TestSetup; 3] = [
+    const TEST_CASES_BIG_NUMBERS: &[TestSetup] = &[
+        // (1 << 64) - 1 is fine
         (
             &[
                 0xFF, 0x80, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
@@ -469,6 +470,7 @@ mod tests {
             0,
             Ok(0xFFFF_FFFF_FFFF_FFFF),
         ),
+        // 1 << 64 is too big
         (
             &[
                 0xFF, 0x81, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
@@ -476,22 +478,57 @@ mod tests {
             0,
             Err(Error::IntegerOverflow),
         ),
+        // Adding 1 << 64 is no good, no matter what else is there
         (
             &[
-                0xFF, 0x80, 0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02,
+                0xFF, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02,
             ],
             0,
+            Err(Error::IntegerOverflow),
+        ),
+        // 1 << 63
+        (
+            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F],
+            7,
+            Ok(0x8000_0000_0000_0000),
+        ),
+        // 1 << 63 with extra zero values
+        (
+            &[
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+            ],
+            7,
+            Ok(0x8000_0000_0000_0000),
+        ),
+        // 1 << 64 with prefix 7
+        (
+            &[
+                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x01,
+            ],
+            7,
+            Err(Error::IntegerOverflow),
+        ),
+        // Adding 1 << 64 is no good, no matter what else is there
+        (
+            &[
+                0xFF, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x02,
+            ],
+            7,
             Err(Error::IntegerOverflow),
         ),
     ];
 
     #[test]
     fn read_prefixed_int_big_number() {
-        for (buf, prefix_len, value) in &TEST_CASES_BIG_NUMBERS {
+        for (buf, prefix_len, value) in TEST_CASES_BIG_NUMBERS {
             let mut reader = IntReader::new(buf[0], *prefix_len);
             let mut test_receiver: TestReceiver = TestReceiver::default();
             test_receiver.write(&buf[1..]);
-            assert_eq!(reader.read(&mut test_receiver), *value);
+            assert_eq!(
+                reader.read(&mut test_receiver),
+                *value,
+                "p{prefix_len}: {buf:x?}"
+            );
         }
     }
 
@@ -582,7 +619,7 @@ mod tests {
 
     #[test]
     fn read_prefixed_int_big_receiver_buffer_wrapper() {
-        for (buf, prefix_len, value) in &TEST_CASES_BIG_NUMBERS {
+        for (buf, prefix_len, value) in TEST_CASES_BIG_NUMBERS {
             let mut buffer = ReceiverBufferWrapper::new(buf);
             let mut reader = IntReader::new(buffer.read_byte().unwrap(), *prefix_len);
             assert_eq!(reader.read(&mut buffer), *value);
@@ -700,7 +737,7 @@ mod tests {
         let mut data = Encoder::default();
         data.encode_prefixed_encoded_int(
             Prefix::new(0x00, PREFIX_LEN + 1),
-            (LiteralReader::MAX_LEN + 1) as u64,
+            to_u64(LiteralReader::MAX_LEN + 1),
         );
         let mut buffer = ReceiverBufferWrapper::new(data.as_ref());
         assert_eq!(

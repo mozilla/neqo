@@ -7,6 +7,14 @@
 // Tracks possibly-redundant flow control signals from other code and converts
 // into flow control frames needing to be sent to the remote.
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_panics_doc,
+        reason = "`SenderFlowControl` is only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cmp::min,
     fmt::{Debug, Display},
@@ -16,7 +24,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace};
+use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace, to_u64, to_usize};
 
 use crate::{
     Error, Res,
@@ -73,13 +81,10 @@ where
     limit: u64,
     /// How much of that limit we've used.
     used: u64,
-    /// The point at which blocking occurred.  This is updated each time
-    /// the sender decides that it is blocked.  It only ever changes
-    /// when blocking occurs.  This ensures that blocking at any given limit
-    /// is only reported once.
-    /// Note: All values are one greater than the corresponding `limit` to
-    /// allow distinguishing between blocking at a limit of 0 and no blocking.
-    blocked_at: u64,
+    /// The limit at which blocking was last reported, or `None` if never blocked.
+    /// Updated each time the sender decides it is blocked, ensuring that blocking
+    /// at any given limit is only reported once.
+    blocked_at: Option<u64>,
     /// Whether a blocked frame should be sent.
     blocked_frame: bool,
 }
@@ -94,7 +99,7 @@ where
             subject,
             limit: initial,
             used: 0,
-            blocked_at: 0,
+            blocked_at: None,
             blocked_frame: false,
         }
     }
@@ -102,7 +107,6 @@ where
     /// Update the maximum. Returns `Some` with the updated available flow
     /// control if the change was an increase and `None` otherwise.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
-        debug_assert!(limit < u64::MAX);
         (limit > self.limit).then(|| {
             self.limit = limit;
             self.blocked_frame = false;
@@ -112,14 +116,14 @@ where
 
     /// Consume flow control.
     pub fn consume(&mut self, count: usize) {
-        let amt = u64::try_from(count).expect("usize fits into u64");
+        let amt = to_u64(count);
         debug_assert!(self.used + amt <= self.limit);
         self.used += amt;
     }
 
     /// Get available flow control.
-    pub fn available(&self) -> usize {
-        usize::try_from(self.limit - self.used).unwrap_or(usize::MAX)
+    pub const fn available(&self) -> usize {
+        to_usize(self.limit - self.used)
     }
 
     /// How much data has been written.
@@ -130,10 +134,13 @@ where
     /// Mark flow control as blocked.
     /// This only does something if the current limit exceeds the last reported blocking limit.
     pub const fn blocked(&mut self) {
-        if self.limit >= self.blocked_at {
-            self.blocked_at = self.limit + 1;
-            self.blocked_frame = true;
+        if let Some(block) = self.blocked_at
+            && self.limit <= block
+        {
+            return;
         }
+        self.blocked_at = Some(self.limit);
+        self.blocked_frame = true;
     }
 
     /// Return whether a blocking frame needs to be sent.
@@ -141,7 +148,13 @@ where
     /// if a blocking frame has not been sent (or it has been lost), and
     /// if the blocking condition remains.
     fn blocked_needed(&self) -> Option<u64> {
-        (self.blocked_frame && self.limit < self.blocked_at).then(|| self.blocked_at - 1)
+        self.blocked_at
+            .filter(|&l| self.blocked_frame && self.limit <= l)
+    }
+
+    /// Returns whether a blocking frame needs to be sent.
+    pub(crate) fn is_blocked(&self) -> bool {
+        self.blocked_needed().is_some()
     }
 
     /// Clear the need to send a blocked frame.
@@ -153,7 +166,9 @@ where
     /// Only send again if value of `self.blocked_at` hasn't increased since sending.
     /// That would imply that the limit has since increased.
     pub const fn frame_lost(&mut self, limit: u64) {
-        if self.blocked_at == limit + 1 {
+        if let Some(block) = self.blocked_at
+            && block == limit
+        {
             self.blocked_frame = true;
         }
     }
@@ -750,7 +765,7 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Encoder, Role, qdebug};
+    use neqo_common::{Encoder, Role, qdebug, to_u64};
     use nss::random;
 
     use super::{
@@ -1138,9 +1153,9 @@ mod test {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
         let mut fc =
-            ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
 
-        let fraction = INITIAL_LOCAL_MAX_STREAM_DATA as u64 / WINDOW_UPDATE_FRACTION;
+        let fraction = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) / WINDOW_UPDATE_FRACTION;
 
         let consumed = fc.set_consumed(fraction)?;
         fc.add_retired(consumed);
@@ -1160,7 +1175,7 @@ mod test {
         let rtt = Duration::from_millis(40);
         let mut now = test_fixture::now();
         let mut fc =
-            ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let initial_max_active = fc.max_active();
 
         // Consume and retire multiple receive windows without increasing time.
@@ -1196,7 +1211,7 @@ mod test {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
         let mut fc =
-            ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
 
         // Send first window update to give auto-tuning algorithm a baseline.
         let consumed = fc.set_consumed(fc.next_limit())?;
@@ -1263,12 +1278,12 @@ mod test {
             let mut send_to_recv = VecDeque::new();
             let mut recv_to_send = VecDeque::new();
 
-            let mut last_max_active = INITIAL_LOCAL_MAX_STREAM_DATA as u64;
+            let mut last_max_active = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA);
             let mut last_max_active_changed = now;
 
-            let mut sender_window = INITIAL_LOCAL_MAX_STREAM_DATA as u64;
+            let mut sender_window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA);
             let mut fc =
-                ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+                ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
 
             let mut bytes_received: u64 = 0;
             let start_time = now;
@@ -1359,7 +1374,7 @@ mod test {
 
             assert!(
                 effective_window - TOLERANCE <= bdp
-                    || fc.max_active == INITIAL_LOCAL_MAX_STREAM_DATA as u64,
+                    || fc.max_active == to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
                 "{summary} Receive window is larger than the bdp."
             );
 
@@ -1384,7 +1399,7 @@ mod test {
     fn connection_flow_control_auto_tune() -> Res<()> {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
-        let initial_window = (INITIAL_LOCAL_MAX_STREAM_DATA * 16) as u64;
+        let initial_window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA * 16);
         let mut fc = ReceiverFlowControl::new((), initial_window);
         let initial_max_active = fc.max_active();
 
@@ -1425,7 +1440,7 @@ mod test {
     fn connection_flow_control_respects_max_window() -> Res<()> {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
-        let initial_window = (INITIAL_LOCAL_MAX_STREAM_DATA * 16) as u64;
+        let initial_window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA * 16);
         let mut fc = ReceiverFlowControl::new((), initial_window);
 
         // Helper to write frames

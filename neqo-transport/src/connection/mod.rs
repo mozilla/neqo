@@ -20,6 +20,7 @@ use std::{
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
     hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
+    to_u64, to_usize,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -32,6 +33,7 @@ use strum::IntoEnumIterator as _;
 use crate::{
     AppError, CloseReason, Error, Res, StreamId,
     addr_valid::{AddressValidation, NewTokenState},
+    cc::Phase,
     cid::{
         ConnectionId, ConnectionIdEntry, ConnectionIdGenerator, ConnectionIdManager,
         ConnectionIdRef, ConnectionIdStore,
@@ -52,7 +54,7 @@ use crate::{
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{SendOrder, Streams},
+    streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
         TransportParameterId::{
@@ -902,6 +904,29 @@ impl Connection {
         self.crypto.tls().peer_certificate()
     }
 
+    /// Export keying material per RFC 8446 §7.5.
+    ///
+    /// `label` is the TLS exporter label, not the WebTransport application label.
+    /// This can only be called after the handshake is complete.
+    /// Per RFC 8446 §7.5, labels SHOULD begin with `"EXPORTER-"`.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if connection is not in a connected or closing state,
+    /// or export fails.
+    pub fn export_keying_material(&self, label: &str, context: &[u8], out: &mut [u8]) -> Res<()> {
+        if !(self.state.connected() || self.state.closing()) {
+            return Err(Error::NotConnected);
+        }
+        if out.is_empty() || label.is_empty() {
+            return Err(Error::InvalidInput);
+        }
+        self.crypto
+            .tls()
+            .export_keying_material(label.as_bytes(), context, out)
+            .map_err(Into::into)
+    }
+
     /// Call by application when the peer cert has been verified.
     ///
     /// This panics if there is no active peer.  It's OK to call this
@@ -944,6 +969,7 @@ impl Connection {
     #[must_use]
     pub fn stats(&self) -> Stats {
         let mut v = self.stats.borrow().clone();
+        v.version = self.version;
         if let Some(p) = self.paths.primary() {
             let p = p.borrow();
             v.rtt = p.rtt().estimate();
@@ -1105,6 +1131,10 @@ impl Connection {
             return;
         }
 
+        // Snapshot timer type before ACKs can alter loss state.
+        if let Some(path) = self.paths.primary() {
+            self.loss_recovery.note_timeout_type(&path.borrow(), now);
+        }
         for d in dgrams {
             self.input(d, now, now);
         }
@@ -1263,6 +1293,10 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         if let Some(d) = dgram {
+            // Snapshot timer type before ACKs can alter loss state.
+            if let Some(path) = self.paths.primary() {
+                self.loss_recovery.note_timeout_type(&path.borrow(), now);
+            }
             self.input(d, now, now);
             self.process_saved(now);
         }
@@ -2274,8 +2308,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len = size_of::<packet::Number>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
+        let pn_len =
+            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -2923,6 +2957,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         }
         qlog::client_version_information_initiated(
             &mut self.qlog,
@@ -3011,12 +3052,11 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            if let Ok(max_udp_payload) = usize::try_from(remote.get_integer(MaxUdpPayloadSize)) {
-                path.borrow_mut()
-                    .pmtud_mut()
-                    .set_peer_max_udp_payload(max_udp_payload);
-                self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
-            }
+            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
+            path.borrow_mut()
+                .pmtud_mut()
+                .set_peer_max_udp_payload(max_udp_payload);
+            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
@@ -3370,7 +3410,7 @@ impl Connection {
             }
             Frame::RetireConnectionId { sequence_number } => {
                 self.stats.borrow_mut().frame_rx.retire_connection_id += 1;
-                self.cid_manager.retire(sequence_number);
+                self.cid_manager.retire(sequence_number)?;
             }
             Frame::PathChallenge { data } => {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
@@ -3625,6 +3665,13 @@ impl Connection {
                 self.conn_params.get_congestion_control(),
                 now,
             );
+            qlog::congestion_state_updated(
+                &mut self.qlog,
+                None,
+                Phase::SlowStart.into(),
+                None,
+                now,
+            );
         } else {
             self.zero_rtt_state = if self
                 .crypto
@@ -3744,6 +3791,19 @@ impl Connection {
         self.streams.set_fairness(stream_id, fairness)
     }
 
+    /// Assign a stream to a send group for per-group sendOrder namespacing and fair
+    /// bandwidth allocation between groups per the WebTransport spec.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        group_id: Option<SendGroupId>,
+    ) -> Res<()> {
+        self.streams.set_sendgroup(stream_id, group_id)
+    }
+
     /// # Errors
     /// When the stream does not exist.
     pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<send_stream::Stats> {
@@ -3858,20 +3918,14 @@ impl Connection {
     /// `InvalidStreamId` if the stream does not exist.
     /// `NoMoreData` if data and fin bit were previously read by the application.
     pub fn stream_recv(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        let rb = stream.read(data)?;
-        Ok(rb)
+        self.streams.recv(stream_id, data)
     }
 
     /// Application is no longer interested in this stream.
     /// # Errors
     /// When the stream ID is invalid.
     pub fn stream_stop_sending(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
-        let stream = self.streams.get_recv_stream_mut(stream_id)?;
-
-        stream.stop_sending(err);
-        Ok(())
+        self.streams.stop_sending(stream_id, err)
     }
 
     /// Increases `max_stream_data` for a `stream_id`.
@@ -3944,9 +3998,9 @@ impl Connection {
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
 
-        let data_len_possible = u64::try_from(
+        let data_len_possible = to_u64(
             mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
-        )?;
+        );
         Ok(min(data_len_possible, max_dgram_size))
     }
 

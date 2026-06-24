@@ -11,14 +11,12 @@ use std::{
 };
 
 use neqo_common::{Header, MessageType, Role, event::Provider as _, qdebug, qinfo, qtrace};
-use neqo_transport::{
-    AppError, Connection, ConnectionEvent, DatagramTracking, StreamId, StreamType,
-};
+use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
     ReceiveOutput, Res,
-    connection::{Http3Connection, Http3State, SessionAcceptAction},
+    connection::{Http3Connection, Http3State},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
     send_message::SendMessage,
@@ -50,6 +48,18 @@ impl Http3ServerHandler {
     #[must_use]
     pub fn state(&self) -> Http3State {
         self.base_handler.state().clone()
+    }
+
+    pub(crate) const fn base_handler_mut(&mut self) -> &mut Http3Connection {
+        &mut self.base_handler
+    }
+
+    pub(crate) const fn server_events(&self) -> &Http3ServerConnEvents {
+        &self.events
+    }
+
+    pub(crate) const fn mark_needs_processing(&mut self) {
+        self.needs_processing = true;
     }
 
     /// Supply a response for a request.
@@ -158,126 +168,10 @@ impl Http3ServerHandler {
         self.base_handler.stream_reset_send(conn, stream_id, error)
     }
 
-    /// Accept a `WebTransport` Session request
-    pub(crate) fn webtransport_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        accept: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler.webtransport_session_accept(
-            conn,
-            stream_id,
-            Box::new(self.events.clone()),
-            accept,
-            now,
-        )
-    }
-
-    /// Accept a `ConnectUdp` Session request
-    pub(crate) fn connect_udp_session_accept(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        accept: &SessionAcceptAction,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler.connect_udp_session_accept(
-            conn,
-            stream_id,
-            Box::new(self.events.clone()),
-            accept,
-            now,
-        )
-    }
-
-    /// Close `WebTransport` cleanly
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist,
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
-    pub fn webtransport_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
+    pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {
         self.base_handler
-            .webtransport_close_session(conn, session_id, error, message, now)
-    }
-
-    /// Close `ConnectUdp` cleanly
-    ///
-    /// # Errors
-    ///
-    /// `InvalidStreamId` if the stream does not exist,
-    /// `TransportStreamDoesNotExist` if the transport stream does not exist (this may happen if
-    /// `process_output` has not been called when needed, and HTTP3 layer has not picked up the
-    /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
-    /// supplied.
-    pub fn connect_udp_close_session(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        error: u32,
-        message: &str,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler
-            .connect_udp_close_session(conn, session_id, error, message, now)
-    }
-
-    pub fn webtransport_create_stream(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        stream_type: StreamType,
-    ) -> Res<StreamId> {
-        self.needs_processing = true;
-        self.base_handler.webtransport_create_stream_local(
-            conn,
-            session_id,
-            stream_type,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-        )
-    }
-
-    pub fn webtransport_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler
-            .webtransport_send_datagram(session_id, conn, buf, id, now)
-    }
-
-    pub fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
-        &mut self,
-        conn: &mut Connection,
-        session_id: StreamId,
-        buf: &[u8],
-        id: I,
-        now: Instant,
-    ) -> Res<()> {
-        self.needs_processing = true;
-        self.base_handler
-            .connect_udp_send_datagram(session_id, conn, buf, id, now)
+            .validate_extended_connect_session(session_id)
+            .map(|_| ())
     }
 
     /// Process HTTTP3 layer.
@@ -297,6 +191,13 @@ impl Http3ServerHandler {
     /// Take the next available event.
     pub(crate) fn next_event(&self) -> Option<Http3ServerConnEvent> {
         self.events.next_event()
+    }
+
+    /// Queue a GOAWAY frame on the local control stream.
+    pub(crate) fn queue_goaway(&mut self, stream_id: StreamId) {
+        self.base_handler
+            .queue_control_frame(&HFrame::Goaway { stream_id });
+        self.needs_processing = true;
     }
 
     /// Whether this connection has events to process or data to send.

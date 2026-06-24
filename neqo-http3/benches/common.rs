@@ -4,14 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(
-    dead_code,
-    reason = "Included by two bench binaries; each uses only one entry point."
-)]
-
 use std::{hint::black_box, time::Duration};
 
-use criterion::{Criterion, Throughput};
+use criterion::{BatchSize::SmallInput, Criterion, Throughput};
+use neqo_common::to_u64;
 use test_fixture::{
     boxed, fixture_init,
     sim::{
@@ -59,7 +55,7 @@ fn setup_with_link(
 ///
 /// The DSL uplink (200 KB/s, 60 ms one-way delay) keeps the bandwidth-delay
 /// product well below the default flow-control window, so no FC blocking occurs.
-pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
+fn setup(streams: usize, data_size: usize) -> ReadySimulator {
     setup_with_link(streams, data_size, TailDrop::dsl_uplink)
 }
 
@@ -68,7 +64,7 @@ pub fn setup(streams: usize, data_size: usize) -> ReadySimulator {
 /// At 100 MB/s with a 20 ms RTT the bandwidth-delay product (~2 MB) exceeds the
 /// 1 MB per-stream flow-control window, so streams regularly exhaust their window
 /// and block waiting for `MAX_STREAM_DATA`.
-pub fn setup_flow_controlled(streams: usize, data_size: usize) -> ReadySimulator {
+fn setup_flow_controlled(streams: usize, data_size: usize) -> ReadySimulator {
     // Link delay is zero so propagation RTT comes entirely from the Delay nodes
     // (10 ms each way = 20 ms RTT).
     setup_with_link(streams, data_size, || {
@@ -88,40 +84,24 @@ const CONFIGS: [(&str, SetupFn, &[(usize, usize)]); 2] = [
     ),
 ];
 
-/// Runs all stream benchmarks measuring wall-clock CPU time.
-pub fn walltime(c: &mut Criterion) {
+/// Runs all stream benchmarks using `iter_batched`, grouping results under
+/// `name_prefix` (e.g. `"walltime"` or `"simulated"`).
+pub fn bench(c: &mut Criterion, name_prefix: &str) {
     fixture_init();
     for (group_name, setup_fn, params) in CONFIGS {
         let mut group = c.benchmark_group(group_name);
         for &(streams, data_size) in params {
-            let name = format!("walltime/{streams}-streams/each-{data_size}-bytes");
-            group.bench_function(&name, |b| {
-                b.iter_batched(
-                    || setup_fn(streams, data_size),
-                    |sim| black_box(sim.run()),
-                    criterion::BatchSize::SmallInput,
-                );
-            });
-        }
-        group.finish();
-    }
-}
-
-/// Runs all stream benchmarks measuring simulated network time (throughput).
-pub fn simulated(c: &mut Criterion) {
-    fixture_init();
-    for (group_name, setup_fn, params) in CONFIGS {
-        let mut group = c.benchmark_group(group_name);
-        for &(streams, data_size) in params {
-            let name = format!("simulated/{streams}-streams/each-{data_size}-bytes");
-            group.throughput(Throughput::Bytes((streams * data_size) as u64));
-            group.bench_function(&name, |b| {
-                b.iter_custom(|iters| {
-                    (0..iters)
-                        .map(|_| setup_fn(streams, data_size).run())
-                        .sum::<Duration>()
-                });
-            });
+            group.throughput(Throughput::Bytes(to_u64(streams * data_size)));
+            group.bench_function(
+                &format!("{name_prefix}/{streams}-streams/each-{data_size}-bytes"),
+                |b| {
+                    b.iter_batched(
+                        || setup_fn(streams, data_size),
+                        |sim| black_box(sim.run()),
+                        SmallInput,
+                    );
+                },
+            );
         }
         group.finish();
     }

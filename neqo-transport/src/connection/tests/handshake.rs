@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug};
+use neqo_common::{Datagram, event::Provider as _, qdebug, to_u64};
 use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
@@ -1528,7 +1528,7 @@ fn server_initial_retransmits_identical() {
                 // base count for CRYPTO is two per flight, plus any extra
                 crypto: i * 2 + extra,
                 ack: i,
-                largest_acknowledged: (i - i.saturating_sub(1)) as u64,
+                largest_acknowledged: to_u64(i - i.saturating_sub(1)),
                 ..Default::default()
             }
         );
@@ -1902,4 +1902,123 @@ fn initial_crypto_retransmit_during_handshake_pto() {
              packets sent: {packets_sent}"
         );
     }
+}
+
+#[test]
+fn export_keying_material_basic() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let mut material = vec![0u8; 32];
+    client
+        .export_keying_material("EXPORTER-WebTransport", &[], &mut material)
+        .expect("export should succeed after handshake");
+    assert_ne!(material, vec![0u8; 32]);
+}
+
+#[test]
+fn export_keying_material_same_both_sides() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let label = "EXPORTER-WebTransport";
+    let context = b"session-context";
+
+    let mut client_material = vec![0u8; 32];
+    client
+        .export_keying_material(label, context, &mut client_material)
+        .expect("client export should succeed");
+    let mut server_material = vec![0u8; 32];
+    server
+        .export_keying_material(label, context, &mut server_material)
+        .expect("server export should succeed");
+
+    assert_eq!(
+        client_material, server_material,
+        "client and server must export identical keying material"
+    );
+}
+
+#[test]
+fn export_keying_material_before_handshake() {
+    let client = default_client();
+    let result = client.export_keying_material("EXPORTER-WebTransport", &[], &mut [0u8; 32]);
+    assert!(matches!(result, Err(Error::NotConnected)));
+}
+
+#[test]
+fn export_keying_material_zero_length() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    assert!(matches!(
+        client.export_keying_material("EXPORTER-WebTransport", &[], &mut []),
+        Err(Error::InvalidInput)
+    ));
+}
+
+#[test]
+fn export_keying_material_empty_label() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    assert!(matches!(
+        client.export_keying_material("", &[], &mut [0u8; 32]),
+        Err(Error::InvalidInput)
+    ));
+}
+
+// Export should succeed while the connection is closing or draining.
+#[test]
+fn export_keying_material_while_closing() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    client.close(now(), 0, "");
+    assert!(client.state().closing());
+
+    let mut material = vec![0u8; 32];
+    client
+        .export_keying_material("EXPORTER-WebTransport", &[], &mut material)
+        .expect("export should succeed while closing");
+
+    let close_pkt = client.process_output(now()).dgram().unwrap();
+    server.process_input(close_pkt, now());
+    assert!(server.state().closing());
+
+    let mut material = vec![0u8; 32];
+    server
+        .export_keying_material("EXPORTER-WebTransport", &[], &mut material)
+        .expect("export should succeed while draining");
+}
+
+// Export should fail once the connection is fully closed.
+#[test]
+fn export_keying_material_after_closed() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    client.close(now(), 0, "");
+    let close_pkt = client.process_output(now()).dgram();
+    let close_timer = client.process_output(now()).callback();
+    drop(client.process_output(now() + close_timer));
+    assert!(matches!(*client.state(), State::Closed(..)));
+
+    assert!(matches!(
+        client.export_keying_material("EXPORTER-WebTransport", &[], &mut [0u8; 32]),
+        Err(Error::NotConnected)
+    ));
+    let _server_close = server.process(close_pkt, now()).dgram();
+    let drain_timer = server.process_output(now()).callback();
+    drop(server.process_output(now() + drain_timer));
+    assert!(matches!(*server.state(), State::Closed(..)));
+    assert!(matches!(
+        server.export_keying_material("EXPORTER-WebTransport", &[], &mut [0u8; 32]),
+        Err(Error::NotConnected)
+    ));
 }

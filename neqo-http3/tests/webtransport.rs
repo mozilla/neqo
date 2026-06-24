@@ -11,8 +11,8 @@ use std::{cell::RefCell, rc::Rc};
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent, WebTransportRequest,
-    WebTransportServerEvent,
+    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use nss::AuthenticationStatus;
@@ -77,7 +77,13 @@ fn connect() -> (Http3Client, Http3Server) {
     (client, server)
 }
 
-fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebTransportRequest {
+fn setup_wt() -> (Http3Client, Http3Server, ServerSession) {
+    let (mut client, mut server) = connect();
+    let wt_session = create_wt_session(&mut client, &mut server);
+    (client, server, wt_session)
+}
+
+fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> ServerSession {
     let wt_session_id = client
         .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
         .unwrap();
@@ -86,10 +92,7 @@ fn create_wt_session(client: &mut Http3Client, server: &mut Http3Server) -> WebT
     let mut wt_server_session = None;
     while let Some(event) = server.next_event() {
         match event {
-            Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                session,
-                headers,
-            }) => {
+            Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, headers }) => {
                 assert!(
                     headers.contains_header(":method", "CONNECT")
                         && headers.contains_header(":protocol", "webtransport")
@@ -200,7 +203,7 @@ fn receive_data_server(
     let mut recv_data = Vec::new();
     while let Some(event) = server.next_event() {
         match event {
-            Http3ServerEvent::WebTransport(WebTransportServerEvent::NewStream(request)) => {
+            Http3ServerEvent::WebTransport(ServerEvent::NewStream(request)) => {
                 assert_eq!(stream_id, request.stream_id());
                 new_stream_received = true;
             }
@@ -349,10 +352,8 @@ fn wt_race_condition_server_stream_before_confirmation() {
         let wt_server_session = server
             .events()
             .find_map(|event| {
-                if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                    session,
-                    ..
-                }) = event
+                if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) =
+                    event
                 {
                     Some(session)
                 } else {
@@ -452,11 +453,7 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     let wt_server_session = server
         .events()
         .find_map(|event| {
-            if let Http3ServerEvent::WebTransport(WebTransportServerEvent::NewSession {
-                session,
-                ..
-            }) = event
-            {
+            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
                 Some(session)
             } else {
                 None
@@ -496,4 +493,267 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     );
 
     assert_eq!(client.events().next(), None);
+}
+
+#[test]
+fn wt_export_keying_material() {
+    let (mut client, mut server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    let mut result = [0u8; 32];
+    client
+        .webtransport_export_keying_material(session_id, b"my-label", b"my-context", &mut result)
+        .unwrap();
+
+    let mut result2 = [0u8; 32];
+    client
+        .webtransport_export_keying_material(session_id, b"my-label", b"my-context", &mut result2)
+        .unwrap();
+    assert_eq!(result, result2, "same inputs should produce same output");
+
+    let mut different_label = [0u8; 32];
+    client
+        .webtransport_export_keying_material(
+            session_id,
+            b"other-label",
+            b"my-context",
+            &mut different_label,
+        )
+        .unwrap();
+    assert_ne!(result, different_label, "different labels should differ");
+
+    let mut different_context = [0u8; 32];
+    client
+        .webtransport_export_keying_material(
+            session_id,
+            b"my-label",
+            b"other-ctx",
+            &mut different_context,
+        )
+        .unwrap();
+    assert_ne!(
+        result[..],
+        different_context[..],
+        "different contexts should differ"
+    );
+
+    let mut different_len = [0u8; 64];
+    client
+        .webtransport_export_keying_material(
+            session_id,
+            b"my-label",
+            b"my-context",
+            &mut different_len,
+        )
+        .unwrap();
+    assert_ne!(
+        result[..],
+        different_len[..32],
+        "different output lengths produce entirely different material, not a prefix"
+    );
+
+    // Different session IDs must produce different keying material —
+    // this is the core session-scoping property of the WT exporter.
+    let wt_session2 = create_wt_session(&mut client, &mut server);
+    let session_id2 = wt_session2.stream_id();
+    let mut different_session = [0u8; 32];
+    client
+        .webtransport_export_keying_material(
+            session_id2,
+            b"my-label",
+            b"my-context",
+            &mut different_session,
+        )
+        .unwrap();
+    assert_ne!(
+        result, different_session,
+        "different session IDs should differ"
+    );
+}
+
+#[test]
+fn wt_export_keying_material_client_server_agree() {
+    let (client, _server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    let mut client_material = [0u8; 32];
+    client
+        .webtransport_export_keying_material(
+            session_id,
+            b"my-label",
+            b"my-context",
+            &mut client_material,
+        )
+        .unwrap();
+
+    let mut server_material = [0u8; 32];
+    wt_session
+        .export_keying_material(b"my-label", b"my-context", &mut server_material)
+        .unwrap();
+
+    assert_eq!(
+        client_material, server_material,
+        "client and server must derive identical WebTransport keying material"
+    );
+}
+
+#[test]
+fn wt_export_keying_material_label_too_long() {
+    let (client, _server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    let long_label = vec![0u8; 256];
+    assert!(matches!(
+        client.webtransport_export_keying_material(session_id, &long_label, b"ctx", &mut [0u8; 32]),
+        Err(neqo_http3::Error::InvalidInput)
+    ));
+    let max_label = vec![0u8; 255];
+    client
+        .webtransport_export_keying_material(session_id, &max_label, b"ctx", &mut [0u8; 32])
+        .expect("255-byte label should be accepted");
+
+    let long_context = vec![0u8; 256];
+    assert!(matches!(
+        client.webtransport_export_keying_material(
+            session_id,
+            b"label",
+            &long_context,
+            &mut [0u8; 32]
+        ),
+        Err(neqo_http3::Error::InvalidInput)
+    ));
+    let max_context = vec![0u8; 255];
+    client
+        .webtransport_export_keying_material(session_id, b"label", &max_context, &mut [0u8; 32])
+        .expect("255-byte context should be accepted");
+}
+
+#[test]
+fn wt_export_keying_material_zero_length() {
+    let (client, _server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    assert!(matches!(
+        client.webtransport_export_keying_material(session_id, b"my-label", b"my-context", &mut []),
+        Err(neqo_http3::Error::InvalidInput)
+    ));
+}
+
+#[test]
+fn wt_export_keying_material_invalid_session() {
+    let (client, _server, _) = setup_wt();
+
+    let bogus_id = StreamId::new(999);
+    assert!(matches!(
+        client.webtransport_export_keying_material(
+            bogus_id,
+            b"my-label",
+            b"my-context",
+            &mut [0u8; 32]
+        ),
+        Err(neqo_http3::Error::InvalidStreamId)
+    ));
+}
+
+#[test]
+fn wt_export_keying_material_closed_session() {
+    let (mut client, _server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    client
+        .webtransport_close_session(session_id, 0, "", now())
+        .unwrap();
+
+    assert!(matches!(
+        client.webtransport_export_keying_material(
+            session_id,
+            b"my-label",
+            b"my-context",
+            &mut [0u8; 32]
+        ),
+        Err(neqo_http3::Error::InvalidStreamId)
+    ));
+}
+
+#[test]
+fn wt_export_keying_material_server_closed_session() {
+    let (_client, _server, wt_session) = setup_wt();
+
+    wt_session.close_session(0, "", now()).unwrap();
+
+    assert!(matches!(
+        wt_session.export_keying_material(b"my-label", b"my-context", &mut [0u8; 32]),
+        Err(neqo_http3::Error::InvalidStreamId)
+    ));
+}
+
+#[test]
+fn wt_export_keying_material_transport_error() {
+    let (mut client, mut server, wt_session) = setup_wt();
+
+    // Close the QUIC connection fully; the WT session remains in recv_streams
+    // but the transport export fails because the connection is no longer active.
+    client.close(now(), 0, "");
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let drain = server.process_output(now()).callback();
+    server.process_output(now() + drain);
+    assert!(matches!(
+        wt_session.export_keying_material(b"my-label", b"my-context", &mut [0u8; 32]),
+        Err(neqo_http3::Error::Transport(
+            neqo_transport::Error::NotConnected
+        ))
+    ));
+}
+
+#[test]
+fn wt_send_goaway() {
+    let (mut client, mut server, wt_session) = setup_wt();
+    let session_id = wt_session.stream_id();
+
+    let goaway_stream_id = StreamId::new(session_id.as_u64() + 4);
+    server.send_goaway(goaway_stream_id);
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let events: Vec<Http3ClientEvent> = client.events().collect();
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::GoawayReceived)),
+        "client should receive GoawayReceived"
+    );
+    assert_eq!(client.state(), Http3State::GoingAway(goaway_stream_id));
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::WebTransport(
+                WebTransportEvent::Draining { stream_id: id }
+            ) if *id == session_id)),
+        "active WT session should receive a Draining event"
+    );
+}
+
+#[test]
+fn wt_goaway_no_sessions_no_draining_events() {
+    let (mut client, mut server) = connect();
+
+    server.send_goaway(StreamId::new(0));
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let events: Vec<Http3ClientEvent> = client.events().collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Http3ClientEvent::GoawayReceived)),
+        "client should receive GoawayReceived"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { .. })
+        )),
+        "no Draining events when no WT sessions exist"
+    );
 }

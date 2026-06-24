@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, to_u64};
 
 use crate::{
     Error, Res,
@@ -253,7 +253,7 @@ impl HeaderTable {
             if !e.can_reduce(self.acked_inserts_cnt) {
                 return false;
             }
-            self.used -= u64::try_from(e.size()).expect("usize fits in u64");
+            self.used -= to_u64(e.size());
             self.dynamic.pop_back();
         }
         true
@@ -268,11 +268,11 @@ impl HeaderTable {
             .map(DynamicTableEntry::size)
             .sum();
 
-        self.used - u64::try_from(evictable_size).expect("usize fits in u64") <= reduce
+        self.used - to_u64(evictable_size) <= reduce
     }
 
     pub fn insert_possible(&self, size: usize) -> bool {
-        let size = u64::try_from(size).expect("usize fits in u64");
+        let size = to_u64(size);
         size <= self.capacity && self.can_evict_to(self.capacity - size)
     }
 
@@ -290,14 +290,13 @@ impl HeaderTable {
             base: self.base,
             refs: 0,
         };
-        if u64::try_from(entry.size()).map_err(|_| Error::Internal)? > self.capacity
-            || !self
-                .evict_to(self.capacity - u64::try_from(entry.size()).map_err(|_| Error::Internal)?)
+        if to_u64(entry.size()) > self.capacity
+            || !self.evict_to(self.capacity - to_u64(entry.size()))
         {
             return Err(Error::DynamicTableFull);
         }
         self.base += 1;
-        self.used += u64::try_from(entry.size()).map_err(|_| Error::Internal)?;
+        self.used += to_u64(entry.size());
         let index = entry.index();
         self.dynamic.push_front(entry);
         Ok(index)
@@ -362,10 +361,14 @@ impl HeaderTable {
     /// `IncrementAck` if ack is greater than actual number of inserts.
     pub fn increment_acked(&mut self, increment: u64) -> Res<()> {
         qtrace!("[{self}] increment acked by {increment}");
-        self.acked_inserts_cnt += increment;
-        if self.base < self.acked_inserts_cnt {
+        let acked = self
+            .acked_inserts_cnt
+            .checked_add(increment)
+            .ok_or(Error::IncrementAck)?;
+        if self.base < acked {
             return Err(Error::IncrementAck);
         }
+        self.acked_inserts_cnt = acked;
         Ok(())
     }
 
@@ -419,11 +422,30 @@ mod tests {
 
             table.increment_acked(1).unwrap();
 
-            let first_entry_size = table.get_dynamic_with_abs_index(0).unwrap().size() as u64;
+            let first_entry_size = to_u64(table.get_dynamic_with_abs_index(0).unwrap().size());
 
             assert!(table.can_evict_to(first_entry_size));
             assert!(!table.can_evict_to(0));
         }
+    }
+
+    /// A peer can send an `Insert Count Increment` on the decoder stream with an
+    /// increment large enough to overflow the running acknowledged-inserts count.
+    /// The increment is range-checked against `base`, but only after the add, so
+    /// the overflow has to be caught explicitly.
+    #[test]
+    fn increment_acked_overflow_is_rejected() {
+        let mut table = HeaderTable::new(true);
+        table.set_capacity(10000).unwrap();
+        table.insert(b"header1", b"42").unwrap();
+        table.insert(b"header2", b"42").unwrap();
+
+        // Acknowledge both inserts legitimately so acked_inserts_cnt > 0.
+        table.increment_acked(2).unwrap();
+
+        // A malicious increment that would push the count past u64::MAX must be
+        // reported as an error, not overflow.
+        assert_eq!(table.increment_acked(u64::MAX), Err(Error::IncrementAck));
     }
 
     #[test]

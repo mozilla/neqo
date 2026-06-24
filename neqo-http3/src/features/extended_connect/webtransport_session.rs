@@ -5,14 +5,15 @@
 // except according to those terms.
 
 use std::{
-    collections::HashSet,
     fmt::{self, Display, Formatter},
     mem,
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Role, qtrace};
-use neqo_transport::{Connection, StreamId};
+use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
+use neqo_transport::{Connection, StreamId, streams::SendGroupId};
+use rustc_hash::FxHashSet as HashSet;
+use sfv::{BareItem, Item, Parser};
 
 use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
@@ -34,6 +35,10 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// The negotiated protocol from server response headers.
+    negotiated_protocol: Option<String>,
+    /// Send groups registered for this session.
+    send_groups: HashSet<SendGroupId>,
 }
 
 impl Display for Session {
@@ -52,7 +57,23 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            negotiated_protocol: None,
+            send_groups: HashSet::default(),
         }
+    }
+    /// Register a send group with a caller-provided ID for this session.
+    ///
+    /// Returns an error if the ID is already in use.
+    pub(crate) fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        self.send_groups
+            .insert(id)
+            .then_some(())
+            .ok_or(Error::InvalidState)
+    }
+
+    /// Validate that a send group belongs to this session.
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.send_groups.contains(&group_id)
     }
 }
 
@@ -199,6 +220,32 @@ impl Protocol for Session {
             mem::take(&mut self.recv_streams),
             mem::take(&mut self.send_streams),
         )
+    }
+
+    fn process_response_headers(&mut self, headers: &[Header]) {
+        self.negotiated_protocol = headers
+            .iter()
+            .find(|h| h.name().eq_ignore_ascii_case("wt-protocol"))
+            .and_then(|h| Parser::new(h.value()).parse::<Item>().ok())
+            .and_then(|item| {
+                if let BareItem::String(s) = item.bare_item {
+                    Some(s.into())
+                } else {
+                    None
+                }
+            });
+    }
+
+    fn protocol(&self) -> Option<&str> {
+        self.negotiated_protocol.as_deref()
+    }
+
+    fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        Self::register_send_group(self, id)
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        Self::validate_send_group(self, group_id)
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {

@@ -14,6 +14,7 @@ use std::{env, hint::black_box, net::SocketAddr};
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use neqo_bin::{client, server};
+use neqo_common::to_u64;
 use tokio::runtime::Builder;
 
 struct Benchmark {
@@ -63,9 +64,9 @@ fn transfer(c: &mut Criterion) {
             .map_or_else(|| name.to_string(), |suffix| format!("{name}{suffix}"));
         let mut group = c.benchmark_group("transfer");
         group.throughput(if num_requests == 1 {
-            Throughput::Bytes((upload_size + download_size) as u64)
+            Throughput::Bytes(to_u64(upload_size + download_size))
         } else {
-            Throughput::Elements(num_requests as u64)
+            Throughput::Elements(to_u64(num_requests))
         });
         group.bench_function(&bench_name, |b| {
             b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
@@ -80,12 +81,10 @@ fn transfer(c: &mut Criterion) {
                         ));
                         (server_handle, client)
                     },
-                    |(server_handle, client)| {
-                        black_box(async move {
-                            client.await.unwrap();
-                            // Tell server to shut down.
-                            server_handle.send(()).unwrap();
-                        })
+                    |(server_handle, client)| async move {
+                        black_box(client.await.unwrap());
+                        // Tell server to shut down.
+                        server_handle.send(()).unwrap();
                     },
                     BatchSize::PerIteration,
                 );

@@ -32,8 +32,6 @@ ignored = ["log"]
 
 [features]
 bench = ["neqo-common/bench", "neqo-transport/bench", "log/release_max_level_info"]
-blapi = ["neqo-transport/blapi"]
-default = ["blapi"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-transport/build-fuzzing-corpus",

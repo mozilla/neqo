@@ -4,6 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg_attr(
+    feature = "bench",
+    expect(
+        clippy::missing_errors_doc,
+        clippy::missing_panics_doc,
+        clippy::must_use_candidate,
+        reason = "These items are only public API when the `bench` feature is enabled."
+    )
+)]
+
 use std::{
     cell::RefCell,
     cmp::{max, min},
@@ -15,7 +25,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace, to_u64};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
@@ -748,24 +758,22 @@ impl CryptoDxState {
         Ok(len)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default_write() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default_write() -> Self {
         Self::test_default_with_direction(CryptoDxDirection::Write)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default_read() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default_read() -> Self {
         Self::test_default_with_direction(CryptoDxDirection::Read)
     }
 
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
     fn test_default_with_direction(direction: CryptoDxDirection) -> Self {
         // This matches the value in packet.rs
         const CLIENT_CID: &[u8] = &[0x83, 0x94, 0xc8, 0xf0, 0x3e, 0x51, 0x57, 0x08];
-        Self::new_initial(Version::default(), direction, "server in", CLIENT_CID, 0).unwrap()
+        Self::new_initial(Version::default(), direction, "server in", CLIENT_CID, 0)
+            .expect("state created")
     }
 
     /// Get the amount of extra padding packets protected with this profile need.
@@ -1358,9 +1366,8 @@ impl CryptoStates {
     }
 
     /// Make some state for removing protection in tests.
-    #[cfg(not(feature = "disable-encryption"))]
-    #[cfg(test)]
-    pub(crate) fn test_default() -> Self {
+    #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
+    pub fn test_default() -> Self {
         let read = |epoch| {
             let mut dx = CryptoDxState::test_default_read();
             dx.epoch = epoch;
@@ -1369,16 +1376,14 @@ impl CryptoStates {
         let app_read = |epoch| CryptoDxAppData {
             dx: read(epoch),
             cipher: TLS_AES_128_GCM_SHA256,
-            next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).unwrap(),
+            next_secret: hkdf::import_key(TLS_VERSION_1_3, &[0xaa; 32]).expect("key is valid"),
         };
-        let initials = EnumMap::from_array([
-            None,
-            Some(CryptoState {
+        let initials = EnumMap::from_fn(|v| {
+            (v == Version::Version1).then(|| CryptoState {
                 tx: CryptoDxState::test_default_write(),
                 rx: read(0),
-            }),
-            None,
-        ]);
+            })
+        });
         Self {
             initials,
             handshake: None,
@@ -1625,8 +1630,7 @@ impl CryptoStreams {
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
-            header_len +=
-                Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
+            header_len += Encoder::varint_len(to_u64(length)) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_frame(FrameType::Crypto, |b| {
@@ -1669,7 +1673,7 @@ impl CryptoStreams {
                 // `left` is short enough to fit into this packet. So send from the *end*
                 // of `right`, so that the second half of the SNI is in another packet.
                 let right_len = right.len() + left.len() - limit;
-                right_offset += right_len as u64;
+                right_offset += to_u64(right_len);
                 (_, right) = right.split_at(right_len);
             } else if right.len() <= limit {
                 // `right` is short enough to fit into this packet. So only send a part of `left`.
@@ -1701,7 +1705,7 @@ impl CryptoStreams {
                     let packets_needed = data.len().div_ceil(builder.limit());
                     let limit = data.len() / packets_needed;
                     let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                        limit_chunks((offset, left), (offset + to_u64(mid), right), limit);
                     (
                         write_chunk(right_offset, right, builder),
                         write_chunk(left_offset, left, builder),

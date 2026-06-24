@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
+use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog, to_u64};
 use qlog::events::{
     ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
     connectivity::{
@@ -225,7 +225,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
-                length: Some(meta.length() as u64),
+                length: Some(to_u64(meta.length())),
                 payload_length: None,
                 data: None,
             };
@@ -264,7 +264,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
             let header =
                 PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(decrypt_err.len() as u64),
+                length: Some(to_u64(decrypt_err.len())),
                 ..Default::default()
             };
 
@@ -328,9 +328,7 @@ pub fn recovery_parameters_set(
                 timer_granularity: Some(u16::try_from(GRANULARITY.as_millis()).expect("fits")),
                 initial_rtt: Some(DEFAULT_INITIAL_RTT.as_secs_f32() * 1000.0),
                 max_datagram_size: Some(u32::try_from(plpmtu).expect("MTU fits in u32")),
-                initial_congestion_window: Some(
-                    u64::try_from(CWND_INITIAL_PKTS * plpmtu).expect("fits"),
-                ),
+                initial_congestion_window: Some(to_u64(CWND_INITIAL_PKTS * plpmtu)),
                 minimum_congestion_window: Some(
                     u32::try_from(2 * plpmtu).expect("MTU fits in u32"),
                 ),
@@ -429,13 +427,13 @@ pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
                         pto_count = Some(u16::try_from(v).expect("fits in u16"));
                     }
                     Metric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(v).expect("fits in u64"));
+                        congestion_window = Some(to_u64(v));
                     }
                     Metric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(v).expect("fits in u64"));
+                        bytes_in_flight = Some(to_u64(v));
                     }
                     Metric::SsThresh(v) => {
-                        ssthresh = Some(u64::try_from(v).expect("fits in u64"));
+                        ssthresh = Some(to_u64(v));
                     }
                     Metric::PacketsInFlight(v) => packets_in_flight = Some(v),
                     Metric::PacingRate(v) => pacing_rate = Some(v),
@@ -496,7 +494,7 @@ impl From<CongestionStateTrigger> for CongestionStateUpdatedTrigger {
 
 pub fn congestion_state_updated(
     qlog: &mut Qlog,
-    old_state: &'static str,
+    old_state: Option<&'static str>,
     new_state: &'static str,
     trigger: Option<CongestionStateTrigger>,
     now: Instant,
@@ -504,7 +502,7 @@ pub fn congestion_state_updated(
     qlog.add_event_at(
         || {
             Some(EventData::CongestionStateUpdated(CongestionStateUpdated {
-                old: Some(old_state.to_owned()),
+                old: old_state.map(ToOwned::to_owned),
                 new: new_state.to_owned(),
                 trigger: trigger.map(Into::into),
             }))
@@ -514,7 +512,7 @@ pub fn congestion_state_updated(
 }
 
 /// The type of loss recovery timer that fired or was updated.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum LossTimerType {
     /// The reordering/loss-detection timer (ACK-based).
     Ack,
@@ -642,7 +640,7 @@ impl From<Frame<'_>> for QuicFrame {
             },
             Frame::Crypto { offset, data } => Self::Crypto {
                 offset,
-                length: data.len() as u64,
+                length: to_u64(data.len()),
             },
             Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
@@ -650,7 +648,7 @@ impl From<Frame<'_>> for QuicFrame {
                     details: None,
                     raw: Some(RawInfo {
                         data: Some(hex(token)),
-                        length: Some(token.len() as u64),
+                        length: Some(to_u64(token.len())),
                         payload_length: None,
                     }),
                 },
@@ -664,7 +662,7 @@ impl From<Frame<'_>> for QuicFrame {
             } => Self::Stream {
                 stream_id: stream_id.as_u64(),
                 offset,
-                length: data.len() as u64,
+                length: to_u64(data.len()),
                 fin: Some(fin),
                 raw: None,
             },
@@ -739,7 +737,7 @@ impl From<Frame<'_>> for QuicFrame {
                 raw: None,
             },
             Frame::Datagram { data, .. } => Self::Datagram {
-                length: data.len() as u64,
+                length: to_u64(data.len()),
                 raw: None,
             },
         }

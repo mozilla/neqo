@@ -4,11 +4,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use neqo_common::to_u64;
 use neqo_transport::StreamType;
 
 use crate::{
     Error,
     features::extended_connect::{CloseReason, tests::webtransport::WtTest},
+    webtransport::ClientSession as _,
 };
 
 #[test]
@@ -26,17 +28,17 @@ fn wt_client_stream_uni() {
     wt.send_data_client(wt_stream, BUF_CLIENT);
     wt.receive_data_server(wt_stream, true, BUF_CLIENT, false);
     let send_stats = wt.send_stream_stats(wt_stream).unwrap();
-    assert_eq!(send_stats.bytes_written(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_sent(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_acked(), BUF_CLIENT.len() as u64);
+    assert_eq!(send_stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_sent(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_acked(), to_u64(BUF_CLIENT.len()));
 
     // Send data again to test if the stats has the expected values.
     wt.send_data_client(wt_stream, BUF_CLIENT);
     wt.receive_data_server(wt_stream, false, BUF_CLIENT, false);
     let send_stats = wt.send_stream_stats(wt_stream).unwrap();
-    assert_eq!(send_stats.bytes_written(), (BUF_CLIENT.len() * 2) as u64);
-    assert_eq!(send_stats.bytes_sent(), (BUF_CLIENT.len() * 2) as u64);
-    assert_eq!(send_stats.bytes_acked(), (BUF_CLIENT.len() * 2) as u64);
+    assert_eq!(send_stats.bytes_written(), to_u64(BUF_CLIENT.len() * 2));
+    assert_eq!(send_stats.bytes_sent(), to_u64(BUF_CLIENT.len() * 2));
+    assert_eq!(send_stats.bytes_acked(), to_u64(BUF_CLIENT.len() * 2));
 
     let recv_stats = wt.recv_stream_stats(wt_stream);
     assert_eq!(recv_stats.unwrap_err(), Error::InvalidStreamId);
@@ -55,13 +57,13 @@ fn wt_client_stream_bidi() {
     wt.send_data_server(&wt_server_stream, BUF_SERVER);
     wt.receive_data_client(wt_client_stream, false, BUF_SERVER, false);
     let send_stats = wt.send_stream_stats(wt_client_stream).unwrap();
-    assert_eq!(send_stats.bytes_written(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_sent(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_acked(), BUF_CLIENT.len() as u64);
+    assert_eq!(send_stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_sent(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_acked(), to_u64(BUF_CLIENT.len()));
 
     let recv_stats = wt.recv_stream_stats(wt_client_stream).unwrap();
-    assert_eq!(recv_stats.bytes_received(), BUF_SERVER.len() as u64);
-    assert_eq!(recv_stats.bytes_read(), BUF_SERVER.len() as u64);
+    assert_eq!(recv_stats.bytes_received(), to_u64(BUF_SERVER.len()));
+    assert_eq!(recv_stats.bytes_read(), to_u64(BUF_SERVER.len()));
 }
 
 #[test]
@@ -77,8 +79,8 @@ fn wt_server_stream_uni() {
     assert_eq!(send_stats.unwrap_err(), Error::InvalidStreamId);
 
     let recv_stats = wt.recv_stream_stats(wt_server_stream.stream_id()).unwrap();
-    assert_eq!(recv_stats.bytes_received(), BUF_SERVER.len() as u64);
-    assert_eq!(recv_stats.bytes_read(), BUF_SERVER.len() as u64);
+    assert_eq!(recv_stats.bytes_received(), to_u64(BUF_SERVER.len()));
+    assert_eq!(recv_stats.bytes_read(), to_u64(BUF_SERVER.len()));
 }
 
 #[test]
@@ -94,13 +96,13 @@ fn wt_server_stream_bidi() {
     wt.send_data_client(wt_server_stream.stream_id(), BUF_CLIENT);
     drop(wt.receive_data_server(wt_server_stream.stream_id(), false, BUF_CLIENT, false));
     let stats = wt.send_stream_stats(wt_server_stream.stream_id()).unwrap();
-    assert_eq!(stats.bytes_written(), BUF_CLIENT.len() as u64);
-    assert_eq!(stats.bytes_sent(), BUF_CLIENT.len() as u64);
-    assert_eq!(stats.bytes_acked(), BUF_CLIENT.len() as u64);
+    assert_eq!(stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(stats.bytes_sent(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(stats.bytes_acked(), to_u64(BUF_CLIENT.len()));
 
     let recv_stats = wt.recv_stream_stats(wt_server_stream.stream_id()).unwrap();
-    assert_eq!(recv_stats.bytes_received(), BUF_SERVER.len() as u64);
-    assert_eq!(recv_stats.bytes_read(), BUF_SERVER.len() as u64);
+    assert_eq!(recv_stats.bytes_received(), to_u64(BUF_SERVER.len()));
+    assert_eq!(recv_stats.bytes_read(), to_u64(BUF_SERVER.len()));
 }
 
 #[test]
