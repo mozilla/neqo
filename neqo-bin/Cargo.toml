@@ -55,7 +55,7 @@ thiserror = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt"] }
 
 [dev-dependencies]
-criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false, features = [
+criterion = { version = "5", package = "codspeed-criterion-compat", default-features = false, features = [
         "async_tokio",
 ] }
 neqo-bin = { path = ".", features = ["draft-29"] }
