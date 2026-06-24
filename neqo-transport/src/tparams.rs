@@ -55,6 +55,8 @@ pub enum TransportParameterId {
     VersionInformation = 0x11,
     Scone = 0x219e,
     GreaseQuicBit = 0x2ab2,
+    // draft-ietf-quic-reliable-stream-reset
+    ResetStreamAt = 0x17_f758_6d2c_b571,
     MinAckDelay = 0xff02_de1a,
     MaxDatagramFrameSize = 0x0020,
     #[cfg(test)]
@@ -323,7 +325,8 @@ impl TransportParameter {
             },
             TransportParameterId::DisableMigration
             | TransportParameterId::GreaseQuicBit
-            | TransportParameterId::Scone => Self::Empty,
+            | TransportParameterId::Scone
+            | TransportParameterId::ResetStreamAt => Self::Empty,
             TransportParameterId::PreferredAddress => Self::decode_preferred_address(&mut d)?,
             TransportParameterId::MinAckDelay => match d.decode_varint() {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
@@ -514,7 +517,8 @@ impl TransportParameters {
         match tp {
             TransportParameterId::DisableMigration
             | TransportParameterId::GreaseQuicBit
-            | TransportParameterId::Scone => {
+            | TransportParameterId::Scone
+            | TransportParameterId::ResetStreamAt => {
                 self.set(tp, TransportParameter::Empty);
             }
             _ => panic!("Transport parameter not known or not type empty"),
@@ -586,6 +590,17 @@ impl TransportParameters {
                 continue;
             }
 
+            // Other parameters need to be checked manually, because they
+            // require that the previous value be remembered and available for use.
+            // Thus, the new setting needs to be compatible with the old one.
+            //
+            // This is because the feature might be used in 0-RTT, which is impossible
+            // to separate from regular 1-RTT data (given retransmission), so features
+            // used in 0-RTT cannot be disabled if they are remembered.
+            //
+            // For empty values, that just means being present;
+            // for integer values, *generally* the value has to be larger;
+            // any other types either need to be ignorable or have special handling.
             let ok = self.params[k]
                 .as_ref()
                 .is_some_and(|v_self| match (v_self, v_rem) {
@@ -963,6 +978,7 @@ mod tests {
         assert!(!tps2.has_value(RetrySourceConnectionId));
         assert!(!tps2.has_value(Scone));
         assert!(!tps2.has_value(PreferredAddress));
+        assert!(!tps2.has_value(ResetStreamAt));
         assert!(tps2.has_value(StatelessResetToken));
 
         let mut enc = Encoder::default();
@@ -1237,6 +1253,67 @@ mod tests {
         let tps = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
         assert_eq!(tps.get_integer(IdleTimeout), 10);
         assert_eq!(tps.get_integer(InitialMaxData), 20);
+    }
+
+    /// The `reset_stream_at` transport parameter is an empty parameter that round-trips.
+    #[test]
+    fn reset_stream_at_empty_round_trip() {
+        let mut tps = TransportParameters::default();
+        assert!(!tps.get_empty(ResetStreamAt));
+        tps.set_empty(ResetStreamAt);
+        assert!(tps.get_empty(ResetStreamAt));
+
+        let mut enc = Encoder::default();
+        tps.encode(&mut enc);
+        let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
+        assert!(tps2.get_empty(ResetStreamAt));
+        assert_eq!(tps, tps2);
+    }
+
+    /// A `reset_stream_at` transport parameter carrying a non-empty value is rejected.
+    #[test]
+    fn reset_stream_at_non_empty_rejected() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(ResetStreamAt);
+        enc.encode_vvec(&[0x01]); // non-empty content
+        assert_eq!(
+            TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::TooMuchData
+        );
+    }
+
+    /// A duplicate `reset_stream_at` transport parameter is rejected.
+    #[test]
+    fn reset_stream_at_duplicate_rejected() {
+        let mut enc = Encoder::default();
+        TransportParameter::Empty.encode(&mut enc, ResetStreamAt);
+        TransportParameter::Empty.encode(&mut enc, ResetStreamAt);
+        assert_eq!(
+            TransportParameters::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::TransportParameter
+        );
+    }
+
+    /// When the server accepts 0-RTT it MUST NOT disable `reset_stream_at` on the resumed
+    /// connection: if it was remembered (advertised on the original connection) but is not
+    /// currently offered, 0-RTT must be rejected.
+    #[test]
+    fn reset_stream_at_ok_for_0rtt() {
+        let mut remembered = TransportParameters::default();
+        remembered.set_empty(ResetStreamAt);
+
+        // Remembered, but not currently offered: 0-RTT is NOT OK (would disable the extension).
+        let current = TransportParameters::default();
+        assert!(!current.ok_for_0rtt(&remembered));
+
+        // Offered on both sides: OK (extension is preserved).
+        let mut current = TransportParameters::default();
+        current.set_empty(ResetStreamAt);
+        assert!(current.ok_for_0rtt(&remembered));
+
+        // Not remembered, but currently offered: OK (offering more is always fine).
+        let remembered = TransportParameters::default();
+        assert!(current.ok_for_0rtt(&remembered));
     }
 
     #[test]
