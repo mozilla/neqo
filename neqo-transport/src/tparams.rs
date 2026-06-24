@@ -425,7 +425,17 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as being an integer.
     #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
-        let default = match tp {
+        let dflt = Self::integer_default(tp).expect("Transport parameter not a known Integer");
+        match self.params[tp] {
+            None => dflt,
+            Some(TransportParameter::Integer(x)) => x,
+            _ => panic!("Internal error"),
+        }
+    }
+
+    fn integer_default(tp: TransportParameterId) -> Option<u64> {
+        // Note: testing for this can't catch new values; make sure to update the test.
+        Some(match tp {
             TransportParameterId::IdleTimeout
             | TransportParameterId::InitialMaxData
             | TransportParameterId::InitialMaxStreamDataBidiLocal
@@ -437,24 +447,22 @@ impl TransportParameters {
             | TransportParameterId::MaxDatagramFrameSize => 0,
             TransportParameterId::MaxUdpPayloadSize => 65527,
             TransportParameterId::AckDelayExponent => 3,
-            TransportParameterId::MaxAckDelay => DEFAULT_REMOTE_ACK_DELAY
-                .as_millis()
-                .try_into()
-                .expect("default remote ack delay in ms can't overflow u64"),
+            TransportParameterId::MaxAckDelay => {
+                u64::try_from(DEFAULT_REMOTE_ACK_DELAY.as_millis())
+                    .expect("default remote ack delay in ms can't overflow u64")
+            }
             TransportParameterId::ActiveConnectionIdLimit => 2,
-            _ => panic!("Transport parameter not known or not an Integer"),
-        };
-        match self.params[tp] {
-            None => default,
-            Some(TransportParameter::Integer(x)) => x,
-            _ => panic!("Internal error"),
-        }
+            _ => return None,
+        })
     }
 
     // Set an integer type or a default.
     /// # Panics
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
+        if Self::integer_default(tp).is_some_and(|dflt| dflt == value) {
+            return;
+        }
         match tp {
             TransportParameterId::IdleTimeout
             | TransportParameterId::InitialMaxData
@@ -931,6 +939,7 @@ mod tests {
         ConnectionId, Error, Version,
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
+        tracking::DEFAULT_REMOTE_ACK_DELAY,
     };
 
     #[test]
@@ -969,6 +978,34 @@ mod tests {
         tps.encode(&mut enc);
 
         TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+    }
+
+    /// Validate that default values don't get set.
+    #[test]
+    fn default_tps() {
+        let mut tps = TransportParameters::default();
+        for &(tp, value) in &[
+            (IdleTimeout, 0),
+            (InitialMaxData, 0),
+            (InitialMaxStreamDataBidiLocal, 0),
+            (InitialMaxStreamDataBidiRemote, 0),
+            (InitialMaxStreamDataUni, 0),
+            (InitialMaxStreamsBidi, 0),
+            (InitialMaxStreamsUni, 0),
+            (MinAckDelay, 0),
+            (MaxDatagramFrameSize, 0),
+            (MaxUdpPayloadSize, 65527),
+            (AckDelayExponent, 3),
+            (
+                MaxAckDelay,
+                u64::try_from(DEFAULT_REMOTE_ACK_DELAY.as_millis()).unwrap(),
+            ),
+            (ActiveConnectionIdLimit, 2),
+        ] {
+            assert!(TransportParameters::integer_default(tp).is_some());
+            tps.set_integer(tp, value);
+            assert!(!tps.has_value(tp));
+        }
     }
 
     fn make_spa() -> TransportParameter {
