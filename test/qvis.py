@@ -149,7 +149,9 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
     def _stream_frame(fr: dict[str, Any]) -> tuple[int, int, int]:
         sid = int(fr.get("stream_id", 0))
         off = int(fr.get("offset", 0))
-        return sid, off, off + int(fr.get("length") or 0)
+        raw = fr.get("raw") or {}
+        length = int(fr.get("length") or raw.get("payload_length") or 0)
+        return sid, off, off + length
 
     def _update_hwm(hwm: dict[int, int], sid: int, end: int) -> int:
         old = hwm.get(sid, 0)
@@ -168,7 +170,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
         d: dict[str, Any] = ev.get("data") or {}
         frames = d.get("frames") or []
 
-        if name == "transport:packet_sent":
+        if name == "quic:packet_sent":
             hdr = d.get("header") or {}
             if (pn := hdr.get("packet_number")) is not None:
                 st = sent_seq(t)
@@ -213,7 +215,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                     elif ft == "data_blocked":
                         lim = int(fr.get("limit", 0))
                         data.fc_events.append((t, "blocked", lim, -1))
-        elif name == "transport:packet_received":
+        elif name == "quic:packet_received":
             hdr = d.get("header") or {}
             for fr in frames:
                 ft = fr.get("frame_type", "")
@@ -244,7 +246,7 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                         # Pick top `delta` pns from acked_ranges (highest first)
                         pns_desc: list[int] = []
                         for r in ack_ranges or []:
-                            for p in range(int(r[1]), int(r[0]) - 1, -1):
+                            for p in range(int(r[-1]), int(r[0]) - 1, -1):
                                 pns_desc.append(p)
                                 if len(pns_desc) >= delta:
                                     break
@@ -254,13 +256,13 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                             data.ecn_ce_t.append(t)
                             data.ecn_ce_pn.append(p)
                         last_ce_count = ce
-        elif name == "recovery:packet_lost":
+        elif name == "quic:packet_lost":
             hdr = d.get("header") or {}
             if (pn := hdr.get("packet_number")) is not None:
                 data.lost_t.append(lost_seq(t))
                 data.lost_pn.append(int(pn))
                 data.lost_trigger.append(str(d.get("trigger") or "unknown"))
-        elif name == "transport:packets_acked":
+        elif name == "quic:packets_acked":
             pns = sorted(int(pn) for pn in d.get("packet_numbers") or [])
             space = d.get("packet_type") or d.get("packet_number_space", "")
             rpn = last_recv_pn.get(space)
@@ -287,8 +289,8 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                             sb[0].append(t)
                             sb[1].append(acked_stream_hwm[sid])
                     pn_frames.pop(pn, None)
-        elif name == "transport:parameters_set":
-            if d.get("owner") == "remote":
+        elif name == "quic:parameters_set":
+            if d.get("initiator") == "remote":
                 if (v := d.get("initial_max_data")) is not None:
                     fc_conn_limit = int(v)
                     _append_conn_budget(t)
@@ -300,16 +302,16 @@ def extract(  # noqa: C901  # pylint: disable=too-many-locals,too-many-branches,
                 ):
                     if (v := d.get(key)) is not None:
                         fc_stream_limit[key] = int(v)
-        elif name == "recovery:parameters_set":
+        elif name == "quic:recovery_parameters_set":
             if (v := d.get("initial_congestion_window")) is not None:
                 cur["congestion_window"] = float(v)
-        elif name == "recovery:metrics_updated":
+        elif name == "quic:recovery_metrics_updated":
             data.metrics_t.append(metrics_seq(t))
             for f in METRIC_FIELDS:
                 if f in d:
                     cur[f] = float(d[f])
                 data.metrics[f].append(cur[f])
-        elif name == "recovery:congestion_state_updated":
+        elif name == "quic:congestion_state_updated":
             cc_state = str(d.get("new") or "unknown")
             tr: str | None = d.get("trigger")
             if cc_state == "recovery" and tr:
