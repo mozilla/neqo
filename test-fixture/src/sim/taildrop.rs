@@ -216,10 +216,19 @@ impl TailDrop {
             }
 
             self.stats.accumulate_usage(now, self.used);
-            if let Some(d) = self.dequeue(now) {
-                self.send(d, t, subns);
-            } else {
-                self.next_deque = None;
+            // `dequeue` returns `None` both when the queue is empty and when the AQM
+            // drops the packet (e.g. CoDel signalling a non-ECT packet). Keep dequeuing
+            // until we either send a packet or drain the queue, so a drop doesn't stall
+            // the packets behind it.
+            loop {
+                if let Some(d) = self.dequeue(now) {
+                    self.send(d, t, subns);
+                    break;
+                }
+                if self.queue.is_empty() {
+                    self.next_deque = None;
+                    break;
+                }
             }
         }
     }
@@ -477,5 +486,37 @@ mod test {
             "expected tail-drop on overflow, got stats: {}",
             td.stats
         );
+    }
+
+    /// When `CoDel` drops a non-ECT packet mid-queue, the packets behind it must
+    /// still be delivered — a drop should not stall the rest of the queue.
+    #[test]
+    fn codel_drop_does_not_stall_queue() {
+        // Slow link with a large buffer so packets queue long enough for CoDel to
+        // act, and non-ECT traffic so signalling drops rather than marks.
+        let mut td = TailDrop::new(100_000, 500_000, Aqm::codel(), Duration::from_millis(1));
+        let t0 = now();
+        td.prepare(t0);
+
+        for _ in 0..100 {
+            td.process(Some(make_datagram(Ecn::NotEct)), t0);
+        }
+        drain(&mut td, t0);
+
+        assert_eq!(td.stats.marked, 0, "non-ECT packets cannot be CE-marked");
+        assert!(
+            td.stats.dropped > 0,
+            "expected CoDel to drop some non-ECT packets, got stats: {}",
+            td.stats
+        );
+        // Every received packet must be accounted for as either delivered or dropped;
+        // a stalled queue would leave packets unaccounted for.
+        assert_eq!(
+            td.stats.delivered + td.stats.dropped,
+            td.stats.received,
+            "queue stalled: {}",
+            td.stats
+        );
+        assert!(td.stats.delivered > 0, "expected some packets to survive");
     }
 }

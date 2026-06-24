@@ -27,7 +27,7 @@ pub struct CodelState {
     /// Whether we are currently in the "dropping" (signalling) state.
     dropping: bool,
     /// How many marks/drops have occurred in the current dropping interval.
-    /// `u32` because [`Duration`] only implements [`Div<u32>`](std::ops::Div).
+    /// `u32` so it converts losslessly to `f64` (via [`f64::from`]) in `control_law`.
     count: u32,
     /// `count` at entry to the last dropping period; used for fast restart.
     lastcount: u32,
@@ -82,8 +82,9 @@ impl CodelState {
         false
     }
 
+    /// `next_mark_time` = base + INTERVAL / sqrt(count)
     fn control_law(&self, base: Instant) -> Instant {
-        base + CODEL_INTERVAL / self.count.max(1).isqrt()
+        base + CODEL_INTERVAL.div_f64(f64::from(self.count.max(1)).sqrt())
     }
 }
 
