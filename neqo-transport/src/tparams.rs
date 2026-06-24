@@ -941,7 +941,6 @@ mod tests {
         ConnectionId, Error, Version,
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
-        tracking::DEFAULT_REMOTE_ACK_DELAY,
     };
 
     #[test]
@@ -985,7 +984,7 @@ mod tests {
     /// Validate that default values don't get set.
     #[test]
     fn default_tps() {
-        use enum_map::Enum;
+        use enum_map::Enum as _;
         let mut tps = TransportParameters::default();
         let mut count = 0;
         for i in 0..TransportParameterId::LENGTH {
