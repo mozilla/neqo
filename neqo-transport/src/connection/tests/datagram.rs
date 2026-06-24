@@ -56,7 +56,7 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
 
 struct InsertEmptyLenDatagram;
 
-impl crate::connection::test_internal::FrameWriter for InsertEmptyLenDatagram {
+impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.encode_varint(FrameType::DatagramWithLen);
         builder.encode_vvec(&[]);
