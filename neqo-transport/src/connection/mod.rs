@@ -1854,8 +1854,10 @@ impl Connection {
                             self.save_datagram(epoch, d, remaining, now);
                             return Ok(());
                         }
-                        Error::KeysExhausted => {
-                            // Exhausting read keys is fatal.
+                        // Exhausting read keys is fatal. So is a packet that
+                        // authenticated but broke the protocol (e.g. reserved
+                        // bits set), which closes the connection.
+                        Error::KeysExhausted | Error::ProtocolViolation => {
                             return Err(e.error);
                         }
                         Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
