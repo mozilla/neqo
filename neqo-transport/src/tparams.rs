@@ -460,9 +460,11 @@ impl TransportParameters {
     /// # Panics
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
-        if Self::integer_default(tp).is_some_and(|dflt| dflt == value) {
-            return;
-        }
+>         if Self::integer_default(tp).is_some_and(|dflt| dflt == value) {
+>             self.remove(tp);
+>             return;
+>         }
+> 
         match tp {
             TransportParameterId::IdleTimeout
             | TransportParameterId::InitialMaxData
@@ -1003,6 +1005,11 @@ mod tests {
             (ActiveConnectionIdLimit, 2),
         ] {
             assert!(TransportParameters::integer_default(tp).is_some());
+            tps.set_integer(tp, value);
+            assert!(!tps.has_value(tp));
+            
+            tps.set_integer(tp, value + 1);
+            assert!(tps.has_value(tp));
             tps.set_integer(tp, value);
             assert!(!tps.has_value(tp));
         }
