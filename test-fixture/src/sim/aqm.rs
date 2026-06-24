@@ -145,7 +145,7 @@ fn mark_ce(dgram: &Datagram) -> Option<Datagram> {
     }
 }
 
-/// Congestion-signalling mode for a [`TailDrop`](super::TailDrop) queue.
+/// Congestion-signalling mode for a [`TailDrop`](super::taildrop::TailDrop) queue.
 ///
 /// The inner state types are opaque; use [`Aqm::codel()`] and [`Aqm::red()`] to create instances.
 #[derive(Clone, Default)]
