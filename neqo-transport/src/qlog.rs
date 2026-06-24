@@ -733,7 +733,7 @@ impl From<Frame<'_>> for QuicFrame {
                 trigger_frame_type: Some(frame_type),
             },
             Frame::HandshakeDone => Self::HandshakeDone,
-            Frame::AckFrequency { .. } => Self::Unknown {
+            Frame::AckFrequency { .. } | Frame::ResetStreamAt { .. } => Self::Unknown {
                 frame_type_value: None,
                 raw_frame_type: frame.get_type().into(),
                 raw: None,
