@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace};
+use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
 use neqo_transport::{
     Connection, DatagramTracking, Error as TransportError, StreamId, StreamType, recv_stream,
     send_stream, server::ConnectionRef, streams::SendOrder,
@@ -210,7 +210,7 @@ impl ClientSession for Http3Client {
         Ok(self
             .connection()
             .max_datagram_size()?
-            .saturating_sub(u64::try_from(qsid_len).map_err(|_| Error::Internal)?))
+            .saturating_sub(to_u64(qsid_len)))
     }
 
     fn webtransport_set_sendorder(
@@ -730,7 +730,7 @@ impl ServerSession {
             .conn
             .borrow()
             .max_datagram_size()?
-            .saturating_sub(u64::try_from(qsid_len).map_err(|_| Error::Internal)?))
+            .saturating_sub(to_u64(qsid_len)))
     }
 
     /// Export keying material for this WebTransport session

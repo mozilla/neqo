@@ -374,6 +374,20 @@ impl TransportParameters {
         while d.remaining() > 0 {
             match TransportParameter::decode(d) {
                 Ok(Some((tipe, tp))) => {
+                    // RFC 9000, Section 7.4:
+                    //
+                    // > An endpoint MUST NOT send a parameter more than once in a given transport
+                    // > parameters extension. An endpoint SHOULD treat receipt of duplicate
+                    // > transport parameters as a connection error of type
+                    // > TRANSPORT_PARAMETER_ERROR.
+                    //
+                    // The SHOULD only exists to let endpoints skip tracking parameters they do
+                    // not understand (see RFC 9413), not for robustness, so reject a duplicate of
+                    // a parameter we have already parsed.
+                    if tps.params[tipe].is_some() {
+                        qinfo!("Duplicate transport parameter {tipe}");
+                        return Err(Error::TransportParameter);
+                    }
                     tps.set(tipe, tp);
                 }
                 Ok(None) => {}
@@ -910,7 +924,7 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     use TransportParameterId::*;
-    use neqo_common::{Decoder, Encoder, qdebug};
+    use neqo_common::{Decoder, Encoder, qdebug, to_u64};
 
     use super::PreferredAddress;
     use crate::{
@@ -1201,6 +1215,30 @@ mod tests {
         assert!(invalid_decode_result.is_err());
     }
 
+    /// RFC 9000, Section 7.4: a duplicate transport parameter is a connection
+    /// error of type [`TRANSPORT_PARAMETER_ERROR`].
+    #[test]
+    fn duplicate_tp_rejected() {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
+        TransportParameter::Integer(20).encode(&mut enc, IdleTimeout);
+        assert_eq!(
+            TransportParameters::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::TransportParameter
+        );
+    }
+
+    /// Distinct transport parameters next to each other still decode.
+    #[test]
+    fn distinct_tps_accepted() {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
+        TransportParameter::Integer(20).encode(&mut enc, InitialMaxData);
+        let tps = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
+        assert_eq!(tps.get_integer(IdleTimeout), 10);
+        assert_eq!(tps.get_integer(InitialMaxData), 20);
+    }
+
     #[test]
     fn versions_encode_decode() {
         const ENCODED: &[u8] = &[
@@ -1315,7 +1353,7 @@ mod tests {
 
     #[test]
     fn max_udp_payload_size_boundary() {
-        let min = crate::packet::MIN_INITIAL_PACKET_SIZE as u64;
+        let min = to_u64(crate::packet::MIN_INITIAL_PACKET_SIZE);
         assert!(decode_tp_integer(MaxUdpPayloadSize, min).is_ok());
         assert!(decode_tp_integer(MaxUdpPayloadSize, min - 1).is_err());
     }

@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qdebug;
+use neqo_common::{qdebug, to_u64, to_usize};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -42,9 +42,9 @@ pub enum Outcome {
 #[derive(Debug)]
 pub struct Search {
     /// The circular array used to track acked bytes per bin.
-    acked_bins: [usize; Self::NUM_ACKED_BINS],
+    acked_bins: [u64; Self::NUM_ACKED_BINS],
     /// The circular array used to track sent bytes per bin.
-    sent_bins: [usize; Self::NUM_SENT_BINS],
+    sent_bins: [u64; Self::NUM_SENT_BINS],
     /// The current index of the circular array. `None` if uninitialized.
     curr_idx: Option<usize>,
     /// Time at which the current bin will be passed and the next should start.
@@ -52,9 +52,9 @@ pub struct Search {
     /// The duration of each bin.
     bin_duration: Duration,
     /// Tracking amount of acked bytes on this connection. Is incremented on every ACK.
-    acked_bytes: usize,
+    acked_bytes: u64,
     /// Tracking amount of sent bytes on this connection. Is incremented on every sent packet.
-    sent_bytes: usize,
+    sent_bytes: u64,
     /// The RTT used to initialize SEARCH (set in [`Self::initialize`]).
     initial_rtt: Option<Duration>,
 }
@@ -86,7 +86,7 @@ impl Search {
     /// current delivered bytes, as an integer out of [`Self::SCALE`] (= 0.26).
     const THRESH: usize = 26;
     /// Scale factor for integer approximation of fractional values.
-    const SCALE: usize = 100;
+    const SCALE: u32 = 100;
 
     /// Creates a new SEARCH slow start instance.
     pub const fn new() -> Self {
@@ -110,8 +110,7 @@ impl Search {
     fn initialize(&mut self, initial_rtt: Duration, now: Instant) {
         self.initial_rtt = Some(initial_rtt);
         // BIN_DURATION = WINDOW_SIZE / W = initial_rtt * WINDOW_SIZE_FACTOR / W
-        self.bin_duration =
-            initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE as u32 / Self::W as u32;
+        self.bin_duration = initial_rtt * Self::WINDOW_SIZE_FACTOR / Self::SCALE / Self::W as u32;
         if self.bin_duration.is_zero() {
             qdebug!(
                 "skipping initialization because bin_duration.is_zero() but bin_duration must be non-zero - initial_rtt: {initial_rtt:?}",
@@ -208,34 +207,29 @@ impl Search {
         let bin_nanos = self.bin_duration.as_nanos();
         let bins_last_rtt = usize::try_from(rtt_nanos / bin_nanos).unwrap_or(usize::MAX);
         let prev_idx = curr_idx.saturating_sub(bins_last_rtt);
-        let fraction =
-            u64::try_from((rtt_nanos % bin_nanos) * Self::SCALE as u128 / bin_nanos).unwrap_or(0);
+        let fraction = u64::try_from((rtt_nanos % bin_nanos) * u128::from(Self::SCALE) / bin_nanos)
+            .unwrap_or(0);
 
         (prev_idx, fraction)
     }
 
-    /// Computes delivered bytes between two bin indices. Widens the result to `u64` to avoid
-    /// saturation or overflow further down the line on 32-bit systems with large bandwidths.
+    /// Computes delivered bytes between two bin indices.
     const fn compute_delv(&self, old: usize, new: usize) -> u64 {
         self.acked_bins[new % Self::NUM_ACKED_BINS]
-            .saturating_sub(self.acked_bins[old % Self::NUM_ACKED_BINS]) as u64
+            .saturating_sub(self.acked_bins[old % Self::NUM_ACKED_BINS])
     }
 
     /// Computes sent bytes between two (previous) bin indices. Interpolates a fraction of each bin
     /// on the ends to get the accurate value when the actual previous timestamp is between two
     /// bins. The fraction is an integer out of [`Self::SCALE`], i.e. a value between `0` and `99`.
-    /// Widens intermittent results and returns `u64` to avoid saturation or overflow on 32-bit
-    /// systems with large bandwidths.
     const fn compute_sent(&self, old: usize, new: usize, fraction: u64) -> u64 {
         // NOTE: SEARCH draft-09 does forward interpolation here, i.e. `new + 1` or `old + 1`. That
         // is a mistake in the draft and has been discussed with the SEARCH team. Subtracting is
         // correct.
-        let low_idx = (self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]))
-            as u64;
-        let high_idx = (self.sent_bins[new % Self::NUM_SENT_BINS]
-            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]))
-            as u64;
+        let low_idx = self.sent_bins[(new - 1) % Self::NUM_SENT_BINS]
+            .saturating_sub(self.sent_bins[(old - 1) % Self::NUM_SENT_BINS]);
+        let high_idx = self.sent_bins[new % Self::NUM_SENT_BINS]
+            .saturating_sub(self.sent_bins[old % Self::NUM_SENT_BINS]);
         let sent = low_idx * fraction + high_idx * (Self::SCALE as u64 - fraction);
         sent / Self::SCALE as u64
     }
@@ -270,8 +264,7 @@ impl Search {
         }
 
         let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff =
-            usize::try_from(diff * Self::SCALE as u64 / prev_sent).unwrap_or(usize::MAX);
+        let norm_diff = to_usize(diff * u64::from(Self::SCALE) / prev_sent);
 
         if norm_diff < Self::THRESH {
             qdebug!(
@@ -344,12 +337,12 @@ impl Search {
     }
 
     #[cfg(test)]
-    pub const fn acked_bin(&self, idx: usize) -> usize {
+    pub const fn acked_bin(&self, idx: usize) -> u64 {
         self.acked_bins[idx % Self::NUM_ACKED_BINS]
     }
 
     #[cfg(test)]
-    pub const fn sent_bin(&self, idx: usize) -> usize {
+    pub const fn sent_bin(&self, idx: usize) -> u64 {
         self.sent_bins[idx % Self::NUM_SENT_BINS]
     }
 
@@ -449,11 +442,11 @@ impl SlowStart for Search {
     }
 
     fn record_acked_bytes(&mut self, new_acked_bytes: usize) {
-        self.acked_bytes = self.acked_bytes.saturating_add(new_acked_bytes);
+        self.acked_bytes = self.acked_bytes.saturating_add(to_u64(new_acked_bytes));
     }
 
     fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {
-        self.sent_bytes = self.sent_bytes.saturating_add(sent_bytes);
+        self.sent_bytes = self.sent_bytes.saturating_add(to_u64(sent_bytes));
     }
 
     fn reset(&mut self) {

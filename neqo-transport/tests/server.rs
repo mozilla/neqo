@@ -460,7 +460,7 @@ fn bad_client_initial() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead_enc.expansion() + PN_LEN).unwrap())
+        .encode_len(payload_enc.len() + aead_enc.expansion() + PN_LEN)
         .encode_byte(u8::try_from(pn >> 8).unwrap())
         .encode_byte(u8::try_from(pn & 0xff).unwrap());
 
@@ -555,7 +555,7 @@ fn bad_client_initial_connection_close() {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_varint(u64::try_from(payload_enc.len() + aead.expansion() + 1).unwrap())
+        .encode_len(payload_enc.len() + aead.expansion() + 1)
         .encode_byte(u8::try_from(pn).unwrap());
 
     let mut ciphertext = header_enc.as_ref().to_vec();

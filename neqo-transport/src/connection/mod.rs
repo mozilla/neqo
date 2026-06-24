@@ -20,6 +20,7 @@ use std::{
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
     hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
+    to_u64, to_usize,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -2307,8 +2308,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len = size_of::<packet::Number>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
+        let pn_len =
+            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3051,12 +3052,11 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            if let Ok(max_udp_payload) = usize::try_from(remote.get_integer(MaxUdpPayloadSize)) {
-                path.borrow_mut()
-                    .pmtud_mut()
-                    .set_peer_max_udp_payload(max_udp_payload);
-                self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
-            }
+            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
+            path.borrow_mut()
+                .pmtud_mut()
+                .set_peer_max_udp_payload(max_udp_payload);
+            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
@@ -3998,9 +3998,9 @@ impl Connection {
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
 
-        let data_len_possible = u64::try_from(
+        let data_len_possible = to_u64(
             mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
-        )?;
+        );
         Ok(min(data_len_possible, max_dgram_size))
     }
 

@@ -279,7 +279,7 @@ fn map_error(err: &Error) -> Error {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Header;
+    use neqo_common::{Header, to_u64};
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
 
@@ -681,7 +681,7 @@ mod tests {
                 &mut decoder,
                 t.header_block,
                 &t.headers,
-                StreamId::from(u64::try_from(i).unwrap()),
+                StreamId::from(to_u64(i)),
             );
         }
 
@@ -760,7 +760,7 @@ mod tests {
                 &mut decoder,
                 t.header_block,
                 &t.headers,
-                StreamId::from(u64::try_from(i).unwrap()),
+                StreamId::from(to_u64(i)),
             );
         }
 

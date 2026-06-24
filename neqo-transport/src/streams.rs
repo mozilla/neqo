@@ -143,6 +143,11 @@ impl Streams {
                 final_size,
             } => {
                 stats.reset_stream += 1;
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.4)
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if self.obtain_stream(*stream_id)?.1.is_some() {
                     self.recv
                         .reset(*stream_id, *application_error_code, *final_size)?;
@@ -153,6 +158,11 @@ impl Streams {
                 application_error_code,
             } => {
                 stats.stop_sending += 1;
+                // Terminate connection with STREAM_STATE_ERROR if receive-only
+                // stream (-transport 19.5)
+                if stream_id.is_recv_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 self.events
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
@@ -167,6 +177,11 @@ impl Streams {
                 ..
             } => {
                 stats.stream += 1;
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.8)
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.inbound_stream_frame(*fin, *offset, data)?;
                 }
@@ -185,6 +200,11 @@ impl Streams {
                     *maximum_stream_data
                 );
                 stats.max_stream_data += 1;
+                // Terminate connection with STREAM_STATE_ERROR if receive-only
+                // stream (-transport 19.10)
+                if stream_id.is_recv_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.set_max_stream_data(*maximum_stream_data);
                 }
