@@ -332,7 +332,7 @@ pub fn migration_with_modifiers(
         .unwrap();
 
     let mut migrated = false;
-    let probe = client.process_output(now).dgram().unwrap();
+    let probe = new_path_modifier(client.process_output(now).dgram().unwrap());
     if !drop_new_path {
         assert_v4_path(&probe, true); // Contains PATH_CHALLENGE.
         assert_path_challenge_min_len(&client, &probe, now);
