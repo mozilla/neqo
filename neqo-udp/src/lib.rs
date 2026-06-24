@@ -498,7 +498,7 @@ mod tests {
         // which sets `UDP_SEND_MSG_SIZE` on Windows. With a single segment,
         // `effective_segment_size()` returns `None`, and Windows silently truncates
         // the oversized datagram instead of returning `EMSGSIZE`.
-        let segment_size = u16::MAX as usize + 1;
+        let segment_size = usize::from(u16::MAX) + 1;
         let oversized_batch = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,

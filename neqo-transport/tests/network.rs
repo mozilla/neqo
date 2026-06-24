@@ -25,7 +25,7 @@ const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_millis(55);
 const JITTER: Duration = Duration::from_millis(10);
 
 const fn weeks(m: u32) -> Duration {
-    Duration::from_secs((m as u64) * 60 * 60 * 24 * 7)
+    Duration::from_secs(m as u64 * 60 * 60 * 24 * 7)
 }
 
 simulate!(

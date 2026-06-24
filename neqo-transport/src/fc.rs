@@ -24,7 +24,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace};
+use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace, to_u64, to_usize};
 
 use crate::{
     Error, Res,
@@ -116,14 +116,14 @@ where
 
     /// Consume flow control.
     pub fn consume(&mut self, count: usize) {
-        let amt = u64::try_from(count).expect("usize fits into u64");
+        let amt = to_u64(count);
         debug_assert!(self.used + amt <= self.limit);
         self.used += amt;
     }
 
     /// Get available flow control.
-    pub fn available(&self) -> usize {
-        usize::try_from(self.limit - self.used).unwrap_or(usize::MAX)
+    pub const fn available(&self) -> usize {
+        to_usize(self.limit - self.used)
     }
 
     /// How much data has been written.
@@ -765,7 +765,7 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Encoder, Role, qdebug};
+    use neqo_common::{Encoder, Role, qdebug, to_u64};
     use nss::random;
 
     use super::{
@@ -1153,9 +1153,9 @@ mod test {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
         let mut fc =
-            ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
 
-        let fraction = INITIAL_LOCAL_MAX_STREAM_DATA as u64 / WINDOW_UPDATE_FRACTION;
+        let fraction = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) / WINDOW_UPDATE_FRACTION;
 
         let consumed = fc.set_consumed(fraction)?;
         fc.add_retired(consumed);
@@ -1175,7 +1175,7 @@ mod test {
         let rtt = Duration::from_millis(40);
         let mut now = test_fixture::now();
         let mut fc =
-            ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let initial_max_active = fc.max_active();
 
         // Consume and retire multiple receive windows without increasing time.
@@ -1211,7 +1211,7 @@ mod test {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
         let mut fc =
-            ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
 
         // Send first window update to give auto-tuning algorithm a baseline.
         let consumed = fc.set_consumed(fc.next_limit())?;
@@ -1278,12 +1278,12 @@ mod test {
             let mut send_to_recv = VecDeque::new();
             let mut recv_to_send = VecDeque::new();
 
-            let mut last_max_active = INITIAL_LOCAL_MAX_STREAM_DATA as u64;
+            let mut last_max_active = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA);
             let mut last_max_active_changed = now;
 
-            let mut sender_window = INITIAL_LOCAL_MAX_STREAM_DATA as u64;
+            let mut sender_window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA);
             let mut fc =
-                ReceiverFlowControl::new(StreamId::new(0), INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+                ReceiverFlowControl::new(StreamId::new(0), to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
 
             let mut bytes_received: u64 = 0;
             let start_time = now;
@@ -1374,7 +1374,7 @@ mod test {
 
             assert!(
                 effective_window - TOLERANCE <= bdp
-                    || fc.max_active == INITIAL_LOCAL_MAX_STREAM_DATA as u64,
+                    || fc.max_active == to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
                 "{summary} Receive window is larger than the bdp."
             );
 
@@ -1399,7 +1399,7 @@ mod test {
     fn connection_flow_control_auto_tune() -> Res<()> {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
-        let initial_window = (INITIAL_LOCAL_MAX_STREAM_DATA * 16) as u64;
+        let initial_window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA * 16);
         let mut fc = ReceiverFlowControl::new((), initial_window);
         let initial_max_active = fc.max_active();
 
@@ -1440,7 +1440,7 @@ mod test {
     fn connection_flow_control_respects_max_window() -> Res<()> {
         let rtt = Duration::from_millis(40);
         let now = test_fixture::now();
-        let initial_window = (INITIAL_LOCAL_MAX_STREAM_DATA * 16) as u64;
+        let initial_window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA * 16);
         let mut fc = ReceiverFlowControl::new((), initial_window);
 
         // Helper to write frames
