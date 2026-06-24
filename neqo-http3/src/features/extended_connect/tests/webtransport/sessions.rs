@@ -267,7 +267,7 @@ fn wt_unknown_session_frame_client() {
     // Send an unknown frame.
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     wt.client

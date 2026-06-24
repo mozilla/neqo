@@ -18,7 +18,10 @@ fuzz_target!(|data: &[u8]| {
 
     let (encoder_stream_len, data) = if data.len() >= ENCODER_STREAM_LEN_SIZE {
         let (left, right) = data.split_at(ENCODER_STREAM_LEN_SIZE);
-        (u16::from_le_bytes(left.try_into().unwrap()) as usize, right)
+        (
+            usize::from(u16::from_le_bytes(left.try_into().unwrap())),
+            right,
+        )
     } else {
         (0, data)
     };

@@ -13,6 +13,7 @@
 
 use std::time::Duration;
 
+use neqo_common::to_u64;
 use test_fixture::now;
 
 use super::{RTT, make_cc_newreno};
@@ -276,8 +277,8 @@ fn congestion_avoidance_no_two_mss_cap() {
     // BIF stays well above the app-limited threshold so is_app_limited is false.
     let n = 3 * (cwnd0 / mtu) + 1;
     let mut pkts = Vec::with_capacity(n);
-    for pn in 0..n {
-        let p = sent::make_packet(u64::try_from(pn).unwrap(), now, mtu);
+    for pn in 0..to_u64(n) {
+        let p = sent::make_packet(pn, now, mtu);
         cc.on_packet_sent(&p, now, false);
         pkts.push(p);
     }

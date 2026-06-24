@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
-use neqo_common::Encoder;
+use neqo_common::{Encoder, to_u64};
 use neqo_transport::{Connection, StreamId, recv_stream, send_stream};
 
 use super::session::Session;
@@ -92,7 +92,7 @@ impl RecvStream for WebTransportRecvStream {
             } else {
                 TYPE_LEN_BIDI
             };
-            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+            to_u64(id_len + Encoder::varint_len(self.session_id.as_u64()))
         } else {
             0
         };
@@ -243,7 +243,7 @@ impl SendStream for WebTransportSendStream {
             } else {
                 TYPE_LEN_BIDI
             };
-            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+            to_u64(id_len + Encoder::varint_len(self.session_id.as_u64()))
         } else {
             0
         };

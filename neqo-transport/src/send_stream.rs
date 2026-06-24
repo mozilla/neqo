@@ -18,7 +18,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
+use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace, to_u64, to_usize};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
@@ -198,7 +198,7 @@ impl RangeTracker {
         reason = "OK here."
     )]
     pub fn mark_acked(&mut self, new_off: u64, new_len: usize) {
-        let end = new_off + u64::try_from(new_len).expect("usize fits in u64");
+        let end = new_off + to_u64(new_len);
         let new_off = max(self.acked, new_off);
         let mut new_len = end.saturating_sub(new_off);
         if new_len == 0 {
@@ -301,7 +301,7 @@ impl RangeTracker {
         reason = "OK here."
     )]
     pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
-        let new_end = new_off + u64::try_from(new_len).expect("usize fits in u64");
+        let new_end = new_off + to_u64(new_len);
         new_off = max(self.acked, new_off);
         let mut new_len = new_end.saturating_sub(new_off);
         if new_len == 0 {
@@ -392,7 +392,7 @@ impl RangeTracker {
         }
 
         self.first_unmarked = None;
-        let len = u64::try_from(len).expect("usize fits in u64");
+        let len = to_u64(len);
         let end_off = off + len;
 
         let mut to_remove = SmallVec::<[_; 8]>::new();
@@ -451,10 +451,7 @@ impl RangeTracker {
     /// On 32-bit machines where far too much is sent before calling this.
     /// Note that this should not be called for handshakes, which should never exceed that limit.
     pub fn unmark_sent(&mut self) {
-        self.unmark_range(
-            0,
-            usize::try_from(self.highest_offset()).expect("u64 fits in usize"),
-        );
+        self.unmark_range(0, to_usize(self.highest_offset()));
     }
 
     #[cfg(feature = "bench")]
@@ -477,8 +474,7 @@ impl TxBuffer {
     ///
     /// See [`MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
     /// concrete value.
-    #[expect(clippy::cast_possible_truncation, reason = "Checked by const_assert!")]
-    pub const MAX_SIZE: usize = MAX_LOCAL_MAX_STREAM_DATA as usize;
+    pub const MAX_SIZE: usize = to_usize(MAX_LOCAL_MAX_STREAM_DATA);
 
     #[must_use]
     pub fn new() -> Self {
@@ -497,7 +493,7 @@ impl TxBuffer {
 
     fn first_unmarked_range(&mut self) -> Option<(u64, Option<u64>)> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
-        let buffered = u64::try_from(self.buffered()).ok()?;
+        let buffered = to_u64(self.buffered());
         (start != self.retired() + buffered).then_some((start, maybe_len))
     }
 
@@ -520,7 +516,7 @@ impl TxBuffer {
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = usize::try_from(start - self.retired()).ok()?;
+        let buff_off = to_usize(start - self.retired());
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.
@@ -530,9 +526,7 @@ impl TxBuffer {
             &self.send_buf.as_slices().1[buff_off - self.send_buf.as_slices().0.len()..]
         };
 
-        let len = maybe_len.map_or(slc.len(), |range_len| {
-            min(usize::try_from(range_len).unwrap_or(usize::MAX), slc.len())
-        });
+        let len = maybe_len.map_or(slc.len(), |range_len| min(to_usize(range_len), slc.len()));
 
         debug_assert!(len > 0);
         debug_assert!(len <= slc.len());
@@ -554,8 +548,7 @@ impl TxBuffer {
         self.ranges.mark_acked(offset, len);
 
         // Any newly-retired bytes can be dropped from the buffer.
-        let new_retirable =
-            usize::try_from(self.retired() - prev_retired).expect("u64 fits in usize");
+        let new_retirable = to_usize(self.retired() - prev_retired);
         debug_assert!(new_retirable <= self.buffered());
         self.send_buf.drain(..new_retirable);
     }
@@ -583,7 +576,7 @@ impl TxBuffer {
     }
 
     fn used(&self) -> u64 {
-        self.retired() + u64::try_from(self.buffered()).expect("usize fits in u64")
+        self.retired() + to_u64(self.buffered())
     }
 }
 
@@ -843,7 +836,7 @@ impl SendStream {
     pub fn bytes_written(&self) -> u64 {
         match &self.state {
             State::Send { send_buf, .. } | State::DataSent { send_buf, .. } => {
-                send_buf.retired() + u64::try_from(send_buf.buffered()).expect("usize fits in u64")
+                send_buf.retired() + to_u64(send_buf.buffered())
             }
             State::DataRecvd {
                 retired, written, ..
@@ -955,7 +948,7 @@ impl SendStream {
         // Estimate size of the length field based on the available space,
         // less 1, which is the worst case.
         let length = min(space.saturating_sub(1), data_len);
-        let length_len = Encoder::varint_len(u64::try_from(length).expect("usize fits in u64"));
+        let length_len = Encoder::varint_len(to_u64(length));
         debug_assert!(length_len <= space); // We don't depend on this being true, but it is true.
 
         // From here we can always fit `data_len`, but we might as well fill
@@ -1002,8 +995,7 @@ impl SendStream {
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
-            let fin = final_size
-                .is_some_and(|fs| fs == offset + u64::try_from(length).expect("usize fits in u64"));
+            let fin = final_size.is_some_and(|fs| fs == offset + to_u64(length));
             if length == 0 && !fin {
                 qtrace!("[{self}] write_frame no data, no fin");
                 return;
@@ -1140,10 +1132,7 @@ impl SendStream {
         reason = "OK here."
     )]
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
-        self.bytes_sent = max(
-            self.bytes_sent,
-            offset + u64::try_from(len).expect("usize fits in u64"),
-        );
+        self.bytes_sent = max(self.bytes_sent, offset + to_u64(len));
 
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
@@ -1182,7 +1171,7 @@ impl SendStream {
                 if *fin_acked && send_buf.buffered() == 0 {
                     self.conn_events.send_stream_complete(self.stream_id);
                     let retired = send_buf.retired();
-                    let buffered = u64::try_from(send_buf.buffered()).expect("usize fits in u64");
+                    let buffered = to_u64(send_buf.buffered());
                     self.state.transition(State::DataRecvd {
                         retired,
                         written: buffered,
@@ -1199,10 +1188,7 @@ impl SendStream {
         reason = "OK here."
     )]
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
-        self.retransmission_offset = max(
-            self.retransmission_offset,
-            offset + u64::try_from(len).expect("usize fits in u64"),
-        );
+        self.retransmission_offset = max(self.retransmission_offset, offset + to_u64(len));
         qtrace!(
             "[{self}] mark_as_lost retransmission offset={}",
             self.retransmission_offset
@@ -1379,7 +1365,7 @@ impl SendStream {
             State::Send { fc, send_buf, .. } => {
                 let final_size = fc.used();
                 let final_retired = send_buf.retired();
-                let buffered = u64::try_from(send_buf.buffered()).expect("usize fits in u64");
+                let buffered = to_u64(send_buf.buffered());
                 self.state.transition(State::ResetSent {
                     err,
                     final_size,
@@ -1391,7 +1377,7 @@ impl SendStream {
             State::DataSent { send_buf, .. } => {
                 let final_size = send_buf.used();
                 let final_retired = send_buf.retired();
-                let buffered = u64::try_from(send_buf.buffered()).expect("usize fits in u64");
+                let buffered = to_u64(send_buf.buffered());
                 self.state.transition(State::ResetSent {
                     err,
                     final_size,
@@ -1866,7 +1852,9 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace};
+    use neqo_common::{
+        Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace, to_u64, to_usize,
+    };
 
     use super::RecoveryToken;
     use crate::{
@@ -2352,8 +2340,8 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
-        let one_byte_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 1;
-        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
+        let one_byte_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 1;
+        txb.mark_as_sent(0, to_usize(one_byte_from_end));
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
                          && start == one_byte_from_end
@@ -2372,7 +2360,7 @@ mod tests {
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
-        let five_bytes_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 5;
+        let five_bytes_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 5;
         txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 5
@@ -2382,7 +2370,7 @@ mod tests {
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, to_usize(five_bytes_from_end));
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
@@ -2397,7 +2385,7 @@ mod tests {
         txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 30
-                         && start == INITIAL_LOCAL_MAX_STREAM_DATA as u64
+                         && start == to_u64(INITIAL_LOCAL_MAX_STREAM_DATA)
                          && x.iter().all(|ch| *ch == 2)));
     }
 
@@ -2413,9 +2401,9 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // As above
-        let forty_bytes_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 40;
+        let forty_bytes_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 40;
 
-        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, to_usize(forty_bytes_from_end));
         assert!(matches!(txb.next_bytes(),
                  Some((start, x)) if x.len() == 40
                  && start == forty_bytes_from_end
@@ -2433,7 +2421,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark a range 'A' in second slice as sent. Should still return the same
-        let range_a_start = INITIAL_LOCAL_MAX_STREAM_DATA as u64 + 30;
+        let range_a_start = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) + 30;
         let range_a_end = range_a_start + 10;
         txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
@@ -2442,8 +2430,8 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Ack entire first slice and into second slice
-        let ten_bytes_past_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 + 10;
-        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
+        let ten_bytes_past_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) + 10;
+        txb.mark_as_acked(0, to_usize(ten_bytes_past_end));
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
@@ -2499,7 +2487,7 @@ mod tests {
         // should now hit the tx buffer size
         conn_fc
             .borrow_mut()
-            .update(INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            .update(to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let res = s.send(&big_buf).unwrap();
         assert_eq!(res, INITIAL_LOCAL_MAX_STREAM_DATA - 4096);
 
@@ -3156,7 +3144,7 @@ mod tests {
 
         // The minimum amount of extra space for getting another frame in.
         let mut enc = Encoder::default();
-        enc.encode_varint(u64::try_from(data.len()).unwrap());
+        enc.encode_len(data.len());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;
 
@@ -3255,7 +3243,7 @@ mod tests {
     }
 
     fn make_send_stream(data: &[u8]) -> (SendStream, u64) {
-        let len = data.len() as u64;
+        let len = to_u64(data.len());
         let mut s = SendStream::new(
             StreamId::new(100),
             0,

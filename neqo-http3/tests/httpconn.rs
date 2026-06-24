@@ -10,7 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{Datagram, event::Provider as _, qtrace};
+use neqo_common::{Datagram, event::Provider as _, qtrace, to_usize};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
@@ -221,7 +221,6 @@ fn response_103() {
 
 /// Test [`neqo_http3::SendMessage::send_data`] to set
 /// [`neqo_transport::SendStream::set_writable_event_low_watermark`].
-#[expect(clippy::cast_possible_truncation, reason = "OK in a test.")]
 #[test]
 fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>> {
     const STREAM_LIMIT: u64 = 5000;
@@ -286,7 +285,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
     // Expect the server's available send space to be back to the stream limit.
-    assert_eq!(request.available()?, STREAM_LIMIT as usize);
+    assert_eq!(request.available()?, to_usize(STREAM_LIMIT));
 
     // Expect the server to emit a DataWritable event, even though it always had
     // at least 1 byte available to send, i.e. it never exhausted the entire

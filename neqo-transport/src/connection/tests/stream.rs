@@ -6,7 +6,7 @@
 
 use std::{cmp::max, collections::HashMap, fmt::Debug};
 
-use neqo_common::{Role, event::Provider as _, qdebug};
+use neqo_common::{Role, event::Provider as _, qdebug, to_u64};
 use test_fixture::now;
 
 use super::{
@@ -345,9 +345,7 @@ fn sending_max_data() {
     const SMALL_MAX_DATA: usize = 2048;
 
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
-    );
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
 
     connect(&mut client, &mut server);
 
@@ -394,7 +392,7 @@ fn max_data() {
     server
         .set_local_tparam(
             InitialMaxData,
-            TransportParameter::Integer(u64::try_from(SMALL_MAX_DATA).unwrap()),
+            TransportParameter::Integer(to_u64(SMALL_MAX_DATA)),
         )
         .unwrap();
 
@@ -453,9 +451,7 @@ fn exceed_max_data() {
     const SMALL_MAX_DATA: usize = 1024;
 
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
-    );
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
 
     connect(&mut client, &mut server);
 
@@ -1053,7 +1049,7 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     // create a stream
     let stream_id = server.stream_create(stream_type).unwrap();
     let written1 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written1).unwrap(), RECV_BUFFER_START);
+    assert_eq!(to_u64(written1), RECV_BUFFER_START);
 
     // Send the stream to the client.
     let out = server.process_output(now());
@@ -1071,7 +1067,7 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     // If the flow control window has been increased, server can write more data.
     let written2 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
     if RECV_BUFFER_START < new_fc {
-        assert_eq!(u64::try_from(written2).unwrap(), new_fc - RECV_BUFFER_START);
+        assert_eq!(to_u64(written2), new_fc - RECV_BUFFER_START);
     } else {
         assert_eq!(written2, 0);
     }
@@ -1084,13 +1080,13 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
     // read all data by client
     let mut buf = [0x0; 10000];
     let (read, _) = client.stream_recv(stream_id, &mut buf).unwrap();
-    assert_eq!(u64::try_from(read).unwrap(), max(RECV_BUFFER_START, new_fc));
+    assert_eq!(to_u64(read), max(RECV_BUFFER_START, new_fc));
 
     let out4 = client.process_output(now());
     drop(server.process(out4.dgram(), now()));
 
     let written3 = server.stream_send(stream_id, &[0x0; 10000]).unwrap();
-    assert_eq!(u64::try_from(written3).unwrap(), new_fc);
+    assert_eq!(to_u64(written3), new_fc);
 }
 
 #[test]
@@ -1110,9 +1106,7 @@ fn session_flow_control_stop_sending_state_recv() {
     const SMALL_MAX_DATA: usize = 1024;
 
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
-    );
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
 
     connect(&mut client, &mut server);
 
@@ -1159,9 +1153,7 @@ fn session_flow_control_stop_sending_state_size_known() {
     const SMALL_MAX_DATA: usize = 1024;
 
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
-    );
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
 
     connect(&mut client, &mut server);
 
@@ -1210,9 +1202,7 @@ fn session_flow_control_stop_sending_state_data_recvd() {
     const SMALL_MAX_DATA: usize = 1024;
 
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
-    );
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
 
     connect(&mut client, &mut server);
 
@@ -1255,9 +1245,7 @@ fn session_flow_control_affects_all_streams() {
     const SMALL_MAX_DATA: usize = 1024;
 
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().max_data(u64::try_from(SMALL_MAX_DATA).unwrap()),
-    );
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
 
     connect(&mut client, &mut server);
 

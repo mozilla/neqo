@@ -1189,7 +1189,7 @@ mod tests {
     use std::time::Duration;
 
     use http::Uri;
-    use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace};
+    use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
@@ -2797,7 +2797,7 @@ mod tests {
     }
 
     fn alloc_buffer(size: usize) -> (Vec<u8>, Vec<u8>) {
-        let data_frame = HFrame::Data { len: size as u64 };
+        let data_frame = HFrame::Data { len: to_u64(size) };
         let mut enc = Encoder::default();
         data_frame.encode(&mut enc);
 
@@ -3878,7 +3878,7 @@ mod tests {
 
         let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
         enc.encode_varint(1028_u64); // Arbitrary type.
-        enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+        enc.encode_len(UNKNOWN_FRAME_LEN);
         let mut buf: Vec<_> = enc.into();
         buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
         _ = server.conn.stream_send(request_stream_id, &buf).unwrap();
@@ -6441,7 +6441,7 @@ mod tests {
         let mut d = Encoder::default();
         hframe.encode(&mut d);
         let d_frame = HFrame::Data {
-            len: u64::try_from(data.len()).unwrap(),
+            len: to_u64(data.len()),
         };
         d_frame.encode(&mut d);
         d.encode(data);
