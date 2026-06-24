@@ -732,7 +732,12 @@ impl Loss {
             && pto < now
         {
             let probes = enum_set!(PacketNumberSpace::ApplicationData);
-            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
+            self.fire_pto(
+                PacketNumberSpace::ApplicationData,
+                probes,
+                self.pto_period(rtt),
+                now,
+            );
         }
     }
 
@@ -868,6 +873,7 @@ impl Loss {
         &mut self,
         pn_space: PacketNumberSpace,
         allow_probes: PacketNumberSpaceSet,
+        pto: Duration,
         now: Instant,
     ) {
         if let Some(st) = &mut self.pto_state {
@@ -880,7 +886,7 @@ impl Loss {
             st.count_pto(&mut self.stats.borrow_mut());
             qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PtoCount(st.count())], now);
         }
-        qlog::loss_timer_set(&mut self.qlog, now);
+        qlog::loss_timer_set(&mut self.qlog, pn_space, pto, now);
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -943,7 +949,8 @@ impl Loss {
         }
 
         qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
-        self.fire_pto(pn_space, allow_probes, now);
+        let pto = self.pto_period(primary_path.borrow().rtt());
+        self.fire_pto(pn_space, allow_probes, pto, now);
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {

@@ -33,7 +33,11 @@ use neqo_transport::{
     ConnectionIdRef, ConnectionParameters, State, Version, version,
 };
 use nss::{AllowZeroRtt, AntiReplay, AuthenticationStatus, random};
-use qlog::{events::EventImportance, streamer::QlogStreamer};
+use qlog::{
+    ReferenceTime,
+    events::EventImportance,
+    streamer::{EventTimePrecision, QlogStreamer},
+};
 
 pub mod assertions;
 pub mod header_protection;
@@ -536,18 +540,17 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     }
 
     let mut trace = new_trace(Role::Client);
-    // Set reference time to 0.0 for testing.
-    trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+    // Set reference time to a deterministic value for testing.
+    trace.common_fields.as_mut().unwrap().reference_time = ReferenceTime::new_monotonic(None);
     let contents = buf.clone();
     let streamer = QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
-        None,
         None,
         None,
         #[expect(clippy::disallowed_methods, reason = "logging happens in real time")]
         Instant::now(),
         trace,
         EventImportance::Extra,
+        EventTimePrecision::MicroSeconds,
         Box::new(buf),
     );
     let log = Qlog::enabled(streamer, PathBuf::from(""));
@@ -556,7 +559,7 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
 
 pub const EXPECTED_LOG_HEADER: &str = concat!(
     "\u{1e}",
-    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"neqo-Client trace","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","trace":{"title":"neqo-Client trace","description":"neqo-Client trace","common_fields":{"protocol_types":["QUIC"],"reference_time":{"clock_type":"monotonic","epoch":"unknown"},"time_format":"relative_to_epoch"},"vantage_point":{"name":"neqo-Client","type":"client"},"event_schemas":["urn:ietf:params:qlog:events:quic-12"]}}"#,
     "\n"
 );
 
