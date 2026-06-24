@@ -985,34 +985,23 @@ mod tests {
     /// Validate that default values don't get set.
     #[test]
     fn default_tps() {
+        use enum_map::Enum;
         let mut tps = TransportParameters::default();
-        for &(tp, value) in &[
-            (IdleTimeout, 0),
-            (InitialMaxData, 0),
-            (InitialMaxStreamDataBidiLocal, 0),
-            (InitialMaxStreamDataBidiRemote, 0),
-            (InitialMaxStreamDataUni, 0),
-            (InitialMaxStreamsBidi, 0),
-            (InitialMaxStreamsUni, 0),
-            (MinAckDelay, 0),
-            (MaxDatagramFrameSize, 0),
-            (MaxUdpPayloadSize, 65527),
-            (AckDelayExponent, 3),
-            (
-                MaxAckDelay,
-                u64::try_from(DEFAULT_REMOTE_ACK_DELAY.as_millis()).unwrap(),
-            ),
-            (ActiveConnectionIdLimit, 2),
-        ] {
-            assert!(TransportParameters::integer_default(tp).is_some());
-            tps.set_integer(tp, value);
-            assert!(!tps.has_value(tp));
-            
-            tps.set_integer(tp, value + 1);
-            assert!(tps.has_value(tp));
-            tps.set_integer(tp, value);
-            assert!(!tps.has_value(tp));
+        let mut count = 0;
+        for i in 0..TransportParameterId::LENGTH {
+            let tp = TransportParameterId::from_usize(i);
+            if let Some(value) = TransportParameters::integer_default(tp) {
+                count += 1;
+                tps.set_integer(tp, value);
+                assert!(!tps.has_value(tp), "{tp}");
+
+                tps.set_integer(tp, value + 1);
+                assert!(tps.has_value(tp), "{tp}");
+                tps.set_integer(tp, value);
+                assert!(!tps.has_value(tp), "{tp}");
+            }
         }
+        assert!(count > 0);
     }
 
     fn make_spa() -> TransportParameter {
