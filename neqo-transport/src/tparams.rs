@@ -433,6 +433,11 @@ impl TransportParameters {
         }
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "False positive in 1.90, check when we bump MSRV"
+    )]
     fn integer_default(tp: TransportParameterId) -> Option<u64> {
         // Note: testing for this can't catch new values; make sure to update the test.
         Some(match tp {
