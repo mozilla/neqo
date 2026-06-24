@@ -1052,7 +1052,7 @@ mod tests {
         time::{Duration, Instant},
     };
 
-    use neqo_common::qlog::Qlog;
+    use neqo_common::{qlog::Qlog, to_u64};
     use test_fixture::{DEFAULT_ADDR, now};
 
     use super::{
@@ -2053,7 +2053,7 @@ mod tests {
         let pto = ms(100);
 
         // Add exactly MIN_OUTSTANDING_UNACK packets → n_pto = 2.
-        add_sent(&mut lrs, (MIN_OUTSTANDING_UNACK - 1) as u64);
+        add_sent(&mut lrs, to_u64(MIN_OUTSTANDING_UNACK - 1));
         assert_eq!(lrs.sent_packets.len(), MIN_OUTSTANDING_UNACK);
 
         lrs.last_ack_eliciting = Some(t);

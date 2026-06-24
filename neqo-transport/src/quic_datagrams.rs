@@ -8,7 +8,7 @@
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::{Buffer, Encoder, qdebug};
+use neqo_common::{Buffer, Encoder, qdebug, to_u64};
 
 use crate::{
     ConnectionEvents, Error, Res, Stats,
@@ -112,8 +112,7 @@ impl QuicDatagrams {
             let len = dgram.as_ref().len();
             if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
                 // The datagram fits into the packet.
-                let length_len =
-                    Encoder::varint_len(u64::try_from(len).expect("usize fits in u64"));
+                let length_len = Encoder::varint_len(to_u64(len));
                 // Include a length if there is space for another frame after this one.
                 if builder.remaining()
                     >= DATAGRAM_FRAME_TYPE_VARINT_LEN
@@ -164,7 +163,7 @@ impl QuicDatagrams {
         tracking: DatagramTracking,
         stats: &mut Stats,
     ) -> Res<()> {
-        if u64::try_from(data.len())? > self.remote_datagram_size {
+        if to_u64(data.len()) > self.remote_datagram_size {
             qdebug!(
                 "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
                 data.len(),
@@ -191,7 +190,7 @@ impl QuicDatagrams {
         // A `local_datagram_size` of 0 means we advertised a
         // max_datagram_frame_size of 0, i.e. no DATAGRAM frame support
         // (RFC 9221, Section 3).
-        if self.local_datagram_size == 0 || self.local_datagram_size < u64::try_from(data.len())? {
+        if self.local_datagram_size == 0 || self.local_datagram_size < to_u64(data.len()) {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events

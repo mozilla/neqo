@@ -12,7 +12,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Decoder, Encoder, to_u64};
 use neqo_transport::frame::{Frame, FrameType};
 
 const FRAME_PAYLOAD: usize = 100;
@@ -24,10 +24,10 @@ const FRAME_PAYLOAD: usize = 100;
 /// Frame type 0x0e = StreamWithOffLen (offset present, length present, no FIN).
 fn encode_stream_frames(n: usize) -> Vec<u8> {
     let mut enc = Encoder::default();
-    for i in 0..n as u64 {
+    for i in 0..to_u64(n) {
         enc.encode_varint(FrameType::StreamWithOffLen)
             .encode_varint(1u8) // stream id = 1
-            .encode_varint(i * FRAME_PAYLOAD as u64) // offset
+            .encode_varint(i * to_u64(FRAME_PAYLOAD)) // offset
             .encode_vvec(&[0u8; FRAME_PAYLOAD]); // length-prefixed payload
     }
     enc.into()

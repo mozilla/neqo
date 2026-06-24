@@ -248,6 +248,7 @@ mod tests {
         time::Duration,
     };
 
+    use neqo_common::to_u64;
     use test_fixture::now;
 
     use super::PacketSender;
@@ -324,7 +325,7 @@ mod tests {
 
         let pkts: Vec<_> = (0..n)
             .map(|pn| {
-                let p = sent::make_packet(pn as u64, now, mtu);
+                let p = sent::make_packet(to_u64(pn), now, mtu);
                 sender.on_packet_sent(&p, RTT, now);
                 p
             })

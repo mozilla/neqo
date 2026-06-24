@@ -7,6 +7,7 @@
 use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize::SmallInput, Criterion, Throughput};
+use neqo_common::to_u64;
 use test_fixture::{
     boxed, fixture_init,
     sim::{
@@ -90,7 +91,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
     for (group_name, setup_fn, params) in CONFIGS {
         let mut group = c.benchmark_group(group_name);
         for &(streams, data_size) in params {
-            group.throughput(Throughput::Bytes((streams * data_size) as u64));
+            group.throughput(Throughput::Bytes(to_u64(streams * data_size)));
             group.bench_function(
                 &format!("{name_prefix}/{streams}-streams/each-{data_size}-bytes"),
                 |b| {
