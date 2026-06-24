@@ -21,13 +21,13 @@ use neqo_common::{
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
-    OutputBatch, Stats as TransportStats, StreamId, Version, ZeroRttState,
+    OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler, PushId,
-    ReceiveOutput, Res,
+    ReceiveOutput, Res, SendGroupId,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -1164,6 +1164,53 @@ impl Http3Client {
     #[must_use]
     pub fn transport_stats(&self) -> TransportStats {
         self.conn.stats()
+    }
+
+    /// Create a send group for a WebTransport session, returning its connection-unique ID.
+    ///
+    /// Send groups allow organizing streams with shared prioritization.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_create_send_group(&mut self, session_id: StreamId) -> Res<SendGroupId> {
+        self.base_handler.webtransport_create_send_group(session_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    pub fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.base_handler
+            .webtransport_validate_send_group(session_id, group_id)
+    }
+
+    /// Create a WebTransport stream with a send group.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, stream creation fails, or send group is invalid.
+    pub fn webtransport_create_stream_with_send_group(
+        &mut self,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        self.base_handler
+            .webtransport_create_stream_local_with_send_group(
+                &mut self.conn,
+                session_id,
+                stream_type,
+                Box::new(self.events.clone()),
+                Box::new(self.events.clone()),
+                send_group,
+            )
     }
 }
 

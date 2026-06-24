@@ -195,6 +195,23 @@ impl WtTest {
         wt_server_session
     }
 
+    fn create_second_wt_session(&mut self) -> StreamId {
+        let id = self
+            .client
+            .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+            .unwrap();
+        self.exchange_packets();
+        while let Some(event) = self.server.next_event() {
+            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
+            }
+        }
+        self.exchange_packets();
+        id
+    }
+
     fn exchange_packets(&mut self) {
         const RTT: Duration = Duration::from_millis(10);
         let mut out = None;

@@ -20,7 +20,7 @@ use crate::{
     frame::FrameType,
     packet,
     send_stream::{self, OrderGroup},
-    streams::{SendOrder, StreamOrder},
+    streams::SendOrder,
     tparams::{TransportParameter, TransportParameterId::*},
 };
 
@@ -156,34 +156,37 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     }
     assert_eq!(*server.state(), State::Confirmed);
 
-    let stream_ids = server
-        .events()
-        .filter_map(|evt| match evt {
-            ConnectionEvent::RecvStreamReadable { stream_id, .. } => Some(stream_id),
-            _ => None,
-        })
-        .enumerate()
-        .map(|(a, b)| (b, a))
-        .collect::<HashMap<_, _>>();
+    // Reception order: the sequence in which streams first became readable on the server.
+    let mut reception_order = Vec::new();
+    for evt in server.events() {
+        if let ConnectionEvent::RecvStreamReadable { stream_id } = evt
+            && !reception_order.contains(&stream_id)
+        {
+            reception_order.push(stream_id);
+        }
+    }
 
-    // streams should arrive in priority order, not order of creation, if sendorder prioritization
-    // is working correctly
+    // Nothing is starved: every stream is eventually delivered.
+    assert_eq!(reception_order.len(), ordered.len());
 
-    // 'ordered' has the send order currently.  Re-sort it by sendorder, but
-    // if two items from the same sendorder exist, secondarily sort by the ordering in
-    // the stream_ids vector (HashMap<StreamId, index: usize>)
-    ordered.sort_unstable_by_key(|(stream_id, sendorder)| {
-        (
-            StreamOrder {
-                sendorder: *sendorder,
-            },
-            stream_ids[stream_id],
-        )
-    });
-    // make sure everything now is in the same order, since we modified the order of
-    // same-sendorder items to match the ordering of those we saw in reception
-    for (i, (stream_id, _sendorder)) in ordered.iter().enumerate() {
-        assert_eq!(i, stream_ids[stream_id]);
+    // Per the WebTransport send-order rules, strictly-ordered streams (those with a
+    // sendOrder) within a send group -- here all streams are in the null group -- must be
+    // sent highest-sendOrder first. Streams without a sendOrder are not strictly ordered:
+    // they must not starve, but their position relative to ordered streams is
+    // implementation-defined, so it is not asserted here.
+    let sendorder_of: HashMap<StreamId, Option<SendOrder>> = ordered.iter().copied().collect();
+    let mut prev_order: Option<SendOrder> = None;
+    for stream_id in &reception_order {
+        let Some(order) = sendorder_of[stream_id] else {
+            continue;
+        };
+        if let Some(prev) = prev_order {
+            assert!(
+                order <= prev,
+                "stream with sendOrder {order} delivered after higher sendOrder {prev}"
+            );
+        }
+        prev_order = Some(order);
     }
 }
 

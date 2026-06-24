@@ -35,6 +35,29 @@ use crate::{
 
 pub type SendOrder = i64;
 
+/// Identifier for a send group, unique within a connection.
+///
+/// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
+/// cannot be passed where a send-group id is expected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SendGroupId(u64);
+
+impl SendGroupId {
+    /// Creates a new `SendGroupId`. Note: `0` is reserved as a sentinel
+    /// by the transport scheduler (`NULL_GROUP_ID`) and will be rejected
+    /// by [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The underlying integer, e.g. for wire encoding.
+    #[must_use]
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
     pub sendorder: Option<SendOrder>,
@@ -459,6 +482,12 @@ impl Streams {
     /// When the stream does not exist.
     pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.send.set_fairness(stream_id, fairness)
+    }
+
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn set_sendgroup(&mut self, stream_id: StreamId, group_id: Option<SendGroupId>) -> Res<()> {
+        self.send.set_sendgroup(stream_id, group_id)
     }
 
     /// # Errors
