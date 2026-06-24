@@ -13,10 +13,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Ecn, qinfo, qtrace};
+use neqo_common::{Datagram, qinfo, qtrace};
 use neqo_transport::Output;
 
-use super::{Node, Rng, aqm::Aqm};
+use super::{
+    Node, Rng,
+    aqm::{Aqm, MarkResult},
+};
 
 /// One second in nanoseconds.
 const ONE_SECOND_NS: u128 = 1_000_000_000;
@@ -126,11 +129,19 @@ impl TailDrop {
     ///
     /// # Panics
     ///
-    /// Panics if rate is zero or over 1Gbps.
+    /// Panics if rate is zero or over 1Gbps, or if `Aqm::Red` is used and capacity is too large
+    /// for its overflow-avoiding arithmetic.
     #[must_use]
     pub fn new(rate: usize, capacity: usize, aqm: Aqm, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
         assert!(rate <= 1_000_000_000, "rates over 1Gbps are not supported");
+        if matches!(aqm, Aqm::Red(_)) {
+            // We multiply capacity by 4096 below and need to avoid overflow.
+            assert!(capacity < usize::MAX / 4096, "too much capacity");
+            // We need to square a value close to 1000x this and have it fit within a u128.
+            #[cfg(target_pointer_width = "64")]
+            assert!(capacity < (1 << 54), "too much capacity");
+        }
         Self {
             overhead: 80,
             rate,
@@ -216,20 +227,15 @@ impl TailDrop {
             }
 
             self.stats.accumulate_usage(now, self.used);
-            // `dequeue` returns `None` both when the queue is empty and when the AQM
-            // drops the packet (e.g. CoDel signalling a non-ECT packet). Keep dequeuing
-            // until we either send a packet or drain the queue, so a drop doesn't stall
-            // the packets behind it.
-            loop {
+            // Keep dequeuing until we send a packet or exhaust the queue; an AQM drop
+            // should not stall the packets behind it.
+            while !self.queue.is_empty() {
                 if let Some(d) = self.dequeue(now) {
                     self.send(d, t, subns);
-                    break;
-                }
-                if self.queue.is_empty() {
-                    self.next_deque = None;
-                    break;
+                    return;
                 }
             }
+            self.next_deque = None;
         }
     }
 
@@ -239,15 +245,19 @@ impl TailDrop {
         let (enqueue_time, pkt) = self.queue.pop_front()?;
         self.used -= self.size(&pkt);
         let sojourn = now.saturating_duration_since(enqueue_time);
-        let result = self
-            .aqm
-            .mark(pkt, sojourn, self.used == 0, self.used, self.capacity, now);
-        match &result {
-            None => self.stats.dropped += 1,
-            Some(d) if Ecn::from(d.tos()) == Ecn::Ce => self.stats.marked += 1,
-            Some(_) => {}
+        // Note: RED evaluates occupancy at dequeue time (self.used after decrement), which
+        // is slightly lower than the enqueue-time occupancy the original code used.
+        match self.aqm.mark(pkt, sojourn, self.used, self.capacity, now) {
+            MarkResult::Forward(d) => Some(d),
+            MarkResult::Marked(d) => {
+                self.stats.marked += 1;
+                Some(d)
+            }
+            MarkResult::Dropped => {
+                self.stats.dropped += 1;
+                None
+            }
         }
-        result
     }
 }
 

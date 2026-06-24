@@ -105,11 +105,6 @@ impl RedState {
         //
         // This code scales that up by a factor of 1024 so we can use integers.
         // This is mostly because our RNG can't sample from 0..1_f64.
-        // We multiply capacity by 4096 below and need to avoid overflow.
-        assert!(capacity < usize::MAX / 4096, "too much capacity");
-        // We need to square a value close to 1000x this and have it fit within a u128.
-        #[cfg(target_pointer_width = "64")]
-        assert!(capacity < (1 << 54), "too much capacity");
         let Some(n) = (2048 * used).checked_sub(capacity * 4096 / 5) else {
             return false; // (used / capacity) < 0.4
         };
@@ -125,6 +120,16 @@ impl RedState {
             .random_from(0..(1 << 20));
         r < p
     }
+}
+
+/// The outcome of applying AQM policy to a dequeued packet.
+pub enum MarkResult {
+    /// AQM chose not to signal; forward the packet unchanged.
+    Forward(Datagram),
+    /// AQM signalled and the packet is ECT-capable; forward CE-marked.
+    Marked(Datagram),
+    /// AQM signalled but the packet is not ECT-capable; drop it.
+    Dropped,
 }
 
 /// CE-mark an ECT(0) datagram; drop (return `None`) if not ECT-capable.
@@ -183,26 +188,23 @@ impl Aqm {
     }
 
     /// Apply AQM policy to the dequeued packet.
-    ///
-    /// Returns `Some(datagram)` to forward (possibly CE-marked), or `None` if dropped.
     pub(super) fn mark(
         &mut self,
         pkt: Datagram,
         sojourn: Duration,
-        queue_empty: bool,
         used: usize,
         capacity: usize,
         now: Instant,
-    ) -> Option<Datagram> {
+    ) -> MarkResult {
         let should_signal = match self {
-            Self::CoDel(state) => state.update(sojourn, queue_empty, now),
+            Self::CoDel(state) => state.update(sojourn, used == 0, now),
             Self::Red(state) => Ecn::from(pkt.tos()).is_ect() && state.should_mark(used, capacity),
             Self::None => false,
         };
         if should_signal {
-            mark_ce(&pkt)
+            mark_ce(&pkt).map_or(MarkResult::Dropped, MarkResult::Marked)
         } else {
-            Some(pkt)
+            MarkResult::Forward(pkt)
         }
     }
 }
