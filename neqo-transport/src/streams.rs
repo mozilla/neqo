@@ -5,12 +5,7 @@
 // except according to those terms.
 
 // Stream management for a connection.
-use std::{
-    cell::RefCell,
-    cmp::Ordering,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
 use neqo_common::{Buffer, Role, qtrace, qwarn};
 
@@ -227,8 +222,6 @@ impl Streams {
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
-        now: Instant,
-        rtt: Duration,
     ) {
         // Send `DATA_BLOCKED` as necessary.
         self.sender_fc
@@ -241,12 +234,12 @@ impl Streams {
         // Send `MAX_DATA` as necessary.
         self.receiver_fc
             .borrow_mut()
-            .write_frames(builder, tokens, stats, now, rtt);
+            .write_frames(builder, tokens, stats);
         if builder.is_full() {
             return;
         }
 
-        self.recv.write_frames(builder, tokens, stats, now, rtt);
+        self.recv.write_frames(builder, tokens, stats);
 
         self.remote_stream_limits[StreamType::BiDi].write_frames(builder, tokens, stats);
         if builder.is_full() {

@@ -14,7 +14,6 @@ use std::{
     fmt::Debug,
     mem,
     rc::{Rc, Weak},
-    time::{Duration, Instant},
 };
 
 use neqo_common::{Buffer, Role, qtrace};
@@ -47,11 +46,9 @@ impl RecvStreams {
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
-        now: Instant,
-        rtt: Duration,
     ) {
         for stream in self.streams.values_mut() {
-            stream.write_frame(builder, tokens, stats, now, rtt);
+            stream.write_frame(builder, tokens, stats);
             if builder.is_full() {
                 return;
             }
@@ -988,12 +985,10 @@ impl RecvStream {
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
-        now: Instant,
-        rtt: Duration,
     ) {
         match &mut self.state {
             // Maybe send MAX_STREAM_DATA
-            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats, now, rtt),
+            RecvStreamState::Recv { fc, .. } => fc.write_frames(builder, tokens, stats),
             // Maybe send STOP_SENDING
             RecvStreamState::AbortReading {
                 frame_needed, err, ..
@@ -1090,10 +1085,9 @@ impl RecvStream {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
+    use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc};
 
     use neqo_common::{Encoder, qtrace};
-    use test_fixture::now;
 
     use super::RecvStream;
     use crate::{
@@ -1611,13 +1605,7 @@ mod tests {
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
-        s.write_frame(
-            &mut builder,
-            &mut token,
-            &mut FrameStats::default(),
-            now(),
-            Duration::from_millis(100),
-        );
+        s.write_frame(&mut builder, &mut token, &mut FrameStats::default());
 
         // it should be gone
         assert!(!s.has_frames_to_write());
@@ -1723,48 +1711,38 @@ mod tests {
         s.inbound_stream_frame(false, 0, &[0; SESSION_WINDOW])
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
-        // The buffer is big enough to hold SESSION_WINDOW, this will make sure that we always
-        // read everything from he stream.
-        let mut buf = [0; 2 * SESSION_WINDOW];
+        let mut buf = [0; 4 * SESSION_WINDOW];
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
-        // consume it
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
-        session_fc.borrow_mut().write_frames(
-            &mut builder,
-            &mut token,
-            &mut FrameStats::default(),
-            now(),
-            Duration::from_millis(100),
-        );
+        session_fc
+            .borrow_mut()
+            .write_frames(&mut builder, &mut token, &mut FrameStats::default());
 
-        // Switch to SizeKnown state
-        s.inbound_stream_frame(true, 2 * u64::try_from(SESSION_WINDOW).unwrap() - 1, &[0])
+        // Switch to SizeKnown state.
+        // After the first write_frames, auto-tuning grows the session window
+        // (consumed * 4), so we need larger amounts to exceed the auto-tuned
+        // threshold and trigger a new FC update.
+        s.inbound_stream_frame(true, 4 * u64::try_from(SESSION_WINDOW).unwrap() - 1, &[0])
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
-        // Receive new data that can be read.
         s.inbound_stream_frame(
             false,
             u64::try_from(SESSION_WINDOW).unwrap(),
-            &[0; SESSION_WINDOW / 2 + 1],
+            &[0; 2 * SESSION_WINDOW],
         )
         .unwrap();
         assert!(!session_fc.borrow().frame_needed());
         s.read(&mut buf).unwrap();
         assert!(session_fc.borrow().frame_needed());
-        // consume it
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
-        session_fc.borrow_mut().write_frames(
-            &mut builder,
-            &mut token,
-            &mut FrameStats::default(),
-            now(),
-            Duration::from_millis(100),
-        );
+        session_fc
+            .borrow_mut()
+            .write_frames(&mut builder, &mut token, &mut FrameStats::default());
 
         // Test DataRecvd state
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
@@ -2068,21 +2046,10 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut token = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        fc.borrow_mut().write_frames(
-            &mut builder,
-            &mut token,
-            &mut stats,
-            now(),
-            Duration::from_millis(100),
-        );
+        fc.borrow_mut()
+            .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 0);
-        s.write_frame(
-            &mut builder,
-            &mut token,
-            &mut stats,
-            now(),
-            Duration::from_millis(100),
-        );
+        s.write_frame(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_stream_data, 1);
 
         // Receive 1 byte that will cause a session fc update after it is read.
@@ -2101,21 +2068,10 @@ mod tests {
         );
         assert!(fc.borrow().frame_needed());
         assert!(!s.fc().unwrap().frame_needed());
-        fc.borrow_mut().write_frames(
-            &mut builder,
-            &mut token,
-            &mut stats,
-            now(),
-            Duration::from_millis(100),
-        );
+        fc.borrow_mut()
+            .write_frames(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_data, 1);
-        s.write_frame(
-            &mut builder,
-            &mut token,
-            &mut stats,
-            now(),
-            Duration::from_millis(100),
-        );
+        s.write_frame(&mut builder, &mut token, &mut stats);
         assert_eq!(stats.max_stream_data, 1);
     }
 

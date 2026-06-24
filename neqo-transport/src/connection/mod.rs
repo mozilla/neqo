@@ -2332,13 +2332,7 @@ impl Connection {
         &mut self,
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
-        now: Instant,
     ) {
-        let rtt = self.paths.primary().map_or_else(
-            || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
-            |p| p.borrow().rtt().estimate(),
-        );
-
         let stats = &mut self.stats.borrow_mut();
         let frame_stats = &mut stats.frame_tx;
         if self.role == Role::Server
@@ -2355,7 +2349,7 @@ impl Connection {
         }
 
         self.streams
-            .write_maintenance_frames(builder, tokens, frame_stats, now, rtt);
+            .write_maintenance_frames(builder, tokens, frame_stats);
         if builder.is_full() {
             return;
         }
@@ -2531,7 +2525,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
