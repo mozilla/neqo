@@ -54,7 +54,7 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
     }
 }
 
-struct InsertEmptyLenDatagram;
+struct InsertEmptyDatagram;
 
 impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
@@ -434,7 +434,7 @@ fn dgram_unsupported() {
     // The client advertised max_datagram_frame_size=0, so any DATAGRAM frame,
     // including an empty one, is a connection error (RFC 9221, Section 3).
     let out = server
-        .test_write_frames(InsertEmptyLenDatagram, now())
+        .test_write_frames(InsertEmptyDatagram, now())
         .dgram()
         .unwrap();
     client.process_input(out, now());
