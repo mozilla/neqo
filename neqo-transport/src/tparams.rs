@@ -140,7 +140,7 @@ impl PreferredAddress {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -155,6 +155,31 @@ pub enum TransportParameter {
         current: version::Wire,
         other: Vec<version::Wire>,
     },
+}
+
+impl fmt::Debug for TransportParameter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Bytes(a) => f.debug_tuple("Bytes").field(&hex(a)).finish(),
+            Self::Integer(a) => f.debug_tuple("Integer").field(a).finish(),
+            Self::Empty => f.write_str("Empty"),
+            Self::PreferredAddress { v4, v6, cid, srt } => f
+                .debug_struct("PreferredAddress")
+                .field("v4", v4)
+                .field("v6", v6)
+                .field("cid", cid)
+                .field("srt", srt)
+                .finish(),
+            Self::Versions { current, other } => f
+                .debug_struct("Versions")
+                .field("current", &hex(current.to_be_bytes()))
+                .field(
+                    "other",
+                    &other.iter().map(|v| hex(v.to_be_bytes())).collect::<Vec<_>>(),
+                )
+                .finish(),
+        }
+    }
 }
 
 impl TransportParameter {
@@ -929,6 +954,21 @@ mod tests {
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
     };
+
+    #[test]
+    fn debug_hex() {
+        let bytes = TransportParameter::Bytes(vec![0x01, 0x23, 0xab, 0xcd]);
+        assert_eq!(format!("{bytes:?}"), r#"Bytes("0123abcd")"#);
+
+        let versions = TransportParameter::Versions {
+            current: 0x0000_0001,
+            other: vec![0xff00_001d, 0x709a_50c4],
+        };
+        assert_eq!(
+            format!("{versions:?}"),
+            r#"Versions { current: "00000001", other: ["ff00001d", "709a50c4"] }"#
+        );
+    }
 
     #[test]
     fn basic_tps() {
