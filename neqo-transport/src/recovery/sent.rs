@@ -90,9 +90,7 @@ impl Packet {
     /// Returns `true` if this packet is a PMTUD probe.
     #[must_use]
     pub fn is_pmtud_probe(&self) -> bool {
-        self.tokens
-            .iter()
-            .any(|t| matches!(t, recovery::Token::PmtudProbe))
+        self.tokens.iter().any(recovery::Token::is_pmtud_probe)
     }
 
     /// The time that this packet was sent.

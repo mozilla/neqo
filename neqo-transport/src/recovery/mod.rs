@@ -267,6 +267,9 @@ impl LossRecoverySpace {
         for p in &acked {
             self.remove_packet(p);
             eliciting |= p.ack_eliciting();
+            if p.is_pmtud_probe() {
+                continue;
+            }
             if p.lost() {
                 stats.late_ack += 1;
             }
@@ -510,6 +513,10 @@ impl Loss {
         self.qlog = qlog;
     }
 
+    fn record_packet_loss(&self, packets: &[sent::Packet]) {
+        self.stats.borrow_mut().lost += packets.iter().filter(|p| !p.is_pmtud_probe()).count();
+    }
+
     /// Drop all 0rtt packets.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
         let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
@@ -673,7 +680,7 @@ impl Loss {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
-        self.stats.borrow_mut().lost += lost.len();
+        self.record_packet_loss(&lost);
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
@@ -988,7 +995,7 @@ impl Loss {
                 now,
             );
         }
-        self.stats.borrow_mut().lost += lost_packets.len();
+        self.record_packet_loss(&lost_packets);
 
         self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets

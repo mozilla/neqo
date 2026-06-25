@@ -70,3 +70,10 @@ pub enum Token {
     /// A PMTUD probe packet.
     PmtudProbe,
 }
+
+impl Token {
+    #[must_use]
+    pub const fn is_pmtud_probe(&self) -> bool {
+        matches!(self, Self::PmtudProbe)
+    }
+}

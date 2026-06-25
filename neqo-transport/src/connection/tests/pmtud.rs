@@ -20,6 +20,7 @@ use crate::{
         CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
         new_client, new_server, send_something,
     },
+    pmtud::{MAX_PROBES, SEARCH_TABLE_LEN},
 };
 
 /// Test that one can reach the maximum MTU with GSO enabled.
@@ -108,6 +109,63 @@ fn drive_pmtud(
         }
     }
     now
+}
+
+/// With an unlimited path MTU every probe in the search table is delivered and ACKed.
+#[test]
+fn pmtud_stats_no_loss() {
+    fixture_init();
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    connect(&mut client, &mut server);
+    drive_pmtud(&mut client, &mut server, usize::MAX, now());
+    assert_eq!(client.stats().pmtud_tx, SEARCH_TABLE_LEN - 1);
+    assert_eq!(client.stats().pmtud_ack, SEARCH_TABLE_LEN - 1);
+    assert_eq!(client.stats().pmtud_lost, 0);
+}
+
+/// With `path_mtu = 1420 - header_size`:
+/// * probe at 1380 (payload 1380 - header = 1332 ≤ path_mtu): delivered, ACKed
+/// * probe at 1420 (payload 1420 - header = 1372 = path_mtu): delivered, ACKed
+/// * probe at 1472 (payload 1472 - header = 1424 > path_mtu): dropped every attempt
+///
+/// After `MAX_PROBES` consecutive failures at 1472 the algorithm stops, giving exactly
+/// 2 ACKed probes, `MAX_PROBES` lost probes, and `2 + MAX_PROBES` sent probes.
+#[test]
+fn pmtud_stats_loss() {
+    fixture_init();
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    connect(&mut client, &mut server);
+    let header_size = Pmtud::header_size(
+        client
+            .paths
+            .primary()
+            .unwrap()
+            .borrow()
+            .local_address()
+            .ip(),
+    );
+    drive_pmtud(&mut client, &mut server, 1420 - header_size, now());
+    assert_eq!(client.stats().pmtud_tx, 2 + MAX_PROBES);
+    assert_eq!(client.stats().pmtud_ack, 2);
+    assert_eq!(client.stats().pmtud_lost, MAX_PROBES);
 }
 
 /// Tests that when a client goes through a VPN (packets arrive from different IP),

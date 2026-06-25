@@ -2810,7 +2810,9 @@ impl Connection {
                 now,
             );
 
-            self.stats.borrow_mut().packets_tx += 1;
+            if !tokens.iter().any(recovery::Token::is_pmtud_probe) {
+                self.stats.borrow_mut().packets_tx += 1;
+            }
             // Track which packet types are sent with which ECN codepoints. For
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of

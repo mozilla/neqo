@@ -347,14 +347,15 @@ pub struct Stats {
     /// The number of packet that were saved for later processing.
     pub saved_datagrams: usize,
 
-    /// Total packets sent.
+    /// Total packets sent, excluding PMTUD probes (see `pmtud_tx`).
     pub packets_tx: usize,
-    /// Total number of packets that are declared lost.
+    /// Total number of packets that are declared lost, excluding PMTUD probes (see `pmtud_lost`).
     pub lost: usize,
-    /// Late acknowledgments, for packets that were declared lost already.
+    /// Late acknowledgments, for packets that were declared lost already, excluding PMTUD probes
+    /// (see `pmtud_ack`).
     pub late_ack: usize,
-    /// Acknowledgments for packets that contained data that was marked
-    /// for retransmission when the PTO timer popped.
+    /// Acknowledgments for packets that contained data that was marked for retransmission when
+    /// the PTO timer popped, excluding PMTUD probes (see `pmtud_ack`).
     pub pto_ack: usize,
     /// Number of times we had to drop an unacknowledged ACK range.
     pub unacked_range_dropped: usize,
