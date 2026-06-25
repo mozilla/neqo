@@ -220,8 +220,7 @@ pub fn server_version_information_failed(
 pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
     qlog.add_event_at(
         || {
-            let payload = meta.payload();
-            let mut d = Decoder::from(payload);
+            let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
                 length: Some(to_u64(meta.length())),
                 payload_length: None,
@@ -230,12 +229,8 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
 
             let mut frames = Vec::new();
             while d.remaining() > 0 {
-                let before = d.offset();
                 if let Ok(f) = Frame::decode(&mut d) {
-                    frames.push(QuicFrame::from(FrameWithRaw(
-                        f,
-                        &payload[before..d.offset()],
-                    )));
+                    frames.push(QuicFrame::from(f));
                 } else {
                     qinfo!("qlog: invalid frame");
                     break;
@@ -590,48 +585,17 @@ fn loss_timer_updated(
     );
 }
 
-// Helper functions
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "Option<Box<RawInfo>> is needed by callers."
-)]
-fn wire_raw(raw_bytes: &[u8]) -> Option<Box<RawInfo>> {
-    Some(Box::new(RawInfo {
-        length: Some(to_u64(raw_bytes.len())),
-        payload_length: None,
-        data: Some(Box::new(to_hex(raw_bytes))),
-    }))
-}
-
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "Option<Box<RawInfo>> is needed by callers."
-)]
-fn wire_raw_payload(raw_bytes: &[u8], payload: usize) -> Option<Box<RawInfo>> {
-    Some(Box::new(RawInfo {
-        length: Some(to_u64(raw_bytes.len())),
-        payload_length: Some(to_u64(payload)),
-        data: Some(Box::new(to_hex(raw_bytes))),
-    }))
-}
-
-struct FrameWithRaw<'a>(Frame<'a>, &'a [u8]);
-
 #[expect(clippy::too_many_lines, reason = "Yeah, but it's a nice match.")]
 #[expect(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     reason = "We need to truncate here."
 )]
-impl From<FrameWithRaw<'_>> for QuicFrame {
-    fn from(FrameWithRaw(frame, raw_bytes): FrameWithRaw<'_>) -> Self {
+impl From<Frame<'_>> for QuicFrame {
+    fn from(frame: Frame) -> Self {
         match frame {
-            Frame::Padding(_) => Self::Padding {
-                raw: wire_raw(raw_bytes),
-            },
-            Frame::Ping => Self::Ping {
-                raw: wire_raw(raw_bytes),
-            },
+            Frame::Padding(_) => Self::Padding { raw: None },
+            Frame::Ping => Self::Ping { raw: None },
             Frame::Ack {
                 largest_acknowledged,
                 ack_delay,
@@ -656,7 +620,7 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
                     ect1: ecn_count.map(|c| c[Ecn::Ect1]),
                     ect0: ecn_count.map(|c| c[Ecn::Ect0]),
                     ce: ecn_count.map(|c| c[Ecn::Ce]),
-                    raw: wire_raw(raw_bytes),
+                    raw: None,
                 }
             }
             // Note that qlog doesn't currently support `RESET_STREAM_AT`,
@@ -676,7 +640,7 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
                 error: ApplicationError::Unknown,
                 error_code: Some(application_error_code),
                 final_size,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::StopSending {
                 stream_id,
@@ -685,39 +649,31 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
                 stream_id: stream_id.as_u64(),
                 error: ApplicationError::Unknown,
                 error_code: Some(application_error_code),
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
-            Frame::Crypto { offset, data } => Self::Crypto {
-                offset,
-                raw: wire_raw_payload(raw_bytes, data.len()),
-            },
-            Frame::NewToken { token } => Self::NewToken {
+            Frame::Crypto { offset, .. } => Self::Crypto { offset, raw: None },
+            Frame::NewToken { .. } => Self::NewToken {
                 token: qlog::Token {
                     ty: None,
                     details: None,
-                    raw: Some(RawInfo {
-                        data: Some(Box::new(to_hex(token))),
-                        length: Some(to_u64(token.len())),
-                        payload_length: None,
-                    }),
+                    raw: None,
                 },
-                raw: wire_raw_payload(raw_bytes, token.len()),
+                raw: None,
             },
             Frame::Stream {
                 fin,
                 stream_id,
                 offset,
-                data,
                 ..
             } => Self::Stream {
                 stream_id: stream_id.as_u64(),
                 offset: Some(offset),
                 fin: Some(fin),
-                raw: wire_raw_payload(raw_bytes, data.len()),
+                raw: None,
             },
             Frame::MaxData { maximum_data } => Self::MaxData {
                 maximum: maximum_data,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::MaxStreamData {
                 stream_id,
@@ -725,7 +681,7 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
             } => Self::MaxStreamData {
                 stream_id: stream_id.as_u64(),
                 maximum: maximum_stream_data,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::MaxStreams {
                 stream_type,
@@ -733,11 +689,11 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
             } => Self::MaxStreams {
                 stream_type: stream_type.into(),
                 maximum: maximum_streams,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::DataBlocked { data_limit } => Self::DataBlocked {
                 limit: data_limit,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::StreamDataBlocked {
                 stream_id,
@@ -745,7 +701,7 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
             } => Self::StreamDataBlocked {
                 stream_id: stream_id.as_u64(),
                 limit: stream_data_limit,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::StreamsBlocked {
                 stream_type,
@@ -753,7 +709,7 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
             } => Self::StreamsBlocked {
                 stream_type: stream_type.into(),
                 limit: stream_limit,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::NewConnectionId {
                 sequence_number,
@@ -766,19 +722,19 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
                 connection_id_length: Some(connection_id.len() as u8),
                 connection_id: to_hex(connection_id),
                 stateless_reset_token: Some(to_hex(stateless_reset_token)),
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
                 sequence_number,
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::PathChallenge { data } => Self::PathChallenge {
                 data: Some(to_hex(data)),
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::PathResponse { data } => Self::PathResponse {
                 data: Some(to_hex(data)),
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
             Frame::ConnectionClose {
                 error_code,
@@ -792,16 +748,12 @@ impl From<FrameWithRaw<'_>> for QuicFrame {
                 reason_bytes: None,
                 trigger_frame_type: Some(frame_type),
             },
-            Frame::HandshakeDone => Self::HandshakeDone {
-                raw: wire_raw(raw_bytes),
-            },
+            Frame::HandshakeDone => Self::HandshakeDone { raw: None },
             Frame::AckFrequency { .. } => Self::Unknown {
                 frame_type_bytes: Some(frame.get_type().into()),
-                raw: wire_raw(raw_bytes),
+                raw: None,
             },
-            Frame::Datagram { data, .. } => Self::Datagram {
-                raw: wire_raw_payload(raw_bytes, data.len()),
-            },
+            Frame::Datagram { .. } => Self::Datagram { raw: None },
         }
     }
 }
