@@ -852,12 +852,15 @@ impl SendStream {
         self.sendorder = sendorder;
     }
 
-    /// If all data has been buffered or written, how much was sent.
+    /// If the stream's final size is established, what it is. This is known once the stream is
+    /// closed (`DataSent`) or reset (`ResetSent`/`ResetSentReliable`).
     #[must_use]
     pub fn final_size(&self) -> Option<u64> {
         match &self.state {
             State::DataSent { send_buf, .. } => Some(send_buf.used()),
-            State::ResetSent { final_size, .. } => Some(*final_size),
+            State::ResetSent { final_size, .. } | State::ResetSentReliable { final_size, .. } => {
+                Some(*final_size)
+            }
             _ => None,
         }
     }
@@ -1060,7 +1063,13 @@ impl SendStream {
         };
 
         let id = self.stream_id;
-        let final_size = self.final_size();
+        // Avoid `Self::final_size`, because we don't want to send the FIN flag
+        // after `RESET_STREAM_AT`, even if we have all the data.
+        // If we did, packet loss or reordering could drop the reset being delivered.
+        let fin_offset = match &self.state {
+            State::DataSent { send_buf, .. } => Some(send_buf.used()),
+            _ => None,
+        };
         if let Some((offset, data)) = self.next_bytes(retransmission) {
             let overhead = 1 // Frame type
                 + Encoder::varint_len(id.as_u64())
@@ -1075,8 +1084,8 @@ impl SendStream {
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
-            let fin = final_size
-                .is_some_and(|fs| fs == offset + u64::try_from(length).expect("usize fits in u64"));
+            let fin = fin_offset
+                .is_some_and(|fo| fo == offset + u64::try_from(length).expect("usize fits in u64"));
             if length == 0 && !fin {
                 qtrace!("[{self}] write_frame no data, no fin");
                 return;
@@ -3902,8 +3911,8 @@ mod tests {
         let mut s = reliable_stream_committed(&[0x42; 4], &[0x42; 6], ConnectionEvents::default());
         s.reset(0);
 
-        // No final size is reported, so STREAM frames never carry a FIN.
-        assert_eq!(s.final_size(), None);
+        // The final size is reported accurately even while reliably resetting.
+        assert_eq!(s.final_size(), Some(10));
 
         // Only `[0, 4)` is offered.
         let (offset, data) = s.next_bytes(false).expect("committed data");
@@ -3917,6 +3926,33 @@ mod tests {
         let (offset, data) = s.next_bytes(false).expect("retransmit committed data");
         assert_eq!(offset, 0);
         assert_eq!(data.len(), 4);
+    }
+
+    /// Even when the committed prefix equals the final size (so the written data offset reaches
+    /// `final_size`), a reliable reset's STREAM frame carries no FIN.
+    #[test]
+    fn reliable_reset_omits_fin_at_final_size() {
+        // Commit all 5 bytes, so reliable_size == final_size == 5.
+        let mut s = reliable_stream_committed(&[0x42; 5], &[], ConnectionEvents::default());
+        s.reset(0);
+        assert_eq!(s.final_size(), Some(5));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_stream_frame(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
+        assert_eq!(stats.stream, 1);
+        assert_eq!(tokens.len(), 1);
+        assert!(
+            !as_stream_token(&tokens.remove(0)).fin,
+            "reliable reset must not emit a FIN"
+        );
     }
 
     /// On a retransmission, only lost data below the retransmission offset is offered; fresh
