@@ -32,10 +32,10 @@ const MTU_SIZES_V6: &[usize] = &[
     1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
-pub(crate) const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
+pub const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
-pub(crate) const MAX_PROBES: usize = 3;
+pub const MAX_PROBES: usize = 3;
 const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
 
 #[derive(Debug, PartialEq, Clone, Copy)]

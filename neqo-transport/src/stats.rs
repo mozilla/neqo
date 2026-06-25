@@ -349,7 +349,8 @@ pub struct Stats {
 
     /// Total packets sent, excluding PMTUD probes (see `pmtud_tx`).
     pub packets_tx: usize,
-    /// Total number of packets that are declared lost, excluding PMTUD probes (see `pmtud_lost`).
+    /// Total number of packets that are declared lost. PMTUD probes are included here (since they
+    /// always carry at least a PING) and also counted separately in `pmtud_lost`.
     pub lost: usize,
     /// Late acknowledgments, for packets that were declared lost already, excluding PMTUD probes
     /// (see `pmtud_ack`).

@@ -111,7 +111,7 @@ fn drive_pmtud(
     now
 }
 
-/// With an unlimited path MTU every probe in the search table is delivered and ACKed.
+/// With an unlimited path MTU every probe in the search table is delivered and acked.
 #[test]
 fn pmtud_stats_no_loss() {
     fixture_init();
@@ -127,18 +127,22 @@ fn pmtud_stats_no_loss() {
     );
     connect(&mut client, &mut server);
     drive_pmtud(&mut client, &mut server, usize::MAX, now());
+    // Every probe in the search table (minus the base) is sent, acked, and not lost.
+    // pmtud_tx is separate from packets_tx; probes are not double-counted there.
     assert_eq!(client.stats().pmtud_tx, SEARCH_TABLE_LEN - 1);
     assert_eq!(client.stats().pmtud_ack, SEARCH_TABLE_LEN - 1);
     assert_eq!(client.stats().pmtud_lost, 0);
 }
 
-/// With `path_mtu = 1420 - header_size`:
-/// * probe at 1380 (payload 1380 - header = 1332 ≤ path_mtu): delivered, ACKed
-/// * probe at 1420 (payload 1420 - header = 1372 = path_mtu): delivered, ACKed
-/// * probe at 1472 (payload 1472 - header = 1424 > path_mtu): dropped every attempt
+/// With `path_mtu = 1420 - header_size` (IPv6, header = 48 bytes, limit = 1372):
+/// * probe at 1380 (payload 1380 - 48 = 1332 ≤ 1372): delivered, acked
+/// * probe at 1420 (payload 1420 - 48 = 1372 = 1372): delivered, acked
+/// * probe at 1470 (payload 1470 - 48 = 1422 > 1372): dropped every attempt
 ///
-/// After `MAX_PROBES` consecutive failures at 1472 the algorithm stops, giving exactly
-/// 2 ACKed probes, `MAX_PROBES` lost probes, and `2 + MAX_PROBES` sent probes.
+/// After `MAX_PROBES` consecutive failures at 1470 the algorithm stops, giving exactly
+/// 2 acked probes, `MAX_PROBES` lost probes, and `2 + MAX_PROBES` sent probes.
+/// Since probes carry stream data (piggybacked via `write_appdata_frames`), lost probes
+/// also increment `stats.lost` in addition to `stats.pmtud_lost`.
 #[test]
 fn pmtud_stats_loss() {
     fixture_init();
@@ -166,6 +170,9 @@ fn pmtud_stats_loss() {
     assert_eq!(client.stats().pmtud_tx, 2 + MAX_PROBES);
     assert_eq!(client.stats().pmtud_ack, 2);
     assert_eq!(client.stats().pmtud_lost, MAX_PROBES);
+    // Probes carry stream data (piggybacked via write_appdata_frames), so lost
+    // probes also count in the general loss counter, not just pmtud_lost.
+    assert_eq!(client.stats().lost, MAX_PROBES);
 }
 
 /// Tests that when a client goes through a VPN (packets arrive from different IP),
