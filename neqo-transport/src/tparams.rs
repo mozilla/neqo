@@ -461,7 +461,7 @@ impl TransportParameters {
         })
     }
 
-    // Set an integer type or a default.
+    // Set an integer transport parameter, removing it if it matches the spec default.
     /// # Panics
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
