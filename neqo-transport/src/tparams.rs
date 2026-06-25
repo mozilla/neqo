@@ -175,7 +175,10 @@ impl fmt::Debug for TransportParameter {
                 .field("current", &hex(current.to_be_bytes()))
                 .field(
                     "other",
-                    &other.iter().map(|v| hex(v.to_be_bytes())).collect::<Vec<_>>(),
+                    &other
+                        .iter()
+                        .map(|v| hex(v.to_be_bytes()))
+                        .collect::<Vec<_>>(),
                 )
                 .finish(),
         }
@@ -971,10 +974,7 @@ mod tests {
 
         let spa = make_spa();
         let formatted = format!("{spa:?}");
-        assert!(
-            formatted.contains(r#"cid: "0102030405""#),
-            "{formatted}"
-        );
+        assert!(formatted.contains(r#"cid: "0102030405""#), "{formatted}");
         assert!(
             formatted.contains(r#"srt: "03030303030303030303030303030303""#),
             "{formatted}"
