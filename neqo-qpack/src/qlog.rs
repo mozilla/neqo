@@ -11,7 +11,11 @@ use std::time::Instant;
 use neqo_common::qlog::Qlog;
 
 // The QPACK events module was removed in qlog 0.18.
-pub const fn qpack_read_insert_count_increment_instruction(
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "Real implementation would not be const due to &mut Qlog."
+)]
+pub fn qpack_read_insert_count_increment_instruction(
     _qlog: &mut Qlog,
     _increment: u64,
     _data: &[u8],
