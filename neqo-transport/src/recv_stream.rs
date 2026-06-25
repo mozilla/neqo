@@ -924,36 +924,55 @@ impl RecvStream {
                 }
             }
             RecvStreamState::AbortReading {
-                fc,
-                session_fc,
                 final_received,
                 final_read,
                 ..
             }
             | RecvStreamState::WaitForReset {
-                fc,
-                session_fc,
                 final_received,
                 final_read,
+                ..
             } => {
                 // The application abandoned the read side (via stop_sending). We can discard the
                 // reliable and ignore `reliable_size`, which can't be validated here
                 // because this is the first `RESET_STREAM[_AT]` we've received.
                 // Note: we don't check that subsequent frames contain a correct `reliable_size`.
-                Self::flow_control_retire_data(final_size - fc.retired(), fc, session_fc);
-                self.conn_events
-                    .recv_stream_reset(self.stream_id, application_error_code);
-                let received = *final_received;
-                let read = *final_read;
-                self.set_state(RecvStreamState::ResetRecvd {
-                    final_received: received,
-                    final_read: read,
-                });
-                Ok(true)
+                let final_received = *final_received;
+                let final_read = *final_read;
+                Ok(self.finish_reset(
+                    final_size,
+                    application_error_code,
+                    final_received,
+                    final_read,
+                ))
             }
             // DataRecvd / DataRead / ResetRecvd: nothing to do.
             _ => Ok(false),
         }
+    }
+
+    /// Finalize a reset: release any flow control still held up to `final_size` (the dropped tail
+    /// is never delivered), surface the reset to the application, and move to `ResetRecvd`. Returns
+    /// `true` to signal that the stream has ended.
+    fn finish_reset(
+        &mut self,
+        final_size: u64,
+        err: AppError,
+        final_received: u64,
+        final_read: u64,
+    ) -> bool {
+        if let RecvStreamState::SizeKnownAt { fc, session_fc, .. }
+        | RecvStreamState::AbortReading { fc, session_fc, .. }
+        | RecvStreamState::WaitForReset { fc, session_fc, .. } = &mut self.state
+        {
+            Self::flow_control_retire_data(final_size - fc.retired(), fc, session_fc);
+        }
+        self.conn_events.recv_stream_reset(self.stream_id, err);
+        self.set_state(RecvStreamState::ResetRecvd {
+            final_received,
+            final_read,
+        });
+        true
     }
 
     /// While in `SizeKnownAt`, once the application has read the entire reliable prefix, release
@@ -962,28 +981,22 @@ impl RecvStream {
     fn complete_reliable_reset_if_drained(&mut self) -> bool {
         let RecvStreamState::SizeKnownAt {
             recv_buf,
-            fc,
-            session_fc,
             err,
             final_size,
             reliable_size,
-        } = &mut self.state
+            ..
+        } = &self.state
         else {
             return false;
         };
         if recv_buf.retired() < *reliable_size {
             return false;
         }
-        // Release flow control for the whole stream; the dropped tail is never delivered.
-        Self::flow_control_retire_data(*final_size - fc.retired(), fc, session_fc);
+        let final_size = *final_size;
+        let err = *err;
         let final_received = recv_buf.received();
         let final_read = recv_buf.retired();
-        self.conn_events.recv_stream_reset(self.stream_id, *err);
-        self.set_state(RecvStreamState::ResetRecvd {
-            final_received,
-            final_read,
-        });
-        true
+        self.finish_reset(final_size, err, final_received, final_read)
     }
 
     fn flow_control_retire_data(
@@ -1159,8 +1172,6 @@ impl RecvStream {
                 true
             }
             RecvStreamState::SizeKnownAt {
-                fc,
-                session_fc,
                 recv_buf,
                 err,
                 final_size,
@@ -1168,15 +1179,11 @@ impl RecvStream {
             } => {
                 // The reset is already known; the application is abandoning the (not fully
                 // delivered) reliable prefix. Release flow control, surface the reset, and end.
-                Self::flow_control_retire_data(*final_size - fc.retired(), fc, session_fc);
+                let final_size = *final_size;
+                let err = *err;
                 let final_received = recv_buf.received();
                 let final_read = recv_buf.retired();
-                self.conn_events.recv_stream_reset(self.stream_id, *err);
-                self.set_state(RecvStreamState::ResetRecvd {
-                    final_received,
-                    final_read,
-                });
-                true
+                self.finish_reset(final_size, err, final_received, final_read)
             }
             RecvStreamState::DataRead { .. }
             | RecvStreamState::AbortReading { .. }
