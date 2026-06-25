@@ -29,8 +29,6 @@ pub struct Decoder {
     max_entries: u64,
     send_buf: Encoder,
     local_stream_id: Option<StreamId>,
-    /// Whether the leading stream-type prefix has been committed for reliable delivery.
-    prefix_committed: bool,
     max_table_size: u64,
     max_blocked_streams: usize,
     blocked_streams: Vec<(StreamId, u64)>, // stream_id and requested inserts count.
@@ -54,7 +52,6 @@ impl Decoder {
             max_entries: qpack_settings.max_table_size_decoder >> 5,
             send_buf,
             local_stream_id: None,
-            prefix_committed: false,
             max_table_size: qpack_settings.max_table_size_decoder,
             max_blocked_streams,
             blocked_streams: Vec::with_capacity(max_blocked_streams),
