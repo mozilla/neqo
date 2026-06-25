@@ -35,6 +35,29 @@ use crate::{
 
 pub type SendOrder = i64;
 
+/// Identifier for a send group, unique within a connection.
+///
+/// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
+/// cannot be passed where a send-group id is expected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SendGroupId(u64);
+
+impl SendGroupId {
+    /// Creates a new `SendGroupId`. Note: `0` is reserved as a sentinel
+    /// by the transport scheduler (`NULL_GROUP_ID`) and will be rejected
+    /// by [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+    #[must_use]
+    pub const fn new(id: u64) -> Self {
+        Self(id)
+    }
+
+    /// The underlying integer, e.g. for wire encoding.
+    #[must_use]
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
     pub sendorder: Option<SendOrder>,
@@ -112,6 +135,7 @@ impl Streams {
 
     /// # Errors
     /// When the frame is invalid.
+    #[expect(clippy::too_many_lines, reason = "Yep, but it's a nice big match.")]
     pub fn input_frame(&mut self, frame: &Frame, stats: &mut FrameStats) -> Res<()> {
         match frame {
             Frame::ResetStream {
@@ -120,6 +144,11 @@ impl Streams {
                 final_size,
             } => {
                 stats.reset_stream += 1;
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.4)
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if self.obtain_stream(*stream_id)?.1.is_some() {
                     // A plain RESET_STREAM is a reliable reset with `reliable_size == 0`.
                     self.recv
@@ -136,6 +165,9 @@ impl Streams {
                 if !self.tps.borrow().local().get_empty(ResetStreamAt) {
                     return Err(Error::ProtocolViolation);
                 }
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 stats.reset_stream_at += 1;
                 if self.obtain_stream(*stream_id)?.1.is_some() {
                     self.recv.reset(
@@ -151,6 +183,11 @@ impl Streams {
                 application_error_code,
             } => {
                 stats.stop_sending += 1;
+                // Terminate connection with STREAM_STATE_ERROR if receive-only
+                // stream (-transport 19.5)
+                if stream_id.is_recv_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 self.events
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
@@ -165,6 +202,11 @@ impl Streams {
                 ..
             } => {
                 stats.stream += 1;
+                // Terminate connection with STREAM_STATE_ERROR if send-only
+                // stream (-transport 19.8)
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if let (_, Some(rs)) = self.obtain_stream(*stream_id)? {
                     rs.inbound_stream_frame(*fin, *offset, data)?;
                 }
@@ -183,6 +225,11 @@ impl Streams {
                     *maximum_stream_data
                 );
                 stats.max_stream_data += 1;
+                // Terminate connection with STREAM_STATE_ERROR if receive-only
+                // stream (-transport 19.10)
+                if stream_id.is_recv_only(self.role) {
+                    return Err(Error::StreamState);
+                }
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
                     ss.set_max_stream_data(*maximum_stream_data);
                 }
@@ -460,6 +507,12 @@ impl Streams {
     /// When the stream does not exist.
     pub fn set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
         self.send.set_fairness(stream_id, fairness)
+    }
+
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn set_sendgroup(&mut self, stream_id: StreamId, group_id: Option<SendGroupId>) -> Res<()> {
+        self.send.set_sendgroup(stream_id, group_id)
     }
 
     /// # Errors

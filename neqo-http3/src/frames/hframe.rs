@@ -115,9 +115,7 @@ impl HFrame {
                 push_id,
                 header_block,
             } => {
-                enc.encode_varint(
-                    (header_block.len() + (Encoder::varint_len(u64::from(*push_id)))) as u64,
-                );
+                enc.encode_len(header_block.len() + Encoder::varint_len(u64::from(*push_id)));
                 enc.encode_varint(*push_id);
                 enc.encode(header_block);
             }

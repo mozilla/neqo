@@ -1242,7 +1242,7 @@ mod tests {
         let mut e = Encoder::default();
         e.encode_varint(FrameType::Padding);
         // `Frame::Padding` uses u16 to store length. Try to overflow length.
-        e.pad_to(u16::MAX as usize + 1, 0);
+        e.pad_to(usize::from(u16::MAX) + 1, 0);
         assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
     }
 

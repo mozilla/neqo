@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::event::Provider as _;
+use neqo_common::{event::Provider as _, to_u64};
 use static_assertions::const_assert;
 
 use super::{
@@ -35,8 +35,8 @@ const DATAGRAM_LEN_MTU: usize =
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
-const DATAGRAM_LEN_SMALLER_THAN_MTU: u64 = MIN_INITIAL_PACKET_SIZE as u64;
-const_assert!(DATAGRAM_LEN_SMALLER_THAN_MTU < DATAGRAM_LEN_MTU as u64);
+const DATAGRAM_LEN_SMALLER_THAN_MTU: u64 = to_u64(MIN_INITIAL_PACKET_SIZE);
+const_assert!(DATAGRAM_LEN_SMALLER_THAN_MTU < to_u64(DATAGRAM_LEN_MTU));
 const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE];
 const_assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
 const DATA_SMALLER_THAN_MTU_2: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE / 2];
@@ -51,6 +51,15 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.encode_varint(FrameType::Datagram);
         builder.encode(self.data);
+    }
+}
+
+struct InsertEmptyDatagram;
+
+impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::DatagramWithLen);
+        builder.encode_vvec(&[]);
     }
 }
 
@@ -417,6 +426,23 @@ fn dgram_too_big() {
 }
 
 #[test]
+fn dgram_unsupported() {
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // The client advertised max_datagram_frame_size=0, so any DATAGRAM frame,
+    // including an empty one, is a connection error (RFC 9221, Section 3).
+    let out = server
+        .test_write_frames(InsertEmptyDatagram, now())
+        .dgram()
+        .unwrap();
+    client.process_input(out, now());
+
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+#[test]
 fn outgoing_datagram_queue_full() {
     let (mut client, mut server) = connect_datagram();
 
@@ -485,7 +511,7 @@ fn multiple_datagram_events() {
 
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(u64::try_from(DATA_SIZE).unwrap())
+            .datagram_size(to_u64(DATA_SIZE))
             .incoming_datagram_queue(MAX_QUEUE),
     );
     let mut server = default_server();
@@ -531,7 +557,7 @@ fn too_many_datagram_events() {
 
     let mut client = new_client(
         ConnectionParameters::default()
-            .datagram_size(u64::try_from(DATA_SIZE).unwrap())
+            .datagram_size(to_u64(DATA_SIZE))
             .incoming_datagram_queue(MAX_QUEUE),
     );
     let mut server = default_server();

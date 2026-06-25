@@ -10,7 +10,7 @@ mod sessions;
 mod streams;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider as _, header::HeadersExt as _};
+use neqo_common::{event::Provider as _, header::HeadersExt as _, to_u64};
 use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType, recv_stream, send_stream};
 use nss::AuthenticationStatus;
 use test_fixture::{
@@ -26,7 +26,7 @@ use crate::{
 };
 
 // Leave space for large QUIC header.
-const DATAGRAM_SIZE: u64 = Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) as u64 - 40;
+const DATAGRAM_SIZE: u64 = to_u64(Pmtud::default_plpmtu(DEFAULT_ADDR.ip())) - 40;
 
 pub fn wt_default_parameters() -> Http3Parameters {
     Http3Parameters::default()
@@ -193,6 +193,23 @@ impl WtTest {
         let wt_server_session = wt_server_session.unwrap();
         assert_eq!(wt_session_id, wt_server_session.stream_id());
         wt_server_session
+    }
+
+    fn create_second_wt_session(&mut self) -> StreamId {
+        let id = self
+            .client
+            .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+            .unwrap();
+        self.exchange_packets();
+        while let Some(event) = self.server.next_event() {
+            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
+            }
+        }
+        self.exchange_packets();
+        id
     }
 
     fn exchange_packets(&mut self) {

@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug};
+use neqo_common::{Datagram, event::Provider as _, qdebug, to_u64};
 use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
@@ -1528,7 +1528,7 @@ fn server_initial_retransmits_identical() {
                 // base count for CRYPTO is two per flight, plus any extra
                 crypto: i * 2 + extra,
                 ack: i,
-                largest_acknowledged: (i - i.saturating_sub(1)) as u64,
+                largest_acknowledged: to_u64(i - i.saturating_sub(1)),
                 ..Default::default()
             }
         );
