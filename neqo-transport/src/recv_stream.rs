@@ -872,6 +872,15 @@ impl RecvStream {
             } => {
                 // Keep the buffered reliable prefix; drop anything at or beyond `reliable_size`.
                 recv_buf.discard_after(reliable_size);
+                // Return credit for the dropped tail immediately; only the still-unread prefix
+                // keeps its credit (retired as the application reads it).
+                Self::retire_undeliverable(
+                    final_size,
+                    reliable_size,
+                    recv_buf.retired(),
+                    fc,
+                    session_fc,
+                );
                 let fc = mem::take(fc);
                 let session_fc = mem::take(session_fc);
                 let recv_buf = mem::replace(recv_buf, RxStreamOrderer::new());
@@ -886,10 +895,12 @@ impl RecvStream {
                 Ok(self.complete_reliable_reset_if_drained())
             }
             RecvStreamState::SizeKnownAt {
+                fc,
+                session_fc,
                 recv_buf,
                 err,
+                final_size,
                 reliable_size: stored,
-                ..
             } => {
                 // The final size is already validated above; a changed error code is a state
                 // error. `reliable_size` may only be reduced (increases are ignored).
@@ -899,6 +910,14 @@ impl RecvStream {
                 if reliable_size < *stored {
                     *stored = reliable_size;
                     recv_buf.discard_after(reliable_size);
+                    // Return credit for the newly-dropped range immediately.
+                    Self::retire_undeliverable(
+                        *final_size,
+                        reliable_size,
+                        recv_buf.retired(),
+                        fc,
+                        session_fc,
+                    );
                     Ok(self.complete_reliable_reset_if_drained())
                 } else {
                     Ok(false)
@@ -976,6 +995,24 @@ impl RecvStream {
             fc.add_retired(new_read);
             session_fc.borrow_mut().add_retired(new_read);
         }
+    }
+
+    /// On a reliable reset, retire the flow control for everything that will never be delivered,
+    /// i.e. all but the still-unread reliable prefix `[read, reliable_size)`. This returns
+    /// stream- and connection-level credit to the peer immediately, rather than only once the
+    /// application has drained the prefix (the prefix's own credit is retired as it is read).
+    ///
+    /// `read` is the number of bytes the application has read so far (`recv_buf.retired()`).
+    fn retire_undeliverable(
+        final_size: u64,
+        reliable_size: u64,
+        read: u64,
+        fc: &mut ReceiverFlowControl<StreamId>,
+        session_fc: &Rc<RefCell<ReceiverFlowControl<()>>>,
+    ) {
+        let still_needed = reliable_size.saturating_sub(read);
+        let target_retired = final_size - still_needed;
+        Self::flow_control_retire_data(target_retired.saturating_sub(fc.retired()), fc, session_fc);
     }
 
     /// Send a flow control update.
@@ -2771,11 +2808,59 @@ mod tests {
         // All 100 bytes of session flow control are retired (40 read + 60 dropped tail).
         check_fc(&session_fc.borrow(), 100, 100);
 
-        // Doing this again without data has the same effect.
+        // Doing this again without reading retires the dropped tail [40,100) immediately; the
+        // still-unread prefix is retired only when the read side is later abandoned.
         let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
         assert!(s.reset(7, 100, 40).is_ok());
-        check_fc(&session_fc.borrow(), 200, 100);
+        check_fc(&session_fc.borrow(), 200, 160);
         assert!(s.stop_sending(9));
         check_fc(&session_fc.borrow(), 200, 200);
+    }
+
+    /// The undeliverable tail's flow control is returned immediately on a reliable reset, before
+    /// the application reads the prefix.
+    #[test]
+    fn reset_releases_tail_flow_control_immediately() {
+        const FC_LIMIT: u64 = 1024;
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), FC_LIMIT)));
+        let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
+        s.inbound_stream_frame(false, 0, &[0x42; 100]).unwrap();
+
+        // Reliable size 40, final size 100: the [40,100) tail is retired right away, even though
+        // the 40-byte prefix has not been read yet.
+        assert!(s.reset(7, 100, 40).is_ok());
+        check_fc(&session_fc.borrow(), 100, 60);
+
+        // Reading the prefix retires the rest.
+        let mut buf = [0; 256];
+        assert_eq!(s.read(&mut buf).unwrap(), (40, false));
+        assert!(s.is_ended());
+        check_fc(&session_fc.borrow(), 100, 100);
+    }
+
+    /// Reducing `reliable_size` with a later frame returns credit for the newly-dropped range.
+    #[test]
+    fn reset_reduce_releases_more_flow_control() {
+        const FC_LIMIT: u64 = 1024;
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), FC_LIMIT)));
+        let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
+        s.inbound_stream_frame(false, 0, &[0x42; 100]).unwrap();
+
+        // The difference between reliable (80) and final (100) sizes is retired.
+        assert!(s.reset(7, 100, 80).is_ok());
+        check_fc(&session_fc.borrow(), 100, 20);
+
+        // Increases are ignored.
+        assert!(s.reset(7, 100, 90).is_ok());
+        check_fc(&session_fc.borrow(), 100, 20);
+
+        // Only the reduction is retired.
+        assert!(s.reset(7, 100, 40).is_ok());
+        check_fc(&session_fc.borrow(), 100, 60);
+
+        let mut buf = [0; 256];
+        assert_eq!(s.read(&mut buf).unwrap(), (40, false));
+        assert!(s.is_ended());
+        check_fc(&session_fc.borrow(), 100, 100);
     }
 }
