@@ -48,6 +48,7 @@ mod null;
 mod pmtud;
 mod priority;
 mod recovery;
+mod reset_stream_at;
 mod resumption;
 mod stream;
 mod vn;
@@ -310,6 +311,16 @@ fn assert_error(c: &Connection, expected: &CloseReason) {
             assert_eq!(*error, *expected, "{c} error mismatch");
         }
         _ => panic!("bad state {:?}", c.state()),
+    }
+}
+
+/// Pump datagrams between two peers until neither has anything more to send.
+fn exchange(a: &mut Connection, b: &mut Connection) {
+    let mut d = a.process_output(now()).dgram();
+    while let Some(dgram) = d {
+        let r = b.process(Some(dgram), now()).dgram();
+        mem::swap(a, b);
+        d = r;
     }
 }
 
