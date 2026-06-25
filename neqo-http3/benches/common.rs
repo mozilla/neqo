@@ -13,7 +13,7 @@ use test_fixture::{
     sim::{
         ReadySimulator, Simulator,
         http3_connection::{Node, Requests, Responses},
-        network::{Delay, TailDrop},
+        network::{Aqm, Delay, TailDrop},
     },
 };
 
@@ -68,7 +68,7 @@ fn setup_flow_controlled(streams: usize, data_size: usize) -> ReadySimulator {
     // Link delay is zero so propagation RTT comes entirely from the Delay nodes
     // (10 ms each way = 20 ms RTT).
     setup_with_link(streams, data_size, || {
-        TailDrop::new(100_000_000, 2_000_000, false, Duration::ZERO)
+        TailDrop::new(100_000_000, 2_000_000, Aqm::None, Duration::ZERO)
     })
 }
 
