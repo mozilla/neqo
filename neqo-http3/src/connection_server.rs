@@ -168,6 +168,15 @@ impl Http3ServerHandler {
         self.base_handler.stream_reset_send(conn, stream_id, error)
     }
 
+    /// Commit to reliably delivering the stream data buffered so far.
+    ///
+    /// # Errors
+    /// When the transport rejects the commitment (see
+    /// [`neqo_transport::Connection::stream_commit`]).
+    pub fn stream_commit(&self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
+        self.base_handler.stream_commit(conn, stream_id)
+    }
+
     pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {
         self.base_handler
             .validate_extended_connect_session(session_id)

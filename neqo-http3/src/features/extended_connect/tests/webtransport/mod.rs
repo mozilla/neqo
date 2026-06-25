@@ -364,6 +364,10 @@ impl WtTest {
         self.exchange_packets();
     }
 
+    fn commit_stream_client(&mut self, wt_stream_id: StreamId) {
+        self.client.stream_commit(wt_stream_id).unwrap();
+    }
+
     fn receive_reset_client(&mut self, expected_stream_id: StreamId) {
         let wt_reset_event = |e| {
             matches!(

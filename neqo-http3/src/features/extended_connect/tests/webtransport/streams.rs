@@ -177,6 +177,27 @@ fn wt_client_stream_uni_reset() {
 }
 
 #[test]
+fn wt_client_stream_uni_commit_reset() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
+
+    // Commit the buffered data, then reset: this is delivered as RESET_STREAM_AT.
+    wt.commit_stream_client(wt_stream);
+    let before = wt.client.transport_stats().frame_tx.reset_stream_at;
+    wt.reset_stream_client(wt_stream);
+    assert_eq!(
+        wt.client.transport_stats().frame_tx.reset_stream_at,
+        before + 1
+    );
+    wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+#[test]
 fn wt_server_stream_uni_reset() {
     const BUF_SERVER: &[u8] = &[2; 30];
 

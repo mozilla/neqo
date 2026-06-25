@@ -1027,7 +1027,7 @@ impl Http3Connection {
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        qinfo!("[{self}] Reset sending side of stream {stream_id} error={error}");
+        qdebug!("[{self}] Reset sending side of stream {stream_id} error={error}");
 
         if self.send_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
@@ -1038,13 +1038,26 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Commit to reliably delivering the stream data buffered so far. If the stream is
+    /// subsequently reset, that prefix is delivered using `RESET_STREAM_AT`, if possible.
+    /// See [`neqo_transport::Connection::stream_commit`].
+    ///
+    /// # Errors
+    /// When the transport rejects the commitment (e.g. the peer did not enable reliable reset,
+    /// or the stream does not exist).
+    pub fn stream_commit(&self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+        qtrace!("[{self}] Commit reliable size on stream {stream_id}");
+        conn.stream_commit(stream_id)?;
+        Ok(())
+    }
+
     pub fn stream_stop_sending(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        qinfo!("[{self}] Send stop sending for stream {stream_id} error={error}");
+        qdebug!("[{self}] Send stop sending for stream {stream_id} error={error}");
         if self.recv_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
         }
