@@ -66,9 +66,6 @@ pub struct QuicDatagrams {
     /// The max size of a datagram that would be acceptable by the peer.
     remote_datagram_size: u64,
     max_queued_outgoing_datagrams: usize,
-    /// The max number of datagrams that will be queued in connection events.
-    /// If the number is exceeded, the oldest datagram will be dropped.
-    max_queued_incoming_datagrams: usize,
     /// Datagram queued for sending.
     datagrams: VecDeque<QuicDatagram>,
     conn_events: ConnectionEvents,
@@ -78,14 +75,12 @@ impl QuicDatagrams {
     pub fn new(
         local_datagram_size: u64,
         max_queued_outgoing_datagrams: usize,
-        max_queued_incoming_datagrams: usize,
         conn_events: ConnectionEvents,
     ) -> Self {
         Self {
             local_datagram_size,
             remote_datagram_size: 0,
             max_queued_outgoing_datagrams,
-            max_queued_incoming_datagrams,
             datagrams: VecDeque::with_capacity(max_queued_outgoing_datagrams),
             conn_events,
         }
@@ -186,15 +181,14 @@ impl QuicDatagrams {
         Ok(())
     }
 
-    pub fn handle_datagram(&self, data: &[u8], stats: &mut Stats) -> Res<()> {
+    pub fn handle_datagram(&self, data: &[u8]) -> Res<()> {
         // A `local_datagram_size` of 0 means we advertised a
         // max_datagram_frame_size of 0, i.e. no DATAGRAM frame support
         // (RFC 9221, Section 3).
         if self.local_datagram_size == 0 || self.local_datagram_size < to_u64(data.len()) {
             return Err(Error::ProtocolViolation);
         }
-        self.conn_events
-            .add_datagram(self.max_queued_incoming_datagrams, data, stats);
+        self.conn_events.add_datagram(data);
         Ok(())
     }
 }
