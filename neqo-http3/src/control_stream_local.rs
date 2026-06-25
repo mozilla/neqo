@@ -24,8 +24,6 @@ pub struct ControlStreamLocal {
     stream: BufferedStream,
     /// `stream_id`s of outstanding request streams
     outstanding_priority_update: VecDeque<StreamId>,
-    /// Whether the leading stream-type prefix has been committed for reliable delivery.
-    prefix_committed: bool,
 }
 
 impl Display for ControlStreamLocal {
@@ -51,16 +49,7 @@ impl ControlStreamLocal {
         recv_conn: &mut HashMap<StreamId, Box<dyn RecvStream>>,
         now: Instant,
     ) -> Res<()> {
-        let sent = self.stream.send_buffer(conn, now)?;
-        if sent > 0
-            && !self.prefix_committed
-            && let Some(stream_id) = self.stream_id()
-        {
-            // Commit the leading stream-type prefix so it survives a reset.
-            // Best-effort: a no-op when the peer didn't enable reliable reset.
-            _ = conn.stream_commit(stream_id);
-            self.prefix_committed = true;
-        }
+        self.stream.send_buffer(conn, now)?;
         self.send_priority_update(conn, recv_conn, now)
     }
 
