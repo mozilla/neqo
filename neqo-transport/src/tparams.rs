@@ -167,8 +167,8 @@ impl fmt::Debug for TransportParameter {
                 .debug_struct("PreferredAddress")
                 .field("v4", v4)
                 .field("v6", v6)
-                .field("cid", cid)
-                .field("srt", srt)
+                .field("cid", &hex(cid))
+                .field("srt", &hex(srt))
                 .finish(),
             Self::Versions { current, other } => f
                 .debug_struct("Versions")
@@ -967,6 +967,17 @@ mod tests {
         assert_eq!(
             format!("{versions:?}"),
             r#"Versions { current: "00000001", other: ["ff00001d", "709a50c4"] }"#
+        );
+
+        let spa = make_spa();
+        let formatted = format!("{spa:?}");
+        assert!(
+            formatted.contains(r#"cid: "0102030405""#),
+            "{formatted}"
+        );
+        assert!(
+            formatted.contains(r#"srt: "03030303030303030303030303030303""#),
+            "{formatted}"
         );
     }
 
