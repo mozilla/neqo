@@ -646,12 +646,23 @@ impl From<Frame<'_>> for QuicFrame {
                 error_code: Some(application_error_code),
                 raw: None,
             },
-            Frame::Crypto { offset, .. } => Self::Crypto { offset, raw: None },
-            Frame::NewToken { .. } => Self::NewToken {
+            Frame::Crypto { offset, data, .. } => Self::Crypto {
+                offset,
+                raw: Some(Box::new(RawInfo {
+                    length: None,
+                    payload_length: Some(to_u64(data.len())),
+                    data: None,
+                })),
+            },
+            Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
                     ty: None,
                     details: None,
-                    raw: None,
+                    raw: Some(RawInfo {
+                        length: Some(to_u64(token.len())),
+                        payload_length: None,
+                        data: None,
+                    }),
                 },
                 raw: None,
             },
@@ -659,12 +670,17 @@ impl From<Frame<'_>> for QuicFrame {
                 fin,
                 stream_id,
                 offset,
+                data,
                 ..
             } => Self::Stream {
                 stream_id: stream_id.as_u64(),
                 offset: Some(offset),
                 fin: Some(fin),
-                raw: None,
+                raw: Some(Box::new(RawInfo {
+                    length: None,
+                    payload_length: Some(to_u64(data.len())),
+                    data: None,
+                })),
             },
             Frame::MaxData { maximum_data } => Self::MaxData {
                 maximum: maximum_data,
@@ -748,7 +764,13 @@ impl From<Frame<'_>> for QuicFrame {
                 frame_type_bytes: Some(frame.get_type().into()),
                 raw: None,
             },
-            Frame::Datagram { .. } => Self::Datagram { raw: None },
+            Frame::Datagram { data, .. } => Self::Datagram {
+                raw: Some(Box::new(RawInfo {
+                    length: None,
+                    payload_length: Some(to_u64(data.len())),
+                    data: None,
+                })),
+            },
         }
     }
 }
