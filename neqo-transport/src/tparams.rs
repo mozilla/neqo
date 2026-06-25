@@ -465,28 +465,10 @@ impl TransportParameters {
     /// # Panics
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
-        if Self::integer_default(tp).is_some_and(|dflt| dflt == value) {
-            self.remove(tp);
-            return;
-        }
-
-        match tp {
-            TransportParameterId::IdleTimeout
-            | TransportParameterId::InitialMaxData
-            | TransportParameterId::InitialMaxStreamDataBidiLocal
-            | TransportParameterId::InitialMaxStreamDataBidiRemote
-            | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::InitialMaxStreamsBidi
-            | TransportParameterId::InitialMaxStreamsUni
-            | TransportParameterId::MaxUdpPayloadSize
-            | TransportParameterId::AckDelayExponent
-            | TransportParameterId::MaxAckDelay
-            | TransportParameterId::ActiveConnectionIdLimit
-            | TransportParameterId::MinAckDelay
-            | TransportParameterId::MaxDatagramFrameSize => {
-                self.set(tp, TransportParameter::Integer(value));
-            }
-            _ => panic!("Transport parameter not known"),
+        match Self::integer_default(tp) {
+            Some(dflt) if dflt == value => self.remove(tp),
+            Some(_) => self.set(tp, TransportParameter::Integer(value)),
+            None => panic!("Transport parameter not known"),
         }
     }
 
