@@ -322,6 +322,7 @@ mod test {
         now,
         sim::{
             Node as _,
+            aqm::CodelState,
             network::{Aqm, TailDrop},
             rng::Random,
         },
@@ -381,16 +382,19 @@ mod test {
 
         // Advance well past INTERVAL so CoDel has time to act.
         let mut t = t0;
+        let mut first_mark_time = None;
         for _ in 0..500 {
             t += Duration::from_millis(1);
+            let prev = td.stats.marked;
             td.process(None, t);
+            if td.stats.marked > prev && first_mark_time.is_none() {
+                first_mark_time = Some(t);
+            }
         }
 
-        assert!(
-            td.stats.marked > 0,
-            "expected marks after INTERVAL, got stats: {}",
-            td.stats
-        );
+        assert!(td.stats.marked > 0);
+        // The first mark must not arrive before one full INTERVAL of above-target sojourn.
+        assert!(first_mark_time.is_some_and(|ft| ft >= t0 + Duration::from_millis(100)));
     }
 
     /// After entering dropping state, successive marks should be spaced at
@@ -421,15 +425,14 @@ mod test {
             }
         }
 
-        assert!(mark_times.len() >= 3, "expected at least 3 marks");
+        assert!(mark_times.len() >= 4);
 
-        // Each successive gap should be smaller than the previous.
-        let gap0 = mark_times[1].duration_since(mark_times[0]);
-        let gap1 = mark_times[2].duration_since(mark_times[1]);
-        assert!(
-            gap1 < gap0,
-            "expected decreasing inter-mark gaps: {gap0:?} then {gap1:?}"
-        );
+        // Each successive gap should be smaller than the previous (control law: INTERVAL/sqrt(n)).
+        let gaps: Vec<_> = mark_times
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]))
+            .collect();
+        assert!(gaps.windows(2).all(|w| w[1] < w[0]));
     }
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
@@ -491,11 +494,7 @@ mod test {
         }
 
         assert_eq!(td.stats.marked, 0, "should not mark when ECN disabled");
-        assert!(
-            td.stats.dropped > 0,
-            "expected tail-drop on overflow, got stats: {}",
-            td.stats
-        );
+        assert!(td.stats.dropped > 0);
     }
 
     /// When `CoDel` drops a non-ECT packet mid-queue, the packets behind it must
@@ -514,19 +513,99 @@ mod test {
         drain(&mut td, t0);
 
         assert_eq!(td.stats.marked, 0, "non-ECT packets cannot be CE-marked");
-        assert!(
-            td.stats.dropped > 0,
-            "expected CoDel to drop some non-ECT packets, got stats: {}",
-            td.stats
-        );
+        assert!(td.stats.dropped > 0);
         // Every received packet must be accounted for as either delivered or dropped;
         // a stalled queue would leave packets unaccounted for.
-        assert_eq!(
-            td.stats.delivered + td.stats.dropped,
-            td.stats.received,
-            "queue stalled: {}",
-            td.stats
-        );
-        assert!(td.stats.delivered > 0, "expected some packets to survive");
+        assert_eq!(td.stats.delivered + td.stats.dropped, td.stats.received);
+        assert!(td.stats.delivered > 0);
+    }
+
+    /// Step `state` in 1 ms increments until `n` signals fire; return their timestamps.
+    fn codel_marks(state: &mut CodelState, n: usize, t0: Instant) -> Vec<Instant> {
+        let mut times = Vec::new();
+        let mut t = t0;
+        while times.len() < n {
+            t += Duration::from_millis(1);
+            if state.update(Duration::from_millis(10), false, t) {
+                times.push(t);
+            }
+            assert!(t < t0 + Duration::from_secs(5));
+        }
+        times
+    }
+
+    /// No signal fires before one full INTERVAL of above-target sojourn.
+    #[test]
+    fn codel_no_signal_before_interval() {
+        let mut state = CodelState::default();
+        let t0 = now();
+        for ms in 0..99 {
+            assert!(!state.update(
+                Duration::from_millis(10),
+                false,
+                t0 + Duration::from_millis(ms)
+            ));
+        }
+    }
+
+    /// `queue_empty` resets sojourn tracking; no signal fires while the queue is empty.
+    #[test]
+    fn codel_queue_empty_resets_tracking() {
+        let mut state = CodelState::default();
+        let t0 = now();
+        // Arm first_above_time: 10 calls with above-target sojourn.
+        for ms in 0..10 {
+            state.update(
+                Duration::from_millis(10),
+                false,
+                t0 + Duration::from_millis(ms),
+            );
+        }
+        // Pass queue_empty=true for well over INTERVAL; must never signal.
+        for ms in 10..210 {
+            assert!(!state.update(
+                Duration::from_millis(10),
+                true,
+                t0 + Duration::from_millis(ms)
+            ));
+        }
+    }
+
+    /// Successive marks in the dropping state have strictly decreasing gaps.
+    #[test]
+    fn codel_dropping_gaps_decrease() {
+        let mut state = CodelState::default();
+        let mark_times = codel_marks(&mut state, 4, now());
+        let gaps: Vec<_> = mark_times
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]))
+            .collect();
+        assert!(gaps.windows(2).all(|w| w[1] < w[0]));
+    }
+
+    /// Re-entering the dropping state shortly after leaving gives a shorter second-mark
+    /// gap than a cold start, because count is resumed rather than reset to 1.
+    #[test]
+    fn codel_fast_restart_shorter_gap() {
+        let t0 = now();
+
+        // Phase 1: accumulate several marks to build up count.
+        let mut state = CodelState::default();
+        let phase1_end = *codel_marks(&mut state, 4, t0).last().unwrap();
+
+        // Phase 2: leave dropping by draining the queue.
+        for i in 1..=5 {
+            state.update(Duration::ZERO, true, phase1_end + Duration::from_millis(i));
+        }
+
+        // Measure the second-mark gap with fast restart vs. cold start.
+        let reenter = phase1_end + Duration::from_millis(10); // well within the 1600 ms window
+        let fast = codel_marks(&mut state.clone(), 2, reenter);
+        let cold = codel_marks(&mut CodelState::default(), 2, reenter);
+
+        // Fast restart resumes with count > 1, so INTERVAL/sqrt(count) < INTERVAL.
+        let gap_fast = fast[1].duration_since(fast[0]);
+        let gap_cold = cold[1].duration_since(cold[0]);
+        assert!(gap_fast < gap_cold);
     }
 }

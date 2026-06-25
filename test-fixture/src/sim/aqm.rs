@@ -17,6 +17,7 @@ use super::Rng;
 
 const CODEL_TARGET: Duration = Duration::from_millis(5);
 const CODEL_INTERVAL: Duration = Duration::from_millis(100);
+const CODEL_FAST_RESTART_WINDOW: Duration = CODEL_INTERVAL.saturating_mul(16);
 
 /// `CoDel` (RFC 8289) algorithm state.
 #[derive(Clone, Default)]
@@ -38,7 +39,7 @@ pub struct CodelState {
 impl CodelState {
     /// Update the `CoDel` state machine for the packet just dequeued.
     /// Returns true if congestion should be signalled for this packet.
-    fn update(&mut self, sojourn: Duration, queue_empty: bool, now: Instant) -> bool {
+    pub(super) fn update(&mut self, sojourn: Duration, queue_empty: bool, now: Instant) -> bool {
         // Track when sojourn first exceeded TARGET.
         if sojourn < CODEL_TARGET || queue_empty {
             self.first_above_time = None;
@@ -59,31 +60,30 @@ impl CodelState {
                 self.next_mark_time = Some(self.control_law(dn));
                 return true;
             }
-        } else if over_interval {
-            // Enter dropping state.
-            self.dropping = true;
-            // Fast restart (RFC 8289 §4): if we re-enter dropping within 16×INTERVAL
-            // of the previous interval, start count at `count − lastcount` (the increment
-            // from the last dropping period) rather than 1.  This means the marking rate
-            // picks up where it left off rather than restarting from scratch each time.
-            let recently_dropping = self
-                .next_mark_time
-                .is_some_and(|dn| now.saturating_duration_since(dn) < CODEL_INTERVAL * 16);
-            self.count = if recently_dropping {
-                max(1, self.count.saturating_sub(self.lastcount))
-            } else {
-                1
-            };
-            self.lastcount = self.count;
-            self.next_mark_time = Some(self.control_law(now));
-            return true;
+            return false;
         }
-
-        false
+        if !over_interval {
+            return false;
+        }
+        // Enter dropping state.
+        self.dropping = true;
+        // Fast restart (RFC 8289 §4): if we re-enter dropping within CODEL_FAST_RESTART_WINDOW,
+        // start count at the increment from the last dropping period rather than 1.
+        let recently_dropping = self
+            .next_mark_time
+            .is_some_and(|dn| now.saturating_duration_since(dn) < CODEL_FAST_RESTART_WINDOW);
+        self.count = if recently_dropping {
+            max(1, self.count.saturating_sub(self.lastcount))
+        } else {
+            1
+        };
+        self.lastcount = self.count;
+        self.next_mark_time = Some(self.control_law(now));
+        true
     }
 
     /// `next_mark_time` = base + INTERVAL / sqrt(count)
-    fn control_law(&self, base: Instant) -> Instant {
+    pub(super) fn control_law(&self, base: Instant) -> Instant {
         base + CODEL_INTERVAL.div_f64(f64::from(self.count.max(1)).sqrt())
     }
 }
@@ -123,7 +123,7 @@ impl RedState {
 }
 
 /// The outcome of applying AQM policy to a dequeued packet.
-pub enum MarkResult {
+pub(super) enum MarkResult {
     /// AQM chose not to signal; forward the packet unchanged.
     Forward(Datagram),
     /// AQM signalled and the packet is ECT-capable; forward CE-marked.
@@ -132,19 +132,18 @@ pub enum MarkResult {
     Dropped,
 }
 
-/// CE-mark an ECT(0) datagram; drop (return `None`) if not ECT-capable.
-fn mark_ce(dgram: &Datagram) -> Option<Datagram> {
+/// CE-mark an ECT(0) datagram in place; forward CE unchanged; drop if not ECT-capable.
+fn mark_ce(mut dgram: Datagram) -> Option<Datagram> {
     let tos = dgram.tos();
     let ecn = Ecn::from(tos);
-    if ecn.is_ect() {
+    if ecn == Ecn::Ce {
+        // Already marked; forwarding again is a no-op (RFC 3168 §5).
+        Some(dgram)
+    } else if ecn.is_ect() {
         assert_ne!(ecn, Ecn::Ect1, "ECT(1)/L4S is not implemented");
         qtrace!("taildrop marking {} bytes CE", dgram.len());
-        Some(Datagram::new(
-            dgram.source(),
-            dgram.destination(),
-            Tos::from((Dscp::from(tos), Ecn::Ce)),
-            dgram.to_vec(),
-        ))
+        dgram.set_tos(Tos::from((Dscp::from(tos), Ecn::Ce)));
+        Some(dgram)
     } else {
         qtrace!("taildrop dropping {} bytes (not ECT-capable)", dgram.len());
         None
@@ -202,7 +201,7 @@ impl Aqm {
             Self::None => false,
         };
         if should_signal {
-            mark_ce(&pkt).map_or(MarkResult::Dropped, MarkResult::Marked)
+            mark_ce(pkt).map_or(MarkResult::Dropped, MarkResult::Marked)
         } else {
             MarkResult::Forward(pkt)
         }
