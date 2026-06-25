@@ -183,6 +183,9 @@ impl SendStream for WebTransportSendStream {
                     conn.stream_close_send(self.stream_id)?;
                     self.set_done(CloseType::Done);
                 } else {
+                    // Commit the session-id prefix once it is buffered.
+                    // WebTransport requires reliable_reset so pass the error.
+                    conn.stream_commit(self.stream_id)?;
                     self.state = WebTransportSenderStreamState::SendingData;
                 }
             } else {
