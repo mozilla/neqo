@@ -425,7 +425,22 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as being an integer.
     #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
-        let default = match tp {
+        let dflt = Self::integer_default(tp).expect("Transport parameter not a known Integer");
+        match self.params[tp] {
+            None => dflt,
+            Some(TransportParameter::Integer(x)) => x,
+            _ => panic!("Internal error"),
+        }
+    }
+
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "False positive in 1.90, check when we bump MSRV"
+    )]
+    fn integer_default(tp: TransportParameterId) -> Option<u64> {
+        // Note: testing for this can't catch new values; make sure to update the test.
+        Some(match tp {
             TransportParameterId::IdleTimeout
             | TransportParameterId::InitialMaxData
             | TransportParameterId::InitialMaxStreamDataBidiLocal
@@ -437,41 +452,23 @@ impl TransportParameters {
             | TransportParameterId::MaxDatagramFrameSize => 0,
             TransportParameterId::MaxUdpPayloadSize => 65527,
             TransportParameterId::AckDelayExponent => 3,
-            TransportParameterId::MaxAckDelay => DEFAULT_REMOTE_ACK_DELAY
-                .as_millis()
-                .try_into()
-                .expect("default remote ack delay in ms can't overflow u64"),
+            TransportParameterId::MaxAckDelay => {
+                u64::try_from(DEFAULT_REMOTE_ACK_DELAY.as_millis())
+                    .expect("default remote ack delay in ms can't overflow u64")
+            }
             TransportParameterId::ActiveConnectionIdLimit => 2,
-            _ => panic!("Transport parameter not known or not an Integer"),
-        };
-        match self.params[tp] {
-            None => default,
-            Some(TransportParameter::Integer(x)) => x,
-            _ => panic!("Internal error"),
-        }
+            _ => return None,
+        })
     }
 
-    // Set an integer type or a default.
+    // Set an integer transport parameter, removing it if it matches the spec default.
     /// # Panics
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
-        match tp {
-            TransportParameterId::IdleTimeout
-            | TransportParameterId::InitialMaxData
-            | TransportParameterId::InitialMaxStreamDataBidiLocal
-            | TransportParameterId::InitialMaxStreamDataBidiRemote
-            | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::InitialMaxStreamsBidi
-            | TransportParameterId::InitialMaxStreamsUni
-            | TransportParameterId::MaxUdpPayloadSize
-            | TransportParameterId::AckDelayExponent
-            | TransportParameterId::MaxAckDelay
-            | TransportParameterId::ActiveConnectionIdLimit
-            | TransportParameterId::MinAckDelay
-            | TransportParameterId::MaxDatagramFrameSize => {
-                self.set(tp, TransportParameter::Integer(value));
-            }
-            _ => panic!("Transport parameter not known"),
+        match Self::integer_default(tp) {
+            Some(dflt) if dflt == value => self.remove(tp),
+            Some(_) => self.set(tp, TransportParameter::Integer(value)),
+            None => panic!("Transport parameter not known"),
         }
     }
 
@@ -969,6 +966,28 @@ mod tests {
         tps.encode(&mut enc);
 
         TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+    }
+
+    /// Validate that default values don't get set.
+    #[test]
+    fn default_tps() {
+        use enum_map::Enum as _;
+        let mut tps = TransportParameters::default();
+        let mut count = 0;
+        for i in 0..TransportParameterId::LENGTH {
+            let tp = TransportParameterId::from_usize(i);
+            if let Some(value) = TransportParameters::integer_default(tp) {
+                count += 1;
+                tps.set_integer(tp, value);
+                assert!(!tps.has_value(tp), "{tp}");
+
+                tps.set_integer(tp, value + 1);
+                assert!(tps.has_value(tp), "{tp}");
+                tps.set_integer(tp, value);
+                assert!(!tps.has_value(tp), "{tp}");
+            }
+        }
+        assert!(count > 0);
     }
 
     fn make_spa() -> TransportParameter {
