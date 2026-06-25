@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use neqo_common::{Encoder, event::Provider as _};
-use neqo_transport::{CloseReason, Connection, StreamType};
+use neqo_transport::{CloseReason, Connection, ConnectionParameters, StreamType};
 use nss::AuthenticationStatus;
 use test_fixture::{default_server_h3, now};
 
@@ -15,9 +15,12 @@ use super::{connect, default_http3_client, default_http3_server, exchange_packet
 use crate::{
     Error, HFrame, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State,
     WebTransportEvent,
+    features::extended_connect::tests::webtransport::{WtTest, wt_default_parameters},
     settings::{HSetting, HSettingType, HSettings},
     webtransport::ClientSession as _,
 };
+
+const URL: (&str, &str, &str) = ("https", "something.com", "/");
 
 fn check_wt_event(client: &mut Http3Client, wt_enable_client: bool, wt_enable_server: bool) {
     let wt_event = client.events().find_map(|e| {
@@ -58,6 +61,47 @@ fn negotiate_wt() {
     let (mut client, _server) = connect_wt(false, false);
     assert!(!client.webtransport_enabled());
     check_wt_event(&mut client, false, false);
+}
+
+/// Check for conditions that disable WebTransport.
+/// WebTransport requires that a number of features be enabled,
+/// so negotiation should fail if those features are off on either side.
+#[test]
+fn webtransport_prerequisites() {
+    fn either_disabled(params: Http3Parameters) {
+        let mut client_off = WtTest::new_with_params(params.clone(), wt_default_parameters());
+        assert!(
+            !client_off.client.webtransport_enabled(),
+            "disabled locally on client"
+        );
+        assert!(
+            client_off
+                .client
+                .webtransport_create_session(now(), URL, &[])
+                .is_err()
+        );
+
+        let mut server_off = WtTest::new_with_params(wt_default_parameters(), params);
+        assert!(
+            server_off
+                .client
+                .webtransport_create_session(now(), URL, &[])
+                .is_err()
+        );
+    }
+
+    // At the protocol layer, only the server setting matters for the WebTransport setting.
+    // However, our code disables WebTransport if it is turned off in parameters.
+    either_disabled(wt_default_parameters().webtransport(false));
+    either_disabled(wt_default_parameters().http3_datagram(false));
+    either_disabled(
+        wt_default_parameters()
+            .connection_parameters(ConnectionParameters::default().datagram_size(0)),
+    );
+    either_disabled(
+        wt_default_parameters()
+            .connection_parameters(ConnectionParameters::default().reliable_stream_reset(false)),
+    );
 }
 
 #[derive(PartialEq, Eq)]

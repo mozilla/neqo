@@ -6,7 +6,7 @@
 
 use std::{fmt::Debug, mem};
 
-use neqo_common::qtrace;
+use neqo_common::{Role, qtrace};
 
 use crate::{
     client_events::Http3ClientEvents,
@@ -53,7 +53,10 @@ impl NegotiationState {
         }
     }
 
-    pub fn handle_settings(&mut self, settings: &HSettings) {
+    /// Process the peer's settings. `prerequisites_met` carries any feature-specific
+    /// preconditions beyond the peer advertising the feature's own setting (for example,
+    /// WebTransport additionally requires extended CONNECT support).
+    pub fn handle_settings(&mut self, settings: &HSettings, role: Role, prerequisites_met: bool) {
         if !self.locally_enabled() {
             return;
         }
@@ -64,12 +67,12 @@ impl NegotiationState {
         } = self
         {
             qtrace!(
-                "set_negotiated {feature_type:?} to {}",
+                "set_negotiated {feature_type:?} to {} (prerequisites_met={prerequisites_met})",
                 settings.get(*feature_type)
             );
             let cb = mem::take(listener);
             let ft = *feature_type;
-            *self = if settings.get(ft) == 1 {
+            *self = if (role == Role::Server || settings.get(ft) > 0) && prerequisites_met {
                 Self::Negotiated
             } else {
                 Self::Failed
@@ -104,7 +107,17 @@ pub(crate) enum ConnectType {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use crate::{features::NegotiationState, settings::HSettingType};
+    use neqo_common::Role;
+
+    use crate::{
+        features::{
+            NegotiationState,
+            extended_connect::{
+                ExtendedConnectFeature, ExtendedConnectType, TransportPrerequisites,
+            },
+        },
+        settings::{HSetting, HSettingType, HSettings},
+    };
 
     #[test]
     fn negotiation_state_locally_enabled() {
@@ -116,5 +129,118 @@ mod tests {
 
         assert!(NegotiationState::Negotiated.locally_enabled());
         assert!(NegotiationState::Failed.locally_enabled());
+    }
+
+    fn negotiate(
+        role: Role,
+        feature: ExtendedConnectType,
+        settings: &HSettings,
+        peer_ok: bool,
+    ) -> bool {
+        let mut f = ExtendedConnectFeature::new(feature, role, true);
+        let prereqs = TransportPrerequisites::new(peer_ok, peer_ok);
+        f.handle_settings(settings, &prereqs);
+        f.enabled()
+    }
+
+    /// A WebTransport client only negotiates when the server advertises everything it needs
+    /// (extended CONNECT, HTTP/3 datagrams, and the datagram/reliable-reset transport
+    /// parameters); a server has no such requirements on the peer.
+    #[test]
+    fn webtransport_feature_checks() {
+        // Everything the server must advertise via SETTINGS for a client to use WebTransport.
+        let full = HSettings::new(&[
+            HSetting::new(HSettingType::EnableWebTransport, 1),
+            HSetting::new(HSettingType::EnableH3Datagram, 1),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ]);
+        // Missing extended CONNECT.
+        let no_connect = HSettings::new(&[
+            HSetting::new(HSettingType::EnableWebTransport, 1),
+            HSetting::new(HSettingType::EnableH3Datagram, 1),
+        ]);
+        // Missing HTTP/3 datagrams.
+        let no_h3_datagram = HSettings::new(&[
+            HSetting::new(HSettingType::EnableWebTransport, 1),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ]);
+
+        // Client: needs all SETTINGS and the peer's transport parameters.
+        assert!(negotiate(
+            Role::Client,
+            ExtendedConnectType::WebTransport,
+            &full,
+            true
+        ));
+        assert!(!negotiate(
+            Role::Client,
+            ExtendedConnectType::WebTransport,
+            &no_connect,
+            true
+        ));
+        assert!(!negotiate(
+            Role::Client,
+            ExtendedConnectType::WebTransport,
+            &no_h3_datagram,
+            true
+        ));
+        assert!(!negotiate(
+            Role::Client,
+            ExtendedConnectType::WebTransport,
+            &full,
+            false
+        ));
+
+        // Server: the prerequisites matter, as does the datagram setting.
+        assert!(!negotiate(
+            Role::Server,
+            ExtendedConnectType::WebTransport,
+            &HSettings::default(),
+            true
+        ));
+        assert!(negotiate(
+            Role::Server,
+            ExtendedConnectType::WebTransport,
+            &HSettings::new(&[HSetting::new(HSettingType::EnableH3Datagram, 1)]),
+            true,
+        ));
+        assert!(!negotiate(
+            Role::Server,
+            ExtendedConnectType::WebTransport,
+            &full,
+            false
+        ));
+    }
+
+    /// Confirm that the necessary features for `CONNECT_UDP` are validated.
+    #[test]
+    fn connect_udp_feature_checks() {
+        // The client needs the server setting, but doesn't care about the transport features.
+        assert!(negotiate(
+            Role::Client,
+            ExtendedConnectType::ConnectUdp,
+            &HSettings::new(&[HSetting::new(HSettingType::EnableConnect, 1),]),
+            true
+        ));
+        assert!(!negotiate(
+            Role::Client,
+            ExtendedConnectType::ConnectUdp,
+            &HSettings::default(),
+            true
+        ));
+        assert!(negotiate(
+            Role::Client,
+            ExtendedConnectType::ConnectUdp,
+            &HSettings::new(&[HSetting::new(HSettingType::EnableConnect, 1),]),
+            false
+        ));
+
+        // The server simply doesn't care.
+        assert!(negotiate(
+            Role::Server,
+            ExtendedConnectType::ConnectUdp,
+            &HSettings::default(),
+            false
+        ));
     }
 }

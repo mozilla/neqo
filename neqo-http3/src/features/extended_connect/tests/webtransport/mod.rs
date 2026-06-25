@@ -657,24 +657,4 @@ impl WtTest {
         };
         assert!(self.server.events().any(wt_datagram_event));
     }
-
-    fn check_no_datagram_received_client(&mut self) {
-        let wt_datagram_event = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::WebTransport(WebTransportEvent::Datagram { .. })
-            )
-        };
-        assert!(!self.client.events().any(wt_datagram_event));
-    }
-
-    fn check_no_datagram_received_server(&self) {
-        let wt_datagram_event = |e| {
-            matches!(
-                e,
-                Http3ServerEvent::WebTransport(ServerEvent::Datagram { .. })
-            )
-        };
-        assert!(!self.server.events().any(wt_datagram_event));
-    }
 }

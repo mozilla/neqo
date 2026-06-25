@@ -83,16 +83,39 @@ impl From<ExtendedConnectType> for HSettingType {
     }
 }
 
+pub struct TransportPrerequisites {
+    datagrams: bool,
+    reliable_reset: bool,
+}
+
+impl TransportPrerequisites {
+    #[must_use]
+    pub const fn new(datagrams: bool, reliable_reset: bool) -> Self {
+        Self {
+            datagrams,
+            reliable_reset,
+        }
+    }
+
+    const fn all(&self) -> bool {
+        self.datagrams && self.reliable_reset
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ExtendedConnectFeature {
     feature_negotiation: NegotiationState,
+    connect_type: ExtendedConnectType,
+    role: Role,
 }
 
 impl ExtendedConnectFeature {
     #[must_use]
-    pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
+    pub fn new(connect_type: ExtendedConnectType, role: Role, enable: bool) -> Self {
         Self {
             feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
+            connect_type,
+            role,
         }
     }
 
@@ -100,8 +123,30 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.set_listener(new_listener);
     }
 
-    pub fn handle_settings(&mut self, settings: &HSettings) {
-        self.feature_negotiation.handle_settings(settings);
+    /// `peer_transport_ok` indicates whether the peer's transport parameters meet WebTransport's
+    /// requirements (QUIC datagrams and reliable stream reset).
+    pub fn handle_settings(
+        &mut self,
+        settings: &HSettings,
+        transport_prereqs: &TransportPrerequisites,
+    ) {
+        // A WebTransport client must confirm the server supports everything WebTransport needs:
+        // extended CONNECT, HTTP/3 datagrams (SETTINGS), and the datagram/reliable-reset
+        // transport parameters.
+        let prerequisites_met = match self.connect_type {
+            ExtendedConnectType::WebTransport => {
+                transport_prereqs.all()
+                    && settings.get(HSettingType::EnableH3Datagram) == 1
+                    && (self.role == Role::Server
+                        || (settings.get(HSettingType::EnableConnect) == 1
+                            && settings.get(HSettingType::EnableWebTransport) == 1))
+            }
+            ExtendedConnectType::ConnectUdp => {
+                self.role == Role::Server || settings.get(HSettingType::EnableConnect) == 1
+            }
+        };
+        self.feature_negotiation
+            .handle_settings(settings, self.role, prerequisites_met);
     }
 
     #[must_use]
