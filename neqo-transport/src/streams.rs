@@ -27,7 +27,7 @@ use crate::{
     tparams::{
         TransportParameterId::{
             InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
-            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni,
+            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni, ResetStreamAt,
         },
         TransportParametersHandler,
     },
@@ -121,8 +121,29 @@ impl Streams {
             } => {
                 stats.reset_stream += 1;
                 if self.obtain_stream(*stream_id)?.1.is_some() {
+                    // A plain RESET_STREAM is a reliable reset with `reliable_size == 0`.
                     self.recv
-                        .reset_at(*stream_id, *application_error_code, *final_size, 0)?;
+                        .reset(*stream_id, *application_error_code, *final_size, 0)?;
+                }
+            }
+            Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                reliable_size,
+            } => {
+                // We must have advertised support to legitimately receive this frame.
+                if !self.tps.borrow().local().get_empty(ResetStreamAt) {
+                    return Err(Error::ProtocolViolation);
+                }
+                stats.reset_stream_at += 1;
+                if self.obtain_stream(*stream_id)?.1.is_some() {
+                    self.recv.reset(
+                        *stream_id,
+                        *application_error_code,
+                        *final_size,
+                        *reliable_size,
+                    )?;
                 }
             }
             Frame::StopSending {

@@ -5,17 +5,16 @@
 // except according to those terms.
 
 // Tests for RESET_STREAM_AT (draft-ietf-quic-reliable-stream-reset).
-//
-// The end-to-end tests are `#[ignore]`d for now: the send side emits RESET_STREAM_AT, but the
-// receive-side routing and delivery of the reliable prefix are implemented in later steps. Once
-// those land, the ignore attributes are removed.
 
 use neqo_common::event::Provider as _;
 use test_fixture::now;
 
-use super::{connect, default_client, default_server, exchange, new_server};
+use super::{
+    connect, default_client, default_server, exchange, new_client, new_server, send_with_extra,
+};
 use crate::{
-    Connection, ConnectionParameters, Error, StreamId, StreamType, events::ConnectionEvent,
+    Connection, ConnectionParameters, Error, StreamId, StreamType,
+    connection::test_internal::FrameWriter, events::ConnectionEvent, frame::FrameType, packet,
 };
 
 const DATA: &[u8] = b"the quick brown fox";
@@ -49,8 +48,8 @@ fn emits_reset_stream_at_on_wire() {
     assert_eq!(after.reset_stream, 0);
 }
 
-/// Against a peer that did not advertise `reset_stream_at`, `stream_commit` is rejected, and a
-/// plain `RESET_STREAM` is the only option.
+/// Against a peer that did not advertise reliable resets, `stream_commit` is rejected,
+/// and a plain `RESET_STREAM` is the only option.
 #[test]
 fn commit_unavailable_without_peer_support() {
     let mut client = default_client();
@@ -75,7 +74,6 @@ fn commit_unavailable_without_peer_support() {
 /// Happy path: the receiver delivers exactly `[0, RELIABLE)` and then observes the reset; bytes
 /// beyond the reliable offset are not delivered.
 #[test]
-#[ignore = "receive-side handling of RESET_STREAM_AT lands in a later step"]
 fn happy_path() {
     let mut client = default_client();
     let mut server = default_server();
@@ -106,7 +104,6 @@ fn happy_path() {
 /// No STREAM FIN is emitted while a reliable reset is in progress: the receiver never sees a
 /// clean end, only the reset.
 #[test]
-#[ignore = "receive-side handling of RESET_STREAM_AT lands in a later step"]
 fn no_stream_fin() {
     let mut client = default_client();
     let mut server = default_server();
@@ -123,7 +120,6 @@ fn no_stream_fin() {
 /// Reaching `ResetRecvd` after a reliable reset does not surface a `SendStreamComplete` event
 /// (delivery-of-committed-data notification is tracked separately; see the project issue).
 #[test]
-#[ignore = "receive-side handling of RESET_STREAM_AT lands in a later step"]
 fn reliable_reset_emits_no_send_complete() {
     let mut client = default_client();
     let mut server = default_server();
@@ -137,4 +133,28 @@ fn reliable_reset_emits_no_send_complete() {
         .filter(|e| matches!(e, ConnectionEvent::SendStreamComplete { .. }))
         .count();
     assert_eq!(completes, 0);
+}
+
+/// Writes a raw `RESET_STREAM_AT` frame for `stream_id` with zero error/final/reliable sizes.
+struct ResetStreamAtWriter(u64);
+
+impl FrameWriter for ResetStreamAtWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        // type, stream_id, application_error_code, final_size, reliable_size
+        builder.write_varint_frame(&[FrameType::ResetStreamAt.into(), self.0, 0, 0, 0]);
+    }
+}
+
+/// Receiving a `RESET_STREAM_AT` after not advertising support is a protocol violation.
+#[test]
+fn unadvertised_reset_stream_at_is_rejected() {
+    let mut client = new_client(ConnectionParameters::default().reliable_stream_reset(false));
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // The server sends a crafted RESET_STREAM_AT for a client-initiated stream. The client did
+    // not advertise the extension, so it must close the connection.
+    let dgram = send_with_extra(&mut server, ResetStreamAtWriter(0), now());
+    client.process_input(dgram, now());
+    assert!(client.state().closed());
 }

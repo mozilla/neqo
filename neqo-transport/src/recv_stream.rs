@@ -132,7 +132,7 @@ impl RecvStreams {
     ///
     /// # Errors
     /// When flow control or the frame encoding is violated (see [`RecvStream::reset_at`]).
-    pub fn reset_at(
+    pub fn reset(
         &mut self,
         stream_id: StreamId,
         application_error_code: AppError,
@@ -140,7 +140,7 @@ impl RecvStreams {
         reliable_size: u64,
     ) -> Res<()> {
         if let Ok(rs) = self.get_mut(stream_id) {
-            let ended = rs.reset_at(application_error_code, final_size, reliable_size)?;
+            let ended = rs.reset(application_error_code, final_size, reliable_size)?;
             self.set_ended(ended);
         }
         Ok(())
@@ -834,8 +834,9 @@ impl RecvStream {
         Ok(())
     }
 
-    /// Handle a `RESET_STREAM_AT` frame: the reliable prefix `[0, reliable_size)` must be
-    /// delivered before the reset is surfaced.
+    /// Handle a `RESET_STREAM` or `RESET_STREAM_AT` frame.
+    ///
+    /// Any reliable prefix `[0, reliable_size)` is delivered before the reset event.
     ///
     /// # Errors
     /// [`Error::FrameEncoding`] if `reliable_size > final_size`, [`Error::FinalSize`] if a
@@ -845,7 +846,7 @@ impl RecvStream {
     /// # Returns
     /// `true` when the stream reaches `ResetRecvd` (ended); `false` while it remains in
     /// `SizeKnownAt` awaiting delivery of the prefix, or for a no-op in a terminal state.
-    pub fn reset_at(
+    pub fn reset(
         &mut self,
         application_error_code: AppError,
         final_size: u64,
@@ -1960,7 +1961,7 @@ mod tests {
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
 
-        s.reset_at(
+        s.reset(
             Error::None.code(),
             u64::try_from(SESSION_WINDOW).unwrap(),
             0,
@@ -2638,7 +2639,7 @@ mod tests {
         let mut s = reliable_recv_stream(events.clone());
         s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
 
-        assert!(s.reset_at(7, 10, 4).is_ok());
+        assert!(s.reset(7, 10, 4).is_ok());
         assert!(!s.is_ended());
         assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
         assert_eq!(reset_count(&mut events), 0);
@@ -2658,7 +2659,7 @@ mod tests {
         let mut events = ConnectionEvents::default();
         let mut s = reliable_recv_stream(events.clone());
         s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
-        assert!(s.reset_at(7, 10, 0).is_ok());
+        assert!(s.reset(7, 10, 0).is_ok());
         assert!(s.is_ended());
         assert_eq!(reset_count(&mut events), 1);
     }
@@ -2669,7 +2670,7 @@ mod tests {
         let mut events = ConnectionEvents::default();
         let mut s = reliable_recv_stream(events.clone());
         // RESET_STREAM_AT arrives before the committed data.
-        assert!(s.reset_at(7, 8, 8).is_ok());
+        assert!(s.reset(7, 8, 8).is_ok());
         assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
 
         // Partial prefix: read what's there, not yet complete.
@@ -2690,23 +2691,23 @@ mod tests {
     #[test]
     fn reset_at_reliable_exceeds_final() {
         let mut s = reliable_recv_stream(ConnectionEvents::default());
-        assert_eq!(s.reset_at(7, 4, 8).unwrap_err(), Error::FrameEncoding);
+        assert_eq!(s.reset(7, 4, 8).unwrap_err(), Error::FrameEncoding);
     }
 
     /// A later frame changing the final size is a `FINAL_SIZE_ERROR`.
     #[test]
     fn reset_at_changed_final_size() {
         let mut s = reliable_recv_stream(ConnectionEvents::default());
-        assert!(s.reset_at(7, 10, 4).is_ok());
-        assert_eq!(s.reset_at(7, 12, 4).unwrap_err(), Error::FinalSize);
+        assert!(s.reset(7, 10, 4).is_ok());
+        assert_eq!(s.reset(7, 12, 4).unwrap_err(), Error::FinalSize);
     }
 
     /// A later frame changing the error code is a `STREAM_STATE_ERROR`.
     #[test]
     fn reset_at_changed_error_code() {
         let mut s = reliable_recv_stream(ConnectionEvents::default());
-        assert!(s.reset_at(7, 10, 4).is_ok());
-        assert_eq!(s.reset_at(9, 10, 4).unwrap_err(), Error::StreamState);
+        assert!(s.reset(7, 10, 4).is_ok());
+        assert_eq!(s.reset(9, 10, 4).unwrap_err(), Error::StreamState);
     }
 
     /// `reliable_size` may be reduced (dropping newly-excess data) but increases are ignored.
@@ -2714,12 +2715,12 @@ mod tests {
     fn reset_at_reduce_and_ignore_increase() {
         let mut s = reliable_recv_stream(ConnectionEvents::default());
         s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
-        assert!(s.reset_at(7, 10, 8).is_ok());
+        assert!(s.reset(7, 10, 8).is_ok());
 
         // An increase is ignored.
-        assert!(s.reset_at(7, 10, 9).is_ok());
+        assert!(s.reset(7, 10, 9).is_ok());
         // A reduction drops the newly-excess data.
-        assert!(s.reset_at(7, 10, 4).is_ok());
+        assert!(s.reset(7, 10, 4).is_ok());
 
         let mut buf = [0; 64];
         // Only `[0, 4)` survives.
@@ -2734,7 +2735,7 @@ mod tests {
         let mut s = reliable_recv_stream(events.clone());
         s.inbound_stream_frame(false, 0, &[0x42; 4]).unwrap();
         assert!(!s.stop_sending(9));
-        assert!(s.reset_at(7, 10, 8).is_ok());
+        assert!(s.reset(7, 10, 8).is_ok());
         assert!(s.is_ended());
         assert_eq!(reset_count(&mut events), 1);
     }
@@ -2745,7 +2746,7 @@ mod tests {
         let mut events = ConnectionEvents::default();
         let mut s = reliable_recv_stream(events.clone());
         s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
-        assert!(s.reset_at(7, 10, 8).is_ok());
+        assert!(s.reset(7, 10, 8).is_ok());
         assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
 
         assert!(s.stop_sending(9)); // ends the stream
@@ -2762,7 +2763,7 @@ mod tests {
         let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
         s.inbound_stream_frame(false, 0, &[0x42; 100]).unwrap();
         // Reliable size 40, final size 100: the [40,100) tail is dropped.
-        assert!(s.reset_at(7, 100, 40).is_ok());
+        assert!(s.reset(7, 100, 40).is_ok());
 
         let mut buf = [0; 256];
         assert_eq!(s.read(&mut buf).unwrap(), (40, false));
@@ -2772,7 +2773,7 @@ mod tests {
 
         // Doing this again without data has the same effect.
         let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
-        assert!(s.reset_at(7, 100, 40).is_ok());
+        assert!(s.reset(7, 100, 40).is_ok());
         check_fc(&session_fc.borrow(), 200, 100);
         assert!(s.stop_sending(9));
         check_fc(&session_fc.borrow(), 200, 200);
