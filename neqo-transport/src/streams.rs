@@ -122,7 +122,7 @@ impl Streams {
                 stats.reset_stream += 1;
                 if self.obtain_stream(*stream_id)?.1.is_some() {
                     self.recv
-                        .reset(*stream_id, *application_error_code, *final_size)?;
+                        .reset_at(*stream_id, *application_error_code, *final_size, 0)?;
                 }
             }
             Frame::StopSending {
