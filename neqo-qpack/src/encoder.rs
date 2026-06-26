@@ -1028,7 +1028,7 @@ mod tests {
             .stream_send(encoder.recv_stream_id, &[0x00])
             .unwrap();
         let out = encoder.peer_conn.process_output(now());
-        drop(encoder.conn.process(out.dgram(), now()));
+        encoder.conn.process_input(out.dgram().unwrap(), now());
         assert_eq!(
             encoder
                 .encoder
