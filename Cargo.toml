@@ -38,7 +38,7 @@ libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
 nss = { version = "0.13", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
 nss-test-fixture = { version = "0.1", package = "test-fixture", git = "https://github.com/mozilla/nss-rs" }
-qlog = { version = "0.16.0", default-features = false }
+qlog = { version = "0.18.0", default-features = false }
 quinn-udp = { version = "0.6", default-features = false, features = ["log", "fast-apple-datapath"] }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
 static_assertions = { version = "1.1", default-features = false }

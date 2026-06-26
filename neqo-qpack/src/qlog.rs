@@ -8,35 +8,17 @@
 
 use std::time::Instant;
 
-use neqo_common::{hex, qlog::Qlog};
-use qlog::events::{
-    EventData, RawInfo,
-    qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
-};
+use neqo_common::qlog::Qlog;
 
+// The QPACK events module was removed in qlog 0.18.
+#[expect(
+    clippy::missing_const_for_fn,
+    reason = "Real implementation would not be const due to &mut Qlog."
+)]
 pub fn qpack_read_insert_count_increment_instruction(
-    qlog: &mut Qlog,
-    increment: u64,
-    data: &[u8],
-    now: Instant,
+    _qlog: &mut Qlog,
+    _increment: u64,
+    _data: &[u8],
+    _now: Instant,
 ) {
-    qlog.add_event_at(
-        || {
-            let raw = RawInfo {
-                length: Some(8),
-                payload_length: None,
-                data: Some(hex(data)),
-            };
-            let ev_data = EventData::QpackInstructionParsed(QpackInstructionParsed {
-                instruction: QPackInstruction::InsertCountIncrementInstruction {
-                    instruction_type: QpackInstructionTypeName::InsertCountIncrementInstruction,
-                    increment,
-                },
-                raw: Some(raw),
-            });
-
-            Some(ev_data)
-        },
-        now,
-    );
 }
