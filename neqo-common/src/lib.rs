@@ -101,14 +101,27 @@ impl<T: AsRef<[u8]>> fmt::Debug for $n<T> {
     };
 }
 
+/// A fast hex implementation with fixed overhead.
+fn chunk_hex<T: AsRef<[u8]>>(f: &mut fmt::Formatter<'_>, v: T) -> fmt::Result {
+    const HEX: &[u8] = b"0123456789abcdef";
+    const CHUNK_SIZE: usize = 128;
+    let mut chunk = [0u8; CHUNK_SIZE * 2];
+    for slice in v.as_ref().chunks(CHUNK_SIZE) {
+        for (i, &b) in slice.iter().enumerate() {
+            chunk[i * 2] = HEX[usize::from(b >> 4)];
+            chunk[i * 2 + 1] = HEX[usize::from(b & 0xf)];
+        }
+        // SAFETY: only ASCII hex is written to the chunk
+        f.write_str(unsafe { std::str::from_utf8_unchecked(&chunk[..slice.len() * 2]) })?;
+    }
+    Ok(())
+}
+
 hex_struct! {
     /// Simple Hex converter for formatting.
     Hex,
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for b in self.0.as_ref() {
-            write!(f, "{b:02x}")?;
-        }
-        Ok(())
+        chunk_hex(f, &self.0)
     }
 }
 
@@ -123,17 +136,12 @@ hex_struct! {
             f.write_str(": ")?;
         }
         let first = min(buf.len(), SHOW_LEN);
-        for b in &buf[..first] {
-            write!(f, "{b:02x}")?;
-        }
+        chunk_hex(f, &buf[..first])?;
         let last = max(buf.len().saturating_sub(SHOW_LEN), first);
         if last > first {
             write!(f, "..")?;
         }
-        for b in &buf[last..] {
-            write!(f, "{b:02x}")?;
-        }
-        Ok(())
+        chunk_hex(f, &buf[last..])
     }
 }
 
@@ -146,10 +154,7 @@ hex_struct! {
         if !buf.is_empty() {
             f.write_str(": ")?;
         }
-        for b in buf {
-            write!(f, "{b:02x}")?;
-        }
-        Ok(())
+        chunk_hex(f, buf)
     }
 }
 

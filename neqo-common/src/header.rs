@@ -4,11 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::str::FromStr;
+use std::{
+    fmt::{self, Debug},
+    str::FromStr,
+};
 
 use thiserror::Error;
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
+use crate::HexWithLen;
+
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {
     name: String,
     /// The raw header field value as bytes.
@@ -64,6 +69,22 @@ impl Header {
     /// Returns an error if the value contains invalid UTF-8.
     pub fn value_utf8(&self) -> Result<&str, std::str::Utf8Error> {
         std::str::from_utf8(&self.value)
+    }
+}
+
+impl Debug for Header {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.starts_with(':') {
+            write!(f, "<{}>", self.name)?;
+        } else {
+            f.write_str(&self.name)?;
+        }
+        f.write_str(": ")?;
+        if let Ok(s) = self.value_utf8() {
+            write!(f, r#""{s}""#)
+        } else {
+            HexWithLen::fmt(f, &self.value)
+        }
     }
 }
 

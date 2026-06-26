@@ -88,7 +88,7 @@ pub struct RecvMessage {
 
 impl Display for RecvMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "RecvMessage stream_id:{}", self.stream_id)
+        write!(f, "RecvMessage {}", self.stream_id)
     }
 }
 
@@ -291,7 +291,7 @@ impl RecvMessage {
                         (None, false) => break Ok(()),
                         (Some(frame), fin) => {
                             qdebug!(
-                                "[{self}] A new frame has been received: {frame:?}; state={:?} fin={fin}",
+                                "[{self}] recv frame: {frame:?}; state={:?} fin={fin}",
                                 self.state,
                             );
                             match frame {
