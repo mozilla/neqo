@@ -8,7 +8,8 @@ use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
-    hex_snip_middle, hex_with_len, qtrace,
+    hex::{HexSnipMiddle, HexWithLen},
+    qtrace,
 };
 use neqo_transport::{Connection, StreamId};
 
@@ -116,7 +117,7 @@ impl Debug for FrameReader {
         f.debug_struct("FrameReader")
             .field("state", &self.state)
             .field("frame_type", &self.frame_type)
-            .field("frame", &hex_snip_middle(&self.buffer[..frame_len]))
+            .field("frame", &HexSnipMiddle::new(&self.buffer[..frame_len]))
             .finish()
     }
 }
@@ -238,7 +239,7 @@ impl FrameReader {
                     qtrace!(
                         "received frame {:?}: {}",
                         self.frame_type,
-                        hex_with_len(&data[..])
+                        HexWithLen::new(&data[..])
                     );
                     return self.frame_data_decoded::<T>(&data);
                 }

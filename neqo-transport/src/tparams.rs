@@ -8,13 +8,13 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display, Formatter},
+    fmt::{self, Debug, Display, Formatter},
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex::Hex, qdebug, qinfo, qtrace};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
@@ -63,7 +63,7 @@ pub enum TransportParameterId {
 
 impl Display for TransportParameterId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        format!("{self:?}((0x{:02x}))", u64::from(*self)).fmt(f)
+        write!(f, "{self:?}(0x{:02x})", u64::from(*self))
     }
 }
 
@@ -140,7 +140,7 @@ impl PreferredAddress {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -155,6 +155,37 @@ pub enum TransportParameter {
         current: version::Wire,
         other: Vec<version::Wire>,
     },
+}
+
+impl Debug for TransportParameter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        struct VersionListDebug<T>(T);
+        impl<T: AsRef<[version::Wire]>> Debug for VersionListDebug<T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.debug_list()
+                    .entries(self.0.as_ref().iter().map(|v| Hex::new(v.to_be_bytes())))
+                    .finish()
+            }
+        }
+
+        match self {
+            Self::Bytes(a) => f.debug_tuple("Bytes").field(&Hex::new(a)).finish(),
+            Self::Integer(a) => f.debug_tuple("Integer").field(a).finish(),
+            Self::Empty => f.write_str("Empty"),
+            Self::PreferredAddress { v4, v6, cid, srt } => f
+                .debug_struct("PreferredAddress")
+                .field("v4", v4)
+                .field("v6", v6)
+                .field("cid", &Hex::new(cid))
+                .field("srt", &Hex::new(srt))
+                .finish(),
+            Self::Versions { current, other } => f
+                .debug_struct("Versions")
+                .field("current", &Hex::new(&current.to_be_bytes()))
+                .field("other", &VersionListDebug(other))
+                .finish(),
+        }
+    }
 }
 
 impl TransportParameter {
@@ -842,7 +873,7 @@ impl ExtensionHandler for TransportParametersHandler {
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         qtrace!(
             "Handling transport parameters, msg={msg:?} value={}",
-            hex(d),
+            Hex::new(d),
         );
 
         if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
@@ -929,6 +960,29 @@ mod tests {
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
     };
+
+    #[test]
+    fn debug_hex() {
+        let bytes = TransportParameter::Bytes(vec![0x01, 0x23, 0xab, 0xcd]);
+        assert_eq!(format!("{bytes:?}"), "Bytes(0123abcd)");
+
+        let versions = TransportParameter::Versions {
+            current: 0x0000_0001,
+            other: vec![0xff00_001d, 0x709a_50c4],
+        };
+        assert_eq!(
+            format!("{versions:?}"),
+            "Versions { current: 00000001, other: [ff00001d, 709a50c4] }"
+        );
+
+        let spa = make_spa();
+        let formatted = format!("{spa:?}");
+        assert!(formatted.contains("cid: 0102030405"), "{formatted}");
+        assert!(
+            formatted.contains("srt: 03030303030303030303030303030303"),
+            "{formatted}"
+        );
+    }
 
     #[test]
     fn basic_tps() {
@@ -1351,8 +1405,8 @@ mod tests {
 
     #[test]
     fn transport_parameter_id_display() {
-        assert_eq!(InitialMaxData.to_string(), "InitialMaxData((0x04))");
-        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout((0x01))");
+        assert_eq!(InitialMaxData.to_string(), "InitialMaxData(0x04)");
+        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout(0x01)");
     }
 
     // Helper: encode an integer TP, then decode it.

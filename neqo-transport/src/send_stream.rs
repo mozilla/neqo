@@ -2117,7 +2117,7 @@ mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
     use neqo_common::{
-        Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace, to_u64, to_usize,
+        Encoder, MAX_VARINT, event::Provider as _, hex::HexWithLen, qtrace, to_u64, to_usize,
     };
 
     use super::RecoveryToken;
@@ -3729,7 +3729,7 @@ mod tests {
         );
         qtrace!(
             "STREAM frame: {}",
-            hex_with_len(&builder.as_ref()[header_len..])
+            HexWithLen::new(&builder.as_ref()[header_len..])
         );
         stats.stream > 0
     }

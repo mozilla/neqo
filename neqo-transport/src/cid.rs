@@ -15,7 +15,11 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{Buffer, Decoder, Encoder, hex, hex_with_len, qdebug, qinfo, to_usize};
+use neqo_common::{
+    Buffer, Decoder, Encoder,
+    hex::{Hex, HexWithLen},
+    qdebug, qinfo, to_usize,
+};
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
 
@@ -100,13 +104,14 @@ impl Deref for ConnectionId {
 
 impl Debug for ConnectionId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "CID {}", hex_with_len(&self.cid))
+        f.write_str("CID ")?;
+        HexWithLen::fmt(f, &self.cid)
     }
 }
 
 impl Display for ConnectionId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", hex(&self.cid))
+        Hex::fmt(f, &self.cid)
     }
 }
 
@@ -123,13 +128,14 @@ pub struct ConnectionIdRef<'a> {
 
 impl Debug for ConnectionIdRef<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "CID {}", hex_with_len(self.cid))
+        f.write_str("CID ")?;
+        HexWithLen::fmt(f, self.cid)
     }
 }
 
 impl Display for ConnectionIdRef<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", hex(self.cid))
+        Hex::fmt(f, self.cid)
     }
 }
 

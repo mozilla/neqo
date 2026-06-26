@@ -4,11 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::str::FromStr;
+use std::{
+    fmt::{self, Debug},
+    str::FromStr,
+};
 
 use thiserror::Error;
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Clone)]
+use crate::hex::HexWithLen;
+
+#[derive(PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {
     name: String,
     /// The raw header field value as bytes.
@@ -64,6 +69,22 @@ impl Header {
     /// Returns an error if the value contains invalid UTF-8.
     pub fn value_utf8(&self) -> Result<&str, std::str::Utf8Error> {
         std::str::from_utf8(&self.value)
+    }
+}
+
+impl Debug for Header {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.starts_with(':') {
+            write!(f, "<{}>", self.name)?;
+        } else {
+            f.write_str(&self.name)?;
+        }
+        f.write_str(": ")?;
+        if let Ok(s) = self.value_utf8() {
+            write!(f, "{s:?}")
+        } else {
+            HexWithLen::fmt(f, &self.value)
+        }
     }
 }
 
@@ -235,5 +256,20 @@ mod tests {
             "x-custom"
         );
         assert!(headers.iter().find_header("missing").is_none());
+    }
+
+    #[test]
+    fn debug_format() {
+        let h = Header::new(":status", "200");
+        assert_eq!(format!("{h:?}"), r#"<:status>: "200""#);
+
+        let h = Header::new("content-type", "text/html");
+        assert_eq!(format!("{h:?}"), r#"content-type: "text/html""#);
+
+        let h = Header::new("has-quotes", "abc\"123");
+        assert_eq!(format!("{h:?}"), r#"has-quotes: "abc\"123""#);
+
+        let h = Header::new("binary", vec![0xff, 0xfe]);
+        assert_eq!(format!("{h:?}"), "binary: [2]: fffe");
     }
 }
