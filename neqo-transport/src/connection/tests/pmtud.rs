@@ -166,7 +166,7 @@ fn pmtud_stats_loss() {
     assert_eq!(client.stats().pmtud.ack, 2);
     assert_eq!(client.stats().pmtud.lost, MAX_PROBES);
     // Probes carry stream data (piggybacked via write_appdata_frames), so lost
-    // probes also count in the general loss counter, not just pmtud_lost.
+    // probes also count in the general loss counter, not just pmtud.lost.
     assert_eq!(client.stats().lost, MAX_PROBES);
 }
 
