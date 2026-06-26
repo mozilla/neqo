@@ -13,16 +13,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Dscp, Ecn, Tos, qinfo, qtrace};
+use neqo_common::{Datagram, qinfo, qtrace};
 use neqo_transport::Output;
 
-use super::Node;
-use crate::sim::Rng;
+use super::{
+    Node, Rng,
+    aqm::{Aqm, MarkResult},
+};
 
 /// One second in nanoseconds.
 const ONE_SECOND_NS: u128 = 1_000_000_000;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Stats {
     /// The number of packets received.
     received: usize,
@@ -41,7 +43,7 @@ struct Stats {
 
     /// The start time.
     start_time: Option<Instant>,
-    /// The start time.
+    /// The time of the last usage accumulation.
     last_update: Option<Instant>,
     /// Accumulated queue usage multiplied by time.
     /// This is in units of `bytes * nanoseconds`, which will get big.
@@ -51,22 +53,6 @@ struct Stats {
 }
 
 impl Stats {
-    // Const constructor for compile-time initialization in TailDrop::new().
-    // Could derive Default if const was not required.
-    const fn new() -> Self {
-        Self {
-            received: 0,
-            marked: 0,
-            dropped: 0,
-            delivered: 0,
-            maxq: 0,
-            capacity: 0,
-            start_time: None,
-            last_update: None,
-            cumulative_usage: 0,
-        }
-    }
-
     fn update_maxq(&mut self, used: usize) {
         self.maxq = max(self.maxq, used);
     }
@@ -120,13 +106,11 @@ pub struct TailDrop {
     rate: usize,
     /// The depth of the queue, in bytes.
     capacity: usize,
-    /// Whether to apply ECN markings.
-    ecn: bool,
 
     /// A counter for how many bytes are enqueued.
     used: usize,
-    /// A queue of unsent bytes.
-    queue: VecDeque<Datagram>,
+    /// A queue of unsent datagrams with their enqueue timestamps.
+    queue: VecDeque<(Instant, Datagram)>,
     /// The time that the next datagram can enter the link.
     /// Includes any sub-ns remainder (which helps absorb rounding errors).
     next_deque: Option<(Instant, u32)>,
@@ -137,55 +121,52 @@ pub struct TailDrop {
     on_link: VecDeque<(Instant, Datagram)>,
 
     stats: Stats,
-
-    // The random number generator we use for RED.
-    rng: Option<Rng>,
+    aqm: Aqm,
 }
 
 impl TailDrop {
-    /// Make a new taildrop node with the given rate, ECN, queue capacity, and link delay.
-    /// When ECN is enabled, the stack will avoid filling the buffer and sit around 50%
-    /// capacity, so you might need to double the buffer size to get comparable throughput.
-    /// Of course, a smaller buffer will mean less latency.
+    /// Make a new taildrop node with the given rate, AQM, queue capacity, and link delay.
     ///
     /// # Panics
     ///
-    /// Panics if rate is zero or over 1Gbps, or if capacity is too large.
+    /// Panics if rate is zero or over 1Gbps, or if `Aqm::Red` is used and capacity is too large
+    /// for its overflow-avoiding arithmetic.
     #[must_use]
-    pub const fn new(rate: usize, capacity: usize, ecn: bool, delay: Duration) -> Self {
+    pub fn new(rate: usize, capacity: usize, aqm: Aqm, delay: Duration) -> Self {
         assert!(rate != 0, "zero rate gets you nowhere");
         assert!(rate <= 1_000_000_000, "rates over 1Gbps are not supported");
-        // We multiply this by 4096 below and need to avoid overflow.
-        assert!(capacity < usize::MAX / 4096, "too much capacity");
-        // We need to square a value close to 1000x this and have it fit within a u128.
-        #[cfg(target_pointer_width = "64")]
-        assert!(capacity < (1 << 54), "too much capacity");
+        if matches!(aqm, Aqm::Red(_)) {
+            // We multiply capacity by 4096 below and need to avoid overflow.
+            assert!(capacity < usize::MAX / 4096, "too much capacity");
+            // We need to square a value close to 1000x this and have it fit within a u128.
+            #[cfg(target_pointer_width = "64")]
+            assert!(capacity < (1 << 54), "too much capacity");
+        }
         Self {
             overhead: 80,
             rate,
             capacity,
-            ecn,
             used: 0,
             queue: VecDeque::new(),
             next_deque: None,
             delay,
             on_link: VecDeque::new(),
-            stats: Stats::new(),
-            rng: None,
+            stats: Stats::default(),
+            aqm,
         }
     }
 
     /// A tail drop queue on a 10Mbps link (approximated to 1 million bytes per second)
     /// with a fat 32k buffer (about 30ms), and the default forward delay of 50ms.
     #[must_use]
-    pub const fn dsl_downlink() -> Self {
-        Self::new(1_000_000, 32_768, false, Duration::from_millis(50))
+    pub fn dsl_downlink() -> Self {
+        Self::new(1_000_000, 32_768, Aqm::None, Duration::from_millis(50))
     }
 
     /// Cut uplink to one fifth of the downlink (2Mbps), and reduce the buffer to 1/4.
     #[must_use]
-    pub const fn dsl_uplink() -> Self {
-        Self::new(200_000, 8_192, false, Duration::from_millis(50))
+    pub fn dsl_uplink() -> Self {
+        Self::new(200_000, 8_192, Aqm::None, Duration::from_millis(50))
     }
 
     /// How "big" is this datagram, accounting for overheads.
@@ -220,7 +201,6 @@ impl TailDrop {
     }
 
     /// Enqueue for sending.  Maybe.  If this overflows the queue, drop it instead.
-    /// If the queue is too deep, CE mark it before saving.
     fn maybe_enqueue(&mut self, d: Datagram, now: Instant) {
         self.stats.received += 1;
         if self.next_deque.is_none() {
@@ -231,8 +211,7 @@ impl TailDrop {
             self.stats.accumulate_usage(now, self.used);
             self.used += self.size(&d);
             self.stats.update_maxq(self.used);
-            let d = self.maybe_mark(d);
-            self.queue.push_back(d);
+            self.queue.push_back((now, d));
         } else {
             qtrace!("taildrop dropping {} bytes", d.len());
             self.stats.dropped += 1;
@@ -242,69 +221,49 @@ impl TailDrop {
     /// If the last packet that was sending has been sent, start sending
     /// the next one.
     fn maybe_send(&mut self, now: Instant) {
-        if let Some((t, subns)) = &self.next_deque {
-            if now < *t {
+        if let Some((t, subns)) = self.next_deque {
+            if now < t {
                 return;
             }
 
             self.stats.accumulate_usage(now, self.used);
-            if let Some(d) = self.queue.pop_front() {
-                self.used -= self.size(&d);
-                self.send(d, *t, *subns);
-            } else {
-                self.next_deque = None;
+            // Keep dequeuing until we send a packet or exhaust the queue; an AQM drop
+            // should not stall the packets behind it.
+            while !self.queue.is_empty() {
+                if let Some(d) = self.dequeue(now) {
+                    self.send(d, t, subns);
+                    return;
+                }
+            }
+            self.next_deque = None;
+        }
+    }
+
+    /// Pop the front packet and apply the AQM policy.
+    /// Returns `None` if the packet was dropped (do not send).
+    fn dequeue(&mut self, now: Instant) -> Option<Datagram> {
+        let (enqueue_time, pkt) = self.queue.pop_front()?;
+        self.used -= self.size(&pkt);
+        let sojourn = now.saturating_duration_since(enqueue_time);
+        // Note: RED evaluates occupancy at dequeue time (self.used after decrement), which
+        // is slightly lower than the enqueue-time occupancy the original code used.
+        match self.aqm.mark(pkt, sojourn, self.used, self.capacity, now) {
+            MarkResult::Forward(d) => Some(d),
+            MarkResult::Marked(d) => {
+                self.stats.marked += 1;
+                Some(d)
+            }
+            MarkResult::Dropped => {
+                self.stats.dropped += 1;
+                None
             }
         }
-    }
-
-    /// Apply ECN-CE markings to packets if they are ECT(0) marked.
-    /// This is classic, simple ECN using RED; we don't know about L4S yet.
-    fn maybe_mark(&mut self, dgram: Datagram) -> Datagram {
-        if self.ecn && Ecn::from(dgram.tos()).is_ect() && self.should_mark(self.used) {
-            assert!(
-                Ecn::from(dgram.tos()) != Ecn::Ect1,
-                "ECT(1)/L4S is not implemented"
-            );
-            qtrace!("taildrop marking {} bytes", dgram.len());
-            self.stats.marked += 1;
-            let tos = Tos::from((Dscp::from(dgram.tos()), Ecn::Ce));
-            Datagram::new(dgram.source(), dgram.destination(), tos, dgram.to_vec())
-        } else {
-            dgram
-        }
-    }
-
-    fn should_mark(&self, used: usize) -> bool {
-        // Apply RED which starts at 0 mark chance at 40% of the capacity.
-        // From there, follow a quadratic that reaches 1 at 90% capacity.
-        // Cap at around 95% mark probability.
-        //
-        // let p = (2 * ((used / capacity) - 0.4));
-        // if rand(0, 1) < p.pow(2).clamp(0, 0.95) { mark(d) } else { d }
-        //
-        // This code scales that up by a factor of 1024 so we can use integers.
-        // This is mostly because our RNG can't sample from 0..1_f64.
-
-        let Some(n) = (2048 * used).checked_sub(self.capacity * 4096 / 5) else {
-            return false; // (used / capacity) < 0.4
-        };
-        // Cap pre-squaring: 998 =~ 1024 * Math.pow(0.95, 1/2)
-        let p = u128::try_from(n.min(self.capacity * 998)).unwrap();
-        let c = u128::try_from(self.capacity).unwrap();
-        let p = u64::try_from(p * p / c / c).unwrap();
-        let r = self
-            .rng
-            .as_ref()
-            .unwrap()
-            .borrow_mut()
-            .random_from(0..(1 << 20));
-        r < p
     }
 }
 
 impl Node for TailDrop {
     fn init(&mut self, rng: Rng, _now: Instant) {
-        self.rng = Some(rng);
+        self.aqm.init_rng(rng);
     }
 
     fn prepare(&mut self, now: Instant) {
@@ -349,14 +308,132 @@ impl Debug for TailDrop {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::{cell::RefCell, rc::Rc, time::Duration};
+    use std::{
+        cell::RefCell,
+        net::{IpAddr, Ipv4Addr, SocketAddr},
+        rc::Rc,
+        time::{Duration, Instant},
+    };
 
-    use neqo_common::{Encoder, qinfo};
+    use neqo_common::{Datagram, Dscp, Ecn, Encoder, Tos, qinfo};
+    use neqo_transport::Output;
 
     use crate::{
         now,
-        sim::{Node as _, network::TailDrop, rng::Random},
+        sim::{
+            Node as _,
+            aqm::CodelState,
+            network::{Aqm, TailDrop},
+            rng::Random,
+        },
     };
+
+    fn make_datagram(ecn: Ecn) -> Datagram {
+        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 443);
+        let tos = Tos::from((Dscp::default(), ecn));
+        Datagram::new(addr, addr, tos, vec![0u8; 1200])
+    }
+
+    fn drain(td: &mut TailDrop, now: Instant) {
+        let mut t = now;
+        loop {
+            match td.process(None, t) {
+                Output::Callback(d) => t += d,
+                Output::Datagram(_) => {}
+                Output::None => return,
+            }
+        }
+    }
+
+    /// Packets with sojourn well below TARGET should not be marked or dropped.
+    #[test]
+    fn no_mark_below_target() {
+        // 100 Mbps link with a large buffer; packets drain in < 1ms so sojourn < TARGET.
+        let mut td = TailDrop::new(
+            100_000_000,
+            1_000_000,
+            Aqm::codel(),
+            Duration::from_millis(1),
+        );
+        let t0 = now();
+        td.prepare(t0);
+
+        for _ in 0..10 {
+            td.process(Some(make_datagram(Ecn::Ect0)), t0);
+        }
+        drain(&mut td, t0);
+
+        assert_eq!(td.stats.marked, 0);
+        assert_eq!(td.stats.dropped, 0);
+    }
+
+    /// Packets that queue for longer than INTERVAL should trigger a mark (ECN) or drop.
+    #[test]
+    fn marks_after_interval() {
+        // 100 Kbps link forces long queuing (>>5ms sojourn).
+        let mut td = TailDrop::new(100_000, 500_000, Aqm::codel(), Duration::from_millis(1));
+        let t0 = now();
+        td.prepare(t0);
+
+        // Enqueue enough packets to fill >100ms of link time.
+        for _ in 0..100 {
+            td.process(Some(make_datagram(Ecn::Ect0)), t0);
+        }
+
+        // Advance well past INTERVAL so CoDel has time to act.
+        let mut t = t0;
+        let mut first_mark_time = None;
+        for _ in 0..500 {
+            t += Duration::from_millis(1);
+            let prev = td.stats.marked;
+            td.process(None, t);
+            if td.stats.marked > prev && first_mark_time.is_none() {
+                first_mark_time = Some(t);
+            }
+        }
+
+        assert!(td.stats.marked > 0);
+        // The first mark must not arrive before one full INTERVAL of above-target sojourn.
+        assert!(first_mark_time.is_some_and(|ft| ft >= t0 + Duration::from_millis(100)));
+    }
+
+    /// After entering dropping state, successive marks should be spaced at
+    /// decreasing intervals (control law: INTERVAL / sqrt(count)).
+    #[test]
+    fn mark_rate_increases() {
+        // Very slow link to ensure long sojourn times.
+        let mut td = TailDrop::new(50_000, 1_000_000, Aqm::codel(), Duration::from_millis(1));
+        let t0 = now();
+        td.prepare(t0);
+
+        for _ in 0..200 {
+            td.process(Some(make_datagram(Ecn::Ect0)), t0);
+        }
+
+        // Collect times at which marks occur.
+        let mut mark_times = Vec::new();
+        let mut t = t0;
+        while mark_times.len() < 4 {
+            t += Duration::from_millis(1);
+            let prev = td.stats.marked;
+            td.process(None, t);
+            if td.stats.marked > prev {
+                mark_times.push(t);
+            }
+            if t > t0 + Duration::from_secs(5) {
+                break;
+            }
+        }
+
+        assert!(mark_times.len() >= 4);
+
+        // Each successive gap should be smaller than the previous (control law: INTERVAL/sqrt(n)).
+        let gaps: Vec<_> = mark_times
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]))
+            .collect();
+        assert!(gaps.windows(2).all(|w| w[1] < w[0]));
+    }
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
         let mut enc = Encoder::default();
@@ -367,14 +444,15 @@ mod test {
         let rng = Rc::new(RefCell::new(Random::new(
             <&[u8; 32]>::try_from(enc.as_ref()).unwrap(),
         )));
-        // We use only the capacity of these config parameters.
-        let mut td = TailDrop::new(1, capacity, true, Duration::from_secs(2));
+        let mut td = TailDrop::new(1, capacity, Aqm::red(), Duration::from_secs(2));
         td.init(rng, now());
-        let mut successes = 0;
-        for _ in 0..trials {
-            successes += usize::from(td.should_mark(used));
-        }
-        qinfo!("{successes} out of {trials} trails at {used}/{capacity}");
+        let Aqm::Red(state) = &td.aqm else {
+            unreachable!()
+        };
+        let successes = (0..trials)
+            .filter(|_| state.should_mark(used, capacity))
+            .count();
+        qinfo!("{successes} out of {trials} trials at {used}/{capacity}");
         successes
     }
 
@@ -399,5 +477,135 @@ mod test {
         /// Replacing this salt with a random number can be used to test sampling.
         const SALT: u64 = 17;
         check_mark_rates(SALT);
+    }
+
+    /// With ECN disabled, the node is a pure tail-drop queue: no `CoDel` signalling,
+    /// drops only when the buffer overflows.
+    #[test]
+    fn drop_when_ecn_disabled() {
+        // Small buffer: 10 000 bytes holds ~7 packets (1280 bytes each with overhead).
+        let mut td = TailDrop::new(100_000, 10_000, Aqm::None, Duration::from_millis(1));
+        let t0 = now();
+        td.prepare(t0);
+
+        // Burst 20 packets at once — far more than the buffer can hold.
+        for _ in 0..20 {
+            td.process(Some(make_datagram(Ecn::NotEct)), t0);
+        }
+
+        assert_eq!(td.stats.marked, 0, "should not mark when ECN disabled");
+        assert!(td.stats.dropped > 0);
+    }
+
+    /// When `CoDel` drops a non-ECT packet mid-queue, the packets behind it must
+    /// still be delivered — a drop should not stall the rest of the queue.
+    #[test]
+    fn codel_drop_does_not_stall_queue() {
+        // Slow link with a large buffer so packets queue long enough for CoDel to
+        // act, and non-ECT traffic so signalling drops rather than marks.
+        let mut td = TailDrop::new(100_000, 500_000, Aqm::codel(), Duration::from_millis(1));
+        let t0 = now();
+        td.prepare(t0);
+
+        for _ in 0..100 {
+            td.process(Some(make_datagram(Ecn::NotEct)), t0);
+        }
+        drain(&mut td, t0);
+
+        assert_eq!(td.stats.marked, 0, "non-ECT packets cannot be CE-marked");
+        assert!(td.stats.dropped > 0);
+        // Every received packet must be accounted for as either delivered or dropped;
+        // a stalled queue would leave packets unaccounted for.
+        assert_eq!(td.stats.delivered + td.stats.dropped, td.stats.received);
+        assert!(td.stats.delivered > 0);
+    }
+
+    /// Step `state` in 1 ms increments until `n` signals fire; return their timestamps.
+    fn codel_marks(state: &mut CodelState, n: usize, t0: Instant) -> Vec<Instant> {
+        let mut times = Vec::new();
+        let mut t = t0;
+        while times.len() < n {
+            t += Duration::from_millis(1);
+            if state.update(Duration::from_millis(10), false, t) {
+                times.push(t);
+            }
+            assert!(t < t0 + Duration::from_secs(5));
+        }
+        times
+    }
+
+    /// No signal fires before one full INTERVAL of above-target sojourn.
+    #[test]
+    fn codel_no_signal_before_interval() {
+        let mut state = CodelState::default();
+        let t0 = now();
+        for ms in 0..99 {
+            assert!(!state.update(
+                Duration::from_millis(10),
+                false,
+                t0 + Duration::from_millis(ms)
+            ));
+        }
+    }
+
+    /// `queue_empty` resets sojourn tracking; no signal fires while the queue is empty.
+    #[test]
+    fn codel_queue_empty_resets_tracking() {
+        let mut state = CodelState::default();
+        let t0 = now();
+        // Arm first_above_time: 10 calls with above-target sojourn.
+        for ms in 0..10 {
+            state.update(
+                Duration::from_millis(10),
+                false,
+                t0 + Duration::from_millis(ms),
+            );
+        }
+        // Pass queue_empty=true for well over INTERVAL; must never signal.
+        for ms in 10..210 {
+            assert!(!state.update(
+                Duration::from_millis(10),
+                true,
+                t0 + Duration::from_millis(ms)
+            ));
+        }
+    }
+
+    /// Successive marks in the dropping state have strictly decreasing gaps.
+    #[test]
+    fn codel_dropping_gaps_decrease() {
+        let mut state = CodelState::default();
+        let mark_times = codel_marks(&mut state, 4, now());
+        let gaps: Vec<_> = mark_times
+            .windows(2)
+            .map(|w| w[1].duration_since(w[0]))
+            .collect();
+        assert!(gaps.windows(2).all(|w| w[1] < w[0]));
+    }
+
+    /// Re-entering the dropping state shortly after leaving gives a shorter second-mark
+    /// gap than a cold start, because count is resumed rather than reset to 1.
+    #[test]
+    fn codel_fast_restart_shorter_gap() {
+        let t0 = now();
+
+        // Phase 1: accumulate several marks to build up count.
+        let mut state = CodelState::default();
+        let phase1_end = *codel_marks(&mut state, 4, t0).last().unwrap();
+
+        // Phase 2: leave dropping by draining the queue.
+        for i in 1..=5 {
+            state.update(Duration::ZERO, true, phase1_end + Duration::from_millis(i));
+        }
+
+        // Measure the second-mark gap with fast restart vs. cold start.
+        let reenter = phase1_end + Duration::from_millis(10); // well within the 1600 ms window
+        let fast = codel_marks(&mut state.clone(), 2, reenter);
+        let cold = codel_marks(&mut CodelState::default(), 2, reenter);
+
+        // Fast restart resumes with count > 1, so INTERVAL/sqrt(count) < INTERVAL.
+        let gap_fast = fast[1].duration_since(fast[0]);
+        let gap_cold = cold[1].duration_since(cold[0]);
+        assert!(gap_fast < gap_cold);
     }
 }
