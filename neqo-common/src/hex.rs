@@ -10,7 +10,7 @@ use std::{
 };
 
 macro_rules! hex_struct {
-    {$(#[$m:meta])* $n:ident, $f:item $($in:expr => $out:expr),*} => {
+    {$(#[$m:meta])* $n:ident, $f:item $($in:expr => $out:expr),*$(,)?} => {
 $(#[$m])*
 pub struct $n<T>(T);
 
@@ -100,7 +100,8 @@ hex_struct! {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         chunk_hex(f, &self.0)
     }
-    [1, 2, 3] => "010203"
+    [] => "",
+    [1, 2, 3] => "010203",
 }
 
 hex_struct! {
@@ -121,7 +122,9 @@ hex_struct! {
         }
         chunk_hex(f, &buf[last..])
     }
-    [1, 2, 3] => "[3]: 010203"
+    [] => "[0]",
+    [1, 2, 3] => "[3]: 010203",
+    [0; 20] => "[20]: 0000000000000000..0000000000000000",
 }
 
 hex_struct! {
@@ -135,7 +138,7 @@ hex_struct! {
         }
         chunk_hex(f, buf)
     }
-    [1, 2, 3] => "[3]: 010203"
+    [1, 2, 3] => "[3]: 010203",
 }
 
 #[cfg(test)]
