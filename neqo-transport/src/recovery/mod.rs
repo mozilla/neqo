@@ -267,6 +267,7 @@ impl LossRecoverySpace {
         for p in &acked {
             self.remove_packet(p);
             if p.is_pmtud_probe() {
+                // Don't count PMTUD probes as ack-eliciting for RTT/stats purposes.
                 continue;
             }
             eliciting |= p.ack_eliciting();
