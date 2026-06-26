@@ -1405,8 +1405,8 @@ mod tests {
 
     #[test]
     fn transport_parameter_id_display() {
-        assert_eq!(InitialMaxData.to_string(), "InitialMaxData((0x04))");
-        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout((0x01))");
+        assert_eq!(InitialMaxData.to_string(), "InitialMaxData(0x04)");
+        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout(0x01)");
     }
 
     // Helper: encode an integer TP, then decode it.
