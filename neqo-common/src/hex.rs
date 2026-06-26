@@ -36,7 +36,7 @@ impl<T> $n<T> {
     /// ```
     ///
     /// # Errors
-    /// Propagates and errors from the formatter.
+    /// Propagates any errors from the formatter.
     pub const fn new(v: T) -> Self {
         Self(v)
     }
@@ -60,7 +60,7 @@ impl<T: AsRef<[u8]>> $n<T> {
     /// ```
     ///
     /// # Errors
-    /// Propagates and errors from the formatter.
+    /// Propagates any errors from the formatter.
     pub fn fmt(f: &mut fmt::Formatter<'_>, v: T) -> fmt::Result {
         write!(f, "{}", &Self::new(v))
     }

@@ -182,7 +182,7 @@ impl Debug for TransportParameter {
             Self::Versions { current, other } => f
                 .debug_struct("Versions")
                 .field("current", &Hex::new(&current.to_be_bytes()))
-                .field("other", &VersionListDebug(other.iter()))
+                .field("other", &VersionListDebug(other))
                 .finish(),
         }
     }
