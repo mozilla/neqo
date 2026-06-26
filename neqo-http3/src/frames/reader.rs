@@ -7,8 +7,9 @@
 use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{
-    Decoder, HexSnipMiddle, HexWithLen, IncrementalDecoderBuffer, IncrementalDecoderIgnore,
-    IncrementalDecoderUint, qtrace,
+    Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
+    hex::{HexSnipMiddle, HexWithLen},
+    qtrace,
 };
 use neqo_transport::{Connection, StreamId};
 

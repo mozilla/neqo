@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use neqo_common::{Datagram, Decoder, HexWithLen, Role, qtrace};
+use neqo_common::{Datagram, Decoder, Role, hex::HexWithLen, qtrace};
 use nss::{
     Mode, RecordProtection as Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},

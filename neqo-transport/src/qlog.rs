@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Decoder, Ecn, Hex, qinfo, qlog::Qlog, to_u64};
+use neqo_common::{Decoder, Ecn, hex::Hex, qinfo, qlog::Qlog, to_u64};
 use qlog::events::{
     ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
     connectivity::{

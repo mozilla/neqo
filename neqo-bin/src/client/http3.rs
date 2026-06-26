@@ -20,7 +20,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{Datagram, Hex, event::Provider, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, event::Provider, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,

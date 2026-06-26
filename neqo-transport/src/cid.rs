@@ -15,7 +15,11 @@ use std::{
     rc::Rc,
 };
 
-use neqo_common::{Buffer, Decoder, Encoder, Hex, HexWithLen, qdebug, qinfo, to_usize};
+use neqo_common::{
+    Buffer, Decoder, Encoder,
+    hex::{Hex, HexWithLen},
+    qdebug, qinfo, to_usize,
+};
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
 

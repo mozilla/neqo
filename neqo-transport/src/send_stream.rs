@@ -2117,7 +2117,7 @@ mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
     use neqo_common::{
-        Encoder, HexWithLen, MAX_VARINT, event::Provider as _, qtrace, to_u64, to_usize,
+        Encoder, MAX_VARINT, event::Provider as _, hex::HexWithLen, qtrace, to_u64, to_usize,
     };
 
     use super::RecoveryToken;

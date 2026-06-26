@@ -15,8 +15,12 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Decoder, Encoder, Header, Hex, HexWithLen, MessageType, Role,
-    event::Provider as EventProvider, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
+    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    event::Provider as EventProvider,
+    hex::{Hex, HexWithLen},
+    qdebug, qinfo,
+    qlog::Qlog,
+    qtrace, qwarn,
 };
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{

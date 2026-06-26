@@ -14,7 +14,7 @@ use std::{
 };
 
 use common::{assert_dscp, connected_server, default_server, generate_ticket};
-use neqo_common::{Datagram, Encoder, HexWithLen, Role, qdebug, qtrace};
+use neqo_common::{Datagram, Encoder, Role, hex::HexWithLen, qdebug, qtrace};
 use neqo_transport::{
     CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamType,
     server::ValidateAddress,

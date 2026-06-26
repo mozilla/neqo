@@ -21,8 +21,9 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Decoder, Ecn, Hex, Role,
+    Datagram, Decoder, Ecn, Role,
     event::Provider as _,
+    hex::Hex,
     qlog::{Qlog, new_trace},
     qtrace,
 };

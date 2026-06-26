@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use neqo_common::{Hex, qlog::Qlog};
+use neqo_common::{hex::Hex, qlog::Qlog};
 use qlog::events::{
     EventData, RawInfo,
     qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},

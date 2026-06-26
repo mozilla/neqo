@@ -33,7 +33,7 @@ use futures::{
     FutureExt as _,
     future::{Either, select, select_all},
 };
-use neqo_common::{Datagram, Hex, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::Http3Server;
 use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress};
 use neqo_udp::{DatagramIter, RecvBuf};

@@ -6,7 +6,7 @@
 
 use std::fmt::{self, Debug, Write as _};
 
-use neqo_common::{Buffer, Decoder, Encoder, HexWithLen};
+use neqo_common::{Buffer, Decoder, Encoder, hex::HexWithLen};
 use neqo_transport::StreamId;
 use nss::random;
 

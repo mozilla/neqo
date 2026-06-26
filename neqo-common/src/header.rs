@@ -11,7 +11,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::HexWithLen;
+use crate::hex::HexWithLen;
 
 #[derive(PartialEq, PartialOrd, Eq, Ord, Clone)]
 pub struct Header {

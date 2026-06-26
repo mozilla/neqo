@@ -15,7 +15,11 @@ use std::{
 
 use enum_map::Enum;
 use log::debug;
-use neqo_common::{Buffer, Decoder, Encoder, Hex, HexWithLen, qtrace, qwarn};
+use neqo_common::{
+    Buffer, Decoder, Encoder,
+    hex::{Hex, HexWithLen},
+    qtrace, qwarn,
+};
 use nss::{Mode, RecordProtectionOps as _, random};
 use strum::{EnumIter, FromRepr};
 

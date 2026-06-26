@@ -11,7 +11,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{Bytes, HexWithLen, Tos};
+use crate::{Bytes, Tos, hex::HexWithLen};
 
 /// A UDP datagram.
 ///

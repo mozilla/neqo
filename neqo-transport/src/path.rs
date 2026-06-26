@@ -13,7 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Encoder, Hex, Tos, datagram, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
+use neqo_common::{
+    Buffer, Encoder, Tos, datagram, hex::Hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
+};
 use nss::random;
 
 use crate::{

@@ -25,7 +25,11 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, Encoder, Hex, HexSnipMiddle, Role, qdebug, qinfo, qtrace, to_u64};
+use neqo_common::{
+    Buffer, Encoder, Role,
+    hex::{Hex, HexSnipMiddle},
+    qdebug, qinfo, qtrace, to_u64,
+};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,

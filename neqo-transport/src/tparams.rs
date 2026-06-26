@@ -14,7 +14,7 @@ use std::{
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Buffer, Decoder, Encoder, Hex, Role, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex::Hex, qdebug, qinfo, qtrace};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},

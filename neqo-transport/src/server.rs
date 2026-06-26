@@ -19,7 +19,7 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Hex, Role, Tos, event::Provider as _, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
+    Datagram, Role, Tos, event::Provider as _, hex::Hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
     qwarn,
 };
 use nss::{
