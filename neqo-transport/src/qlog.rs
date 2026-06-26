@@ -53,7 +53,7 @@ use crate::{
 
 /// Allocation-performing hex conversion for qlog only.
 fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
-    format!("{}", Hex::new(v))
+    Hex::new(v).to_string()
 }
 
 pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {

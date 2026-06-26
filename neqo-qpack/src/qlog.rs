@@ -25,7 +25,7 @@ pub fn qpack_read_insert_count_increment_instruction(
             let raw = RawInfo {
                 length: Some(8),
                 payload_length: None,
-                data: Some(format!("{}", Hex::new(data))),
+                data: Some(Hex::new(data).to_string()),
             };
             let ev_data = EventData::QpackInstructionParsed(QpackInstructionParsed {
                 instruction: QPackInstruction::InsertCountIncrementInstruction {
