@@ -7,12 +7,13 @@
 use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize::SmallInput, Criterion, Throughput};
+use neqo_common::to_u64;
 use test_fixture::{
     boxed, fixture_init,
     sim::{
         ReadySimulator, Simulator,
         http3_connection::{Node, Requests, Responses},
-        network::{Delay, TailDrop},
+        network::{Aqm, Delay, TailDrop},
     },
 };
 
@@ -67,7 +68,7 @@ fn setup_flow_controlled(streams: usize, data_size: usize) -> ReadySimulator {
     // Link delay is zero so propagation RTT comes entirely from the Delay nodes
     // (10 ms each way = 20 ms RTT).
     setup_with_link(streams, data_size, || {
-        TailDrop::new(100_000_000, 2_000_000, false, Duration::ZERO)
+        TailDrop::new(100_000_000, 2_000_000, Aqm::None, Duration::ZERO)
     })
 }
 
@@ -90,7 +91,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
     for (group_name, setup_fn, params) in CONFIGS {
         let mut group = c.benchmark_group(group_name);
         for &(streams, data_size) in params {
-            group.throughput(Throughput::Bytes((streams * data_size) as u64));
+            group.throughput(Throughput::Bytes(to_u64(streams * data_size)));
             group.bench_function(
                 &format!("{name_prefix}/{streams}-streams/each-{data_size}-bytes"),
                 |b| {

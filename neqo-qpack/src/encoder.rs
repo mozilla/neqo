@@ -230,6 +230,12 @@ impl Encoder {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
+                // RFC 9204, Section 4.4.3: an Increment of zero is a connection error
+                // of type QPACK_DECODER_STREAM_ERROR, the same as one that raises the
+                // count past the inserts sent (rejected in `increment_acked`).
+                if increment == 0 {
+                    return Err(Error::DecoderStream);
+                }
                 qlog::qpack_read_insert_count_increment_instruction(
                     qlog,
                     increment,
@@ -1006,6 +1012,29 @@ mod tests {
     #[test]
     fn stream_canceled() {
         test_insertion_blocked_on_waiting_for_header_ack_or_stream_cancel(1);
+    }
+
+    /// RFC 9204, Section 4.4.3: an Insert Count Increment instruction with an
+    /// Increment of zero is a connection error of type `QPACK_DECODER_STREAM_ERROR`,
+    /// the same as one that raises the count past the inserts the encoder has sent
+    /// (already rejected in `increment_acked`).
+    #[test]
+    fn insert_count_increment_zero_is_rejected() {
+        let mut encoder = connect(false);
+
+        // 0x00 is an Insert Count Increment instruction carrying an Increment of 0.
+        encoder
+            .peer_conn
+            .stream_send(encoder.recv_stream_id, &[0x00])
+            .unwrap();
+        let out = encoder.peer_conn.process_output(now());
+        encoder.conn.process_input(out.dgram().unwrap(), now());
+        assert_eq!(
+            encoder
+                .encoder
+                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now()),
+            Err(Error::DecoderStream)
+        );
     }
 
     fn assert_is_index_to_dynamic(buf: &[u8]) {

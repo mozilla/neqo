@@ -13,6 +13,7 @@
 
 use std::time::Duration;
 
+use neqo_common::to_u64;
 use test_fixture::now;
 
 use super::{RTT, make_cc_newreno};
@@ -107,7 +108,7 @@ fn issue_876() {
 
     // Send some more packets so that the cc is not app-limited.
     for p in &sent_packets[..6] {
-        cc.on_packet_sent(p, now, false);
+        cc.on_packet_sent(p, now);
     }
     assert_eq!(cc.acked_bytes(), 0);
     cwnd_is_default(&cc);
@@ -129,7 +130,7 @@ fn issue_876() {
     assert_eq!(cc.bytes_in_flight(), 5 * cc.max_datagram_size() - 2);
 
     // Send a packet after recovery starts
-    cc.on_packet_sent(&sent_packets[6], now, false);
+    cc.on_packet_sent(&sent_packets[6], now);
     assert!(!cc.recovery_packet());
     cwnd_is_halved(&cc);
     assert_eq!(cc.acked_bytes(), 0);
@@ -183,7 +184,7 @@ fn issue_1465() {
     };
     let mut send_next = |cc: &mut ClassicCongestionController<ClassicSlowStart, NewReno>, now| {
         let p = next_packet(now);
-        cc.on_packet_sent(&p, now, false);
+        cc.on_packet_sent(&p, now);
         p
     };
 
@@ -276,9 +277,9 @@ fn congestion_avoidance_no_two_mss_cap() {
     // BIF stays well above the app-limited threshold so is_app_limited is false.
     let n = 3 * (cwnd0 / mtu) + 1;
     let mut pkts = Vec::with_capacity(n);
-    for pn in 0..n {
-        let p = sent::make_packet(u64::try_from(pn).unwrap(), now, mtu);
-        cc.on_packet_sent(&p, now, false);
+    for pn in 0..to_u64(n) {
+        let p = sent::make_packet(pn, now, mtu);
+        cc.on_packet_sent(&p, now);
         pkts.push(p);
     }
 

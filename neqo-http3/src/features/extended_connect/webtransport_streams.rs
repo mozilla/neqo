@@ -6,8 +6,8 @@
 
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
-use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId, recv_stream, send_stream};
+use neqo_common::{Encoder, to_u64};
+use neqo_transport::{Connection, StreamId, recv_stream, send_stream, streams::SendGroupId};
 
 use super::session::Session;
 use crate::{
@@ -92,7 +92,7 @@ impl RecvStream for WebTransportRecvStream {
             } else {
                 TYPE_LEN_BIDI
             };
-            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+            to_u64(id_len + Encoder::varint_len(self.session_id.as_u64()))
         } else {
             0
         };
@@ -127,6 +127,7 @@ pub struct WebTransportSendStream {
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<Session>>,
     session_id: StreamId,
+    send_group: Option<SendGroupId>,
 }
 
 impl WebTransportSendStream {
@@ -136,6 +137,7 @@ impl WebTransportSendStream {
         events: Box<dyn SendStreamEvents>,
         session: Rc<RefCell<Session>>,
         local: bool,
+        send_group: Option<SendGroupId>,
     ) -> Self {
         Self {
             stream_id,
@@ -158,7 +160,23 @@ impl WebTransportSendStream {
             events,
             session_id,
             session,
+            send_group,
         }
+    }
+
+    #[expect(dead_code, reason = "pending send group further integration")]
+    pub(crate) const fn send_group(&self) -> Option<SendGroupId> {
+        self.send_group
+    }
+
+    pub(crate) fn update_send_group(&mut self, send_group: Option<SendGroupId>) -> Res<()> {
+        if let Some(group_id) = send_group
+            && !self.session.borrow().validate_send_group(group_id)
+        {
+            return Err(crate::Error::InvalidState);
+        }
+        self.send_group = send_group;
+        Ok(())
     }
 
     fn set_done(&mut self, close_type: CloseType) {
@@ -243,7 +261,7 @@ impl SendStream for WebTransportSendStream {
             } else {
                 TYPE_LEN_BIDI
             };
-            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+            to_u64(id_len + Encoder::varint_len(self.session_id.as_u64()))
         } else {
             0
         };
@@ -264,5 +282,12 @@ impl SendStream for WebTransportSendStream {
             bytes_sent,
             bytes_acked,
         ))
+    }
+
+    fn set_send_group(&mut self, send_group: SendGroupId) -> Res<()> {
+        self.update_send_group(Some(send_group))
+    }
+    fn clear_send_group(&mut self) -> Res<()> {
+        self.update_send_group(None)
     }
 }

@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use neqo_common::{hex, qlog::Qlog};
+use neqo_common::{hex::Hex, qlog::Qlog};
 use qlog::events::{
     EventData, RawInfo,
     qpack::{QPackInstruction, QpackInstructionParsed, QpackInstructionTypeName},
@@ -25,7 +25,7 @@ pub fn qpack_read_insert_count_increment_instruction(
             let raw = RawInfo {
                 length: Some(8),
                 payload_length: None,
-                data: Some(hex(data)),
+                data: Some(Hex::new(data).to_string()),
             };
             let ev_data = EventData::QpackInstructionParsed(QpackInstructionParsed {
                 instruction: QPackInstruction::InsertCountIncrementInstruction {

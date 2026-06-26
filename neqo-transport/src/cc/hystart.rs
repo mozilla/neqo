@@ -49,7 +49,7 @@ pub struct HyStart {
     css_baseline_mode: HyStartCssBaseline,
     last_round_min_rtt: Option<Duration>,
     current_round_min_rtt: Option<Duration>,
-    rtt_sample_count: usize,
+    rtt_sample_count: u64,
     window_end: Option<packet::Number>,
     css_baseline_min_rtt: Option<Duration>,
     css_round_count: usize,
@@ -68,7 +68,7 @@ impl HyStart {
 
     pub const MIN_RTT_DIVISOR: u32 = 8;
 
-    pub const N_RTT_SAMPLE: usize = 8;
+    pub const N_RTT_SAMPLE: u64 = 8;
 
     pub const CSS_GROWTH_DIVISOR: usize = 4;
 
@@ -169,7 +169,7 @@ impl HyStart {
     }
 
     #[cfg(test)]
-    pub const fn rtt_sample_count(&self) -> usize {
+    pub const fn rtt_sample_count(&self) -> u64 {
         self.rtt_sample_count
     }
 

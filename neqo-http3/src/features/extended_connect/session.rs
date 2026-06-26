@@ -13,7 +13,7 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
-use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
+use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
@@ -448,6 +448,10 @@ impl Session {
         }
     }
 
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.protocol.validate_send_group(group_id)
+    }
+
     fn has_data_to_send(&self) -> bool {
         self.control_stream_send.has_data_to_send()
     }
@@ -464,6 +468,14 @@ impl Stream for Rc<RefCell<Session>> {
 
     fn session_protocol(&self) -> Option<String> {
         self.borrow().protocol.protocol().map(ToString::to_string)
+    }
+
+    fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        self.borrow_mut().protocol.register_send_group(id)
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.borrow().protocol.validate_send_group(group_id)
     }
 }
 
@@ -601,6 +613,14 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn protocol(&self) -> Option<&str> {
         None
+    }
+
+    fn register_send_group(&mut self, _id: SendGroupId) -> Res<()> {
+        Err(Error::InvalidStreamId)
+    }
+
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        false
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);

@@ -8,13 +8,13 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display, Formatter},
+    fmt::{self, Debug, Display, Formatter},
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Buffer, Decoder, Encoder, Role, hex, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex::Hex, qdebug, qinfo, qtrace};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
@@ -63,7 +63,7 @@ pub enum TransportParameterId {
 
 impl Display for TransportParameterId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        format!("{self:?}((0x{:02x}))", u64::from(*self)).fmt(f)
+        write!(f, "{self:?}(0x{:02x})", u64::from(*self))
     }
 }
 
@@ -140,7 +140,7 @@ impl PreferredAddress {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum TransportParameter {
     Bytes(Vec<u8>),
     Integer(u64),
@@ -155,6 +155,37 @@ pub enum TransportParameter {
         current: version::Wire,
         other: Vec<version::Wire>,
     },
+}
+
+impl Debug for TransportParameter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        struct VersionListDebug<T>(T);
+        impl<T: AsRef<[version::Wire]>> Debug for VersionListDebug<T> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.debug_list()
+                    .entries(self.0.as_ref().iter().map(|v| Hex::new(v.to_be_bytes())))
+                    .finish()
+            }
+        }
+
+        match self {
+            Self::Bytes(a) => f.debug_tuple("Bytes").field(&Hex::new(a)).finish(),
+            Self::Integer(a) => f.debug_tuple("Integer").field(a).finish(),
+            Self::Empty => f.write_str("Empty"),
+            Self::PreferredAddress { v4, v6, cid, srt } => f
+                .debug_struct("PreferredAddress")
+                .field("v4", v4)
+                .field("v6", v6)
+                .field("cid", &Hex::new(cid))
+                .field("srt", &Hex::new(srt))
+                .finish(),
+            Self::Versions { current, other } => f
+                .debug_struct("Versions")
+                .field("current", &Hex::new(&current.to_be_bytes()))
+                .field("other", &VersionListDebug(other))
+                .finish(),
+        }
+    }
 }
 
 impl TransportParameter {
@@ -374,6 +405,20 @@ impl TransportParameters {
         while d.remaining() > 0 {
             match TransportParameter::decode(d) {
                 Ok(Some((tipe, tp))) => {
+                    // RFC 9000, Section 7.4:
+                    //
+                    // > An endpoint MUST NOT send a parameter more than once in a given transport
+                    // > parameters extension. An endpoint SHOULD treat receipt of duplicate
+                    // > transport parameters as a connection error of type
+                    // > TRANSPORT_PARAMETER_ERROR.
+                    //
+                    // The SHOULD only exists to let endpoints skip tracking parameters they do
+                    // not understand (see RFC 9413), not for robustness, so reject a duplicate of
+                    // a parameter we have already parsed.
+                    if tps.params[tipe].is_some() {
+                        qinfo!("Duplicate transport parameter {tipe}");
+                        return Err(Error::TransportParameter);
+                    }
                     tps.set(tipe, tp);
                 }
                 Ok(None) => {}
@@ -411,7 +456,22 @@ impl TransportParameters {
     /// When the transport parameter isn't recognized as being an integer.
     #[must_use]
     pub fn get_integer(&self, tp: TransportParameterId) -> u64 {
-        let default = match tp {
+        let dflt = Self::integer_default(tp).expect("Transport parameter not a known Integer");
+        match self.params[tp] {
+            None => dflt,
+            Some(TransportParameter::Integer(x)) => x,
+            _ => panic!("Internal error"),
+        }
+    }
+
+    #[allow(
+        clippy::allow_attributes,
+        clippy::unwrap_in_result,
+        reason = "False positive in 1.90, check when we bump MSRV"
+    )]
+    fn integer_default(tp: TransportParameterId) -> Option<u64> {
+        // Note: testing for this can't catch new values; make sure to update the test.
+        Some(match tp {
             TransportParameterId::IdleTimeout
             | TransportParameterId::InitialMaxData
             | TransportParameterId::InitialMaxStreamDataBidiLocal
@@ -423,41 +483,23 @@ impl TransportParameters {
             | TransportParameterId::MaxDatagramFrameSize => 0,
             TransportParameterId::MaxUdpPayloadSize => 65527,
             TransportParameterId::AckDelayExponent => 3,
-            TransportParameterId::MaxAckDelay => DEFAULT_REMOTE_ACK_DELAY
-                .as_millis()
-                .try_into()
-                .expect("default remote ack delay in ms can't overflow u64"),
+            TransportParameterId::MaxAckDelay => {
+                u64::try_from(DEFAULT_REMOTE_ACK_DELAY.as_millis())
+                    .expect("default remote ack delay in ms can't overflow u64")
+            }
             TransportParameterId::ActiveConnectionIdLimit => 2,
-            _ => panic!("Transport parameter not known or not an Integer"),
-        };
-        match self.params[tp] {
-            None => default,
-            Some(TransportParameter::Integer(x)) => x,
-            _ => panic!("Internal error"),
-        }
+            _ => return None,
+        })
     }
 
-    // Set an integer type or a default.
+    // Set an integer transport parameter, removing it if it matches the spec default.
     /// # Panics
     /// When the transport parameter isn't recognized as being an integer.
     pub fn set_integer(&mut self, tp: TransportParameterId, value: u64) {
-        match tp {
-            TransportParameterId::IdleTimeout
-            | TransportParameterId::InitialMaxData
-            | TransportParameterId::InitialMaxStreamDataBidiLocal
-            | TransportParameterId::InitialMaxStreamDataBidiRemote
-            | TransportParameterId::InitialMaxStreamDataUni
-            | TransportParameterId::InitialMaxStreamsBidi
-            | TransportParameterId::InitialMaxStreamsUni
-            | TransportParameterId::MaxUdpPayloadSize
-            | TransportParameterId::AckDelayExponent
-            | TransportParameterId::MaxAckDelay
-            | TransportParameterId::ActiveConnectionIdLimit
-            | TransportParameterId::MinAckDelay
-            | TransportParameterId::MaxDatagramFrameSize => {
-                self.set(tp, TransportParameter::Integer(value));
-            }
-            _ => panic!("Transport parameter not known"),
+        match Self::integer_default(tp) {
+            Some(dflt) if dflt == value => self.remove(tp),
+            Some(_) => self.set(tp, TransportParameter::Integer(value)),
+            None => panic!("Transport parameter not known"),
         }
     }
 
@@ -831,7 +873,7 @@ impl ExtensionHandler for TransportParametersHandler {
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
         qtrace!(
             "Handling transport parameters, msg={msg:?} value={}",
-            hex(d),
+            Hex::new(d),
         );
 
         if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
@@ -910,7 +952,7 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     use TransportParameterId::*;
-    use neqo_common::{Decoder, Encoder, qdebug};
+    use neqo_common::{Decoder, Encoder, qdebug, to_u64};
 
     use super::PreferredAddress;
     use crate::{
@@ -918,6 +960,29 @@ mod tests {
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
     };
+
+    #[test]
+    fn debug_hex() {
+        let bytes = TransportParameter::Bytes(vec![0x01, 0x23, 0xab, 0xcd]);
+        assert_eq!(format!("{bytes:?}"), "Bytes(0123abcd)");
+
+        let versions = TransportParameter::Versions {
+            current: 0x0000_0001,
+            other: vec![0xff00_001d, 0x709a_50c4],
+        };
+        assert_eq!(
+            format!("{versions:?}"),
+            "Versions { current: 00000001, other: [ff00001d, 709a50c4] }"
+        );
+
+        let spa = make_spa();
+        let formatted = format!("{spa:?}");
+        assert!(formatted.contains("cid: 0102030405"), "{formatted}");
+        assert!(
+            formatted.contains("srt: 03030303030303030303030303030303"),
+            "{formatted}"
+        );
+    }
 
     #[test]
     fn basic_tps() {
@@ -955,6 +1020,28 @@ mod tests {
         tps.encode(&mut enc);
 
         TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+    }
+
+    /// Validate that default values don't get set.
+    #[test]
+    fn default_tps() {
+        use enum_map::Enum as _;
+        let mut tps = TransportParameters::default();
+        let mut count = 0;
+        for i in 0..TransportParameterId::LENGTH {
+            let tp = TransportParameterId::from_usize(i);
+            if let Some(value) = TransportParameters::integer_default(tp) {
+                count += 1;
+                tps.set_integer(tp, value);
+                assert!(!tps.has_value(tp), "{tp}");
+
+                tps.set_integer(tp, value + 1);
+                assert!(tps.has_value(tp), "{tp}");
+                tps.set_integer(tp, value);
+                assert!(!tps.has_value(tp), "{tp}");
+            }
+        }
+        assert!(count > 0);
     }
 
     fn make_spa() -> TransportParameter {
@@ -1201,6 +1288,30 @@ mod tests {
         assert!(invalid_decode_result.is_err());
     }
 
+    /// RFC 9000, Section 7.4: a duplicate transport parameter is a connection
+    /// error of type [`TRANSPORT_PARAMETER_ERROR`].
+    #[test]
+    fn duplicate_tp_rejected() {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
+        TransportParameter::Integer(20).encode(&mut enc, IdleTimeout);
+        assert_eq!(
+            TransportParameters::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::TransportParameter
+        );
+    }
+
+    /// Distinct transport parameters next to each other still decode.
+    #[test]
+    fn distinct_tps_accepted() {
+        let mut enc = Encoder::default();
+        TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
+        TransportParameter::Integer(20).encode(&mut enc, InitialMaxData);
+        let tps = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
+        assert_eq!(tps.get_integer(IdleTimeout), 10);
+        assert_eq!(tps.get_integer(InitialMaxData), 20);
+    }
+
     #[test]
     fn versions_encode_decode() {
         const ENCODED: &[u8] = &[
@@ -1294,8 +1405,8 @@ mod tests {
 
     #[test]
     fn transport_parameter_id_display() {
-        assert_eq!(InitialMaxData.to_string(), "InitialMaxData((0x04))");
-        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout((0x01))");
+        assert_eq!(InitialMaxData.to_string(), "InitialMaxData(0x04)");
+        assert_eq!(format!("{IdleTimeout}"), "IdleTimeout(0x01)");
     }
 
     // Helper: encode an integer TP, then decode it.
@@ -1315,7 +1426,7 @@ mod tests {
 
     #[test]
     fn max_udp_payload_size_boundary() {
-        let min = crate::packet::MIN_INITIAL_PACKET_SIZE as u64;
+        let min = to_u64(crate::packet::MIN_INITIAL_PACKET_SIZE);
         assert!(decode_tp_integer(MaxUdpPayloadSize, min).is_ok());
         assert!(decode_tp_integer(MaxUdpPayloadSize, min - 1).is_err());
     }

@@ -6,7 +6,7 @@
 
 mod common;
 use common::assert_dscp;
-use neqo_common::{Datagram, Decoder, Encoder, Role};
+use neqo_common::{Datagram, Decoder, Encoder, Role, to_u64};
 use neqo_transport::{
     CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamType, Version,
 };
@@ -172,12 +172,10 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
     // Re-encode the packet number as four bytes, so we have enough material for the header
     // protection sample if payload is empty.
     let pn_len = usize::from(header[0] & 0b0000_0011) + 1;
-    let len_pos = header.len()
-        - pn_len
-        - Encoder::varint_len(u64::try_from(pn_len + orig_payload.len()).unwrap());
+    let len_pos = header.len() - pn_len - Encoder::varint_len(to_u64(pn_len + orig_payload.len()));
     header.truncate(len_pos);
     let mut enc = Encoder::new_borrowed_vec(&mut header);
-    enc.encode_varint(u64::try_from(4 + payload.len() + aead.expansion()).unwrap());
+    enc.encode_len(4 + payload.len() + aead.expansion());
     enc.encode_uint(4, pn);
     header[0] = header[0] & 0xfc | 0b0000_0011; // Set the packet number length to 4.
 
@@ -282,7 +280,7 @@ fn overflow_crypto() {
             .encode_vec(1, server_dcid)
             .encode_vec(1, server_scid)
             .encode_vvec(&[]) // token
-            .encode_varint(u64::try_from(2 + payload.len() + aead.expansion()).unwrap()); // length
+            .encode_len(2 + payload.len() + aead.expansion()); // length
         let pn_offset = packet.len();
         packet.encode_uint(2, pn);
 

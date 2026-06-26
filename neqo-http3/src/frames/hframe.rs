@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{Debug, Write as _};
+use std::fmt::{self, Debug, Write as _};
 
-use neqo_common::{Buffer, Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder, hex::HexWithLen};
 use neqo_transport::StreamId;
 use nss::random;
 
@@ -37,7 +37,7 @@ impl From<HFrameType> for u64 {
 }
 
 // data for DATA frame is not read into HFrame::Data.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq)]
 pub enum HFrame {
     Data {
         len: u64, // length of the data
@@ -115,9 +115,7 @@ impl HFrame {
                 push_id,
                 header_block,
             } => {
-                enc.encode_varint(
-                    (header_block.len() + (Encoder::varint_len(u64::from(*push_id)))) as u64,
-                );
+                enc.encode_len(header_block.len() + Encoder::varint_len(u64::from(*push_id)));
                 enc.encode_varint(*push_id);
                 enc.encode(header_block);
             }
@@ -239,5 +237,50 @@ impl FrameDecoder<Self> for HFrame {
                 | HFrameType::PRIORITY_UPDATE_REQUEST
                 | HFrameType::PRIORITY_UPDATE_PUSH
         )
+    }
+}
+
+impl Debug for HFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Data { len } => {
+                write!(f, "DATA[{len}]")
+            }
+            Self::Headers { header_block } => {
+                write!(f, "HEADERS {}", HexWithLen::new(header_block))
+            }
+            Self::CancelPush { push_id } => {
+                write!(f, "CANCEL_PUSH {push_id}")
+            }
+            Self::Settings { settings } => {
+                write!(f, "SETTINGS {settings:?}")
+            }
+            Self::PushPromise {
+                push_id,
+                header_block,
+            } => {
+                write!(
+                    f,
+                    "PUSH_PROMISE {push_id} {}",
+                    HexWithLen::new(header_block)
+                )
+            }
+            Self::Goaway { stream_id } => {
+                write!(f, "GOAWAY {stream_id}")
+            }
+            Self::MaxPushId { push_id } => {
+                write!(f, "MAX_PUSH_ID {push_id}")
+            }
+            Self::Grease => f.write_str("GREASE"),
+            Self::PriorityUpdateRequest {
+                element_id,
+                priority,
+            } => write!(f, "PRIORITY_UPDATE request {element_id} {priority}"),
+
+            Self::PriorityUpdatePush {
+                element_id,
+                priority,
+            } => write!(f, "PRIORITY_UPDATE push {element_id} {priority}"),
+        }
     }
 }
