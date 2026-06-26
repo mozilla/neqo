@@ -11,7 +11,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{Bytes, Tos, hex_with_len};
+use crate::{Buffer, Bytes, Tos, hex_with_len};
 
 /// A UDP datagram.
 ///
@@ -24,10 +24,10 @@ pub struct Datagram<D = Vec<u8>> {
     d: D,
 }
 
-impl TryFrom<Batch> for Datagram {
+impl<B: Buffer> TryFrom<Batch<B>> for Datagram {
     type Error = ();
 
-    fn try_from(d: Batch) -> Result<Self, Self::Error> {
+    fn try_from(d: Batch<B>) -> Result<Self, Self::Error> {
         if d.num_datagrams() != 1 {
             return Err(());
         }
@@ -35,7 +35,8 @@ impl TryFrom<Batch> for Datagram {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            d: d.d,
+            // TODO: Performance footgun?
+            d: d.d.as_slice().to_vec(),
         })
     }
 }
@@ -155,16 +156,18 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
+///
+/// TODO: pub fields good idea?
 #[derive(Clone, PartialEq, Eq)]
-pub struct Batch {
+pub struct Batch<B> {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
     datagram_size: NonZeroUsize,
-    d: Vec<u8>,
+    d: B,
 }
 
-impl Debug for Batch {
+impl<B: Buffer> Debug for Batch<B> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
@@ -173,12 +176,12 @@ impl Debug for Batch {
             self.src,
             self.dst,
             self.datagram_size,
-            hex_with_len(&self.d)
+            hex_with_len(self.d.as_slice())
         )
     }
 }
 
-impl From<Datagram<Vec<u8>>> for Batch {
+impl From<Datagram<Vec<u8>>> for Batch<Vec<u8>> {
     fn from(d: Datagram<Vec<u8>>) -> Self {
         Self {
             src: d.src,
@@ -191,14 +194,25 @@ impl From<Datagram<Vec<u8>>> for Batch {
     }
 }
 
-impl Batch {
+impl<B: Buffer> Batch<B> {
+    /// Maximum [`Batch`] size in bytes.
+    ///
+    /// This value is set conservatively to ensure compatibility with batch IO
+    /// system calls across all supported platforms.
+    ///
+    /// See for example Linux limit in
+    /// <https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402>.
+    pub const MAX: usize = 65535 // maximum UDP datagram size
+        - 40 // IPv6 header
+        - 8; // UDP header
+
     #[must_use]
     pub const fn new(
         src: SocketAddr,
         dst: SocketAddr,
         tos: Tos,
         datagram_size: NonZeroUsize,
-        d: Vec<u8>,
+        d: B,
     ) -> Self {
         Self {
             src,
@@ -235,16 +249,16 @@ impl Batch {
 
     #[must_use]
     pub fn data(&self) -> &[u8] {
-        &self.d
+        self.d.as_slice()
     }
 
     #[must_use]
-    pub const fn num_datagrams(&self) -> usize {
-        self.d.len().div_ceil(self.datagram_size.get())
+    pub fn num_datagrams(&self) -> usize {
+        self.d.position().div_ceil(self.datagram_size.get())
     }
 
     pub fn iter(&self) -> impl Iterator<Item = Datagram<&[u8]>> {
-        self.d.chunks(self.datagram_size.get()).map(|d| Datagram {
+        self.d.as_slice().chunks(self.datagram_size.get()).map(|d| Datagram {
             src: self.src,
             dst: self.dst,
             tos: self.tos,
@@ -253,12 +267,17 @@ impl Batch {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
+        let datagram_size = self.datagram_size.get();
+        let src = self.src;
+        let dst = self.dst;
+        let tos = self.tos;
         self.d
-            .chunks_mut(self.datagram_size.get())
-            .map(|d| Datagram {
-                src: self.src,
-                dst: self.dst,
-                tos: self.tos,
+            .as_mut()
+            .chunks_mut(datagram_size)
+            .map(move |d| Datagram {
+                src,
+                dst,
+                tos,
                 d,
             })
     }
@@ -308,6 +327,8 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
+
+        // TODO: cleanup the &mut
 
         // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
         let batch =

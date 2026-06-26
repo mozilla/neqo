@@ -19,8 +19,8 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Role, Tos, event::Provider as _, hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
-    qwarn,
+    Datagram, Role, Tos, event::Provider as _, hex, qdebug, qerror, qinfo,
+    qlog::Qlog, qtrace, qwarn,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -232,6 +232,7 @@ impl Server {
         now: Instant,
     ) -> Output {
         qdebug!("[{self}] Handle initial");
+        qdebug!("[{self}] Handle initial");
         #[cfg(feature = "build-fuzzing-corpus")]
         Self::write_addr_valid_corpus(dgram.source(), &initial.token);
         let res = self
@@ -406,7 +407,7 @@ impl Server {
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         // Process input datagrams from previous call.
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
             if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
@@ -432,7 +433,7 @@ impl Server {
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         let mut dgrams = dgrams.into_iter();
         while let Some(mut dgram) = dgrams.next() {
             qtrace!("Process datagram: {}", hex(&dgram[..]));
@@ -479,11 +480,13 @@ impl Server {
                 }
 
                 qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-                let vn = packet::Builder::version_negotiation(
+                let mut vn = Vec::new();
+                packet::Builder::version_negotiation(
                     &packet.scid()[..],
                     &packet.dcid()[..],
                     packet.wire_version(),
                     self.conn_params.get_versions().all(),
+                    &mut vn,
                 );
                 qdebug!(
                     "[{self}] type={:?} path:{} {destination}->{source} {:?} len {}",
@@ -545,7 +548,7 @@ impl Server {
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch {
+    fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch<Vec<u8>> {
         assert!(
             self.saved_datagrams.is_empty(),
             "Always process all inbound datagrams first."
@@ -553,9 +556,10 @@ impl Server {
         let mut callback = None;
 
         for connection in &mut self.connections {
+            let send_buffer = Vec::new();
             match connection
                 .borrow_mut()
-                .process_multiple_output(now, max_datagrams)
+                .process_multiple_output(now, send_buffer, max_datagrams)
             {
                 OutputBatch::None => {}
                 d @ OutputBatch::DatagramBatch(_) => return d,
@@ -594,7 +598,7 @@ impl Server {
         dgrams: I,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<Vec<u8>> {
         if let o @ OutputBatch::DatagramBatch(_) = self.process_multiple_input(dgrams, now) {
             // Return immediately. Do any maintenance on next call.
             return o;

@@ -306,7 +306,7 @@ pub trait HttpServer: Display {
         dgrams: D,
         now: Instant,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch;
+    ) -> OutputBatch<Vec<u8>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
