@@ -257,4 +257,19 @@ mod tests {
         );
         assert!(headers.iter().find_header("missing").is_none());
     }
+
+    #[test]
+    fn debug_format() {
+        let h = Header::new(":status", "200");
+        assert_eq!(format!("{h:?}"), r#"<:status>: "200""#);
+
+        let h = Header::new("content-type", "text/html");
+        assert_eq!(format!("{h:?}"), r#"content-type: "text/html""#);
+
+        let h = Header::new("has-quotes", "abc\"123");
+        assert_eq!(format!("{h:?}"), r#"has-quotes: "abc\"123""#);
+
+        let h = Header::new("binary", vec![0xff, 0xfe]);
+        assert_eq!(format!("{h:?}"), "binary: [2]: fffe");
+    }
 }

@@ -115,7 +115,7 @@ hex_struct! {
         chunk_hex(f, &buf[..first])?;
         let last = max(buf.len().saturating_sub(SHOW_LEN), first);
         if last > first {
-            write!(f, "..")?;
+            f.write_str("..")?;
         }
         chunk_hex(f, &buf[last..])
     }
