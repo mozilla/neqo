@@ -266,10 +266,10 @@ impl LossRecoverySpace {
         let mut eliciting = false;
         for p in &acked {
             self.remove_packet(p);
-            eliciting |= p.ack_eliciting();
             if p.is_pmtud_probe() {
                 continue;
             }
+            eliciting |= p.ack_eliciting();
             if p.lost() {
                 stats.late_ack += 1;
             }

@@ -329,6 +329,34 @@ impl DerefMut for DscpCount {
     }
 }
 
+/// PMTUD-specific statistics.
+#[derive(Default, Clone, PartialEq, Eq)]
+pub struct PmtudStats {
+    /// Number of PMTUD probes sent.
+    pub tx: usize,
+    /// Number of PMTUD probes acked.
+    pub ack: usize,
+    /// Number of PMTUD probes lost.
+    pub lost: usize,
+    /// MTU of the local interface used for the most recent path.
+    pub iface_mtu: usize,
+    /// The peer's [`max_udp_payload_size`](https://www.rfc-editor.org/rfc/rfc9000#section-18.2)
+    /// transport parameter, i.e., the maximum UDP payload the peer is willing to receive.
+    pub peer_max_udp_payload: Option<usize>,
+    /// Probed PMTU of the current path.
+    pub pmtu: usize,
+}
+
+impl Debug for PmtudStats {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
+            self.tx, self.ack, self.lost, self.iface_mtu, self.peer_max_udp_payload, self.pmtu
+        )
+    }
+}
+
 /// Connection statistics
 #[derive(Default, Clone, PartialEq)]
 pub struct Stats {
@@ -347,31 +375,21 @@ pub struct Stats {
     /// The number of packet that were saved for later processing.
     pub saved_datagrams: usize,
 
-    /// Total packets sent, excluding PMTUD probes (see `pmtud_tx`).
+    /// Total packets sent, excluding PMTUD probes (see `pmtud.tx`).
     pub packets_tx: usize,
     /// Total number of packets that are declared lost. PMTUD probes are included here (since they
-    /// always carry at least a PING) and also counted separately in `pmtud_lost`.
+    /// always carry at least a PING) and also counted separately in `pmtud.lost`.
     pub lost: usize,
     /// Late acknowledgments, for packets that were declared lost already, excluding PMTUD probes
-    /// (see `pmtud_ack`).
+    /// (see `pmtud.ack`).
     pub late_ack: usize,
     /// Acknowledgments for packets that contained data that was marked for retransmission when
-    /// the PTO timer popped, excluding PMTUD probes (see `pmtud_ack`).
+    /// the PTO timer popped, excluding PMTUD probes (see `pmtud.ack`).
     pub pto_ack: usize,
     /// Number of times we had to drop an unacknowledged ACK range.
     pub unacked_range_dropped: usize,
-    /// Number of PMTUD probes sent.
-    pub pmtud_tx: usize,
-    /// Number of PMTUD probes ACK'ed.
-    pub pmtud_ack: usize,
-    /// Number of PMTUD probes lost.
-    pub pmtud_lost: usize,
-    /// MTU of the local interface used for the most recent path.
-    pub pmtud_iface_mtu: usize,
-    /// The peer's `max_udp_payload_size` transport parameter.
-    pub pmtud_peer_max_udp_payload: Option<usize>,
-    /// Probed PMTU of the current path.
-    pub pmtud_pmtu: usize,
+    /// PMTUD statistics (probes sent/acked/lost, discovered MTU, etc.).
+    pub pmtud: PmtudStats,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,
@@ -493,16 +511,7 @@ impl Debug for Stats {
             self.cc.slow_start_exit.as_ref().map(|e| e.exit_cwnd),
             self.cc.slow_start_exit.as_ref().map(|e| &e.reason),
         )?;
-        writeln!(
-            f,
-            "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
-            self.pmtud_tx,
-            self.pmtud_ack,
-            self.pmtud_lost,
-            self.pmtud_iface_mtu,
-            self.pmtud_peer_max_udp_payload,
-            self.pmtud_pmtu
-        )?;
+        writeln!(f, "  pmtud: {:?}", self.pmtud)?;
         writeln!(f, "  resumed: {}", self.resumed)?;
         writeln!(f, "  frames rx:")?;
         self.frame_rx.fmt(f)?;

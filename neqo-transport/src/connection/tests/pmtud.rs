@@ -111,27 +111,32 @@ fn drive_pmtud(
     now
 }
 
+fn pmtud_client_server() -> (Connection, Connection) {
+    fixture_init();
+    let client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    let server = new_server(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    (client, server)
+}
+
 /// With an unlimited path MTU every probe in the search table is delivered and acked.
 #[test]
 fn pmtud_stats_no_loss() {
-    fixture_init();
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(true)
-            .pmtud_iface_mtu(false),
-    );
-    let mut server = new_server(
-        ConnectionParameters::default()
-            .pmtud(true)
-            .pmtud_iface_mtu(false),
-    );
+    let (mut client, mut server) = pmtud_client_server();
     connect(&mut client, &mut server);
     drive_pmtud(&mut client, &mut server, usize::MAX, now());
     // Every probe in the search table (minus the base) is sent, acked, and not lost.
     // pmtud_tx is separate from packets_tx; probes are not double-counted there.
-    assert_eq!(client.stats().pmtud_tx, SEARCH_TABLE_LEN - 1);
-    assert_eq!(client.stats().pmtud_ack, SEARCH_TABLE_LEN - 1);
-    assert_eq!(client.stats().pmtud_lost, 0);
+    assert_eq!(client.stats().pmtud.tx, SEARCH_TABLE_LEN - 1);
+    assert_eq!(client.stats().pmtud.ack, SEARCH_TABLE_LEN - 1);
+    assert_eq!(client.stats().pmtud.lost, 0);
 }
 
 /// With `path_mtu = 1420 - header_size` (IPv6, header = 48 bytes, limit = 1372):
@@ -142,20 +147,10 @@ fn pmtud_stats_no_loss() {
 /// After `MAX_PROBES` consecutive failures at 1470 the algorithm stops, giving exactly
 /// 2 acked probes, `MAX_PROBES` lost probes, and `2 + MAX_PROBES` sent probes.
 /// Since probes carry stream data (piggybacked via `write_appdata_frames`), lost probes
-/// also increment `stats.lost` in addition to `stats.pmtud_lost`.
+/// also increment `stats.lost` in addition to `stats.pmtud.lost`.
 #[test]
 fn pmtud_stats_loss() {
-    fixture_init();
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .pmtud(true)
-            .pmtud_iface_mtu(false),
-    );
-    let mut server = new_server(
-        ConnectionParameters::default()
-            .pmtud(true)
-            .pmtud_iface_mtu(false),
-    );
+    let (mut client, mut server) = pmtud_client_server();
     connect(&mut client, &mut server);
     let header_size = Pmtud::header_size(
         client
@@ -167,9 +162,9 @@ fn pmtud_stats_loss() {
             .ip(),
     );
     drive_pmtud(&mut client, &mut server, 1420 - header_size, now());
-    assert_eq!(client.stats().pmtud_tx, 2 + MAX_PROBES);
-    assert_eq!(client.stats().pmtud_ack, 2);
-    assert_eq!(client.stats().pmtud_lost, MAX_PROBES);
+    assert_eq!(client.stats().pmtud.tx, 2 + MAX_PROBES);
+    assert_eq!(client.stats().pmtud.ack, 2);
+    assert_eq!(client.stats().pmtud.lost, MAX_PROBES);
     // Probes carry stream data (piggybacked via write_appdata_frames), so lost
     // probes also count in the general loss counter, not just pmtud_lost.
     assert_eq!(client.stats().lost, MAX_PROBES);
@@ -228,7 +223,7 @@ fn vpn_migration_triggers_pmtud() {
     // Client receives the PATH_CHALLENGE. This triggers PMTUD restart on its path.
     let s1 = s1.unwrap();
     let s1_to_client = Datagram::new(s1.source(), c1.source(), s1.tos(), &s1[..]);
-    let client_pmtud_tx_before_challenge = client.stats().pmtud_tx;
+    let client_pmtud_tx_before_challenge = client.stats().pmtud.tx;
     let before_response = client.stats().frame_tx.path_response;
     let c2 = client.process(Some(s1_to_client), now).dgram();
     assert!(c2.is_some(), "Client should respond with PATH_RESPONSE");
@@ -240,15 +235,15 @@ fn vpn_migration_triggers_pmtud() {
     server.process_input(c2_via_vpn, now);
 
     // Record PMTUD probe counts before driving traffic on VPN path.
-    let server_pmtud_tx_before = server.stats().pmtud_tx;
+    let server_pmtud_tx_before = server.stats().pmtud.tx;
 
     // Drive PMTUD probing for both sides on the VPN path with smaller MTU.
     let now = drive_pmtud(&mut client, &mut server, vpn_path_mtu, now);
     drive_pmtud(&mut server, &mut client, vpn_path_mtu, now);
 
     // Verify server and client sent PMTUD probes on the new path.
-    assert!(server.stats().pmtud_tx > server_pmtud_tx_before);
-    assert!(client.stats().pmtud_tx > client_pmtud_tx_before_challenge);
+    assert!(server.stats().pmtud.tx > server_pmtud_tx_before);
+    assert!(client.stats().pmtud.tx > client_pmtud_tx_before_challenge);
 
     // Verify both sides' PMTU reflects the VPN path's smaller MTU.
     // vpn_path_mtu is 1400; the largest IPv6 search table entry <= 1400 is 1380.
