@@ -496,8 +496,8 @@ impl<B: Buffer> Builder<B> {
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
-            &Hex::new(&self.encoder.as_ref()[self.header.clone()]),
-            &Hex::new(&self.encoder.as_ref()[self.header.end..])
+            Hex::new(&self.encoder.as_ref()[self.header.clone()]),
+            Hex::new(&self.encoder.as_ref()[self.header.end..])
         );
 
         // Add space for crypto expansion.
@@ -519,7 +519,7 @@ impl<B: Buffer> Builder<B> {
             self.encoder.as_mut()[j] ^= mask[i];
         }
 
-        qtrace!("Packet built {}", &Hex::new(&self.encoder));
+        qtrace!("Packet built {}", Hex::new(&self.encoder));
         Ok(self.encoder)
     }
 
@@ -884,7 +884,7 @@ impl<'a> Public<'a> {
         qtrace!(
             "{:?} unmask hdr={}",
             crypto.version(),
-            &Hex::new(&self.data[..sample_offset])
+            Hex::new(&self.data[..sample_offset])
         );
         let mask = crypto.compute_mask(sample)?;
 
@@ -915,7 +915,7 @@ impl<'a> Public<'a> {
         hdrbytes.end = self.header_len + pn_len;
         pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
 
-        qtrace!("unmasked hdr={}", &Hex::new(&self.data[hdrbytes.clone()]));
+        qtrace!("unmasked hdr={}", Hex::new(&self.data[hdrbytes.clone()]));
 
         let key_phase =
             self.packet_type == Type::Short && (first_byte & BIT_KEY_PHASE) == BIT_KEY_PHASE;
@@ -1013,8 +1013,8 @@ impl fmt::Debug for Public<'_> {
             f,
             "{:?}: {} {}",
             self.packet_type(),
-            &HexWithLen::new(&self.data[..self.header_len]),
-            &HexWithLen::new(&self.data[self.header_len..])
+            HexWithLen::new(&self.data[..self.header_len]),
+            HexWithLen::new(&self.data[self.header_len..])
         )
     }
 }

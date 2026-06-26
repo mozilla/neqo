@@ -3729,7 +3729,7 @@ mod tests {
         );
         qtrace!(
             "STREAM frame: {}",
-            &HexWithLen::new(&builder.as_ref()[header_len..])
+            HexWithLen::new(&builder.as_ref()[header_len..])
         );
         stats.stream > 0
     }

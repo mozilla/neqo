@@ -858,7 +858,7 @@ impl Path {
         let resp_sent = if let Some(challenge) = self.challenge.take() {
             qtrace!(
                 "[{self}] Responding to path challenge {}",
-                &Hex::new(challenge)
+                Hex::new(challenge)
             );
             builder.encode_frame(FrameType::PathResponse, |b| {
                 b.encode(&challenge[..]);

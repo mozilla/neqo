@@ -441,7 +441,7 @@ impl Http3Client {
         let Some(settings_slice) = dec.decode_vvec() else {
             return Err(Error::InvalidResumptionToken);
         };
-        qtrace!("[{self}]   settings {}", &HexWithLen::new(settings_slice));
+        qtrace!("[{self}]   settings {}", HexWithLen::new(settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
         Error::map_error(
@@ -449,7 +449,7 @@ impl Http3Client {
             Error::InvalidResumptionToken,
         )?;
         let tok = dec.decode_remainder();
-        qtrace!("[{self}]   Transport token {}", &Hex::new(tok));
+        qtrace!("[{self}]   Transport token {}", Hex::new(tok));
         self.conn.enable_resumption(now, tok)?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();

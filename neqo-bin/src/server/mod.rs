@@ -269,7 +269,7 @@ pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
     if args.ech {
         let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
         server.enable_ech(random::<1>()[0], "public.example", &sk, &pk);
-        qinfo!("ECHConfigList: {}", &Hex::new(server.ech_config()));
+        qinfo!("ECHConfigList: {}", Hex::new(server.ech_config()));
     }
 }
 

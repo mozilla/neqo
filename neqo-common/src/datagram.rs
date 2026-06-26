@@ -118,7 +118,7 @@ impl<D: AsRef<[u8]>> Debug for Datagram<D> {
             self.tos,
             self.src,
             self.dst,
-            &HexWithLen::new(&self.d)
+            HexWithLen::new(&self.d)
         )
     }
 }
@@ -173,7 +173,7 @@ impl Debug for Batch {
             self.src,
             self.dst,
             self.datagram_size,
-            &HexWithLen::new(&self.d)
+            HexWithLen::new(&self.d)
         )
     }
 }

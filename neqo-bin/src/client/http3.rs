@@ -304,7 +304,7 @@ impl StreamHandler for DownloadStreamHandler {
             } else if let Ok(txt) = std::str::from_utf8(data) {
                 qdebug!("READ[{stream_id}]: {txt}");
             } else {
-                qdebug!("READ[{stream_id}]: 0x{}", &Hex::new(data));
+                qdebug!("READ[{stream_id}]: 0x{}", Hex::new(data));
             }
         }
 
@@ -354,7 +354,7 @@ impl StreamHandler for UploadStreamHandler {
             }
             Ok(())
         } else {
-            qerror!("Unexpected data [{stream_id}]: 0x{}", &Hex::new(data));
+            qerror!("Unexpected data [{stream_id}]: 0x{}", Hex::new(data));
             Err(crate::client::Error::Http3(Error::InvalidInput))
         }
     }

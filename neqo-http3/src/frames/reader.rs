@@ -239,7 +239,7 @@ impl FrameReader {
                     qtrace!(
                         "received frame {:?}: {}",
                         self.frame_type,
-                        &HexWithLen::new(&data[..])
+                        HexWithLen::new(&data[..])
                     );
                     return self.frame_data_decoded::<T>(&data);
                 }

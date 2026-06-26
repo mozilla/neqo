@@ -145,34 +145,31 @@ mod tests {
 
     #[test]
     fn hex_output() {
-        assert_eq!(format!("{}", &Hex::new([])), "");
-        assert_eq!(format!("{}", &Hex::new([0xab, 0xcd])), "abcd");
+        assert_eq!(format!("{}", Hex::new([])), "");
+        assert_eq!(format!("{}", Hex::new([0xab, 0xcd])), "abcd");
 
-        assert_eq!(format!("{}", &HexSnipMiddle::new([])), "[0]");
-        assert_eq!(format!("{}", &HexWithLen::new([])), "[0]");
+        assert_eq!(format!("{}", HexSnipMiddle::new([])), "[0]");
+        assert_eq!(format!("{}", HexWithLen::new([])), "[0]");
 
-        assert_eq!(
-            format!("{}", &HexSnipMiddle::new([0xab, 0xcd])),
-            "[2]: abcd"
-        );
-        assert_eq!(format!("{}", &HexWithLen::new([0xab, 0xcd])), "[2]: abcd");
+        assert_eq!(format!("{}", HexSnipMiddle::new([0xab, 0xcd])), "[2]: abcd");
+        assert_eq!(format!("{}", HexWithLen::new([0xab, 0xcd])), "[2]: abcd");
     }
 
     #[test]
     fn hex_snip_middle_boundary() {
         // Exactly SHOW_LEN*2 = 16 bytes: should use full hex (no "..").
         let short: Vec<u8> = (0..16).collect();
-        let s = format!("{}", &HexSnipMiddle::new(&short));
+        let s = format!("{}", HexSnipMiddle::new(&short));
         assert!(!s.contains(".."), "16 bytes should not be truncated");
         assert!(s.ends_with("0e0f"));
 
         // 17 bytes: one over the boundary, should be truncated.
         let just_over: Vec<u8> = (0..17).collect();
-        assert!(format!("{}", &HexSnipMiddle::new(&just_over)).contains(".."));
+        assert!(format!("{}", HexSnipMiddle::new(&just_over)).contains(".."));
 
         // 20 bytes: truncated, check first 8 and last 8 bytes are exact.
         let long: Vec<u8> = (0..20).collect();
-        let s = format!("{}", &HexSnipMiddle::new(&long));
+        let s = format!("{}", HexSnipMiddle::new(&long));
         assert!(s.starts_with("[20]: 0001020304050607"));
         assert!(s.contains(".."));
         // Last 8 bytes (12..20 = 0x0c..0x13) must be exactly "0c0d0e0f10111213".

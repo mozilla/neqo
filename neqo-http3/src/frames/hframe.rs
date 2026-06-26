@@ -247,7 +247,7 @@ impl Debug for HFrame {
                 write!(f, "DATA[{len}]")
             }
             Self::Headers { header_block } => {
-                write!(f, "HEADERS {}", &HexWithLen::new(header_block))
+                write!(f, "HEADERS {}", HexWithLen::new(header_block))
             }
             Self::CancelPush { push_id } => {
                 write!(f, "CANCEL_PUSH {push_id}")
@@ -262,7 +262,7 @@ impl Debug for HFrame {
                 write!(
                     f,
                     "PUSH_PROMISE {push_id} {}",
-                    &HexWithLen::new(header_block)
+                    HexWithLen::new(header_block)
                 )
             }
             Self::Goaway { stream_id } => {

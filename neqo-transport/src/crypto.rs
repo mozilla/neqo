@@ -391,7 +391,7 @@ impl Crypto {
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
-                qtrace!("TLS token {}", &Hex::new(t.as_ref()));
+                qtrace!("TLS token {}", Hex::new(t.as_ref()));
                 let mut enc = Encoder::default();
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
@@ -400,7 +400,7 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                qdebug!("resumption token {}", &HexSnipMiddle::new(enc.as_ref()));
+                qdebug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
                 ResumptionToken::new(enc.into(), t.expiration_time())
             })
         } else {
@@ -695,8 +695,8 @@ impl CryptoDxState {
         let mask = self.hpkey.mask(sample)?;
         qtrace!(
             "[{self}] HP sample={} mask={}",
-            &Hex::new(sample),
-            &Hex::new(mask)
+            Hex::new(sample),
+            Hex::new(mask)
         );
         Ok(mask)
     }
@@ -715,8 +715,8 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
-            &Hex::new(data[hdr.clone()].as_ref()),
-            &Hex::new(data[hdr.end..].as_ref())
+            Hex::new(data[hdr.clone()].as_ref()),
+            Hex::new(data[hdr.end..].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
@@ -736,7 +736,7 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", &Hex::new(&data[..len]));
+        qtrace!("[{self}] encrypt ct={}", Hex::new(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(len)
@@ -756,8 +756,8 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
-            &Hex::new(data[hdr.clone()].as_ref()),
-            &Hex::new(data[hdr.end..].as_ref())
+            Hex::new(data[hdr.clone()].as_ref()),
+            Hex::new(data[hdr.end..].as_ref())
         );
         self.invoked()?;
         let (hdr, data) = data.split_at_mut(hdr.end);
@@ -1084,7 +1084,7 @@ impl CryptoStates {
         for v in versions {
             qdebug!(
                 "[{self}] Creating initial cipher state v={v:?}, role={role:?} dcid={}",
-                &Hex::new(dcid)
+                Hex::new(dcid)
             );
 
             let mut initial = CryptoState {

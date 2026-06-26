@@ -498,7 +498,7 @@ impl Default for Encoder {
 
 impl Debug for Encoder {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", &HexWithLen::new(self))
+        HexWithLen::fmt(f, self)
     }
 }
 

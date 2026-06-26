@@ -785,7 +785,7 @@ impl Connection {
 
         qinfo!(
             "[{self}] resumption token {}",
-            &HexSnipMiddle::new(token.as_ref())
+            HexSnipMiddle::new(token.as_ref())
         );
         let mut dec = Decoder::from(token.as_ref());
 
@@ -802,16 +802,16 @@ impl Connection {
         qtrace!("[{self}]   RTT {rtt:?}");
 
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!("[{self}]   transport parameters {}", &Hex::new(tp_slice));
+        qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp =
             TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!("[{self}]   Initial token {}", &Hex::new(init_token));
+        qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
 
         let tok = dec.decode_remainder();
-        qtrace!("[{self}]   TLS token {}", &Hex::new(tok));
+        qtrace!("[{self}]   TLS token {}", Hex::new(tok));
 
         match self.crypto.tls_mut() {
             Agent::Client(c) => {
@@ -867,7 +867,7 @@ impl Connection {
             });
             enc.encode(extra);
             let records = s.send_ticket(now, enc.as_ref())?;
-            qdebug!("[{self}] send session ticket {}", &Hex::new(&enc));
+            qdebug!("[{self}] send session ticket {}", Hex::new(&enc));
             self.crypto.buffer_records(records)?;
         } else {
             unreachable!();
@@ -1349,7 +1349,7 @@ impl Connection {
         let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
             "[{self}] Valid Retry received, token={} scid={retry_scid}",
-            &Hex::new(packet.token())
+            Hex::new(packet.token())
         );
 
         let lost_packets = self.loss_recovery.retry(&path, now);
@@ -1400,7 +1400,7 @@ impl Connection {
             // indicate that there is a stateless reset present.
             qdebug!(
                 "[{self}] Stateless reset: {}",
-                &Hex::new(&d[d.len() - Srt::LEN..])
+                Hex::new(&d[d.len() - Srt::LEN..])
             );
             self.state_signaling.reset();
             self.set_state(
@@ -1767,7 +1767,7 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
-        qtrace!("[{self}] {} input {}", path.borrow(), &Hex::new(&d));
+        qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
         let mut slc = d.as_mut();
@@ -3347,7 +3347,7 @@ impl Connection {
             Frame::Crypto { offset, data } => {
                 qtrace!(
                     "[{self}] Crypto frame on space={space} offset={offset}: {d}",
-                    d = &HexSnipMiddle::new(data),
+                    d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto

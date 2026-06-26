@@ -435,7 +435,7 @@ impl Server {
     ) -> OutputBatch {
         let mut dgrams = dgrams.into_iter();
         while let Some(mut dgram) = dgrams.next() {
-            qtrace!("Process datagram: {}", &Hex::new(&dgram[..]));
+            qtrace!("Process datagram: {}", Hex::new(&dgram[..]));
 
             // This is only looking at the first packet header in the datagram.
             // All packets in the datagram are routed to the same connection.

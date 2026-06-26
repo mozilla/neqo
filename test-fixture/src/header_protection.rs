@@ -147,8 +147,8 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
         .expect("Failed to generate header protection mask");
     qtrace!(
         "sample={} mask={}",
-        &HexWithLen::new(&packet[sample_start..sample_end]),
-        &HexWithLen::new(mask)
+        HexWithLen::new(&packet[sample_start..sample_end]),
+        HexWithLen::new(mask)
     );
     packet[0] ^= mask[0] & 0xf;
     for i in 0..(pn_bytes.end - pn_bytes.start) {
