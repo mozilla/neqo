@@ -19,7 +19,10 @@ pub mod log;
 pub mod qlog;
 pub mod tos;
 
-use std::fmt::Write as _;
+use std::{
+    cmp::{max, min},
+    fmt,
+};
 
 use enum_map::Enum;
 use static_assertions::const_assert_eq;
@@ -36,44 +39,118 @@ pub use self::{
     tos::{Dscp, Ecn, Tos},
 };
 
-#[must_use]
-pub fn hex<A: AsRef<[u8]>>(buf: A) -> String {
-    let mut ret = String::with_capacity(buf.as_ref().len() * 2);
-    for b in buf.as_ref() {
-        write!(&mut ret, "{b:02x}").expect("write OK");
+macro_rules! hex_struct {
+    {$(#[$m:meta])* $n:ident, $f:item} => {
+$(#[$m])*
+pub struct $n<T>(T);
+
+impl<T> $n<T> {
+    /// Wrap an object (or reference) for hex formatting.
+    ///
+    /// For example:
+    /// ```
+    #[doc = concat!("# use neqo_common::", stringify!($n), ";")]
+    /// struct Example(String, Vec<u8>);
+    /// impl std::fmt::Debug for Example {
+    ///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    ///         f.debug_tuple("Example")
+    ///          .field(&self.0)
+    #[doc = concat!(r#"          .field(&"#, stringify!($n), "::new(&self.1))")]
+    ///          .finish()
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Propagates and errors from the formatter.
+    pub const fn new(v: T) -> Self {
+        Self(v)
     }
-    ret
 }
 
-#[must_use]
-pub fn hex_snip_middle<A: AsRef<[u8]>>(buf: A) -> String {
-    const SHOW_LEN: usize = 8;
-    let buf = buf.as_ref();
-    if buf.len() <= SHOW_LEN * 2 {
-        hex_with_len(buf)
-    } else {
-        let mut ret = String::with_capacity(SHOW_LEN * 2 + 16);
-        write!(&mut ret, "[{}]: ", buf.len()).expect("write OK");
-        for b in &buf[..SHOW_LEN] {
-            write!(&mut ret, "{b:02x}").expect("write OK");
-        }
-        ret.push_str("..");
-        for b in &buf[buf.len() - SHOW_LEN..] {
-            write!(&mut ret, "{b:02x}").expect("write OK");
-        }
-        ret
+impl<T: AsRef<[u8]>> $n<T> {
+    /// Write hex-formatted text to the formatter.
+    ///
+    /// For example:
+    /// ```
+    #[doc = concat!("# use neqo_common::", stringify!($n), ";")]
+    /// struct VecWrapper(Vec<u8>);
+    /// impl std::fmt::Display for VecWrapper {
+    ///     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    #[doc = concat!("        ", stringify!($n), "::fmt(f, &self.0)")]
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    /// Propagates and errors from the formatter.
+    pub fn fmt(f: &mut fmt::Formatter<'_>, v: T) -> fmt::Result {
+        write!(f, "{}", &Self::new(v))
     }
 }
 
-#[must_use]
-pub fn hex_with_len<A: AsRef<[u8]>>(buf: A) -> String {
-    let buf = buf.as_ref();
-    let mut ret = String::with_capacity(10 + buf.len() * 2);
-    write!(&mut ret, "[{}]: ", buf.len()).expect("write OK");
-    for b in buf {
-        write!(&mut ret, "{b:02x}").expect("write OK");
+impl<T: AsRef<[u8]>> fmt::Display for $n<T> {
+    $f
+}
+
+impl<T: AsRef<[u8]>> fmt::Debug for $n<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        <Self as fmt::Display>::fmt(self, f)
     }
-    ret
+}
+    };
+}
+
+hex_struct! {
+    /// Simple Hex converter for formatting.
+    Hex,
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for b in self.0.as_ref() {
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+hex_struct! {
+    /// Hex converter for formatting that trims long sequences.
+    HexSnipMiddle,
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        const SHOW_LEN: usize = 8;
+        let buf = self.0.as_ref();
+        write!(f, "[{}]", buf.len())?;
+        if !buf.is_empty() {
+            f.write_str(": ")?;
+        }
+        let first = min(buf.len(), SHOW_LEN);
+        for b in &buf[..first] {
+            write!(f, "{b:02x}")?;
+        }
+        let last = max(buf.len().saturating_sub(SHOW_LEN), first);
+        if last > first {
+            write!(f, "..")?;
+        }
+        for b in &buf[last..] {
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
+    }
+}
+
+hex_struct! {
+    /// Hex converter for formatting that reports the length of the sequence.
+    HexWithLen,
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let buf = self.0.as_ref();
+        write!(f, "[{}]", buf.len())?;
+        if !buf.is_empty() {
+            f.write_str(": ")?;
+        }
+        for b in buf {
+            write!(f, "{b:02x}")?;
+        }
+        Ok(())
+    }
 }
 
 #[must_use]
@@ -183,12 +260,21 @@ macro_rules! dispatch {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
+    use super::{Hex, HexSnipMiddle, HexWithLen, const_max, const_min};
 
     #[test]
     fn hex_output() {
-        assert_eq!(hex([]), "");
-        assert_eq!(hex([0xab, 0xcd]), "abcd");
+        assert_eq!(format!("{}", &Hex::new([])), "");
+        assert_eq!(format!("{}", &Hex::new([0xab, 0xcd])), "abcd");
+
+        assert_eq!(format!("{}", &HexSnipMiddle::new([])), "[0]");
+        assert_eq!(format!("{}", &HexWithLen::new([])), "[0]");
+
+        assert_eq!(
+            format!("{}", &HexSnipMiddle::new([0xab, 0xcd])),
+            "[2]: abcd"
+        );
+        assert_eq!(format!("{}", &HexWithLen::new([0xab, 0xcd])), "[2]: abcd");
     }
 
     #[test]
@@ -203,17 +289,17 @@ mod tests {
     fn hex_snip_middle_boundary() {
         // Exactly SHOW_LEN*2 = 16 bytes: should use full hex (no "..").
         let short: Vec<u8> = (0..16).collect();
-        let s = hex_snip_middle(&short);
+        let s = format!("{}", &HexSnipMiddle::new(&short));
         assert!(!s.contains(".."), "16 bytes should not be truncated");
         assert!(s.ends_with("0e0f"));
 
         // 17 bytes: one over the boundary, should be truncated.
         let just_over: Vec<u8> = (0..17).collect();
-        assert!(hex_snip_middle(&just_over).contains(".."));
+        assert!(format!("{}", &HexSnipMiddle::new(&just_over)).contains(".."));
 
         // 20 bytes: truncated, check first 8 and last 8 bytes are exact.
         let long: Vec<u8> = (0..20).collect();
-        let s = hex_snip_middle(&long);
+        let s = format!("{}", &HexSnipMiddle::new(&long));
         assert!(s.starts_with("[20]: 0001020304050607"));
         assert!(s.contains(".."));
         // Last 8 bytes (12..20 = 0x0c..0x13) must be exactly "0c0d0e0f10111213".

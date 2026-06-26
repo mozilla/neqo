@@ -20,7 +20,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{Datagram, event::Provider, hex, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, Hex, event::Provider, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,
@@ -304,7 +304,7 @@ impl StreamHandler for DownloadStreamHandler {
             } else if let Ok(txt) = std::str::from_utf8(data) {
                 qdebug!("READ[{stream_id}]: {txt}");
             } else {
-                qdebug!("READ[{stream_id}]: 0x{}", hex(data));
+                qdebug!("READ[{stream_id}]: 0x{}", &Hex::new(data));
             }
         }
 
@@ -354,7 +354,7 @@ impl StreamHandler for UploadStreamHandler {
             }
             Ok(())
         } else {
-            qerror!("Unexpected data [{stream_id}]: 0x{}", hex(data));
+            qerror!("Unexpected data [{stream_id}]: 0x{}", &Hex::new(data));
             Err(crate::client::Error::Http3(Error::InvalidInput))
         }
     }

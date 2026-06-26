@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Encoder, Tos, datagram, hex, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
+use neqo_common::{Buffer, Encoder, Hex, Tos, datagram, qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
 use nss::random;
 
 use crate::{
@@ -854,7 +854,10 @@ impl Path {
         }
         // Send PATH_RESPONSE.
         let resp_sent = if let Some(challenge) = self.challenge.take() {
-            qtrace!("[{self}] Responding to path challenge {}", hex(challenge));
+            qtrace!(
+                "[{self}] Responding to path challenge {}",
+                &Hex::new(challenge)
+            );
             builder.encode_frame(FrameType::PathResponse, |b| {
                 b.encode(&challenge[..]);
             });
