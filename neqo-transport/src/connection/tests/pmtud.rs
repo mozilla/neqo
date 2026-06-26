@@ -133,7 +133,7 @@ fn pmtud_stats_no_loss() {
     connect(&mut client, &mut server);
     drive_pmtud(&mut client, &mut server, usize::MAX, now());
     // Every probe in the search table (minus the base) is sent, acked, and not lost.
-    // pmtud_tx is separate from packets_tx; probes are not double-counted there.
+    // pmtud.tx is separate from packets_tx; probes are not double-counted there.
     assert_eq!(client.stats().pmtud.tx, SEARCH_TABLE_LEN - 1);
     assert_eq!(client.stats().pmtud.ack, SEARCH_TABLE_LEN - 1);
     assert_eq!(client.stats().pmtud.lost, 0);
