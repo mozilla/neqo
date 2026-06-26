@@ -81,7 +81,7 @@ impl Debug for Header {
         }
         f.write_str(": ")?;
         if let Ok(s) = self.value_utf8() {
-            write!(f, r#""{s}""#)
+            write!(f, "{s:?}")
         } else {
             HexWithLen::fmt(f, &self.value)
         }

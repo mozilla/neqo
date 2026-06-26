@@ -34,9 +34,6 @@ impl<T> $n<T> {
     #[doc = concat!(r#"assert_eq!(format!("{:?}", Example("v".to_string(), vec!"#, stringify!($in), ")), expected);")]
     )*
     /// ```
-    ///
-    /// # Errors
-    /// Propagates any errors from the formatter.
     pub const fn new(v: T) -> Self {
         Self(v)
     }
