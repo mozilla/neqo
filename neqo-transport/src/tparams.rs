@@ -63,7 +63,7 @@ pub enum TransportParameterId {
 
 impl Display for TransportParameterId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}((0x{:02x}))", u64::from(*self))
+        write!(f, "{self:?}(0x{:02x})", u64::from(*self))
     }
 }
 
