@@ -53,10 +53,11 @@ pub enum TransportParameterId {
     InitialSourceConnectionId = 0x0f,
     RetrySourceConnectionId = 0x10,
     VersionInformation = 0x11,
+    // draft-ietf-quic-reliable-stream-reset
+    ResetStreamAt = 0x1d,
+    // draft-ietf-scone-protocol
     Scone = 0x219e,
     GreaseQuicBit = 0x2ab2,
-    // draft-ietf-quic-reliable-stream-reset
-    ResetStreamAt = 0x17_f758_6d2c_b571,
     MinAckDelay = 0xff02_de1a,
     MaxDatagramFrameSize = 0x0020,
     #[cfg(test)]
