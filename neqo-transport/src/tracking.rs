@@ -16,7 +16,7 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{Level, log_enabled};
-use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn, to_u64};
+use neqo_common::{Buffer, Ecn, Encoder, MAX_VARINT, qdebug, qtrace, qwarn, to_u64};
 use nss::Epoch;
 use smallvec::SmallVec;
 use strum::{Display, EnumIter};
@@ -170,8 +170,7 @@ pub const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
 /// The default number of in-order packets we will receive after
 /// largest acknowledged without sending an immediate acknowledgment.
 pub const DEFAULT_ACK_PACKET_TOLERANCE: packet::Number = 1;
-const MAX_TRACKED_RANGES: usize = 32;
-const MAX_ACKS_PER_FRAME: usize = 32;
+const MAX_TRACKED_RANGES: usize = 128;
 
 /// A structure that tracks what was included in an ACK.
 #[derive(Debug, Clone)]
@@ -405,8 +404,22 @@ impl RecvdPackets {
     }
 
     /// Length of the worst possible ACK frame, assuming only one range and ECN counts.
-    /// Note that this assumes one byte for the type and count of extra ranges.
+    /// Use `ack_len_for_range_count` when accounting for additional ranges.
     pub const USEFUL_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
+    /// Reserve enough room for another useful frame.
+    const ACK_FRAME_RESERVE: usize = packet::Builder::MINIMUM_FRAME_SIZE;
+
+    fn ack_len_for_range_count(range_count: usize) -> usize {
+        let extra_ranges = range_count
+            .checked_sub(1)
+            .expect("ACK range count should be nonzero");
+        Self::USEFUL_ACK_LEN
+            + (extra_ranges * 16)
+            + Encoder::varint_len(
+                u64::try_from(extra_ranges).expect("extra range count should fit into u64"),
+            )
+            - 1
+    }
 
     /// Generate an ACK frame for this packet number space.
     ///
@@ -437,13 +450,17 @@ impl RecvdPackets {
         // When congestion limited, ACK-only packets are 255 bytes at most
         // (`recovery::ACK_ONLY_SIZE_LIMIT - 1`).  This results in limiting the
         // ranges to 13 here.
-        let max_ranges = if let Some(avail) = builder.remaining().checked_sub(Self::USEFUL_ACK_LEN)
+        let remaining = builder.remaining();
+        let mut max_ranges = if let Some(avail) =
+            remaining.checked_sub(Self::USEFUL_ACK_LEN + Self::ACK_FRAME_RESERVE)
         {
-            // Apply a hard maximum to keep plenty of space for other stuff.
-            min(1 + (avail / 16), MAX_ACKS_PER_FRAME)
+            (1 + (avail / 16)).min(MAX_TRACKED_RANGES)
         } else {
             return;
         };
+        while Self::ack_len_for_range_count(max_ranges) + Self::ACK_FRAME_RESERVE > remaining {
+            max_ranges -= 1;
+        }
 
         let ranges = self
             .ranges
@@ -1110,6 +1127,200 @@ mod tests {
         } else {
             panic!("not an ACK!");
         }
+    }
+
+    #[test]
+    fn write_frame_more_than_32_ranges() {
+        const RANGE_COUNT: usize = 40;
+
+        let mut stats = Stats::default();
+        let mut tracker = AckTracker::default();
+        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
+        for i in 0..RANGE_COUNT {
+            recvd
+                .set_received(now(), (i * 2) as u64, true, &mut stats)
+                .unwrap();
+        }
+        assert_eq!(recvd.ranges.len(), RANGE_COUNT);
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut frame_stats = FrameStats::default();
+        let mut tokens = recovery::Tokens::new();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            now(),
+            RTT,
+            &mut builder,
+            &mut tokens,
+            &mut frame_stats,
+        );
+        assert_eq!(frame_stats.ack, 1);
+
+        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
+            panic!("expected one ACK token");
+        };
+        assert_eq!(tok.ranges.len(), RANGE_COUNT);
+
+        let mut dec = builder.as_decoder();
+        dec.skip(1); // Skip the short header.
+        let frame = Frame::decode(&mut dec).unwrap();
+        let Frame::Ack {
+            largest_acknowledged,
+            first_ack_range,
+            ack_ranges,
+            ..
+        } = frame
+        else {
+            panic!("not an ACK!");
+        };
+        assert_eq!(ack_ranges.len() + 1, RANGE_COUNT);
+        let acked_ranges =
+            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges).unwrap();
+        let expected = (0..RANGE_COUNT)
+            .rev()
+            .map(|i| {
+                let pn = (i * 2) as u64;
+                pn..=pn
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(acked_ranges, expected);
+    }
+
+    #[test]
+    fn ack_only_limit_still_caps_ack_ranges() {
+        const ACK_ONLY_RANGE_COUNT: usize = 13;
+
+        assert!(recovery::SendProfile::new_limited(0).ack_only());
+        assert_eq!(
+            recovery::SendProfile::new_limited(0).limit(),
+            recovery::ACK_ONLY_SIZE_LIMIT - 1
+        );
+
+        let mut stats = Stats::default();
+        let mut tracker = AckTracker::default();
+        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
+        for i in 0..(ACK_ONLY_RANGE_COUNT + 5) {
+            recvd
+                .set_received(now(), (i * 2) as u64, true, &mut stats)
+                .unwrap();
+        }
+
+        let mut builder = packet::Builder::short(
+            Encoder::default(),
+            false,
+            None::<&[u8]>,
+            recovery::ACK_ONLY_SIZE_LIMIT - 1,
+        );
+        let mut frame_stats = FrameStats::default();
+        let mut tokens = recovery::Tokens::new();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            now(),
+            RTT,
+            &mut builder,
+            &mut tokens,
+            &mut frame_stats,
+        );
+        assert_eq!(frame_stats.ack, 1);
+        assert!(builder.len() < recovery::ACK_ONLY_SIZE_LIMIT);
+
+        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
+            panic!("expected one ACK token");
+        };
+        assert_eq!(tok.ranges.len(), ACK_ONLY_RANGE_COUNT);
+
+        let mut dec = builder.as_decoder();
+        dec.skip(1); // Skip the short header.
+        let frame = Frame::decode(&mut dec).unwrap();
+        let Frame::Ack { ack_ranges, .. } = frame else {
+            panic!("not an ACK!");
+        };
+        assert_eq!(ack_ranges.len() + 1, ACK_ONLY_RANGE_COUNT);
+    }
+
+    #[test]
+    fn ack_frame_reserves_space_for_another_frame() {
+        let mut stats = Stats::default();
+        let mut tracker = AckTracker::default();
+        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
+        recvd.set_received(now(), 0, true, &mut stats).unwrap();
+        recvd.set_received(now(), 2, true, &mut stats).unwrap();
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        builder.set_limit(
+            builder.len() + RecvdPackets::USEFUL_ACK_LEN + 16 + packet::Builder::MINIMUM_FRAME_SIZE
+                - 1,
+        );
+
+        let mut frame_stats = FrameStats::default();
+        let mut tokens = recovery::Tokens::new();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            now(),
+            RTT,
+            &mut builder,
+            &mut tokens,
+            &mut frame_stats,
+        );
+        assert_eq!(frame_stats.ack, 1);
+        assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
+
+        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
+            panic!("expected one ACK token");
+        };
+        assert_eq!(tok.ranges.len(), 1);
+
+        let mut dec = builder.as_decoder();
+        dec.skip(1); // Skip the short header.
+        let frame = Frame::decode(&mut dec).unwrap();
+        let Frame::Ack { ack_ranges, .. } = frame else {
+            panic!("not an ACK!");
+        };
+        assert_eq!(ack_ranges.len(), 0);
+    }
+
+    #[test]
+    fn two_byte_ack_range_count_reduces_range_budget() {
+        const RANGE_COUNT: usize = 65;
+
+        let mut stats = Stats::default();
+        let mut tracker = AckTracker::default();
+        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
+        for i in 0..RANGE_COUNT {
+            recvd
+                .set_received(now(), (i * 2) as u64, true, &mut stats)
+                .unwrap();
+        }
+        assert_eq!(recvd.ranges.len(), RANGE_COUNT);
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        builder.set_limit(
+            builder.len()
+                + RecvdPackets::USEFUL_ACK_LEN
+                + (16 * (RANGE_COUNT - 1))
+                + packet::Builder::MINIMUM_FRAME_SIZE,
+        );
+
+        let mut frame_stats = FrameStats::default();
+        let mut tokens = recovery::Tokens::new();
+        tracker.write_frame(
+            PacketNumberSpace::Initial,
+            now(),
+            RTT,
+            &mut builder,
+            &mut tokens,
+            &mut frame_stats,
+        );
+        assert_eq!(frame_stats.ack, 1);
+        assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
+
+        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
+            panic!("expected one ACK token");
+        };
+        assert_eq!(tok.ranges.len(), RANGE_COUNT - 1);
     }
 
     #[test]
