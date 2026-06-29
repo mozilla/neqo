@@ -964,6 +964,21 @@ impl<'a> Public<'a> {
             Ok(v) => v,
             Err(e) => return Err((self, e).into()),
         };
+        // The two reserved bits in the first byte (0x0c for long headers, 0x18
+        // for short headers) are header protected, so they can only be checked
+        // now that both header and packet protection have been removed. A peer
+        // that sets either bit is a connection error of type PROTOCOL_VIOLATION.
+        //
+        // <https://www.rfc-editor.org/rfc/rfc9000.html#section-17.2>
+        // <https://www.rfc-editor.org/rfc/rfc9000.html#section-17.3.1>
+        let reserved = if self.packet_type.is_long() {
+            0x0c
+        } else {
+            0x18
+        };
+        if self.data[0] & reserved != 0 {
+            return Err((self, Error::ProtocolViolation).into());
+        }
         let data = &self.data[header_end..header_end + payload_len];
         // Helper for late errors where `self` is partially borrowed.
         let make_err = |error| DecryptionError {
@@ -1334,6 +1349,61 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// A packet that authenticates but has a reserved bit set in the first byte
+    /// is a connection error of type `PROTOCOL_VIOLATION`. The bit is set before
+    /// the packet is encrypted so that it is covered by the AEAD and survives
+    /// header protection removal at the receiver. Each reserved bit is checked
+    /// on its own because the long and short header masks differ.
+    fn reject_reserved_bit(mut builder: Builder<Vec<u8>>, bit: u8) {
+        builder.as_mut()[0] |= bit;
+        let packet = builder
+            .build(&mut CryptoDxState::test_default_write())
+            .expect("build");
+        let mut buf = packet.as_ref().to_vec();
+        let (packet, _) = Public::decode(&mut buf, &cid_mgr()).unwrap();
+        match packet.decrypt(&mut CryptoStates::test_default(), now()) {
+            Err(e) => assert_eq!(e.error, Error::ProtocolViolation),
+            Ok(_) => panic!("reserved bit not rejected"),
+        }
+    }
+
+    #[test]
+    fn reserved_bits_short() {
+        fixture_init();
+        // Short header reserved bits are 0x18.
+        for bit in [0x10, 0x08] {
+            let mut builder = Builder::short(
+                Encoder::default(),
+                true,
+                Some(ConnectionId::from(SERVER_CID)),
+                packet::LIMIT,
+            );
+            builder.pn(0, 1);
+            builder.encode(SAMPLE_SHORT_PAYLOAD);
+            reject_reserved_bit(builder, bit);
+        }
+    }
+
+    #[test]
+    fn reserved_bits_long() {
+        fixture_init();
+        // Long header reserved bits are 0x0c.
+        for bit in [0x08, 0x04] {
+            let mut builder = Builder::long(
+                Encoder::default(),
+                Type::Initial,
+                Version::default(),
+                None::<&[u8]>,
+                Some(ConnectionId::from(SERVER_CID)),
+                packet::LIMIT,
+            );
+            builder.initial_token(&[]);
+            builder.pn(0, 1);
+            builder.encode(SAMPLE_INITIAL_PAYLOAD);
+            reject_reserved_bit(builder, bit);
+        }
     }
 
     #[test]
