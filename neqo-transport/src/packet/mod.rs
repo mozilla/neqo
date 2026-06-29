@@ -1350,8 +1350,10 @@ mod tests {
     /// A packet that authenticates but has a reserved bit set in the first byte
     /// is a connection error of type `PROTOCOL_VIOLATION`. The bit is set before
     /// the packet is encrypted so that it is covered by the AEAD and survives
-    /// header protection removal at the receiver.
-    fn reject_reserved_bit(builder: Builder<Vec<u8>>) {
+    /// header protection removal at the receiver. Each reserved bit is checked
+    /// on its own because the long and short header masks differ.
+    fn reject_reserved_bit(mut builder: Builder<Vec<u8>>, bit: u8) {
+        builder.as_mut()[0] |= bit;
         let packet = builder
             .build(&mut CryptoDxState::test_default_write())
             .expect("build");
@@ -1366,34 +1368,38 @@ mod tests {
     #[test]
     fn reserved_bits_short() {
         fixture_init();
-        let mut builder = Builder::short(
-            Encoder::default(),
-            true,
-            Some(ConnectionId::from(SERVER_CID)),
-            packet::LIMIT,
-        );
-        builder.pn(0, 1);
-        builder.encode(SAMPLE_SHORT_PAYLOAD);
-        builder.as_mut()[0] |= 0x08;
-        reject_reserved_bit(builder);
+        // Short header reserved bits are 0x18.
+        for bit in [0x10, 0x08] {
+            let mut builder = Builder::short(
+                Encoder::default(),
+                true,
+                Some(ConnectionId::from(SERVER_CID)),
+                packet::LIMIT,
+            );
+            builder.pn(0, 1);
+            builder.encode(SAMPLE_SHORT_PAYLOAD);
+            reject_reserved_bit(builder, bit);
+        }
     }
 
     #[test]
     fn reserved_bits_long() {
         fixture_init();
-        let mut builder = Builder::long(
-            Encoder::default(),
-            Type::Initial,
-            Version::default(),
-            None::<&[u8]>,
-            Some(ConnectionId::from(SERVER_CID)),
-            packet::LIMIT,
-        );
-        builder.initial_token(&[]);
-        builder.pn(0, 1);
-        builder.encode(SAMPLE_INITIAL_PAYLOAD);
-        builder.as_mut()[0] |= 0x08;
-        reject_reserved_bit(builder);
+        // Long header reserved bits are 0x0c.
+        for bit in [0x08, 0x04] {
+            let mut builder = Builder::long(
+                Encoder::default(),
+                Type::Initial,
+                Version::default(),
+                None::<&[u8]>,
+                Some(ConnectionId::from(SERVER_CID)),
+                packet::LIMIT,
+            );
+            builder.initial_token(&[]);
+            builder.pn(0, 1);
+            builder.encode(SAMPLE_INITIAL_PAYLOAD);
+            reject_reserved_bit(builder, bit);
+        }
     }
 
     #[test]
