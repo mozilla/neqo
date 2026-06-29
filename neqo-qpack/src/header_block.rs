@@ -930,9 +930,9 @@ mod tests {
     }
 
     /// RFC 9204 Section 4.5.1.1: a non-zero Encoded Insert Count that
-    /// reconstructs to a Required Insert Count of 0 is a decoding error. With
-    /// fewer than `MaxEntries` insertions, an Encoded Insert Count of 1 wraps
-    /// back to 0 and must be rejected.
+    /// reconstructs to a Required Insert Count of 0 is a decoding error.
+    /// A value of 1 maps to a value of 0, which is invalid unless the
+    /// value has wrapped, which this test doesn't cover.
     #[test]
     fn req_insert_count_reconstructed_to_zero() {
         let table = HeaderTable::new(false);
