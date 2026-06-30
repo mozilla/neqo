@@ -590,6 +590,20 @@ trait SendStream: Stream {
     fn stream_writable(&self);
     fn done(&self) -> bool;
 
+    /// Commit to reliably delivering the data buffered so far, so that prefix is still delivered
+    /// (via `RESET_STREAM_AT`) even if the stream is later reset. Implementations of this are
+    /// expected to send any data that is buffered in the HTTP/3 layer is first flushed to the
+    /// transport so the commitment covers everything written so far.
+    /// The default implementation fails immediately.
+    ///
+    /// # Errors
+    /// Transport errors (e.g. the peer did not enable reliable reset), or [`Error::Internal`] if
+    /// the buffered data could not be fully flushed to the transport. The latter is not expected:
+    /// the sender only buffers data that flow control already permits sending.
+    fn commit(&mut self, _conn: &mut Connection, _now: Instant) -> Res<()> {
+        Err(Error::Unavailable)
+    }
+
     /// # Errors
     ///
     /// Error may occur during sending data, e.g. protocol error, etc.

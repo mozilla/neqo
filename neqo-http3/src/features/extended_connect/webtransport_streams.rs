@@ -214,6 +214,17 @@ impl SendStream for WebTransportSendStream {
         Ok(())
     }
 
+    fn commit(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        // The session-id prefix must reach the transport before anything can be committed; flush
+        // it if it is still buffered. If it cannot be flushed, fail rather than under-commit.
+        self.send(conn, now)?;
+        if self.has_data_to_send() {
+            return Err(crate::Error::Internal);
+        }
+        conn.stream_commit(self.stream_id)?;
+        Ok(())
+    }
+
     fn has_data_to_send(&self) -> bool {
         matches!(
             self.state,

@@ -382,7 +382,7 @@ impl WtTest {
     }
 
     fn commit_stream_client(&mut self, wt_stream_id: StreamId) {
-        self.client.stream_commit(wt_stream_id).unwrap();
+        self.client.stream_commit(wt_stream_id, now()).unwrap();
     }
 
     fn receive_reset_client(&mut self, expected_stream_id: StreamId) {

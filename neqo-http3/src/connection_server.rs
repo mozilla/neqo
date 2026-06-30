@@ -173,8 +173,13 @@ impl Http3ServerHandler {
     /// # Errors
     /// When the transport rejects the commitment (see
     /// [`neqo_transport::Connection::stream_commit`]).
-    pub fn stream_commit(&self, stream_id: StreamId, conn: &mut Connection) -> Res<()> {
-        self.base_handler.stream_commit(conn, stream_id)
+    pub fn stream_commit(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<()> {
+        self.base_handler.stream_commit(conn, stream_id, now)
     }
 
     pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {

@@ -1046,12 +1046,21 @@ impl Http3Connection {
     /// See [`neqo_transport::Connection::stream_commit`].
     ///
     /// # Errors
-    /// When the transport rejects the commitment (e.g. the peer did not enable reliable reset,
-    /// or the stream does not exist).
-    pub fn stream_commit(&self, conn: &mut Connection, stream_id: StreamId) -> Res<()> {
+    /// `InvalidStreamId` if the stream does not exist, or a transport error when the commitment
+    /// is rejected (e.g. the peer did not enable reliable reset).
+    pub fn stream_commit(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
         qtrace!("[{self}] Commit reliable size on stream {stream_id}");
-        conn.stream_commit(stream_id)?;
-        Ok(())
+        // The request is routed through the send stream so that any data still buffered in the
+        // HTTP/3 layer is flushed to the transport before the commitment is made.
+        self.send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .commit(conn, now)
     }
 
     pub fn stream_stop_sending(

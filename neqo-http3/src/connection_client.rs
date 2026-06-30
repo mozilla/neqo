@@ -635,8 +635,9 @@ impl Http3Client {
     /// # Errors
     /// `InvalidStreamId` if the stream does not exist, or `NotAvailable` if the peer did not
     /// enable reliable reset.
-    pub fn stream_commit(&mut self, stream_id: StreamId) -> Res<()> {
-        self.base_handler.stream_commit(&mut self.conn, stream_id)
+    pub fn stream_commit(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
+        self.base_handler
+            .stream_commit(&mut self.conn, stream_id, now)
     }
 
     /// # Errors
