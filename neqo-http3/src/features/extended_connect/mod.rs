@@ -23,7 +23,7 @@ use crate::{
     Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
     client_events::Http3ClientEvents,
     features::{
-        NegotiationState,
+        NegotiationState, WebTransportVersion,
         extended_connect::session::{CloseReason, Protocol},
     },
     settings::{HSettingType, HSettings},
@@ -57,12 +57,19 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     );
 }
 
-#[derive(Debug, PartialEq, Copy, Clone, Eq, strum::Display)]
+#[derive(Debug, PartialEq, Copy, Clone, Eq)]
 pub(crate) enum ExtendedConnectType {
-    #[strum(to_string = "webtransport")]
     WebTransport,
-    #[strum(to_string = "connect-udp")]
     ConnectUdp,
+}
+
+impl std::fmt::Display for ExtendedConnectType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::WebTransport => write!(f, "webtransport"),
+            Self::ConnectUdp => write!(f, "connect-udp"),
+        }
+    }
 }
 
 impl ExtendedConnectType {
@@ -77,7 +84,7 @@ impl ExtendedConnectType {
 impl From<ExtendedConnectType> for HSettingType {
     fn from(from: ExtendedConnectType) -> Self {
         match from {
-            ExtendedConnectType::WebTransport => Self::EnableWebTransport,
+            ExtendedConnectType::WebTransport => Self::EnableWebTransportDraft15,
             ExtendedConnectType::ConnectUdp => Self::EnableConnect,
         }
     }
@@ -86,6 +93,9 @@ impl From<ExtendedConnectType> for HSettingType {
 #[derive(Debug)]
 pub(crate) struct ExtendedConnectFeature {
     feature_negotiation: NegotiationState,
+    /// Negotiated WebTransport version; `None` for non-WebTransport features or before
+    /// negotiation.
+    version: Option<WebTransportVersion>,
 }
 
 impl ExtendedConnectFeature {
@@ -93,6 +103,7 @@ impl ExtendedConnectFeature {
     pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
         Self {
             feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
+            version: None,
         }
     }
 
@@ -101,12 +112,42 @@ impl ExtendedConnectFeature {
     }
 
     pub fn handle_settings(&mut self, settings: &HSettings) {
-        self.feature_negotiation.handle_settings(settings);
+        // WebTransport supports two draft versions; check draft-15 first, fall back to draft-07.
+        if matches!(
+            &self.feature_negotiation,
+            NegotiationState::Negotiating {
+                feature_type: HSettingType::EnableWebTransportDraft15,
+                ..
+            }
+        ) {
+            let draft15 = settings.get(HSettingType::EnableWebTransportDraft15) == 1;
+            let draft07 = settings.get(HSettingType::EnableWebTransportDraft07) == 1;
+            self.version = if draft15 {
+                Some(WebTransportVersion::Draft15)
+            } else if draft07 {
+                Some(WebTransportVersion::Draft07)
+            } else {
+                None
+            };
+            self.feature_negotiation.handle_settings_with_enabled(
+                HSettingType::EnableWebTransportDraft15,
+                draft15 || draft07,
+            );
+        } else {
+            self.feature_negotiation.handle_settings(settings);
+        }
     }
 
     #[must_use]
     pub const fn enabled(&self) -> bool {
         self.feature_negotiation.enabled()
+    }
+
+    /// Returns the negotiated WebTransport version, or `None` if not yet negotiated
+    /// or if this feature is not WebTransport.
+    #[must_use]
+    pub const fn version(&self) -> Option<WebTransportVersion> {
+        self.version
     }
 }
 

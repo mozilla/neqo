@@ -31,7 +31,7 @@ use crate::{
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::{
-        ConnectType,
+        ConnectType, WebTransportVersion,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
             send_group::Generator as SendGroupGenerator,
@@ -870,15 +870,15 @@ impl Http3Connection {
                     Header::new(":authority", request.target.authority()),
                 ]
             }
-            Some(ConnectType::Extended(protocol)) => {
+            Some(ConnectType::Extended(connect_type, protocol_str)) => {
                 let mut h = vec![
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
                     Header::new(":path", request.target.path()),
-                    Header::new(":protocol", protocol.to_string()),
+                    Header::new(":protocol", protocol_str.to_string()),
                 ];
-                if protocol == ExtendedConnectType::ConnectUdp {
+                if connect_type == ExtendedConnectType::ConnectUdp {
                     h.push(Header::new("capsule-protocol", "?1"));
                 }
                 h
@@ -1193,6 +1193,15 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// The `:protocol` pseudo-header value for a new WebTransport session, which depends on
+    /// the negotiated draft version (`webtransport` for draft-07, `webtransport-h3` otherwise).
+    pub(crate) const fn webtransport_protocol_str(&self) -> &'static str {
+        match self.webtransport.version() {
+            Some(WebTransportVersion::Draft07) => "webtransport",
+            _ => "webtransport-h3",
+        }
+    }
+
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
@@ -1200,6 +1209,7 @@ impl Http3Connection {
         target: T,
         headers: &[Header],
         connect_type: ExtendedConnectType,
+        protocol_str: &'static str,
     ) -> Res<StreamId>
     where
         T: RequestTarget,
@@ -1224,7 +1234,7 @@ impl Http3Connection {
             method: "CONNECT",
             target,
             headers,
-            connect_type: Some(ConnectType::Extended(connect_type)),
+            connect_type: Some(ConnectType::Extended(connect_type, protocol_str)),
             priority: Priority::default(),
         })?;
         extended_conn
@@ -1482,6 +1492,18 @@ impl Http3Connection {
             return Err(Error::InvalidState);
         }
 
+        // One-way enforcement: respect server's per-session stream limits (draft-15).
+        if let Http3RemoteSettingsState::Received(settings) = &self.settings_state {
+            let max_streams = match stream_type {
+                StreamType::UniDi => settings.get(HSettingType::WtInitialMaxStreamsUni),
+                StreamType::BiDi => settings.get(HSettingType::WtInitialMaxStreamsBidi),
+            };
+            if max_streams != u64::MAX && wt.borrow().local_stream_count(stream_type) >= max_streams
+            {
+                return Err(Error::StreamLimit);
+            }
+        }
+
         let stream_id = conn
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
@@ -1670,7 +1692,11 @@ impl Http3Connection {
                         }
                         HSettingType::BlockedStreams => qpack_changed = true,
                         HSettingType::MaxHeaderListSize
-                        | HSettingType::EnableWebTransport
+                        | HSettingType::EnableWebTransportDraft07
+                        | HSettingType::EnableWebTransportDraft15
+                        | HSettingType::WtInitialMaxData
+                        | HSettingType::WtInitialMaxStreamsUni
+                        | HSettingType::WtInitialMaxStreamsBidi
                         | HSettingType::EnableH3Datagram
                         | HSettingType::EnableConnect => (),
                     }

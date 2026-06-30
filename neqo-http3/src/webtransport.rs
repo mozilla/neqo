@@ -434,12 +434,14 @@ impl Handler for Http3Connection {
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
+        let protocol_str = self.webtransport_protocol_str();
         self.extended_connect_create_session(
             conn,
             events,
             target,
             headers,
             extended_connect::ExtendedConnectType::WebTransport,
+            protocol_str,
         )
     }
 

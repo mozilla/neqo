@@ -257,7 +257,7 @@ fn wrong_setting_value() {
     // Encode a settings frame and send it.
     let mut enc = Encoder::default();
     let settings = HFrame::Settings {
-        settings: HSettings::new(&[HSetting::new(HSettingType::EnableWebTransport, 2)]),
+        settings: HSettings::new(&[HSetting::new(HSettingType::EnableWebTransportDraft15, 2)]),
     };
     settings.encode(&mut enc);
     assert_eq!(

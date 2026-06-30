@@ -24,8 +24,9 @@ implementation is not meant to be used in production and its only purpose is to 
 of the client-side code.
 
 __`WebTransport`__
-WebTransport is supported
-and can be enabled using [`Http3Parameters`](struct.Http3Parameters.html).
+([draft-ietf-webtrans-http3-15](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3-15),
+with backward compatibility for draft-07) is supported and can be enabled using
+[`Http3Parameters`](struct.Http3Parameters.html).
 
 ## Interaction with an application
 

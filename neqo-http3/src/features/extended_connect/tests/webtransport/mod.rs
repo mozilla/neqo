@@ -61,10 +61,9 @@ pub fn default_http3_server(server_params: Http3Parameters) -> Http3Server {
 }
 
 pub fn assert_wt(headers: &[Header]) {
-    assert!(
-        headers.contains_header(":method", "CONNECT")
-            && headers.contains_header(":protocol", "webtransport")
-    );
+    let has_wt_protocol = headers.contains_header(":protocol", "webtransport-h3")
+        || headers.contains_header(":protocol", "webtransport");
+    assert!(headers.contains_header(":method", "CONNECT") && has_wt_protocol);
 }
 
 fn exchange_packets(client: &mut Http3Client, server: &mut Http3Server) {
@@ -315,9 +314,17 @@ impl WtTest {
         wt_session_id: StreamId,
         stream_type: StreamType,
     ) -> StreamId {
+        self.try_create_wt_stream_client(wt_session_id, stream_type)
+            .unwrap()
+    }
+
+    fn try_create_wt_stream_client(
+        &mut self,
+        wt_session_id: StreamId,
+        stream_type: StreamType,
+    ) -> Result<StreamId, Error> {
         self.client
             .webtransport_create_stream(wt_session_id, stream_type)
-            .unwrap()
     }
 
     fn send_data_client(&mut self, wt_stream_id: StreamId, data: &[u8]) {
