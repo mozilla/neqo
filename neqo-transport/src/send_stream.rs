@@ -4634,6 +4634,9 @@ mod tests {
     #[test]
     fn stop_sending_after_reset_stream_at_drops_to_reset_sent() {
         let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        // Keep effective priority == Normal so the post-`reset_lost` retransmission is written at
+        // the same priority as the initial send.
+        s.set_priority(TransmissionPriority::Normal, RetransmissionPriority::Same);
         s.reset(0);
         s.mark_as_sent(0, 5, false);
         _ = send_reset_frame(&mut s);
