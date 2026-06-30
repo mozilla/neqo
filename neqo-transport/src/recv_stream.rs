@@ -131,7 +131,7 @@ impl RecvStreams {
     /// `RESET_STREAM` is a reliable reset with `reliable_size == 0`.
     ///
     /// # Errors
-    /// When flow control or the frame encoding is violated (see [`RecvStream::reset_at`]).
+    /// When flow control or the frame encoding is violated (see [`RecvStream::reset`]).
     pub fn reset(
         &mut self,
         stream_id: StreamId,
