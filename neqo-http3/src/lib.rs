@@ -592,8 +592,8 @@ trait SendStream: Stream {
 
     /// Commit to reliably delivering the data buffered so far, so that it is still delivered
     /// (via `RESET_STREAM_AT`) even if the stream is later reset. Implementations of this are
-    /// expected to send all data they have buffered so the commitment covers everything written so far.
-    /// The default implementation fails immediately.
+    /// expected to send all data they have buffered so the commitment covers everything written so
+    /// far. The default implementation fails immediately.
     ///
     /// # Errors
     /// Transport errors (e.g. the peer did not enable reliable reset),
