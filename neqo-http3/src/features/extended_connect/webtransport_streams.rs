@@ -197,13 +197,13 @@ impl SendStream for WebTransportSendStream {
         if let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state {
             let sent = conn.stream_send(self.stream_id, &buf[..])?;
             if sent == buf.len() {
+                // Commit the session-id prefix once it is buffered.
+                // WebTransport requires reliable_reset so pass the error.
+                conn.stream_commit(self.stream_id)?;
                 if fin {
                     conn.stream_close_send(self.stream_id)?;
                     self.set_done(CloseType::Done);
                 } else {
-                    // Commit the session-id prefix once it is buffered.
-                    // WebTransport requires reliable_reset so pass the error.
-                    conn.stream_commit(self.stream_id)?;
                     self.state = WebTransportSenderStreamState::SendingData;
                 }
             } else {
@@ -215,14 +215,17 @@ impl SendStream for WebTransportSendStream {
     }
 
     fn commit(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
-        // The session-id prefix must reach the transport before anything can be committed; flush
-        // it if it is still buffered. If it cannot be flushed, fail rather than under-commit.
+        // Flush the preface if it is still buffered; `send` commits it once it is fully out. The
+        // preface is sent atomically, so the transport never holds a partial preface: committing
+        // here is safe even while the stream is still blocked in `SendingInit` (it commits
+        // nothing) and can never commit a partial preface.
         self.send(conn, now)?;
-        if self.has_data_to_send() {
-            return Err(crate::Error::Internal);
+        if self.state == WebTransportSenderStreamState::SendingData {
+            conn.stream_commit(self.stream_id)?;
+            Ok(())
+        } else {
+            Err(crate::Error::FlowControlLimit)
         }
-        conn.stream_commit(self.stream_id)?;
-        Ok(())
     }
 
     fn has_data_to_send(&self) -> bool {

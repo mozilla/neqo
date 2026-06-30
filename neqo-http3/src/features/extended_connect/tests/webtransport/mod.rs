@@ -142,6 +142,7 @@ impl WtTest {
         connect_with(&mut client, &mut server);
         Self { client, server }
     }
+
     fn negotiate_wt_session(
         &mut self,
         accept: &SessionAcceptAction,

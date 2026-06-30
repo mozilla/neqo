@@ -245,6 +245,8 @@ pub enum Error {
     AlreadyInitialized,
     #[error("Fatal error")]
     Fatal,
+    #[error("Flow control limit reached")]
+    FlowControlLimit,
     #[error("HTTP GOAWAY received")]
     HttpGoaway,
     #[error("Internal error")]
@@ -261,8 +263,6 @@ pub enum Error {
     InvalidState,
     #[error("Invalid stream ID")]
     InvalidStreamId,
-    #[error("No more data")]
-    NoMoreData,
     #[error("Not enough data")]
     NotEnoughData,
     #[error("Stream limit reached")]
@@ -590,16 +590,15 @@ trait SendStream: Stream {
     fn stream_writable(&self);
     fn done(&self) -> bool;
 
-    /// Commit to reliably delivering the data buffered so far, so that prefix is still delivered
+    /// Commit to reliably delivering the data buffered so far, so that it is still delivered
     /// (via `RESET_STREAM_AT`) even if the stream is later reset. Implementations of this are
-    /// expected to send any data that is buffered in the HTTP/3 layer is first flushed to the
-    /// transport so the commitment covers everything written so far.
+    /// expected to send all data they have buffered so the commitment covers everything written so far.
     /// The default implementation fails immediately.
     ///
     /// # Errors
-    /// Transport errors (e.g. the peer did not enable reliable reset), or [`Error::Internal`] if
-    /// the buffered data could not be fully flushed to the transport. The latter is not expected:
-    /// the sender only buffers data that flow control already permits sending.
+    /// Transport errors (e.g. the peer did not enable reliable reset),
+    /// or [`Error::FlowControlLimit`] if the buffered data could not be fully flushed.
+    /// The latter should be rare as most cases of buffering should include a couple of bytes.
     fn commit(&mut self, _conn: &mut Connection, _now: Instant) -> Res<()> {
         Err(Error::Unavailable)
     }
