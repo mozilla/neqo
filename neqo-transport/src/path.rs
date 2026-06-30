@@ -584,7 +584,7 @@ impl Path {
                         "Outbound interface {name} for destination {ip} has MTU {mtu}",
                         ip = remote.ip()
                     );
-                    stats.pmtud_iface_mtu = mtu;
+                    stats.pmtud.iface_mtu = mtu;
                     Some(mtu)
                 }
                 Err(e) => {

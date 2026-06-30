@@ -266,7 +266,13 @@ impl LossRecoverySpace {
         let mut eliciting = false;
         for p in &acked {
             self.remove_packet(p);
+            // PMTUD probes carry a PING and are ack-eliciting, so they contribute to
+            // `eliciting` for RTT sampling (RFC 9002 §5.1), but their loss/PTO recovery
+            // is handled by the PMTUD state machine, not here.
             eliciting |= p.ack_eliciting();
+            if p.is_pmtud_probe() {
+                continue;
+            }
             if p.lost() {
                 stats.late_ack += 1;
             }

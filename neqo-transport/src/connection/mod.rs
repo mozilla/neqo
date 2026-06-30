@@ -2473,8 +2473,8 @@ impl Connection {
     }
 
     /// Write frames to the provided builder.  Returns a list of tokens used for
-    /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
-    /// whether the packet was padded.
+    /// tracking loss or acknowledgment, whether any frame was ACK eliciting,
+    /// whether the packet was padded, and whether this is a PMTUD probe.
     fn write_frames(
         &mut self,
         path: &PathRef,
@@ -2483,10 +2483,11 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (recovery::Tokens, bool, bool) {
+    ) -> (recovery::Tokens, bool, bool, bool) {
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
+        let mut is_pmtud_probe = false;
 
         if primary {
             let stats = &mut self.stats.borrow_mut().frame_tx;
@@ -2519,7 +2520,7 @@ impl Connection {
 
         if profile.ack_only() {
             // If we are CC limited we can only send ACKs!
-            return (tokens, false, false);
+            return (tokens, false, false, false);
         }
 
         if primary {
@@ -2535,6 +2536,7 @@ impl Connection {
                         &mut self.stats.borrow_mut(),
                     );
                     ack_eliciting = true;
+                    is_pmtud_probe = true;
                 }
                 self.write_appdata_frames(builder, &mut tokens, now);
             } else {
@@ -2573,7 +2575,7 @@ impl Connection {
             false
         };
 
-        (tokens, ack_eliciting, padded)
+        (tokens, ack_eliciting, padded, is_pmtud_probe)
     }
 
     fn write_closing_frames<B: Buffer>(
@@ -2782,12 +2784,12 @@ impl Connection {
 
             // Add frames to the packet.
             let payload_start = builder.len();
-            let (mut tokens, mut ack_eliciting, mut padded) =
-                (recovery::Tokens::new(), false, false);
+            let (mut tokens, mut ack_eliciting, mut padded, mut is_pmtud_probe) =
+                (recovery::Tokens::new(), false, false, false);
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
-                (tokens, ack_eliciting, padded) =
+                (tokens, ack_eliciting, padded, is_pmtud_probe) =
                     self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
             }
             if builder.packet_empty() {
@@ -2814,7 +2816,9 @@ impl Connection {
                 now,
             );
 
-            self.stats.borrow_mut().packets_tx += 1;
+            if !is_pmtud_probe {
+                self.stats.borrow_mut().packets_tx += 1;
+            }
             // Track which packet types are sent with which ECN codepoints. For
             // coalesced packets, this increases the counts for each packet type
             // contained in the coalesced packet. This is per Section 13.4.1 of
@@ -3060,7 +3064,7 @@ impl Connection {
             path.borrow_mut()
                 .pmtud_mut()
                 .set_peer_max_udp_payload(max_udp_payload);
-            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+            self.stats.borrow_mut().pmtud.peer_max_udp_payload = Some(max_udp_payload);
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
