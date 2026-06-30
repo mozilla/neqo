@@ -191,6 +191,9 @@ impl Streams {
                 self.events
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
+                    // The peer has no interest in this data, so drop any commitment and send a
+                    // plain RESET_STREAM rather than reliably delivering the committed prefix.
+                    ss.drop_commitment();
                     ss.reset(*application_error_code);
                 }
             }

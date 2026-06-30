@@ -1648,6 +1648,55 @@ impl SendStream {
         self.state.transition(new_state);
     }
 
+    /// Drop any commitment made via [`Self::commit`] in response to a `STOP_SENDING`: the peer has
+    /// no interest in the data, so there is nothing left to deliver reliably.
+    ///
+    /// Before a reset is sent, this just clears the committed offset so that a subsequent
+    /// [`Self::reset`] emits a plain `RESET_STREAM` (`reliable_size == 0`). If a `RESET_STREAM_AT`
+    /// has already been sent (`ResetSentReliable`), the buffer of still-in-flight committed data is
+    /// dropped and the stream moves to `ResetSent` with `reliable_size` reset to 0 (so any
+    /// retransmission of the reset frame is a plain `RESET_STREAM`), or straight to `ResetRecvd` if
+    /// the reset frame is already acked.
+    pub(crate) fn drop_commitment(&mut self) {
+        match &mut self.state {
+            State::Send { committed, .. } | State::DataSent { committed, .. } => {
+                *committed = 0;
+            }
+            State::ResetSentReliable {
+                send_buf,
+                err,
+                final_size,
+                reset_acked,
+                priority,
+                ..
+            } => {
+                let final_retired = send_buf.retired();
+                let final_written = to_u64(send_buf.buffered());
+                let new_state = if *reset_acked {
+                    // The reset is already acked, so abandoning the data completes the reset.
+                    State::ResetRecvd {
+                        final_retired,
+                        final_written,
+                    }
+                } else {
+                    // Drop the buffer and await the frame ack in `ResetSent`. Clearing
+                    // `reliable_size` makes any retransmission of the reset frame a plain
+                    // `RESET_STREAM`.
+                    State::ResetSent {
+                        err: *err,
+                        final_size: *final_size,
+                        reliable_size: 0,
+                        priority: *priority,
+                        final_retired,
+                        final_written,
+                    }
+                };
+                self.state.transition(new_state);
+            }
+            _ => {}
+        }
+    }
+
     #[cfg(test)]
     pub(crate) const fn state(&mut self) -> &mut State {
         &mut self.state
@@ -4559,6 +4608,82 @@ mod tests {
         let stats = send_reset_frame(&mut s);
         assert_eq!(stats.reset_stream, 0);
         assert_eq!(stats.reset_stream_at, 1);
+    }
+
+    /// A `STOP_SENDING` drops any commitment, so the reset is a plain `RESET_STREAM` even though
+    /// data was committed.
+    #[test]
+    fn stop_sending_drops_commitment_emits_reset_stream() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.drop_commitment();
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+    }
+
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` was already sent drops the in-flight committed
+    /// data (moving to `ResetSent`) but leaves `reliable_size` unchanged.
+    #[test]
+    fn stop_sending_after_reset_stream_at_drops_to_reset_sent() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                reset_acked: false,
+                ..
+            }
+        ));
+
+        // STOP_SENDING: stop delivering the committed prefix, dropping to `ResetSent` with
+        // `reliable_size` cleared to 0 (any frame retransmission is now a plain `RESET_STREAM`).
+        s.drop_commitment();
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        assert!(!s.is_ended());
+
+        // A retransmission of the reset frame is now a plain RESET_STREAM.
+        s.reset_lost();
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+
+        // Once the frame is acked, the stream ends without waiting for the data.
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` whose frame is already acked completes the reset
+    /// immediately, abandoning the still-in-flight committed data.
+    #[test]
+    fn stop_sending_after_reset_stream_at_acked_completes() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        // Frame acked, committed data still in flight.
+        s.reset_acked();
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert!(!s.is_ended());
+
+        s.drop_commitment();
+        assert!(s.is_ended());
     }
 
     /// When all committed data is already acked at reset time, the buffer is dropped (the
