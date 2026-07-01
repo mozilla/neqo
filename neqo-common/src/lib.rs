@@ -13,13 +13,12 @@ pub mod event;
 #[cfg(feature = "build-fuzzing-corpus")]
 mod fuzz;
 pub mod header;
+pub mod hex;
 pub mod hrtime;
 mod incrdecoder;
 pub mod log;
 pub mod qlog;
 pub mod tos;
-
-use std::fmt::Write as _;
 
 use enum_map::Enum;
 use static_assertions::const_assert_eq;
@@ -35,46 +34,6 @@ pub use self::{
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},
     tos::{Dscp, Ecn, Tos},
 };
-
-#[must_use]
-pub fn hex<A: AsRef<[u8]>>(buf: A) -> String {
-    let mut ret = String::with_capacity(buf.as_ref().len() * 2);
-    for b in buf.as_ref() {
-        write!(&mut ret, "{b:02x}").expect("write OK");
-    }
-    ret
-}
-
-#[must_use]
-pub fn hex_snip_middle<A: AsRef<[u8]>>(buf: A) -> String {
-    const SHOW_LEN: usize = 8;
-    let buf = buf.as_ref();
-    if buf.len() <= SHOW_LEN * 2 {
-        hex_with_len(buf)
-    } else {
-        let mut ret = String::with_capacity(SHOW_LEN * 2 + 16);
-        write!(&mut ret, "[{}]: ", buf.len()).expect("write OK");
-        for b in &buf[..SHOW_LEN] {
-            write!(&mut ret, "{b:02x}").expect("write OK");
-        }
-        ret.push_str("..");
-        for b in &buf[buf.len() - SHOW_LEN..] {
-            write!(&mut ret, "{b:02x}").expect("write OK");
-        }
-        ret
-    }
-}
-
-#[must_use]
-pub fn hex_with_len<A: AsRef<[u8]>>(buf: A) -> String {
-    let buf = buf.as_ref();
-    let mut ret = String::with_capacity(10 + buf.len() * 2);
-    write!(&mut ret, "[{}]: ", buf.len()).expect("write OK");
-    for b in buf {
-        write!(&mut ret, "{b:02x}").expect("write OK");
-    }
-    ret
-}
 
 #[must_use]
 pub const fn const_max(a: usize, b: usize) -> usize {
@@ -183,13 +142,7 @@ macro_rules! dispatch {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn hex_output() {
-        assert_eq!(hex([]), "");
-        assert_eq!(hex([0xab, 0xcd]), "abcd");
-    }
+    use super::{const_max, const_min};
 
     #[test]
     fn const_minmax() {
@@ -197,26 +150,5 @@ mod tests {
             assert_eq!(const_min(a, b), min);
             assert_eq!(const_max(a, b), max);
         }
-    }
-
-    #[test]
-    fn hex_snip_middle_boundary() {
-        // Exactly SHOW_LEN*2 = 16 bytes: should use full hex (no "..").
-        let short: Vec<u8> = (0..16).collect();
-        let s = hex_snip_middle(&short);
-        assert!(!s.contains(".."), "16 bytes should not be truncated");
-        assert!(s.ends_with("0e0f"));
-
-        // 17 bytes: one over the boundary, should be truncated.
-        let just_over: Vec<u8> = (0..17).collect();
-        assert!(hex_snip_middle(&just_over).contains(".."));
-
-        // 20 bytes: truncated, check first 8 and last 8 bytes are exact.
-        let long: Vec<u8> = (0..20).collect();
-        let s = hex_snip_middle(&long);
-        assert!(s.starts_with("[20]: 0001020304050607"));
-        assert!(s.contains(".."));
-        // Last 8 bytes (12..20 = 0x0c..0x13) must be exactly "0c0d0e0f10111213".
-        assert!(s.ends_with("0c0d0e0f10111213"));
     }
 }

@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog, to_u64};
+use neqo_common::{Decoder, Ecn, hex::Hex, qinfo, qlog::Qlog, to_u64};
 use qlog::events::{
     ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
     connectivity::{
@@ -51,6 +51,11 @@ use crate::{
     version::{self, Version},
 };
 
+/// Allocation-performing hex conversion for qlog only.
+fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
+    Hex::new(v).to_string()
+}
+
 pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
     qlog.add_event_at(
         || {
@@ -61,8 +66,8 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
                     owner: Some(TransportOwner::Remote),
                     original_destination_connection_id: remote
                         .get_bytes(OriginalDestinationConnectionId)
-                        .map(hex),
-                    stateless_reset_token: remote.get_bytes(StatelessResetToken).map(hex),
+                        .map(to_hex),
+                    stateless_reset_token: remote.get_bytes(StatelessResetToken).map(to_hex),
                     disable_active_migration: remote.get_empty(DisableMigration).then_some(true),
                     max_idle_timeout: Some(remote.get_integer(TransportParameterId::IdleTimeout)),
                     max_udp_payload_size: Some(remote.get_integer(MaxUdpPayloadSize) as u32),
@@ -88,7 +93,7 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
                             port_v4: paddr.ipv4()?.port(),
                             port_v6: paddr.ipv6()?.port(),
                             connection_id: cid.connection_id().to_string(),
-                            stateless_reset_token: hex(cid.reset_token()),
+                            stateless_reset_token: to_hex(cid.reset_token()),
                         })
                     }),
                     ..Default::default()
@@ -655,7 +660,7 @@ impl From<Frame<'_>> for QuicFrame {
                     ty: None,
                     details: None,
                     raw: Some(RawInfo {
-                        data: Some(hex(token)),
+                        data: Some(to_hex(token)),
                         length: Some(to_u64(token.len())),
                         payload_length: None,
                     }),
@@ -715,17 +720,17 @@ impl From<Frame<'_>> for QuicFrame {
                 sequence_number: sequence_number as u32,
                 retire_prior_to: retire_prior as u32,
                 connection_id_length: Some(connection_id.len() as u8),
-                connection_id: hex(connection_id),
-                stateless_reset_token: Some(hex(stateless_reset_token)),
+                connection_id: to_hex(connection_id),
+                stateless_reset_token: Some(to_hex(stateless_reset_token)),
             },
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
                 sequence_number: sequence_number as u32,
             },
             Frame::PathChallenge { data } => Self::PathChallenge {
-                data: Some(hex(data)),
+                data: Some(to_hex(data)),
             },
             Frame::PathResponse { data } => Self::PathResponse {
-                data: Some(hex(data)),
+                data: Some(to_hex(data)),
             },
             Frame::ConnectionClose {
                 error_code,

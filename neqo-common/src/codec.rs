@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
 };
 
-use crate::{Length, hex_with_len, to_u64, to_usize};
+use crate::{Length, hex::HexWithLen, to_u64, to_usize};
 
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 
@@ -184,7 +184,7 @@ impl<'a> AsRef<[u8]> for Decoder<'a> {
 
 impl Debug for Decoder<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&hex_with_len(self.as_ref()))
+        HexWithLen::fmt(f, self)
     }
 }
 
@@ -498,7 +498,7 @@ impl Default for Encoder {
 
 impl Debug for Encoder {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        f.write_str(&hex_with_len(self))
+        HexWithLen::fmt(f, self)
     }
 }
 

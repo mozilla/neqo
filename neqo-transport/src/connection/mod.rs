@@ -18,9 +18,12 @@ use std::{
 };
 
 use neqo_common::{
-    Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
-    hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
-    to_u64, to_usize,
+    Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
+    event::Provider as EventProvider,
+    hex::{Hex, HexSnipMiddle, HexWithLen},
+    hrtime, qdebug, qerror, qinfo,
+    qlog::Qlog,
+    qtrace, qwarn, to_u64, to_usize,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -441,7 +444,6 @@ impl Connection {
         let quic_datagrams = QuicDatagrams::new(
             conn_params.get_datagram_size(),
             conn_params.get_outgoing_datagram_queue(),
-            conn_params.get_incoming_datagram_queue(),
             events.clone(),
         );
 
@@ -782,7 +784,7 @@ impl Connection {
 
         qinfo!(
             "[{self}] resumption token {}",
-            hex_snip_middle(token.as_ref())
+            HexSnipMiddle::new(token.as_ref())
         );
         let mut dec = Decoder::from(token.as_ref());
 
@@ -799,16 +801,16 @@ impl Connection {
         qtrace!("[{self}]   RTT {rtt:?}");
 
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!("[{self}]   transport parameters {}", hex(tp_slice));
+        qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp =
             TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!("[{self}]   Initial token {}", hex(init_token));
+        qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
 
         let tok = dec.decode_remainder();
-        qtrace!("[{self}]   TLS token {}", hex(tok));
+        qtrace!("[{self}]   TLS token {}", Hex::new(tok));
 
         match self.crypto.tls_mut() {
             Agent::Client(c) => {
@@ -864,7 +866,7 @@ impl Connection {
             });
             enc.encode(extra);
             let records = s.send_ticket(now, enc.as_ref())?;
-            qdebug!("[{self}] send session ticket {}", hex(&enc));
+            qdebug!("[{self}] send session ticket {}", Hex::new(&enc));
             self.crypto.buffer_records(records)?;
         } else {
             unreachable!();
@@ -1346,7 +1348,7 @@ impl Connection {
         let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
             "[{self}] Valid Retry received, token={} scid={retry_scid}",
-            hex(packet.token())
+            Hex::new(packet.token())
         );
 
         let lost_packets = self.loss_recovery.retry(&path, now);
@@ -1397,7 +1399,7 @@ impl Connection {
             // indicate that there is a stateless reset present.
             qdebug!(
                 "[{self}] Stateless reset: {}",
-                hex(&d[d.len() - Srt::LEN..])
+                Hex::new(&d[d.len() - Srt::LEN..])
             );
             self.state_signaling.reset();
             self.set_state(
@@ -1764,7 +1766,7 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
-        qtrace!("[{self}] {} input {}", path.borrow(), hex(&d));
+        qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
         let mut slc = d.as_mut();
@@ -1854,8 +1856,10 @@ impl Connection {
                             self.save_datagram(epoch, d, remaining, now);
                             return Ok(());
                         }
-                        Error::KeysExhausted => {
-                            // Exhausting read keys is fatal.
+                        // Exhausting read keys is fatal. So is a packet that
+                        // authenticated but broke the protocol (e.g. reserved
+                        // bits set), which closes the connection.
+                        Error::KeysExhausted | Error::ProtocolViolation => {
                             return Err(e.error);
                         }
                         Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
@@ -3093,7 +3097,7 @@ impl Connection {
             qwarn!(
                 "[{self}] ISCID test failed: self cid {:?} != tp cid {:?}",
                 self.remote_initial_source_cid,
-                tp.map(hex),
+                tp.map(Hex::new),
             );
             return Err(Error::ProtocolViolation);
         }
@@ -3109,7 +3113,7 @@ impl Connection {
                 qwarn!(
                     "[{self}] ODCID test failed: self cid {:?} != tp cid {:?}",
                     self.original_destination_cid,
-                    tp.map(hex),
+                    tp.map(Hex::new),
                 );
                 return Err(Error::ProtocolViolation);
             }
@@ -3126,7 +3130,7 @@ impl Connection {
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
                     "[{self}] RSCID test failed. self cid {expected:?} != tp cid {:?}",
-                    tp.map(hex),
+                    tp.map(Hex::new),
                 );
                 return Err(Error::ProtocolViolation);
             }
@@ -3231,7 +3235,7 @@ impl Connection {
     ) -> Res<()> {
         qtrace!(
             "[{self}] Handshake space={space} data: {:?}",
-            data.as_ref().map(hex_with_len),
+            data.as_ref().map(HexWithLen::new),
         );
 
         let was_authentication_pending =
@@ -3344,7 +3348,7 @@ impl Connection {
             Frame::Crypto { offset, data } => {
                 qtrace!(
                     "[{self}] Crypto frame on space={space} offset={offset}: {d}",
-                    d = hex_snip_middle(data),
+                    d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto
@@ -3494,8 +3498,7 @@ impl Connection {
             }
             Frame::Datagram { data, .. } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams
-                    .handle_datagram(data, &mut self.stats.borrow_mut())?;
+                self.quic_datagrams.handle_datagram(data)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }

@@ -23,7 +23,7 @@ use std::{
 use neqo_common::{
     Datagram, Decoder, Ecn, Role,
     event::Provider as _,
-    hex,
+    hex::Hex,
     qlog::{Qlog, new_trace},
     qtrace,
 };
@@ -235,7 +235,7 @@ where
     .expect("create a server");
     if let Ok(dir) = std::env::var("QLOGDIR") {
         // Use random bytes to generate a unique name
-        let unique_name = format!("server-{}", hex(random::<10>()));
+        let unique_name = format!("server-{}", Hex::new(random::<10>()));
         c.set_qlog(
             Qlog::enabled_with_file(
                 dir.parse().unwrap(),
@@ -445,7 +445,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     dec.skip_vvec(); // The rest of the packet.
     let p1 = &buf[..dec.offset()];
     let p2 = (dec.remaining() > 0).then(|| dec.decode_remainder());
-    qtrace!("split packet: {} {:?}", hex(p1), p2.map(hex));
+    qtrace!("split packet: {} {:?}", Hex::new(p1), p2.map(Hex::new));
     (p1, p2)
 }
 

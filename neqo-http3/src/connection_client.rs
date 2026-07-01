@@ -15,8 +15,12 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Decoder, Encoder, Header, MessageType, Role, event::Provider as EventProvider, hex,
-    hex_with_len, qdebug, qinfo, qlog::Qlog, qtrace, qwarn,
+    Datagram, Decoder, Encoder, Header, MessageType, Role,
+    event::Provider as EventProvider,
+    hex::{Hex, HexWithLen},
+    qdebug, qinfo,
+    qlog::Qlog,
+    qtrace, qwarn,
 };
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
@@ -437,7 +441,7 @@ impl Http3Client {
         let Some(settings_slice) = dec.decode_vvec() else {
             return Err(Error::InvalidResumptionToken);
         };
-        qtrace!("[{self}]   settings {}", hex_with_len(settings_slice));
+        qtrace!("[{self}]   settings {}", HexWithLen::new(settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
         Error::map_error(
@@ -445,7 +449,7 @@ impl Http3Client {
             Error::InvalidResumptionToken,
         )?;
         let tok = dec.decode_remainder();
-        qtrace!("[{self}]   Transport token {}", hex(tok));
+        qtrace!("[{self}]   Transport token {}", Hex::new(tok));
         self.conn.enable_resumption(now, tok)?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();
@@ -964,7 +968,6 @@ impl Http3Client {
                 }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
-                | ConnectionEvent::IncomingDatagramDropped
                 | ConnectionEvent::SconeUpdated(_)
                 | ConnectionEvent::PathMigrated { .. } => {}
             }
