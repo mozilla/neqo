@@ -175,7 +175,7 @@ impl SendStream for SendMessage {
         self.state.new_data()?;
 
         self.stream.send_buffer(conn, now)?;
-        if self.stream.has_buffered_data() {
+        if self.has_data_to_send() {
             return Ok(0);
         }
         let available = conn
@@ -224,11 +224,11 @@ impl SendStream for SendMessage {
     }
 
     fn done(&self) -> bool {
-        !self.stream.has_buffered_data() && self.state.done()
+        !self.has_data_to_send() && self.state.done()
     }
 
     fn stream_writable(&self) {
-        if !self.stream.has_buffered_data() && !self.state.done() {
+        if !self.has_data_to_send() && !self.state.done() {
             // DataWritable is just a signal for an application to try to write more data,
             // if writing fails it is fine. Therefore we do not need to properly check
             // whether more credits are available on the transport layer.
@@ -248,7 +248,7 @@ impl SendStream for SendMessage {
         let sent = Error::map_error(self.stream.send_buffer(conn, now), Error::HttpInternal(5))?;
 
         qtrace!("[{self}] {sent} bytes sent");
-        if !self.stream.has_buffered_data() {
+        if !self.has_data_to_send() {
             if self.state.done() {
                 Error::map_error(
                     conn.stream_close_send(self.stream_id()),
@@ -269,9 +269,9 @@ impl SendStream for SendMessage {
         // Flush so the commitment covers everything buffered so far. If it cannot all be flushed
         // the commitment would fall short, so fail rather than silently under-commit.
         self.stream.send_buffer(conn, now)?;
-        if self.stream.has_buffered_data() {
+        if self.has_data_to_send() {
             qdebug!("buffered data at neqo-http3 layer, failing to commit");
-            return Err(Error::Internal);
+            return Err(Error::FlowControlLimit);
         }
         conn.stream_commit(self.stream_id())?;
         Ok(())
@@ -286,7 +286,7 @@ impl SendStream for SendMessage {
 
     fn close(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
         self.state.fin()?;
-        if !self.stream.has_buffered_data() {
+        if !self.has_data_to_send() {
             conn.stream_close_send(self.stream_id())?;
         }
 
