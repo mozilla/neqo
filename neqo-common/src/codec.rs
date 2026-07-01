@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
 };
 
-use crate::{Length, hex::HexWithLen, to_u64, to_usize};
+use crate::{Length, hex::HexWithLen, to_u64};
 
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 
@@ -52,7 +52,8 @@ impl<'a> Decoder<'a> {
     /// Only use this for tests because we panic rather than reporting a result.
     #[cfg(any(test, feature = "test-fixture"))]
     fn skip_inner(&mut self, n: Option<u64>) {
-        self.skip(to_usize(n.expect("invalid length")));
+        #[expect(clippy::unwrap_used, reason = "Only used in tests.")]
+        self.skip(usize::try_from(n.expect("invalid length")).unwrap());
     }
 
     /// Skip a vector.  Panics if there isn't enough space.
@@ -661,7 +662,7 @@ impl Buffer for &mut Vec<u8> {
 
 impl Buffer for Cursor<&mut [u8]> {
     fn position(&self) -> usize {
-        to_usize(self.position())
+        usize::try_from(self.position()).expect("memory allocation not to exceed usize")
     }
 
     fn as_slice(&self) -> &[u8] {
@@ -682,7 +683,7 @@ impl Buffer for Cursor<&mut [u8]> {
     }
 
     fn pad_to(&mut self, n: usize, v: u8) {
-        let start = to_usize(self.position());
+        let start = usize::try_from(self.position()).expect("Buffer length does not exceed usize");
 
         self.get_mut()[start..n].fill(v);
         self.set_position(to_u64(n));
