@@ -54,7 +54,6 @@ impl FrameDecoder<Self> for Capsule {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::to_usize;
 
     use super::*;
 
@@ -131,7 +130,7 @@ mod tests {
         let mut decoder = neqo_common::Decoder::from(encoded);
         let type_int = decoder.decode_varint().unwrap();
         let len = decoder.decode_varint().unwrap();
-        let data = decoder.decode(to_usize(len)).unwrap();
+        let data = decoder.decode(usize::try_from(len).unwrap()).unwrap();
 
         let result = Capsule::decode(HFrameType(type_int), len, Some(data))
             .unwrap()

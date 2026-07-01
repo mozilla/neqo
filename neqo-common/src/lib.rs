@@ -21,7 +21,6 @@ pub mod qlog;
 pub mod tos;
 
 use enum_map::Enum;
-use static_assertions::const_assert_eq;
 use strum::Display;
 
 #[cfg(feature = "build-fuzzing-corpus")]
@@ -43,10 +42,6 @@ pub const fn const_max(a: usize, b: usize) -> usize {
 pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a > b) as usize]
 }
-
-// Both conversions below are safe on all targets where usize and u64 are the
-// same width (i.e., 64-bit targets). The assertion enforces this at compile time.
-const_assert_eq!(usize::BITS, u64::BITS);
 
 /// A trait for values that represent a length or byte count, convertible
 /// to the wire domain (`u64`).
@@ -70,25 +65,13 @@ impl Length for usize {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "debug_assert roundtrip `v as u64 as usize` contains a u64→usize cast; \
-              const_assert_eq above ensures it is lossless on all supported targets"
+              a usize is never wider than u64, so widening to u64 is always lossless"
 )]
 #[inline]
 #[must_use]
 pub const fn to_u64(v: usize) -> u64 {
     debug_assert!(v as u64 as usize == v);
     v as u64
-}
-
-/// Convert a `u64` to `usize`.
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "const_assert_eq above ensures usize::BITS == u64::BITS"
-)]
-#[inline]
-#[must_use]
-pub const fn to_usize(v: u64) -> usize {
-    debug_assert!(v as usize as u64 == v);
-    v as usize
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]

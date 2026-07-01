@@ -23,7 +23,7 @@ use neqo_common::{
     hex::{Hex, HexSnipMiddle, HexWithLen},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
-    qtrace, qwarn, to_u64, to_usize,
+    qtrace, qwarn, to_u64,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -2312,8 +2312,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len =
-            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
+        let pn_len = size_of::<packet::Number>()
+            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3056,11 +3056,12 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
-            path.borrow_mut()
-                .pmtud_mut()
-                .set_peer_max_udp_payload(max_udp_payload);
-            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+            if let Ok(max_udp_payload) = usize::try_from(remote.get_integer(MaxUdpPayloadSize)) {
+                path.borrow_mut()
+                    .pmtud_mut()
+                    .set_peer_max_udp_payload(max_udp_payload);
+                self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+            }
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
