@@ -1186,6 +1186,10 @@ impl SendStream {
     }
 
     /// Maybe write a `RESET_STREAM` or `RESET_STREAM_AT` frame.
+    /// Returns true if the reset is successfully sent
+    /// and that is the only data that needs sending.
+    /// Returns false when there is no reset to send
+    /// or when a `RESET_STREAM_AT` frame needs to be followed by stream data.
     pub fn write_reset_frame<B: Buffer>(
         &mut self,
         p: TransmissionPriority,
@@ -1241,7 +1245,8 @@ impl SendStream {
             }
             *priority = None;
         }
-        written
+        // Even if the write was successful, if we have reliable data pending, return false.
+        written && !matches!(self.state, State::ResetSentReliable { .. })
     }
 
     pub fn blocked_lost(&mut self, limit: u64) {
@@ -4329,8 +4334,8 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats)
-            && (stats.reset_stream + stats.reset_stream_at == 1)
+        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats);
+        stats.reset_stream + stats.reset_stream_at == 1
     }
 
     #[test]
@@ -4531,12 +4536,13 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        assert!(s.write_reset_frame(
+        s.write_reset_frame(
             TransmissionPriority::Normal,
             &mut builder,
             &mut tokens,
-            &mut stats
-        ));
+            &mut stats,
+        );
+        assert_eq!(stats.reset_stream + stats.reset_stream_at, 1);
         stats
     }
 
@@ -4898,5 +4904,39 @@ mod tests {
         s.reset_lost();
         let eff = TransmissionPriority::Normal + RetransmissionPriority::default();
         assert!(reset_frame_written(&mut s, eff));
+    }
+
+    /// A reliably-reset stream with committed data still in flight has both a `RESET_STREAM_AT`
+    /// frame and the committed STREAM data pending at the same priority. A single `write_frames`
+    /// call into a packet with ample room should emit both, so the reset and the data it protects
+    /// travel together in one packet.
+    #[test]
+    fn reset_and_committed_data_are_coalesced() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        assert!(s.has_data_at(TransmissionPriority::Normal));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        assert!(s.write_frames(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats
+        ));
+        assert!(!builder.is_full());
+
+        // Both frames should be in this one packet.
+        assert_eq!(stats.reset_stream_at, 1);
+        assert_eq!(stats.stream, 1);
     }
 }
