@@ -10,7 +10,7 @@ use std::{
     cmp::min,
     collections::HashMap,
     fmt::{self, Debug, Display},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
@@ -216,6 +216,10 @@ impl sim::Node for Node {
             Endpoint::Client(c) => qinfo!("{test_name}: {:?}", c.transport_stats()),
             Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
         }
+    }
+
+    fn timer_jitter_bound(&self) -> Duration {
+        super::LINUX_TIMER_SLACK
     }
 }
 
