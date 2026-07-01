@@ -161,6 +161,7 @@ impl Streams {
                 final_size,
                 reliable_size,
             } => {
+                stats.reset_stream_at += 1;
                 // We must have advertised support to legitimately receive this frame.
                 if !self.tps.borrow().local().get_empty(ResetStreamAt) {
                     return Err(Error::ProtocolViolation);
@@ -168,7 +169,6 @@ impl Streams {
                 if stream_id.is_send_only(self.role) {
                     return Err(Error::StreamState);
                 }
-                stats.reset_stream_at += 1;
                 if self.obtain_stream(*stream_id)?.1.is_some() {
                     self.recv.reset(
                         *stream_id,
