@@ -2757,6 +2757,21 @@ mod tests {
         assert!(s.is_ended());
     }
 
+    /// A plain `RESET_STREAM` is handled correctly after receiving `RESET_STREAM_AT`.
+    #[test]
+    fn reset_at_canceled_by_plain_reset() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+        assert!(s.reset(7, 10, 8).is_ok());
+        assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
+        assert_eq!(reset_count(&mut events), 0);
+
+        assert!(s.reset(7, 10, 0).is_ok());
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+    }
+
     /// After `STOP_SENDING`, a `RESET_STREAM_AT` ignores `reliable_size` and ends promptly.
     #[test]
     fn reset_at_after_stop_sending() {
