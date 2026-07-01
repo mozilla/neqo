@@ -270,6 +270,7 @@ impl SendStream for SendMessage {
         // the commitment would fall short, so fail rather than silently under-commit.
         self.stream.send_buffer(conn, now)?;
         if self.stream.has_buffered_data() {
+            qdebug!("buffered data at neqo-http3 layer, failing to commit");
             return Err(Error::Internal);
         }
         conn.stream_commit(self.stream_id())?;

@@ -6,8 +6,10 @@
 
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
-use neqo_common::{Encoder, to_u64};
-use neqo_transport::{Connection, StreamId, recv_stream, send_stream, streams::SendGroupId};
+use neqo_common::{Encoder, qdebug, to_u64};
+use neqo_transport::{
+    Connection, Error as TransportError, StreamId, recv_stream, send_stream, streams::SendGroupId,
+};
 
 use super::session::Session;
 use crate::{
@@ -194,36 +196,45 @@ impl Stream for WebTransportSendStream {
 
 impl SendStream for WebTransportSendStream {
     fn send(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
-        if let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state {
-            let sent = conn.stream_send(self.stream_id, &buf[..])?;
-            if sent == buf.len() {
-                // Commit the session-id prefix once it is buffered.
-                // WebTransport requires reliable_reset so pass the error.
-                conn.stream_commit(self.stream_id)?;
-                if fin {
-                    conn.stream_close_send(self.stream_id)?;
-                    self.set_done(CloseType::Done);
-                } else {
-                    self.state = WebTransportSenderStreamState::SendingData;
-                }
-            } else {
-                let b = buf.split_off(sent);
-                *buf = b;
+        let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state else {
+            return Ok(());
+        };
+
+        let sent = conn.stream_send(self.stream_id, &buf[..])?;
+        if sent == buf.len() {
+            // Note that it is safe to commit here because WebTransport requires reliable reset.
+            // However, there are other reasons that a commit or send might fail
+            // and we don't want to get stuck in the `SendingInit` state.
+            // So defer reporting of errors to guarantee that the state transition completes.
+            let mut res = conn.stream_commit(self.stream_id);
+            if res == Err(TransportError::NotAvailable) {
+                qdebug!("[{conn}]: Peer supports webtransport, but not reliable reset: ignoring");
+                // Old versions might need to work when reliable resets are not available.
+                // TODO: Remove this override when we remove support for old WebTransport versions.
+                res = Ok(());
             }
+            if fin {
+                let close = conn.stream_close_send(self.stream_id);
+                res = res.and(close);
+                self.set_done(CloseType::Done);
+            } else {
+                self.state = WebTransportSenderStreamState::SendingData;
+            }
+            res?;
+        } else {
+            let b = buf.split_off(sent);
+            *buf = b;
         }
         Ok(())
     }
 
     fn commit(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
-        // Flush the preface if it is still buffered; `send` commits it once it is fully out. The
-        // preface is sent atomically, so the transport never holds a partial preface: committing
-        // here is safe even while the stream is still blocked in `SendingInit` (it commits
-        // nothing) and can never commit a partial preface.
         self.send(conn, now)?;
         if self.state == WebTransportSenderStreamState::SendingData {
             conn.stream_commit(self.stream_id)?;
             Ok(())
         } else {
+            // Avoid committing unless the preface is successfully sent.
             Err(crate::Error::FlowControlLimit)
         }
     }
