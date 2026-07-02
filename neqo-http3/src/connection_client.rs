@@ -2690,6 +2690,48 @@ mod tests {
         read_response(&mut client, &mut server.conn, request_stream_id);
     }
 
+    // Committing the data written on a regular request, then resetting, sends RESET_STREAM_AT so
+    // the committed prefix is still reliably delivered.
+    #[test]
+    fn fetch_commit_then_reset_is_reliable() {
+        let (mut client, _server, request_stream_id) = connect_and_send_request(false);
+
+        // Commit the data buffered so far (the request header frame).
+        client.stream_commit(request_stream_id, now()).unwrap();
+
+        // Resetting now reliably delivers the committed prefix via RESET_STREAM_AT.
+        let before = client.transport_stats().frame_tx;
+        client
+            .stream_reset_send(request_stream_id, Error::HttpNone.code())
+            .unwrap();
+        _ = client.process_output(now());
+        let after = client.transport_stats().frame_tx;
+        assert_eq!(after.reset_stream_at, before.reset_stream_at + 1);
+        assert_eq!(after.reset_stream, before.reset_stream);
+    }
+
+    // If the data written on a regular request cannot be flushed to the transport (here because
+    // the connection send credit is exhausted), commit() fails rather than committing a short
+    // prefix. Mirrors `wt_client_stream_commit_blocked_preface_is_safe`.
+    #[test]
+    fn fetch_commit_blocked_when_flow_control_exhausted() {
+        let (mut client, _server) =
+            connect_with_connection_parameters(ConnectionParameters::default().max_data(2000));
+
+        // Soak up the connection send credit on one request.
+        let filler = make_request(&mut client, false, &[]);
+        let buf = [0; 4096];
+        while client.send_data(filler, &buf, now()).unwrap() > 0 {}
+
+        // A fresh request cannot flush its buffered headers, so committing fails.
+        let blocked = make_request(&mut client, false, &[]);
+        assert_eq!(
+            client.stream_commit(blocked, now()),
+            Err(Error::FlowControlLimit)
+        );
+        assert_eq!(client.send_data(blocked, &[0; 10], now()), Ok(0));
+    }
+
     // send a request with request body containing request_body. We expect to receive
     // expected_data_frame_header.
     fn fetch_with_data_length_xbytes(request_body: &[u8], expected_data_frame_header: &[u8]) {
@@ -3151,6 +3193,7 @@ mod tests {
         client.process(out.dgram(), now());
 
         let mut reset = false;
+        let mut headers = false;
 
         while let Some(e) = client.next_event() {
             match e {
@@ -3168,14 +3211,19 @@ mod tests {
                     assert!(!local);
                     reset = true;
                 }
-                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
-                    panic!("We should not get any headers or data");
+                // An already-delivered header block survives a reset (a reliable reset relies on
+                // this); only data events, which require a read on the torn-down stream, are
+                // dropped.
+                Http3ClientEvent::HeaderReady { .. } => headers = true,
+                Http3ClientEvent::DataReadable { .. } => {
+                    panic!("We should not get data after a reset");
                 }
                 _ => {}
             }
         }
 
         assert!(reset);
+        assert!(headers);
 
         // after this stream will be removed from client. We will check this by trying to read
         // from the stream and that should fail.
