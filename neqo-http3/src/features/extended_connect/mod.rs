@@ -123,8 +123,7 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.set_listener(new_listener);
     }
 
-    /// `peer_transport_ok` indicates whether the peer's transport parameters meet WebTransport's
-    /// requirements (QUIC datagrams and reliable stream reset).
+    /// `transport_prereqs` captures the state of transport-level features that might be needed.
     pub fn handle_settings(
         &mut self,
         settings: &HSettings,
