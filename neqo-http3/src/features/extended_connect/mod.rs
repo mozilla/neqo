@@ -133,7 +133,7 @@ impl ExtendedConnectFeature {
         // A WebTransport client must confirm the server supports everything WebTransport needs:
         // extended CONNECT, HTTP/3 datagrams (SETTINGS), and the datagram/reliable-reset
         // transport parameters.
-        let prerequisites_met = match self.connect_type {
+        let conditions_met = match self.connect_type {
             ExtendedConnectType::WebTransport => {
                 transport_prereqs.all()
                     && settings.get(HSettingType::EnableH3Datagram) == 1
@@ -145,8 +145,7 @@ impl ExtendedConnectFeature {
                 self.role == Role::Server || settings.get(HSettingType::EnableConnect) == 1
             }
         };
-        self.feature_negotiation
-            .handle_settings(settings, self.role, prerequisites_met);
+        self.feature_negotiation.enable(conditions_met);
     }
 
     #[must_use]

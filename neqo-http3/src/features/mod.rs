@@ -6,12 +6,11 @@
 
 use std::{fmt::Debug, mem};
 
-use neqo_common::{Role, qtrace};
+use neqo_common::qtrace;
 
 use crate::{
-    client_events::Http3ClientEvents,
-    features::extended_connect::ExtendedConnectType,
-    settings::{HSettingType, HSettings},
+    client_events::Http3ClientEvents, features::extended_connect::ExtendedConnectType,
+    settings::HSettingType,
 };
 
 pub mod extended_connect;
@@ -53,33 +52,27 @@ impl NegotiationState {
         }
     }
 
-    /// Process the peer's settings. `prerequisites_met` carries any feature-specific
-    /// preconditions beyond the peer advertising the feature's own setting (for example,
-    /// WebTransport additionally requires extended CONNECT support).
-    pub fn handle_settings(&mut self, settings: &HSettings, role: Role, prerequisites_met: bool) {
-        if !self.locally_enabled() {
-            return;
-        }
-
-        if let Self::Negotiating {
+    /// Enable the feature; triggered by the receipt of settings from the peer.
+    /// `conditions_met` determines whether the feature can be enabled.
+    pub fn enable(&mut self, conditions_met: bool) {
+        let Self::Negotiating {
             feature_type,
             listener,
         } = self
-        {
-            qtrace!(
-                "set_negotiated {feature_type:?} to {} (prerequisites_met={prerequisites_met})",
-                settings.get(*feature_type)
-            );
-            let cb = mem::take(listener);
-            let ft = *feature_type;
-            *self = if (role == Role::Server || settings.get(ft) > 0) && prerequisites_met {
-                Self::Negotiated
-            } else {
-                Self::Failed
-            };
-            if let Some(l) = cb {
-                l.negotiation_done(ft, self.enabled());
-            }
+        else {
+            return;
+        };
+
+        let ft = *feature_type;
+        let cb = mem::take(listener);
+        qtrace!("set_negotiated for {ft:?} conditions_met={conditions_met}");
+        *self = if conditions_met {
+            Self::Negotiated
+        } else {
+            Self::Failed
+        };
+        if let Some(l) = cb {
+            l.negotiation_done(ft, conditions_met);
         }
     }
 
