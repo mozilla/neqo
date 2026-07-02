@@ -188,6 +188,8 @@ pub enum Error {
     Peer(TransportError),
     #[error("stateless reset")]
     StatelessReset,
+    #[error("too many PTOs without acknowledgement; connection assumed broken")]
+    TooManyPtos,
     #[error("too much data")]
     TooMuchData,
     #[error("unexpected message")]
@@ -301,6 +303,7 @@ mod tests {
             (Error::EchRetry(vec![]), 0x179),
             (Error::VersionNegotiation, 0x53f8),
             (Error::Internal, 1),
+            (Error::TooManyPtos, 1),
         ] {
             assert_eq!(err.code(), code);
         }
