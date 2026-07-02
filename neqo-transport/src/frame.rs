@@ -430,9 +430,6 @@ impl<'a> Frame<'a> {
                 error_code: CloseError::Transport(_),
                 ..
             } => pt != packet::Type::ZeroRtt,
-            // PATH_RESPONSE and HANDSHAKE_DONE, like NEW_TOKEN and an
-            // application CONNECTION_CLOSE, are marked `___1` in RFC 9000,
-            // Table 3, so they are only permitted in 1-RTT packets.
             Self::NewToken { .. }
             | Self::ConnectionClose { .. }
             | Self::PathResponse { .. }
