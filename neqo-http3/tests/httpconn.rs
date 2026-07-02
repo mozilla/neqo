@@ -563,3 +563,141 @@ fn server_stop_sending_and_stream_combinations() {
         }
     }
 }
+
+/// Confirm that a server can generate a reliable reset
+/// and that the client receives the committed data before the reset.
+#[test]
+fn server_reliable_reset() {
+    const APP_ERROR: u64 = 7;
+
+    let (mut hconn_c, mut hconn_s, dgram) = connect();
+
+    let req = hconn_c
+        .fetch(
+            now(),
+            "GET",
+            ("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    assert_eq!(req, 0);
+    hconn_c.stream_close_send(req, now()).unwrap();
+    let out = hconn_c.process(dgram, now());
+
+    // Generate a response, with the headers committed.
+    let out = hconn_s.process(out.dgram(), now());
+    if let Some(d) = out.dgram() {
+        hconn_c.process_input(d, now());
+    }
+    let request = receive_request(&hconn_s).unwrap();
+    request
+        .send_headers(&[
+            Header::new(":status", "200"),
+            Header::new("content-length", "3"),
+        ])
+        .unwrap();
+    request.stream_commit(now()).unwrap();
+    request.send_data(RESPONSE_DATA, now()).unwrap();
+    request.stream_reset_send(APP_ERROR).unwrap();
+    let out = hconn_s.process_output(now());
+
+    // Now check that the client gets the right events.
+    drop(hconn_c.process(out.dgram(), now()));
+    let mut got_headers = false;
+    while let Some(event) = hconn_c.next_event() {
+        match event {
+            Http3ClientEvent::HeaderReady { headers, fin, .. } => {
+                assert_eq!(
+                    &headers,
+                    &[
+                        Header::new(":status", "200"),
+                        Header::new("content-length", "3"),
+                    ]
+                );
+                assert!(!fin);
+                got_headers = true;
+            }
+            Http3ClientEvent::DataReadable { .. } => {
+                panic!("should get reset before data");
+            }
+            Http3ClientEvent::Reset { error, local, .. } => {
+                assert!(got_headers);
+                assert_eq!(error, APP_ERROR);
+                assert!(!local);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A reliable reset that commits a DATA frame delivers the committed body: the client sees
+/// `DataReadable`, reads the committed bytes, and only then observes the reset.
+#[test]
+fn server_reliable_reset_with_body() {
+    const APP_ERROR: u64 = 7;
+
+    let (mut hconn_c, mut hconn_s, dgram) = connect();
+    let req = hconn_c
+        .fetch(
+            now(),
+            "GET",
+            ("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    hconn_c.stream_close_send(req, now()).unwrap();
+    let out = hconn_c.process(dgram, now());
+    let out = hconn_s.process(out.dgram(), now());
+    if let Some(d) = out.dgram() {
+        hconn_c.process_input(d, now());
+    }
+    let request = receive_request(&hconn_s).unwrap();
+    request
+        .send_headers(&[
+            Header::new(":status", "200"),
+            Header::new("content-length", "3"),
+        ])
+        .unwrap();
+    request.send_data(RESPONSE_DATA, now()).unwrap();
+    // Commit the headers *and* the body, then reset.
+    request.stream_commit(now()).unwrap();
+    request.stream_reset_send(APP_ERROR).unwrap();
+    let out = hconn_s.process_output(now());
+
+    // The committed headers and body are delivered, but the reset is not.
+    // That is delayed until after data is consumed.
+    drop(hconn_c.process(out.dgram(), now()));
+    let mut got_headers = false;
+    let mut got_data = false;
+    while let Some(event) = hconn_c.next_event() {
+        match event {
+            Http3ClientEvent::HeaderReady { .. } => got_headers = true,
+            Http3ClientEvent::DataReadable { stream_id } => {
+                let mut buf = [0; 10];
+                let (amount, fin) = hconn_c.read_data(now(), stream_id, &mut buf).unwrap();
+                assert_eq!(&buf[..amount], RESPONSE_DATA);
+                assert!(!fin);
+                got_data = true;
+            }
+            Http3ClientEvent::Reset { .. } => panic!("reset surfaced before the body was read"),
+            _ => {}
+        }
+    }
+    assert!(got_headers);
+    assert!(got_data);
+
+    // Reading the committed body drained the reliable data, so we should get a reset event.
+    // The HTTP/3 stack needs to process events from the transport before that happens.
+    drop(hconn_c.process_output(now()));
+    let mut got_reset = false;
+    while let Some(event) = hconn_c.next_event() {
+        if let Http3ClientEvent::Reset { error, local, .. } = event {
+            assert_eq!(error, APP_ERROR);
+            assert!(!local);
+            got_reset = true;
+        }
+    }
+    assert!(got_reset);
+}

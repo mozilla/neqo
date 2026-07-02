@@ -153,16 +153,17 @@ impl RecvStreamEvents for Http3ClientEvents {
         let stream_id = stream_info.stream_id();
         let (local, error) = match close_type {
             CloseType::ResetApp(_) => {
-                self.remove_recv_stream_events(stream_id);
+                self.remove_recv_stream_events(stream_id, false);
                 return;
             }
             CloseType::Done => return,
             CloseType::ResetRemote(e) => {
-                self.remove_recv_stream_events(stream_id);
+                // Preserve a committed header block delivered by a reliable reset.
+                self.remove_recv_stream_events(stream_id, true);
                 (false, e)
             }
             CloseType::LocalError(e) => {
-                self.remove_recv_stream_events(stream_id);
+                self.remove_recv_stream_events(stream_id, false);
                 (true, e)
             }
         };
@@ -385,14 +386,29 @@ impl Http3ClientEvents {
         self.insert(Http3ClientEvent::StateChange(state));
     }
 
-    /// Remove all events for a stream
-    fn remove_recv_stream_events(&self, stream_id: StreamId) {
-        self.remove(|evt| {
-            matches!(evt,
-                Http3ClientEvent::HeaderReady { stream_id: x, .. }
-                | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::PushPromise { request_stream_id: x, .. }
-                | Http3ClientEvent::Reset { stream_id: x, .. } if *x == stream_id)
+    /// Remove events for a stream that is being torn down.
+    ///
+    /// When `keep_header_ready` is set, events carrying headers are preserved.
+    /// This is used when receiving a `RESET_STREAM[_AT]`, because a reliable reset might want
+    /// to preserve the headers and the only place those headers exist is in these events.
+    ///
+    /// Data-bearing events are dropped. If the reliable data includes DATA frames, the
+    /// transport will delay delivery of the reset event, so the only case where we get
+    /// a reset is where existing data is not intended to be reliably delivered.
+    fn remove_recv_stream_events(&self, stream_id: StreamId, keep_header_ready: bool) {
+        self.remove(|evt| match evt {
+            Http3ClientEvent::HeaderReady { stream_id: x, .. }
+            | Http3ClientEvent::PushPromise {
+                request_stream_id: x,
+                ..
+            } if *x == stream_id => !keep_header_ready,
+            Http3ClientEvent::DataReadable { stream_id: x }
+            | Http3ClientEvent::Reset { stream_id: x, .. }
+                if *x == stream_id =>
+            {
+                true
+            }
+            _ => false,
         });
     }
 

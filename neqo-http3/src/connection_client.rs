@@ -3193,6 +3193,7 @@ mod tests {
         client.process(out.dgram(), now());
 
         let mut reset = false;
+        let mut headers = false;
 
         while let Some(e) = client.next_event() {
             match e {
@@ -3210,14 +3211,19 @@ mod tests {
                     assert!(!local);
                     reset = true;
                 }
-                Http3ClientEvent::HeaderReady { .. } | Http3ClientEvent::DataReadable { .. } => {
-                    panic!("We should not get any headers or data");
+                // An already-delivered header block survives a reset (a reliable reset relies on
+                // this); only data events, which require a read on the torn-down stream, are
+                // dropped.
+                Http3ClientEvent::HeaderReady { .. } => headers = true,
+                Http3ClientEvent::DataReadable { .. } => {
+                    panic!("We should not get data after a reset");
                 }
                 _ => {}
             }
         }
 
         assert!(reset);
+        assert!(headers);
 
         // after this stream will be removed from client. We will check this by trying to read
         // from the stream and that should fail.
