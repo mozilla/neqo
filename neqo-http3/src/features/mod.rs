@@ -157,6 +157,11 @@ mod tests {
             HSetting::new(HSettingType::EnableWebTransport, 1),
             HSetting::new(HSettingType::EnableConnect, 1),
         ]);
+        // Everything but WebTransport.
+        let no_wt = HSettings::new(&[
+            HSetting::new(HSettingType::EnableH3Datagram, 1),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ]);
 
         // Client: needs all SETTINGS and the peer's transport parameters.
         assert!(negotiate(
@@ -175,6 +180,12 @@ mod tests {
             Role::Client,
             ExtendedConnectType::WebTransport,
             &no_h3_datagram,
+            true
+        ));
+        assert!(!negotiate(
+            Role::Client,
+            ExtendedConnectType::WebTransport,
+            &no_wt,
             true
         ));
         assert!(!negotiate(
