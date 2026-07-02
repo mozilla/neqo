@@ -83,7 +83,7 @@ impl From<ExtendedConnectType> for HSettingType {
     }
 }
 
-pub struct TransportPrerequisites {
+pub(crate) struct TransportPrerequisites {
     datagrams: bool,
     reliable_reset: bool,
 }
