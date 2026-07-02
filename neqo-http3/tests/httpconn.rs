@@ -605,6 +605,7 @@ fn server_reliable_reset() {
     // Now check that the client gets the right events.
     drop(hconn_c.process(out.dgram(), now()));
     let mut got_headers = false;
+    let mut got_reset = false;
     while let Some(event) = hconn_c.next_event() {
         match event {
             Http3ClientEvent::HeaderReady { headers, fin, .. } => {
@@ -625,10 +626,12 @@ fn server_reliable_reset() {
                 assert!(got_headers);
                 assert_eq!(error, APP_ERROR);
                 assert!(!local);
+                got_reset = true;
             }
             _ => {}
         }
     }
+    assert!(got_reset);
 }
 
 /// A reliable reset that commits a DATA frame delivers the committed body: the client sees
