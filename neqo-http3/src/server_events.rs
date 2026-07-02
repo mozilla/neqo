@@ -136,6 +136,21 @@ impl StreamHandler {
         )
     }
 
+    /// Commit to reliably delivering the stream data buffered so far. If the stream is later
+    /// reset, that prefix is delivered using `RESET_STREAM_AT` (when the peer supports it).
+    ///
+    /// # Errors
+    ///
+    /// It may return `InvalidStreamId` if a stream does not exist anymore, or `NotAvailable`
+    /// if the peer did not enable reliable reset.
+    pub fn stream_commit(&self, now: Instant) -> Res<()> {
+        self.handler.borrow_mut().stream_commit(
+            self.stream_info.stream_id(),
+            &mut self.conn.borrow_mut(),
+            now,
+        )
+    }
+
     /// Reset a stream/request.
     ///
     /// # Errors

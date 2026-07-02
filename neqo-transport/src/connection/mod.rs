@@ -63,7 +63,7 @@ use crate::{
         TransportParameterId::{
             self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit,
             InitialSourceConnectionId, MaxAckDelay, MaxDatagramFrameSize, MaxUdpPayloadSize,
-            MinAckDelay, OriginalDestinationConnectionId, RetrySourceConnectionId,
+            MinAckDelay, OriginalDestinationConnectionId, ResetStreamAt, RetrySourceConnectionId,
             StatelessResetToken,
         },
         TransportParameters, TransportParametersHandler,
@@ -3905,7 +3905,27 @@ impl Connection {
         Ok(())
     }
 
+    /// Commit to reliably delivering all stream data buffered so far: if the stream is later
+    /// reset via [`Self::stream_reset_send`], that prefix is still delivered using
+    /// `RESET_STREAM_AT`. Call this after writing the data to be protected.
+    /// # Errors
+    /// When the stream ID is invalid, the peer did not enable reliable reset
+    /// ([`Error::NotAvailable`]), or the stream has already been reset ([`Error::StreamState`]).
+    pub fn stream_commit(&mut self, stream_id: StreamId) -> Res<()> {
+        // Get the stream first: it cannot exist without remote transport parameters, so
+        // `remote()` below won't panic.
+        let stream = self.streams.get_send_stream_mut(stream_id)?;
+        if !self.tps.borrow().remote().get_empty(ResetStreamAt) {
+            return Err(Error::NotAvailable);
+        }
+        stream.commit()
+    }
+
     /// Abandon transmission of in-flight and future stream data.
+    ///
+    /// If a reliable prefix was committed via [`Self::stream_commit`] and the peer advertised
+    /// support for reliable reset, the committed prefix is delivered using `RESET_STREAM_AT`;
+    /// otherwise a plain `RESET_STREAM` is sent.
     /// # Errors
     /// When the stream ID is invalid.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {

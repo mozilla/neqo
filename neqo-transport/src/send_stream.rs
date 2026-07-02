@@ -591,6 +591,8 @@ pub enum State {
         fc: SenderFlowControl<StreamId>,
         conn_fc: Rc<RefCell<SenderFlowControl<()>>>,
         send_buf: TxBuffer,
+        /// The committed (reliable) offset, set via [`SendStream::commit`].
+        committed: u64,
     },
     // Note: `DataSent` is entered when the stream is closed, not when all data has been
     // sent for the first time.
@@ -598,17 +600,35 @@ pub enum State {
         send_buf: TxBuffer,
         fin_sent: bool,
         fin_acked: bool,
+        /// See [`State::Send::committed`].
+        committed: u64,
     },
     DataRecvd {
         retired: u64,
         written: u64,
     },
+    // A reset has been sent and no committed data below `reliable_size` is still outstanding
+    // (either `reliable_size == 0`, i.e. a plain `RESET_STREAM`, or all committed data has
+    // already been acked). The send buffer is dropped.
     ResetSent {
         err: AppError,
         final_size: u64,
+        /// The reliable size. `0` ⇒ emit `RESET_STREAM`; `> 0` ⇒ emit `RESET_STREAM_AT`.
+        reliable_size: u64,
         priority: Option<TransmissionPriority>,
         final_retired: u64,
         final_written: u64,
+    },
+    // A `RESET_STREAM_AT` has been sent, but committed data below `reliable_size` is still in
+    // flight, so the `TxBuffer` is retained to (re)transmit it.
+    ResetSentReliable {
+        send_buf: TxBuffer,
+        err: AppError,
+        final_size: u64,
+        reliable_size: u64,
+        priority: Option<TransmissionPriority>,
+        /// Whether the `RESET_STREAM_AT` frame itself has been acked.
+        reset_acked: bool,
     },
     ResetRecvd {
         final_retired: u64,
@@ -619,7 +639,9 @@ pub enum State {
 impl State {
     const fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
-            Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => Some(send_buf),
+            Self::Send { send_buf, .. }
+            | Self::DataSent { send_buf, .. }
+            | Self::ResetSentReliable { send_buf, .. } => Some(send_buf),
             Self::Ready { .. }
             | Self::DataRecvd { .. }
             | Self::ResetSent { .. }
@@ -632,7 +654,11 @@ impl State {
             // In Ready, TxBuffer not yet allocated but size is known
             Self::Ready { .. } => TxBuffer::MAX_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
-            Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
+            // No application data can be added after a reset.
+            Self::DataRecvd { .. }
+            | Self::ResetSent { .. }
+            | Self::ResetSentReliable { .. }
+            | Self::ResetRecvd { .. } => 0,
         }
     }
 
@@ -739,12 +765,19 @@ impl SendStream {
     /// Must mirror every frame-emission path in [`Self::write_frames`]; any new
     /// frame type added there must also be reflected here.
     fn has_data_at(&mut self, priority: TransmissionPriority) -> bool {
-        // RESET_STREAM pending?
-        if let State::ResetSent {
-            priority: Some(p), ..
-        } = self.state
-        {
-            return p == priority;
+        // RESET_STREAM / RESET_STREAM_AT pending?
+        match self.state {
+            // A plain reset emits no other frames, so this is the only thing to check.
+            State::ResetSent {
+                priority: reset_priority,
+                ..
+            } => return reset_priority == Some(priority),
+            // A reliable reset may also have committed STREAM data pending, so only short-circuit
+            // when the reset frame itself is queued at this priority; otherwise fall through.
+            State::ResetSentReliable {
+                priority: Some(p), ..
+            } if p == priority => return true,
+            _ => {}
         }
         // STREAM_DATA_BLOCKED pending?
         if priority == self.priority
@@ -823,12 +856,15 @@ impl SendStream {
         self.sendorder = sendorder;
     }
 
-    /// If all data has been buffered or written, how much was sent.
+    /// If the stream's final size is established, what it is. This is known once the stream is
+    /// closed (`DataSent`) or reset (`ResetSent`/`ResetSentReliable`).
     #[must_use]
     pub fn final_size(&self) -> Option<u64> {
         match &self.state {
             State::DataSent { send_buf, .. } => Some(send_buf.used()),
-            State::ResetSent { final_size, .. } => Some(*final_size),
+            State::ResetSent { final_size, .. } | State::ResetSentReliable { final_size, .. } => {
+                Some(*final_size)
+            }
             _ => None,
         }
     }
@@ -846,7 +882,9 @@ impl SendStream {
     )]
     pub fn bytes_written(&self) -> u64 {
         match &self.state {
-            State::Send { send_buf, .. } | State::DataSent { send_buf, .. } => {
+            State::Send { send_buf, .. }
+            | State::DataSent { send_buf, .. }
+            | State::ResetSentReliable { send_buf, .. } => {
                 send_buf.retired() + to_u64(send_buf.buffered())
             }
             State::DataRecvd {
@@ -869,7 +907,9 @@ impl SendStream {
     #[must_use]
     pub const fn bytes_acked(&self) -> u64 {
         match &self.state {
-            State::Send { send_buf, .. } | State::DataSent { send_buf, .. } => send_buf.retired(),
+            State::Send { send_buf, .. }
+            | State::DataSent { send_buf, .. }
+            | State::ResetSentReliable { send_buf, .. } => send_buf.retired(),
             State::DataRecvd { retired, .. } => *retired,
             State::ResetSent { final_retired, .. } | State::ResetRecvd { final_retired, .. } => {
                 *final_retired
@@ -895,6 +935,20 @@ impl SendStream {
                 fin_sent,
                 ..
             } => send_buf.has_next_bytes() || !fin_sent,
+            // Only committed data below `reliable_size` is (re)transmitted (and on a
+            // retransmission, only data below the retransmission offset); no FIN.
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                ..
+            } => {
+                let limit = if retransmission_only {
+                    min(self.retransmission_offset, reliable_size)
+                } else {
+                    reliable_size
+                };
+                send_buf.has_next_bytes_before(limit)
+            }
             _ => false,
         }
     }
@@ -914,12 +968,11 @@ impl SendStream {
                         self.retransmission_offset
                     );
                     (self.retransmission_offset > offset).then(|| {
-                        let Ok(delta) = usize::try_from(self.retransmission_offset - offset) else {
-                            return None;
-                        };
+                        let delta = usize::try_from(self.retransmission_offset - offset)
+                            .unwrap_or(usize::MAX);
                         let len = min(delta, slice.len());
-                        Some((offset, &slice[..len]))
-                    })?
+                        (offset, &slice[..len])
+                    })
                 } else {
                     Some((offset, slice))
                 }
@@ -939,6 +992,27 @@ impl SendStream {
                     // Send empty stream frame with fin set
                     Some((used, &[]))
                 }
+            }
+            // (Re)transmit committed data, truncated so `offset + len <= reliable_size`, and
+            // never a FIN (the end is signalled by the RESET_STREAM_AT frame). This caps fresh
+            // sends at `reliable_size` and, on a retransmission, additionally caps at the
+            // retransmission offset so only lost data below `reliable_size` is resent.
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                ..
+            } => {
+                let limit = if retransmission_only {
+                    min(self.retransmission_offset, reliable_size)
+                } else {
+                    reliable_size
+                };
+                let (offset, slice) = send_buf.next_bytes()?;
+                (offset < limit).then(|| {
+                    let cap = usize::try_from(limit - offset).unwrap_or(usize::MAX);
+                    let len = min(cap, slice.len());
+                    (offset, &slice[..len])
+                })
             }
             State::Ready { .. }
             | State::DataRecvd { .. }
@@ -991,7 +1065,13 @@ impl SendStream {
         };
 
         let id = self.stream_id;
-        let final_size = self.final_size();
+        // Avoid `Self::final_size`, because we don't want to send the FIN flag
+        // after `RESET_STREAM_AT`, even if we have all the data.
+        // If we did, packet loss or reordering could drop the reset being delivered.
+        let fin_offset = match &self.state {
+            State::DataSent { send_buf, .. } => Some(send_buf.used()),
+            _ => None,
+        };
         if let Some((offset, data)) = self.next_bytes(retransmission) {
             let overhead = 1 // Frame type
                 + Encoder::varint_len(id.as_u64())
@@ -1006,7 +1086,7 @@ impl SendStream {
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
-            let fin = final_size.is_some_and(|fs| fs == offset + to_u64(length));
+            let fin = fin_offset.is_some_and(|fo| fo == offset + to_u64(length));
             if length == 0 && !fin {
                 qtrace!("[{self}] write_frame no data, no fin");
                 return;
@@ -1043,6 +1123,11 @@ impl SendStream {
         }
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn reset_acked(&mut self) {
         match self.state {
             State::Ready { .. }
@@ -1055,10 +1140,32 @@ impl SendStream {
                 final_retired,
                 final_written,
                 ..
-            } => self.state.transition(State::ResetRecvd {
-                final_retired,
-                final_written,
-            }),
+            } => {
+                // Reaching `ResetRecvd` does not signal stream completion, even for a reliable
+                // reset that delivered committed data.
+                self.state.transition(State::ResetRecvd {
+                    final_retired,
+                    final_written,
+                });
+            }
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                reset_acked: ref mut frame_acked,
+                ..
+            } => {
+                // Complete only once all committed data has also been acked.
+                if send_buf.retired() >= reliable_size {
+                    let final_retired = send_buf.retired();
+                    let final_written = to_u64(send_buf.buffered());
+                    self.state.transition(State::ResetRecvd {
+                        final_retired,
+                        final_written,
+                    });
+                } else {
+                    *frame_acked = true;
+                }
+            }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
     }
@@ -1066,6 +1173,9 @@ impl SendStream {
     pub fn reset_lost(&mut self) {
         match self.state {
             State::ResetSent {
+                ref mut priority, ..
+            }
+            | State::ResetSentReliable {
                 ref mut priority, ..
             } => {
                 *priority = Some(self.effective_priority);
@@ -1075,7 +1185,11 @@ impl SendStream {
         }
     }
 
-    /// Maybe write a `RESET_STREAM` frame.
+    /// Maybe write a `RESET_STREAM` or `RESET_STREAM_AT` frame.
+    /// Returns true if the reset is successfully sent
+    /// and that is the only data that needs sending.
+    /// Returns false when there is no reset to send
+    /// or when a `RESET_STREAM_AT` frame needs to be followed by stream data.
     pub fn write_reset_frame<B: Buffer>(
         &mut self,
         p: TransmissionPriority,
@@ -1083,34 +1197,56 @@ impl SendStream {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) -> bool {
-        if let State::ResetSent {
-            final_size,
+        let (State::ResetSent {
             err,
-            ref mut priority,
+            final_size,
+            reliable_size,
+            priority,
             ..
-        } = self.state
-        {
-            if *priority != Some(p) {
-                return false;
-            }
-            if builder.write_varint_frame(&[
+        }
+        | State::ResetSentReliable {
+            err,
+            final_size,
+            reliable_size,
+            priority,
+            ..
+        }) = &mut self.state
+        else {
+            return false;
+        };
+        if *priority != Some(p) {
+            return false;
+        }
+        // `reliable_size == 0` ⇒ plain `RESET_STREAM`; otherwise `RESET_STREAM_AT`.
+        let written = if *reliable_size == 0 {
+            builder.write_varint_frame(&[
                 FrameType::ResetStream.into(),
                 self.stream_id.as_u64(),
-                err,
-                final_size,
-            ]) {
-                tokens.push(recovery::Token::Stream(StreamRecoveryToken::ResetStream {
-                    stream_id: self.stream_id,
-                }));
-                stats.reset_stream += 1;
-                *priority = None;
-                true
-            } else {
-                false
-            }
+                *err,
+                *final_size,
+            ])
         } else {
-            false
+            builder.write_varint_frame(&[
+                FrameType::ResetStreamAt.into(),
+                self.stream_id.as_u64(),
+                *err,
+                *final_size,
+                *reliable_size,
+            ])
+        };
+        if written {
+            tokens.push(recovery::Token::Stream(StreamRecoveryToken::ResetStream {
+                stream_id: self.stream_id,
+            }));
+            if *reliable_size == 0 {
+                stats.reset_stream += 1;
+            } else {
+                stats.reset_stream_at += 1;
+            }
+            *priority = None;
         }
+        // Even if the write was successful, if we have reliable data pending, return false.
+        written && !matches!(self.state, State::ResetSentReliable { .. })
     }
 
     pub fn blocked_lost(&mut self, limit: u64) {
@@ -1187,6 +1323,40 @@ impl SendStream {
                         retired,
                         written: buffered,
                     });
+                }
+            }
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                reset_acked,
+                err,
+                final_size,
+                priority,
+            } => {
+                send_buf.mark_as_acked(offset, len);
+                // Wait until all committed data (`< reliable_size`) is acked.
+                if send_buf.retired() >= reliable_size {
+                    let final_retired = send_buf.retired();
+                    let final_written = to_u64(send_buf.buffered());
+                    if reset_acked {
+                        // Both the frame and the committed data are acked: reach `ResetRecvd`.
+                        self.state.transition(State::ResetRecvd {
+                            final_retired,
+                            final_written,
+                        });
+                    } else {
+                        // Committed data is acked but the frame is not: drop the buffer and
+                        // await the frame ack in `ResetSent` (which keeps `reliable_size` so
+                        // that the frame is still retransmitted as RESET_STREAM_AT).
+                        self.state.transition(State::ResetSent {
+                            err,
+                            final_size,
+                            reliable_size,
+                            priority,
+                            final_retired,
+                            final_written,
+                        });
+                    }
                 }
             }
             _ => qtrace!("[{self}] mark_as_acked called from state {:?}", self.state),
@@ -1296,6 +1466,7 @@ impl SendStream {
                 fc: owned_fc,
                 conn_fc: owned_conn_fc,
                 send_buf: TxBuffer::new(),
+                committed: 0,
             });
         }
 
@@ -1322,6 +1493,7 @@ impl SendStream {
                 fc,
                 conn_fc,
                 send_buf,
+                ..
             } => {
                 let sent = send_buf.send(buf);
                 fc.consume(sent);
@@ -1339,67 +1511,194 @@ impl SendStream {
                     send_buf: TxBuffer::new(),
                     fin_sent: false,
                     fin_acked: false,
+                    committed: 0,
                 });
             }
-            State::Send { send_buf, .. } => {
+            State::Send {
+                send_buf,
+                committed,
+                ..
+            } => {
                 let owned_buf = mem::replace(send_buf, TxBuffer::new());
+                let committed = *committed;
                 self.state.transition(State::DataSent {
                     send_buf: owned_buf,
                     fin_sent: false,
                     fin_acked: false,
+                    committed,
                 });
             }
             State::DataSent { .. } => qtrace!("[{self}] already in DataSent state"),
             State::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
             State::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
+            State::ResetSentReliable { .. } => {
+                qtrace!("[{self}] already in ResetSentReliable state");
+            }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
     }
 
+    /// Commit to reliably delivering all data buffered so far: that prefix is delivered even if
+    /// the stream is later reset (via `RESET_STREAM_AT`). Call this *after* writing the data to
+    /// be protected. The committed offset only ever grows (the buffered total never shrinks).
+    /// The caller is responsible for ensuring that their peer supports this feature.
+    ///
+    /// # Errors
+    /// [`Error::StreamState`] when the stream has already been reset.
+    pub fn commit(&mut self) -> Res<()> {
+        match &mut self.state {
+            // Nothing has been buffered yet, so the implicit committed offset stays 0; and once
+            // all data has been received there is nothing left to commit. Both are no-ops.
+            State::Ready { .. } | State::DataRecvd { .. } => Ok(()),
+            State::Send {
+                send_buf,
+                committed,
+                ..
+            }
+            | State::DataSent {
+                send_buf,
+                committed,
+                ..
+            } => {
+                *committed = send_buf.used();
+                Ok(())
+            }
+            State::ResetSent { .. }
+            | State::ResetSentReliable { .. }
+            | State::ResetRecvd { .. } => Err(Error::StreamState),
+        }
+    }
+
+    /// Reset the stream. When a non-zero commitment exists (set via [`Self::commit`], which is
+    /// only reachable when the peer supports the feature), a `RESET_STREAM_AT` is emitted
+    /// (reliably delivering `[0, reliable_size)`); otherwise a plain `RESET_STREAM` is sent.
     #[allow(
         clippy::allow_attributes,
         clippy::missing_panics_doc,
         reason = "OK here."
     )]
     pub fn reset(&mut self, err: AppError) {
-        match &self.state {
-            State::Ready { fc, .. } => {
-                let final_size = fc.used();
-                self.state.transition(State::ResetSent {
+        /// Build the reset state for a stream that has a `send_buf`, choosing between a buffer-less
+        /// `ResetSent` and a `ResetSentReliable` that retains the buffer for committed data.
+        fn make_reset_state(
+            err: AppError,
+            priority: TransmissionPriority,
+            send_buf: &mut TxBuffer,
+            final_size: u64,
+            committed: u64,
+        ) -> State {
+            // A non-zero committed offset implies the peer supports reliable reset (`commit`
+            // enforces that), so it is safe to emit `RESET_STREAM_AT`.
+            let reliable_size = min(committed, final_size);
+            let final_retired = send_buf.retired();
+            let final_written = to_u64(send_buf.buffered());
+            if reliable_size == 0 || final_retired >= reliable_size {
+                // No committed data is still outstanding: drop the buffer.
+                State::ResetSent {
                     err,
                     final_size,
-                    priority: Some(self.priority),
-                    final_retired: 0,
-                    final_written: 0,
-                });
-            }
-            State::Send { fc, send_buf, .. } => {
-                let final_size = fc.used();
-                let final_retired = send_buf.retired();
-                let buffered = to_u64(send_buf.buffered());
-                self.state.transition(State::ResetSent {
-                    err,
-                    final_size,
-                    priority: Some(self.priority),
+                    reliable_size,
+                    priority: Some(priority),
                     final_retired,
-                    final_written: buffered,
-                });
+                    final_written,
+                }
+            } else {
+                // Committed data below `reliable_size` is still in flight: keep the buffer.
+                State::ResetSentReliable {
+                    send_buf: mem::take(send_buf),
+                    err,
+                    final_size,
+                    reliable_size,
+                    reset_acked: false,
+                    priority: Some(priority),
+                }
             }
-            State::DataSent { send_buf, .. } => {
+        }
+
+        let priority = self.priority;
+        let new_state = match &mut self.state {
+            State::Ready { fc, .. } => State::ResetSent {
+                err,
+                final_size: fc.used(),
+                reliable_size: 0,
+                priority: Some(priority),
+                final_retired: 0,
+                final_written: 0,
+            },
+            State::Send {
+                fc,
+                send_buf,
+                committed,
+                ..
+            } => {
+                let final_size = fc.used();
+                make_reset_state(err, priority, send_buf, final_size, *committed)
+            }
+            State::DataSent {
+                send_buf,
+                committed,
+                ..
+            } => {
                 let final_size = send_buf.used();
-                let final_retired = send_buf.retired();
-                let buffered = to_u64(send_buf.buffered());
-                self.state.transition(State::ResetSent {
-                    err,
-                    final_size,
-                    priority: Some(self.priority),
-                    final_retired,
-                    final_written: buffered,
-                });
+                make_reset_state(err, priority, send_buf, final_size, *committed)
             }
-            State::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
-            State::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
-            State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
+            State::DataRecvd { .. }
+            | State::ResetSent { .. }
+            | State::ResetSentReliable { .. }
+            | State::ResetRecvd { .. } => {
+                qtrace!("[{}] reset called in terminal state", self.stream_id);
+                return;
+            }
+        };
+        self.state.transition(new_state);
+    }
+
+    /// Drop any commitment made via [`Self::commit`] in response to a `STOP_SENDING`: the peer has
+    /// no interest in the data, so there is nothing left to deliver reliably.
+    ///
+    /// Before a reset is sent, this just clears the committed offset so that a subsequent
+    /// [`Self::reset`] emits a plain `RESET_STREAM` (`reliable_size == 0`). If a `RESET_STREAM_AT`
+    /// has already been sent (`ResetSentReliable`), the buffer of still-in-flight committed data is
+    /// dropped and the stream moves to `ResetSent` with `reliable_size` reset to 0 (so any
+    /// retransmission of the reset frame is a plain `RESET_STREAM`), or straight to `ResetRecvd` if
+    /// the reset frame is already acked.
+    pub(crate) fn drop_commitment(&mut self) {
+        match &mut self.state {
+            State::Send { committed, .. } | State::DataSent { committed, .. } => {
+                *committed = 0;
+            }
+            State::ResetSentReliable {
+                send_buf,
+                err,
+                final_size,
+                reset_acked,
+                priority,
+                ..
+            } => {
+                let final_retired = send_buf.retired();
+                let final_written = to_u64(send_buf.buffered());
+                let new_state = if *reset_acked {
+                    // The reset is already acked, so abandoning the data completes the reset.
+                    State::ResetRecvd {
+                        final_retired,
+                        final_written,
+                    }
+                } else {
+                    // Drop the buffer and await the frame ack in `ResetSent`. Clearing
+                    // `reliable_size` makes any retransmission of the reset frame a plain
+                    // `RESET_STREAM`.
+                    State::ResetSent {
+                        err: *err,
+                        final_size: *final_size,
+                        reliable_size: 0,
+                        priority: *priority,
+                        final_retired,
+                        final_written,
+                    }
+                };
+                self.state.transition(new_state);
+            }
+            _ => {}
         }
     }
 
@@ -2122,7 +2421,7 @@ mod tests {
 
     use super::RecoveryToken;
     use crate::{
-        ConnectionEvents, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
+        ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         connection::{RetransmissionPriority, TransmissionPriority},
         events::ConnectionEvent,
         fc::SenderFlowControl,
@@ -3695,6 +3994,7 @@ mod tests {
             fc,
             conn_fc,
             send_buf,
+            committed: 0,
         };
         s
     }
@@ -4034,7 +4334,8 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats)
+        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats);
+        stats.reset_stream + stats.reset_stream_at == 1
     }
 
     #[test]
@@ -4194,5 +4495,448 @@ mod tests {
         // Reset lost: priority set back to Some(effective_priority).
         s.reset_lost();
         assert_has_data_only_at(&mut s, &[eff]);
+    }
+
+    // --- RESET_STREAM_AT (reliable stream reset) ---
+
+    const RR_STREAM: StreamId = StreamId::new(100);
+
+    /// A `Send`-state stream with `data` buffered and a generous flow-control window, sharing the
+    /// caller's `ConnectionEvents` so emitted events (e.g. `SendStreamComplete`) can be observed.
+    fn reliable_stream(data: &[u8], events: ConnectionEvents) -> SendStream {
+        let len = data.len() as u64;
+        let mut s = SendStream::new(RR_STREAM, 0, connection_fc(len * 2), events);
+        s.set_max_stream_data(len * 2);
+        s.send(data).unwrap();
+        s
+    }
+
+    /// A `Send`-state stream that buffers `prefix`, commits it (so the committed offset is
+    /// `prefix.len()`), then buffers `rest`. Used to test a committed prefix smaller than the
+    /// final size.
+    fn reliable_stream_committed(
+        prefix: &[u8],
+        rest: &[u8],
+        events: ConnectionEvents,
+    ) -> SendStream {
+        let total = (prefix.len() + rest.len()) as u64;
+        let mut s = SendStream::new(RR_STREAM, 0, connection_fc(total * 2), events);
+        s.set_max_stream_data(total * 2);
+        s.send(prefix).unwrap();
+        s.commit().unwrap();
+        if !rest.is_empty() {
+            s.send(rest).unwrap();
+        }
+        s
+    }
+
+    /// Write the pending reset frame at `Normal` priority and return the frame stats.
+    fn send_reset_frame(s: &mut SendStream) -> FrameStats {
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_reset_frame(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
+        assert_eq!(stats.reset_stream + stats.reset_stream_at, 1);
+        stats
+    }
+
+    /// `commit` is a no-op in `Ready`, succeeds once data is buffered, and fails after reset.
+    #[test]
+    fn commit_validation() {
+        let mut s = SendStream::new(
+            RR_STREAM,
+            1024,
+            connection_fc(1024),
+            ConnectionEvents::default(),
+        );
+        // In `Ready` there is nothing to commit, but it is not an error.
+        assert!(matches!(s.state(), State::Ready { .. }));
+        assert!(s.commit().is_ok());
+
+        // In `Send`, commit captures the buffered data.
+        s.send(&[0x42; 10]).unwrap();
+        assert!(matches!(s.state(), State::Send { .. }));
+        assert!(s.commit().is_ok());
+
+        // After reset, commit fails with a stream-state error.
+        s.reset(0);
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert_eq!(s.commit().unwrap_err(), Error::StreamState);
+    }
+
+    /// `commit` after the stream has been fully received (`DataRecvd`) is a no-op.
+    #[test]
+    fn commit_after_received_is_noop() {
+        let mut s = reliable_stream(&[0x42; 5], ConnectionEvents::default());
+        s.close();
+        s.mark_as_sent(0, 5, true);
+        s.mark_as_acked(0, 5, true);
+        assert!(matches!(s.state(), State::DataRecvd { .. }));
+        assert!(s.commit().is_ok());
+    }
+
+    /// Without a commitment, a reset emits a plain `RESET_STREAM`.
+    #[test]
+    fn reset_without_commit_is_plain() {
+        let mut s = reliable_stream(&[0x42; 10], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+    }
+
+    /// A commitment with the peer's support and data still in flight enters `ResetSentReliable`
+    /// and emits `RESET_STREAM_AT`.
+    #[test]
+    fn reset_with_commit_emits_reset_stream_at() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 0);
+        assert_eq!(stats.reset_stream_at, 1);
+    }
+
+    /// A `STOP_SENDING` drops any commitment, so the reset is a plain `RESET_STREAM` even though
+    /// data was committed.
+    #[test]
+    fn stop_sending_drops_commitment_emits_reset_stream() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.drop_commitment();
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+    }
+
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` was already sent drops the in-flight committed
+    /// data (moving to `ResetSent`) but leaves `reliable_size` unchanged.
+    #[test]
+    fn stop_sending_after_reset_stream_at_drops_to_reset_sent() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        // Keep effective priority == Normal so the post-`reset_lost` retransmission is written at
+        // the same priority as the initial send.
+        s.set_priority(TransmissionPriority::Normal, RetransmissionPriority::Same);
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                reset_acked: false,
+                ..
+            }
+        ));
+
+        // STOP_SENDING: stop delivering the committed prefix, dropping to `ResetSent` with
+        // `reliable_size` cleared to 0 (any frame retransmission is now a plain `RESET_STREAM`).
+        s.drop_commitment();
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        assert!(!s.is_ended());
+
+        // A retransmission of the reset frame is now a plain RESET_STREAM.
+        s.reset_lost();
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+
+        // Once the frame is acked, the stream ends without waiting for the data.
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` whose frame is already acked completes the reset
+    /// immediately, abandoning the still-in-flight committed data.
+    #[test]
+    fn stop_sending_after_reset_stream_at_acked_completes() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        // Frame acked, committed data still in flight.
+        s.reset_acked();
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert!(!s.is_ended());
+
+        s.drop_commitment();
+        assert!(s.is_ended());
+    }
+
+    /// When all committed data is already acked at reset time, the buffer is dropped (the
+    /// stream uses `ResetSent`) but `RESET_STREAM_AT` is still emitted.
+    #[test]
+    fn reset_with_commit_already_acked_drops_buffer() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.mark_as_sent(0, 10, false);
+        s.mark_as_acked(0, 5, false); // retire up to the committed offset
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream_at, 1);
+    }
+
+    /// A reliable reset commits at most `final_size` and never emits a STREAM FIN, capping
+    /// (re)transmission at the reliable offset.
+    #[test]
+    fn reliable_reset_caps_data_and_omits_fin() {
+        let mut s = reliable_stream_committed(&[0x42; 4], &[0x42; 6], ConnectionEvents::default());
+        s.reset(0);
+
+        // The final size is reported accurately even while reliably resetting.
+        assert_eq!(s.final_size(), Some(10));
+
+        // Only `[0, 4)` is offered.
+        let (offset, data) = s.next_bytes(false).expect("committed data");
+        assert_eq!(offset, 0);
+        assert_eq!(data.len(), 4);
+        s.mark_as_sent(0, 4, false);
+        assert!(!s.has_next_bytes(false));
+
+        // A loss below the reliable offset is retransmitted; nothing above it ever is.
+        s.mark_as_lost(0, 4, false);
+        let (offset, data) = s.next_bytes(false).expect("retransmit committed data");
+        assert_eq!(offset, 0);
+        assert_eq!(data.len(), 4);
+    }
+
+    /// Even when the committed prefix equals the final size (so the written data offset reaches
+    /// `final_size`), a reliable reset's STREAM frame carries no FIN.
+    #[test]
+    fn reliable_reset_omits_fin_at_final_size() {
+        // Commit all 5 bytes, so reliable_size == final_size == 5.
+        let mut s = reliable_stream_committed(&[0x42; 5], &[], ConnectionEvents::default());
+        s.reset(0);
+        assert_eq!(s.final_size(), Some(5));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_stream_frame(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
+        assert_eq!(stats.stream, 1);
+        assert_eq!(tokens.len(), 1);
+        assert!(
+            !as_stream_token(&tokens.remove(0)).fin,
+            "reliable reset must not emit a FIN"
+        );
+    }
+
+    /// On a retransmission, only lost data below the retransmission offset is offered; fresh
+    /// data (still below `reliable_size`) is not pulled forward to the retransmission priority.
+    #[test]
+    fn reliable_reset_retransmission_respects_offset() {
+        // Commit all 8 bytes, so `reliable_size == 8`.
+        let mut s = reliable_stream_committed(&[0x42; 8], &[], ConnectionEvents::default());
+        s.reset(0);
+
+        // Send `[0, 4)`; `[4, 8)` remains unsent. Then lose `[0, 2)` (retransmission offset = 2).
+        s.mark_as_sent(0, 4, false);
+        s.mark_as_lost(0, 2, false);
+
+        // Retransmission only offers the lost `[0, 2)`.
+        assert!(s.has_next_bytes(true));
+        let (offset, data) = s.next_bytes(true).expect("retransmit lost data");
+        assert_eq!(offset, 0);
+        assert_eq!(data.len(), 2);
+        s.mark_as_sent(0, 2, false);
+
+        // Nothing more to retransmit: fresh `[4, 8)` is above the retransmission offset.
+        assert!(!s.has_next_bytes(true));
+        assert!(s.next_bytes(true).is_none());
+
+        // But it is still available as a fresh send (below `reliable_size`).
+        assert!(s.has_next_bytes(false));
+        let (offset, data) = s.next_bytes(false).expect("fresh committed data");
+        assert_eq!(offset, 4);
+        assert_eq!(data.len(), 4);
+    }
+
+    /// Data-then-frame ack order reaches `ResetRecvd` without firing `SendStreamComplete`.
+    #[test]
+    fn reliable_reset_completion_data_then_frame() {
+        let events = ConnectionEvents::default();
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events);
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                reset_acked: false,
+                ..
+            }
+        ));
+
+        // Ack the committed data first: collapses to ResetSent, not yet ended.
+        s.mark_as_acked(0, 5, false);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        assert!(!s.is_ended());
+
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// Frame-then-data ack order reaches `ResetRecvd` without firing `SendStreamComplete`.
+    #[test]
+    fn reliable_reset_completion_frame_then_data() {
+        let events = ConnectionEvents::default();
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events);
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+
+        // Ack the frame first: stays in ResetSentReliable awaiting the data.
+        s.reset_acked();
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert!(!s.is_ended());
+
+        s.mark_as_acked(0, 5, false);
+        assert!(s.is_ended());
+    }
+
+    /// When the committed data is already acked at reset time, the eventual frame ack reaches
+    /// `ResetRecvd` without firing `SendStreamComplete`.
+    #[test]
+    fn reliable_reset_completion_preacked() {
+        let events = ConnectionEvents::default();
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events);
+        s.mark_as_sent(0, 10, false);
+        s.mark_as_acked(0, 5, false);
+        s.reset(0);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 5,
+                ..
+            }
+        ));
+
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// Neither a plain reset nor a reliable reset fires `SendStreamComplete`.
+    #[test]
+    fn reset_does_not_complete() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_stream(&[0x42; 10], events.clone());
+        s.reset(0);
+        _ = send_reset_frame(&mut s);
+        s.reset_acked();
+        assert!(s.is_ended());
+
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events.clone());
+        s.mark_as_sent(0, 10, false);
+        s.mark_as_acked(0, 5, false);
+        s.reset(0);
+        _ = send_reset_frame(&mut s);
+        s.reset_acked();
+        assert!(s.is_ended());
+
+        let completions = events
+            .events()
+            .filter(|e| matches!(e, ConnectionEvent::SendStreamComplete { .. }))
+            .count();
+        assert_eq!(completions, 0);
+    }
+
+    /// A lost reliable reset frame is re-armed for retransmission.
+    #[test]
+    fn reliable_reset_frame_lost_rearms() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(reset_frame_written(&mut s, TransmissionPriority::Normal));
+        // In flight: nothing pending at Normal.
+        assert!(!reset_frame_written(&mut s, TransmissionPriority::Normal));
+        // Lost: re-armed at effective priority (Normal + default retransmission).
+        s.reset_lost();
+        let eff = TransmissionPriority::Normal + RetransmissionPriority::default();
+        assert!(reset_frame_written(&mut s, eff));
+    }
+
+    /// A reliably-reset stream with committed data still in flight has both a `RESET_STREAM_AT`
+    /// frame and the committed STREAM data pending at the same priority. A single `write_frames`
+    /// call into a packet with ample room should emit both, so the reset and the data it protects
+    /// travel together in one packet.
+    #[test]
+    fn reset_and_committed_data_are_coalesced() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        assert!(s.has_data_at(TransmissionPriority::Normal));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        assert!(s.write_frames(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats
+        ));
+        assert!(!builder.is_full());
+
+        // Both frames should be in this one packet.
+        assert_eq!(stats.reset_stream_at, 1);
+        assert_eq!(stats.stream, 1);
     }
 }

@@ -142,6 +142,7 @@ impl WtTest {
         connect_with(&mut client, &mut server);
         Self { client, server }
     }
+
     fn negotiate_wt_session(
         &mut self,
         accept: &SessionAcceptAction,
@@ -379,6 +380,10 @@ impl WtTest {
             .stream_reset_send(wt_stream_id, Error::HttpNone.code())
             .unwrap();
         self.exchange_packets();
+    }
+
+    fn commit_stream_client(&mut self, wt_stream_id: StreamId) {
+        self.client.stream_commit(wt_stream_id, now()).unwrap();
     }
 
     fn receive_reset_client(&mut self, expected_stream_id: StreamId) {

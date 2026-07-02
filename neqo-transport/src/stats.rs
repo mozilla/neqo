@@ -28,6 +28,7 @@ pub struct FrameStats {
     pub crypto: usize,
     pub stream: usize,
     pub reset_stream: usize,
+    pub reset_stream_at: usize,
     pub stop_sending: usize,
 
     pub ping: usize,
@@ -68,8 +69,8 @@ impl Debug for FrameStats {
         )?;
         writeln!(
             f,
-            "    stream {} reset {} stop {}",
-            self.stream, self.reset_stream, self.stop_sending,
+            "    stream {} reset {} reset_at {} stop {}",
+            self.stream, self.reset_stream, self.reset_stream_at, self.stop_sending,
         )?;
         writeln!(
             f,
@@ -101,6 +102,7 @@ impl FrameStats {
             + self.crypto
             + self.stream
             + self.reset_stream
+            + self.reset_stream_at
             + self.stop_sending
             + self.ping
             + self.padding
@@ -600,7 +602,7 @@ fn debug() {
   frames rx:
     crypto 0 done 0 token 0 close 0
     ack 0 (max 0) ping 0 padding 0
-    stream 0 reset 0 stop 0
+    stream 0 reset 0 reset_at 0 stop 0
     max: stream 0 data 0 stream_data 0
     blocked: stream 0 data 0 stream_data 0
     datagram 0
@@ -609,7 +611,7 @@ fn debug() {
   frames tx:
     crypto 0 done 0 token 0 close 0
     ack 0 (max 0) ping 0 padding 0
-    stream 0 reset 0 stop 0
+    stream 0 reset 0 reset_at 0 stop 0
     max: stream 0 data 0 stream_data 0
     blocked: stream 0 data 0 stream_data 0
     datagram 0

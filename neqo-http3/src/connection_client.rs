@@ -608,7 +608,7 @@ impl Http3Client {
     ///
     /// An error will be return if a stream does not exist.
     pub fn cancel_fetch(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
-        qinfo!("[{self}] reset_stream {stream_id} error={error}");
+        qdebug!("[{self}] reset_stream {stream_id} error={error}");
         self.base_handler
             .cancel_fetch(stream_id, error, &mut self.conn)
     }
@@ -619,7 +619,6 @@ impl Http3Client {
     ///
     /// An error will be return if stream does not exist.
     pub fn stream_close_send(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
-        qdebug!("[{self}] Close sending side stream={stream_id}");
         self.base_handler
             .stream_close_send(&mut self.conn, stream_id, now)
     }
@@ -628,16 +627,27 @@ impl Http3Client {
     ///
     /// An error will be return if a stream does not exist.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
-        qinfo!("[{self}] stream_reset_send {stream_id} error={error}");
         self.base_handler
             .stream_reset_send(&mut self.conn, stream_id, error)
+    }
+
+    /// Commit to reliably delivering the stream data buffered so far. If the stream is later
+    /// reset with [`Self::stream_reset_send`], that prefix is still delivered using
+    /// `RESET_STREAM_AT` (when the peer supports it). Call this after writing the data to
+    /// protect.
+    ///
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist, or `NotAvailable` if the peer did not
+    /// enable reliable reset.
+    pub fn stream_commit(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
+        self.base_handler
+            .stream_commit(&mut self.conn, stream_id, now)
     }
 
     /// # Errors
     ///
     /// An error will be return if a stream does not exist.
     pub fn stream_stop_sending(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
-        qinfo!("[{self}] stream_stop_sending {stream_id} error={error}");
         self.base_handler
             .stream_stop_sending(&mut self.conn, stream_id, error)
     }

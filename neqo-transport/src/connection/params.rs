@@ -20,7 +20,7 @@ use crate::{
             ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout, InitialMaxData,
             InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
-            MinAckDelay, PreferredAddress as PreferredAddressTp, Scone,
+            MinAckDelay, PreferredAddress as PreferredAddressTp, ResetStreamAt, Scone,
         },
         TransportParametersHandler,
     },
@@ -155,6 +155,9 @@ pub struct ConnectionParameters {
     randomize_first_pn: bool,
     /// Whether to send the SCONE transport parameter.
     scone: bool,
+    /// Whether to advertise support for `RESET_STREAM_AT` (reliable stream reset) via the
+    /// `reset_stream_at` transport parameter.
+    reliable_stream_reset: bool,
     /// Whether to recover from spurious congestion events by restoring prior Congestion Controller
     /// state. Detection and metrics are always active regardless of this setting.
     spurious_recovery: bool,
@@ -189,6 +192,7 @@ impl Default for ConnectionParameters {
             mlkem: true,
             randomize_first_pn: true,
             scone: false,
+            reliable_stream_reset: true,
             spurious_recovery: true,
         }
     }
@@ -518,6 +522,17 @@ impl ConnectionParameters {
     }
 
     #[must_use]
+    pub const fn reliable_stream_reset_enabled(&self) -> bool {
+        self.reliable_stream_reset
+    }
+
+    #[must_use]
+    pub const fn reliable_stream_reset(mut self, reliable_stream_reset: bool) -> Self {
+        self.reliable_stream_reset = reliable_stream_reset;
+        self
+    }
+
+    #[must_use]
     pub const fn spurious_recovery_enabled(&self) -> bool {
         self.spurious_recovery
     }
@@ -551,6 +566,9 @@ impl ConnectionParameters {
         }
         if self.scone {
             tps.local_mut().set_empty(Scone);
+        }
+        if self.reliable_stream_reset {
+            tps.local_mut().set_empty(ResetStreamAt);
         }
         tps.local_mut().set_integer(
             MaxAckDelay,
@@ -636,6 +654,17 @@ mod tests {
         // Default is false; verify builder can toggle it.
         assert!(!ConnectionParameters::default().scone_enabled());
         assert!(ConnectionParameters::default().scone(true).scone_enabled());
+    }
+
+    #[test]
+    fn reliable_stream_reset_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().reliable_stream_reset_enabled());
+        assert!(
+            !ConnectionParameters::default()
+                .reliable_stream_reset(false)
+                .reliable_stream_reset_enabled()
+        );
     }
 
     #[test]

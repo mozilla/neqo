@@ -583,7 +583,7 @@ fn wrong_directional_stream_frames() {
         // The trailing 0s are PADDING for the frames that don't need them.
         let dgram = send_with_extra(
             &mut server,
-            Writer(vec![frame_type.into(), stream_id, 0, 0]),
+            Writer(vec![frame_type.into(), stream_id, 0, 0, 0]),
             now(),
         );
         client.process_input(dgram, now());
@@ -593,6 +593,7 @@ fn wrong_directional_stream_frames() {
     // Frames a sender may not receive, on a client-initiated send-only stream.
     for frame_type in [
         FrameType::ResetStream,
+        FrameType::ResetStreamAt,
         FrameType::Stream,
         FrameType::StreamDataBlocked,
     ] {

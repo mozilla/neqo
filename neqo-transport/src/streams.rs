@@ -27,7 +27,7 @@ use crate::{
     tparams::{
         TransportParameterId::{
             InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
-            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni,
+            InitialMaxStreamDataUni, InitialMaxStreamsBidi, InitialMaxStreamsUni, ResetStreamAt,
         },
         TransportParametersHandler,
     },
@@ -135,6 +135,7 @@ impl Streams {
 
     /// # Errors
     /// When the frame is invalid.
+    #[expect(clippy::too_many_lines, reason = "Yep, but it's a nice big match.")]
     pub fn input_frame(&mut self, frame: &Frame, stats: &mut FrameStats) -> Res<()> {
         match frame {
             Frame::ResetStream {
@@ -149,8 +150,32 @@ impl Streams {
                     return Err(Error::StreamState);
                 }
                 if self.obtain_stream(*stream_id)?.1.is_some() {
+                    // A plain RESET_STREAM is a reliable reset with `reliable_size == 0`.
                     self.recv
-                        .reset(*stream_id, *application_error_code, *final_size)?;
+                        .reset(*stream_id, *application_error_code, *final_size, 0)?;
+                }
+            }
+            Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                reliable_size,
+            } => {
+                stats.reset_stream_at += 1;
+                // We must have advertised support to legitimately receive this frame.
+                if !self.tps.borrow().local().get_empty(ResetStreamAt) {
+                    return Err(Error::ProtocolViolation);
+                }
+                if stream_id.is_send_only(self.role) {
+                    return Err(Error::StreamState);
+                }
+                if self.obtain_stream(*stream_id)?.1.is_some() {
+                    self.recv.reset(
+                        *stream_id,
+                        *application_error_code,
+                        *final_size,
+                        *reliable_size,
+                    )?;
                 }
             }
             Frame::StopSending {
@@ -166,6 +191,9 @@ impl Streams {
                 self.events
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {
+                    // The peer has no interest in this data, so drop any commitment and send a
+                    // plain RESET_STREAM rather than reliably delivering the committed prefix.
+                    ss.drop_commitment();
                     ss.reset(*application_error_code);
                 }
             }

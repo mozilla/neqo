@@ -9,7 +9,7 @@
 
 use std::{
     cell::RefCell,
-    cmp::max,
+    cmp::{max, min},
     collections::BTreeMap,
     fmt::Debug,
     mem,
@@ -108,8 +108,12 @@ impl RecvStreams {
     /// # Errors
     /// When the stream does not exist or has no more data.
     pub fn read(&mut self, stream_id: StreamId, data: &mut [u8]) -> Res<(usize, bool)> {
-        let (n, fin) = self.get_mut(stream_id)?.read(data)?;
-        self.set_ended(fin);
+        let s = self.get_mut(stream_id)?;
+        let (n, fin) = s.read(data)?;
+        // A read can end the stream cleanly (`fin`) or, for a reliable reset, by draining the
+        // reliable prefix and reaching `ResetRecvd`; flag both.
+        let ended = s.is_ended();
+        self.set_ended(ended);
         Ok((n, fin))
     }
 
@@ -123,18 +127,20 @@ impl RecvStreams {
         Ok(())
     }
 
-    /// Reset a stream, noting if it ended.
+    /// Handle a `RESET_STREAM` or `RESET_STREAM_AT` for a stream, noting if it ended. A plain
+    /// `RESET_STREAM` is a reliable reset with `reliable_size == 0`.
     ///
     /// # Errors
-    /// When flow control is violated.
+    /// When flow control or the frame encoding is violated (see [`RecvStream::reset`]).
     pub fn reset(
         &mut self,
         stream_id: StreamId,
         application_error_code: AppError,
         final_size: u64,
+        reliable_size: u64,
     ) -> Res<()> {
         if let Ok(rs) = self.get_mut(stream_id) {
-            let ended = rs.reset(application_error_code, final_size)?;
+            let ended = rs.reset(application_error_code, final_size, reliable_size)?;
             self.set_ended(ended);
         }
         Ok(())
@@ -399,12 +405,40 @@ impl RxStreamOrderer {
         self.received
     }
 
+    /// Discard any buffered data at or beyond `offset`, truncating a range that straddles it.
+    ///
+    /// Used by a reliable reset (`RESET_STREAM_AT`) to drop data above the reliable size. The
+    /// dropped bytes were already charged to flow control, so this only affects what can be
+    /// delivered to the application; `received` (a received-bytes stat) is intentionally left
+    /// unchanged.
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
+    pub fn discard_after(&mut self, offset: u64) {
+        self.data_ranges.split_off(&offset);
+        // Truncate a range that straddles `offset`.
+        if let Some(mut e) = self.data_ranges.last_entry() {
+            // Note: no underflow risk, all ranges that start at or after offset are gone.
+            let start = *e.key();
+            let keep = to_usize(offset - start);
+            let data = e.get_mut();
+            data.truncate(keep);
+
+            // No overflow risk: neither start nor offset can exceed 1<<62.
+            self.end = start + to_u64(data.len());
+        } else {
+            self.end = self.retired;
+        }
+    }
+
     /// Data bytes buffered. Could be more than `bytes_readable` if there are
     /// ranges missing.
     fn buffered(&self) -> u64 {
         self.data_ranges
             .iter()
-            .map(|(&start, data)| to_u64(data.len()) - (self.retired.saturating_sub(start)))
+            .map(|(&start, data)| to_u64(data.len()) - self.retired.saturating_sub(start))
             .sum()
     }
 
@@ -472,6 +506,17 @@ enum RecvStreamState {
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
         recv_buf: RxStreamOrderer,
     },
+    // A `RESET_STREAM_AT` has been received: the final size is known and the reliable prefix
+    // `[0, reliable_size)` must be delivered before the reset is surfaced. Data at or beyond
+    // `reliable_size` is dropped. Transition to `ResetRecvd` when data is `read()`.
+    SizeKnownAt {
+        fc: ReceiverFlowControl<StreamId>,
+        session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+        recv_buf: RxStreamOrderer,
+        err: AppError,
+        final_size: u64,
+        reliable_size: u64,
+    },
     DataRecvd {
         fc: ReceiverFlowControl<StreamId>,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
@@ -520,6 +565,7 @@ impl RecvStreamState {
         match self {
             Self::Recv { recv_buf, .. }
             | Self::SizeKnown { recv_buf, .. }
+            | Self::SizeKnownAt { recv_buf, .. }
             | Self::DataRecvd { recv_buf, .. } => Some(recv_buf),
             Self::DataRead { .. }
             | Self::AbortReading { .. }
@@ -532,9 +578,9 @@ impl RecvStreamState {
         let (fc, session_fc, final_size_reached, retire_data) = match self {
             Self::Recv { fc, session_fc, .. } => (fc, session_fc, false, false),
             Self::WaitForReset { fc, session_fc, .. } => (fc, session_fc, false, true),
-            Self::SizeKnown { fc, session_fc, .. } | Self::DataRecvd { fc, session_fc, .. } => {
-                (fc, session_fc, true, false)
-            }
+            Self::SizeKnown { fc, session_fc, .. }
+            | Self::SizeKnownAt { fc, session_fc, .. }
+            | Self::DataRecvd { fc, session_fc, .. } => (fc, session_fc, true, false),
             Self::AbortReading {
                 fc,
                 session_fc,
@@ -664,6 +710,7 @@ impl RecvStream {
         match &self.state {
             RecvStreamState::Recv { recv_buf, .. }
             | RecvStreamState::SizeKnown { recv_buf, .. }
+            | RecvStreamState::SizeKnownAt { recv_buf, .. }
             | RecvStreamState::DataRecvd { recv_buf, .. } => {
                 let received = recv_buf.received();
                 let read = recv_buf.retired();
@@ -752,6 +799,19 @@ impl RecvStream {
                     });
                 }
             }
+            RecvStreamState::SizeKnownAt {
+                recv_buf,
+                reliable_size,
+                ..
+            } => {
+                // Buffer the reliable prefix; data at or beyond `reliable_size` is dropped.
+                // Completion is driven by `read()`, not by frame arrival.
+                let keep = reliable_size.saturating_sub(offset);
+                if keep > 0 {
+                    let keep = min(data.len(), usize::try_from(keep)?);
+                    recv_buf.inbound_frame(offset, &data[..keep]);
+                }
+            }
             RecvStreamState::DataRecvd { .. }
             | RecvStreamState::DataRead { .. }
             | RecvStreamState::AbortReading { .. }
@@ -768,14 +828,31 @@ impl RecvStream {
         Ok(())
     }
 
+    /// Handle a `RESET_STREAM` or `RESET_STREAM_AT` frame.
+    ///
+    /// Any reliable prefix `[0, reliable_size)` is delivered before the reset event.
+    ///
     /// # Errors
-    /// When the reset occurs at an invalid point.
+    /// [`Error::FrameEncoding`] if `reliable_size > final_size`, [`Error::FinalSize`] if a
+    /// previously-known final size changes, or [`Error::StreamState`] if a later frame changes
+    /// the error code.
     ///
     /// # Returns
-    /// `true` when the stream transitions to `ResetRecvd` (ended).
-    /// `false` if the stream is already in a terminal state and the reset is a no-op.
-    pub fn reset(&mut self, application_error_code: AppError, final_size: u64) -> Res<bool> {
+    /// `true` when the stream reaches `ResetRecvd` (ended); `false` while it remains in
+    /// `SizeKnownAt` awaiting delivery of the prefix, or for a no-op in a terminal state.
+    pub fn reset(
+        &mut self,
+        application_error_code: AppError,
+        final_size: u64,
+        reliable_size: u64,
+    ) -> Res<bool> {
+        // Defensive: also rejected at frame decode.
+        if reliable_size > final_size {
+            return Err(Error::FrameEncoding);
+        }
+        // Catches a changed final size as FINAL_SIZE_ERROR.
         self.state.flow_control_consume_data(final_size, true)?;
+
         match &mut self.state {
             RecvStreamState::Recv {
                 fc,
@@ -787,45 +864,133 @@ impl RecvStream {
                 session_fc,
                 recv_buf,
             } => {
-                // make flow control consumes new data that not really exist.
-                Self::flow_control_retire_data(final_size - fc.retired(), fc, session_fc);
-                self.conn_events
-                    .recv_stream_reset(self.stream_id, application_error_code);
-                let received = recv_buf.received();
-                let read = recv_buf.retired();
-                self.set_state(RecvStreamState::ResetRecvd {
-                    final_received: received,
-                    final_read: read,
+                // Keep the buffered reliable prefix; drop anything at or beyond `reliable_size`.
+                recv_buf.discard_after(reliable_size);
+                // Return credit for the dropped tail immediately; only the still-unread prefix
+                // keeps its credit (retired as the application reads it).
+                Self::retire_undeliverable(
+                    final_size,
+                    reliable_size,
+                    recv_buf.retired(),
+                    fc,
+                    session_fc,
+                );
+                let fc = mem::take(fc);
+                let session_fc = mem::take(session_fc);
+                let recv_buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                self.set_state(RecvStreamState::SizeKnownAt {
+                    fc,
+                    session_fc,
+                    recv_buf,
+                    err: application_error_code,
+                    final_size,
+                    reliable_size,
                 });
-                Ok(true)
+                Ok(self.complete_reliable_reset_if_drained())
             }
-            RecvStreamState::AbortReading {
+            RecvStreamState::SizeKnownAt {
                 fc,
                 session_fc,
+                recv_buf,
+                err,
+                final_size,
+                reliable_size: stored,
+            } => {
+                // The final size is already validated above; a changed error code is a state
+                // error. `reliable_size` may only be reduced (increases are ignored).
+                if application_error_code != *err {
+                    return Err(Error::StreamState);
+                }
+                if reliable_size < *stored {
+                    *stored = reliable_size;
+                    recv_buf.discard_after(reliable_size);
+                    // Return credit for the newly-dropped range immediately.
+                    Self::retire_undeliverable(
+                        *final_size,
+                        reliable_size,
+                        recv_buf.retired(),
+                        fc,
+                        session_fc,
+                    );
+                    Ok(self.complete_reliable_reset_if_drained())
+                } else {
+                    Ok(false)
+                }
+            }
+            RecvStreamState::AbortReading {
                 final_received,
                 final_read,
                 ..
             }
             | RecvStreamState::WaitForReset {
-                fc,
-                session_fc,
                 final_received,
                 final_read,
+                ..
             } => {
-                // make flow control consumes new data that not really exist.
-                Self::flow_control_retire_data(final_size - fc.retired(), fc, session_fc);
-                self.conn_events
-                    .recv_stream_reset(self.stream_id, application_error_code);
-                let received = *final_received;
-                let read = *final_read;
-                self.set_state(RecvStreamState::ResetRecvd {
-                    final_received: received,
-                    final_read: read,
-                });
-                Ok(true)
+                // The application abandoned the read side (via stop_sending). We can discard the
+                // reliable and ignore `reliable_size`, which can't be validated here
+                // because this is the first `RESET_STREAM[_AT]` we've received.
+                // Note: we don't check that subsequent frames contain a correct `reliable_size`.
+                let final_received = *final_received;
+                let final_read = *final_read;
+                Ok(self.finish_reset(
+                    final_size,
+                    application_error_code,
+                    final_received,
+                    final_read,
+                ))
             }
-            _ => Ok(false), // Ignore reset if in DataRecvd, DataRead, or ResetRecvd
+            // DataRecvd / DataRead / ResetRecvd: nothing to do.
+            _ => Ok(false),
         }
+    }
+
+    /// Finalize a reset: release any flow control still held up to `final_size` (the dropped tail
+    /// is never delivered), surface the reset to the application, and move to `ResetRecvd`. Returns
+    /// `true` to signal that the stream has ended.
+    fn finish_reset(
+        &mut self,
+        final_size: u64,
+        err: AppError,
+        final_received: u64,
+        final_read: u64,
+    ) -> bool {
+        if let RecvStreamState::SizeKnownAt { fc, session_fc, .. }
+        | RecvStreamState::AbortReading { fc, session_fc, .. }
+        | RecvStreamState::WaitForReset { fc, session_fc, .. } = &mut self.state
+        {
+            Self::flow_control_retire_data(final_size - fc.retired(), fc, session_fc);
+        }
+        self.conn_events.recv_stream_reset(self.stream_id, err);
+        self.set_state(RecvStreamState::ResetRecvd {
+            final_received,
+            final_read,
+        });
+        true
+    }
+
+    /// While in `SizeKnownAt`, once the application has read the entire reliable prefix, release
+    /// the remaining flow control, surface the reset, and move to `ResetRecvd`. Returns whether
+    /// the stream ended.
+    fn complete_reliable_reset_if_drained(&mut self) -> bool {
+        let RecvStreamState::SizeKnownAt {
+            recv_buf,
+            err,
+            final_size,
+            reliable_size,
+            ..
+        } = &self.state
+        else {
+            return false;
+        };
+        if recv_buf.retired() < *reliable_size {
+            return false;
+        }
+        let final_size = *final_size;
+        let err = *err;
+        let final_received = recv_buf.received();
+        let final_read = recv_buf.retired();
+        self.finish_reset(final_size, err, final_received, final_read)
     }
 
     fn flow_control_retire_data(
@@ -837,6 +1002,24 @@ impl RecvStream {
             fc.add_retired(new_read);
             session_fc.borrow_mut().add_retired(new_read);
         }
+    }
+
+    /// On a reliable reset, retire the flow control for everything that will never be delivered,
+    /// i.e. all but the still-unread reliable prefix `[read, reliable_size)`. This returns
+    /// stream- and connection-level credit to the peer immediately, rather than only once the
+    /// application has drained the prefix (the prefix's own credit is retired as it is read).
+    ///
+    /// `read` is the number of bytes the application has read so far (`recv_buf.retired()`).
+    fn retire_undeliverable(
+        final_size: u64,
+        reliable_size: u64,
+        read: u64,
+        fc: &mut ReceiverFlowControl<StreamId>,
+        session_fc: &Rc<RefCell<ReceiverFlowControl<()>>>,
+    ) {
+        let still_needed = reliable_size.saturating_sub(read);
+        let target_retired = final_size - still_needed;
+        Self::flow_control_retire_data(target_retired.saturating_sub(fc.retired()), fc, session_fc);
     }
 
     /// Send a flow control update.
@@ -913,6 +1096,19 @@ impl RecvStream {
                 };
                 Ok((bytes_read, fin_read))
             }
+            RecvStreamState::SizeKnownAt {
+                recv_buf,
+                fc,
+                session_fc,
+                ..
+            } => {
+                let bytes_read = recv_buf.read(buf);
+                Self::flow_control_retire_data(u64::try_from(bytes_read)?, fc, session_fc);
+                // Once the whole reliable prefix has been read, surface the reset. A reliable
+                // reset never delivers a FIN, so `fin_read` is always `false`.
+                self.complete_reliable_reset_if_drained();
+                Ok((bytes_read, false))
+            }
             RecvStreamState::DataRead { .. }
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
@@ -961,13 +1157,27 @@ impl RecvStream {
                 recv_buf,
             } => {
                 Self::flow_control_retire_data(fc.consumed() - fc.retired(), fc, session_fc);
-                let received = recv_buf.received();
-                let read = recv_buf.retired();
+                let final_received = recv_buf.received();
+                let final_read = recv_buf.retired();
                 self.set_state(RecvStreamState::DataRead {
-                    final_received: received,
-                    final_read: read,
+                    final_received,
+                    final_read,
                 });
                 true
+            }
+            RecvStreamState::SizeKnownAt {
+                recv_buf,
+                err,
+                final_size,
+                ..
+            } => {
+                // The reset is already known; the application is abandoning the (not fully
+                // delivered) reliable prefix. Release flow control, surface the reset, and end.
+                let final_size = *final_size;
+                let err = *err;
+                let final_received = recv_buf.received();
+                let final_read = recv_buf.retired();
+                self.finish_reset(final_size, err, final_received, final_read)
             }
             RecvStreamState::DataRead { .. }
             | RecvStreamState::AbortReading { .. }
@@ -1073,6 +1283,7 @@ impl RecvStream {
         match &self.state {
             RecvStreamState::Recv { fc, .. }
             | RecvStreamState::SizeKnown { fc, .. }
+            | RecvStreamState::SizeKnownAt { fc, .. }
             | RecvStreamState::DataRecvd { fc, .. }
             | RecvStreamState::AbortReading { fc, .. }
             | RecvStreamState::WaitForReset { fc, .. } => Some(fc),
@@ -1086,12 +1297,13 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{Encoder, qtrace, to_u64, to_usize};
+    use neqo_common::{Encoder, event::Provider as _, qtrace, to_u64, to_usize};
     use test_fixture::now;
 
-    use super::RecvStream;
+    use super::{RecvStream, RecvStreamState};
     use crate::{
         ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
+        events::ConnectionEvent,
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
         packet, recovery,
         recv_stream::RxStreamOrderer,
@@ -1786,7 +1998,8 @@ mod tests {
             .unwrap();
         assert!(!session_fc.borrow().frame_needed());
 
-        s.reset(Error::None.code(), to_u64(SESSION_WINDOW)).unwrap();
+        s.reset(Error::None.code(), to_u64(SESSION_WINDOW), 0)
+            .unwrap();
         assert!(session_fc.borrow().frame_needed());
     }
 
@@ -2393,5 +2606,268 @@ mod tests {
         s.inbound_stream_frame(false, SW / 2, &[0; 10]).unwrap();
         check_fc(&fc.borrow(), SW / 2 + 10, SW / 2 + 10);
         check_fc(s.fc().unwrap(), SW / 2 + 10, SW / 2 + 10);
+    }
+
+    // --- RESET_STREAM_AT (reliable stream reset) receive side ---
+
+    const RR_STREAM: StreamId = StreamId::new(67);
+
+    fn reliable_recv_stream(events: ConnectionEvents) -> RecvStream {
+        RecvStream::new(
+            RR_STREAM,
+            INITIAL_LOCAL_MAX_STREAM_DATA as u64,
+            Rc::new(RefCell::new(ReceiverFlowControl::new((), 1024 * 1024))),
+            events,
+        )
+    }
+
+    fn reset_count(events: &mut ConnectionEvents) -> usize {
+        events
+            .events()
+            .filter(|e| {
+                matches!(e, ConnectionEvent::RecvStreamReset { stream_id, .. }
+                if *stream_id == RR_STREAM)
+            })
+            .count()
+    }
+
+    /// `RxStreamOrderer::discard_after` drops whole ranges beyond the offset and truncates a
+    /// straddling range, leaving the `end` invariant intact for later frames.
+    #[test]
+    fn orderer_discard_after() {
+        let mut o = RxStreamOrderer::new();
+        o.inbound_frame(0, &[1; 10]);
+        o.discard_after(4);
+        // Only `[0, 4)` remains readable.
+        let mut buf = [0; 16];
+        assert_eq!(o.read(&mut buf), 4);
+
+        // A later frame entirely beyond the discard point still slots in correctly.
+        let mut o = RxStreamOrderer::new();
+        o.inbound_frame(0, &[1; 4]);
+        o.inbound_frame(8, &[2; 4]); // gap at [4,8)
+        o.discard_after(6); // drops [8,12), keeps [0,4)
+        o.inbound_frame(4, &[3; 2]); // fills [4,6)
+        assert_eq!(o.read(&mut buf), 6);
+
+        // The end marker is correctly maintained when the discard empties it out.
+        let mut o = RxStreamOrderer::new();
+        o.inbound_frame(0, &[1; 4]);
+        assert_eq!(o.read(&mut buf), 4);
+        o.inbound_frame(8, &[2; 4]); // gap at [4,8)
+        o.discard_after(6); // drops [8,12), keeps [0,4)
+        o.inbound_frame(4, &[3; 2]); // fills [4,6)
+        assert_eq!(o.read(&mut buf), 2);
+    }
+
+    /// Happy path: receive all data, then `RESET_STREAM_AT`; only the reliable prefix is
+    /// delivered, and the reset is surfaced once it has been read.
+    #[test]
+    fn reset_at_delivers_prefix_then_resets() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+
+        assert!(s.reset(7, 10, 4).is_ok());
+        assert!(!s.is_ended());
+        assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
+        assert_eq!(reset_count(&mut events), 0);
+
+        // Only `[0, 4)` is delivered; no FIN, and the bytes beyond `reliable_size` are gone.
+        let mut buf = [0; 64];
+        assert_eq!(s.read(&mut buf).unwrap(), (4, false));
+        // Reading drained the prefix → reset surfaced, stream ended.
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+        assert_eq!(s.read(&mut buf).unwrap_err(), Error::NoMoreData);
+    }
+
+    /// `RESET_STREAM` (`reliable_size == 0`) completes immediately.
+    #[test]
+    fn reset_at_zero_completes_immediately() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+        assert!(s.reset(7, 10, 0).is_ok());
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+    }
+
+    /// The reset waits for the reliable prefix to arrive (reordering) and be read.
+    #[test]
+    fn reset_at_waits_for_prefix() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        // RESET_STREAM_AT arrives before the committed data.
+        assert!(s.reset(7, 8, 8).is_ok());
+        assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
+
+        // Partial prefix: read what's there, not yet complete.
+        s.inbound_stream_frame(false, 0, &[0x42; 4]).unwrap();
+        let mut buf = [0; 64];
+        assert_eq!(s.read(&mut buf).unwrap(), (4, false));
+        assert!(!s.is_ended());
+        assert_eq!(reset_count(&mut events), 0);
+
+        // Deliver the remainder.
+        s.inbound_stream_frame(false, 4, &[0x42; 4]).unwrap();
+        assert_eq!(s.read(&mut buf).unwrap(), (4, false));
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+    }
+
+    /// `reliable_size > final_size` is rejected with a frame-encoding error.
+    #[test]
+    fn reset_at_reliable_exceeds_final() {
+        let mut s = reliable_recv_stream(ConnectionEvents::default());
+        assert_eq!(s.reset(7, 4, 8).unwrap_err(), Error::FrameEncoding);
+    }
+
+    /// A later frame changing the final size is a `FINAL_SIZE_ERROR`.
+    #[test]
+    fn reset_at_changed_final_size() {
+        let mut s = reliable_recv_stream(ConnectionEvents::default());
+        assert!(s.reset(7, 10, 4).is_ok());
+        assert_eq!(s.reset(7, 12, 4).unwrap_err(), Error::FinalSize);
+    }
+
+    /// A later frame changing the error code is a `STREAM_STATE_ERROR`.
+    #[test]
+    fn reset_at_changed_error_code() {
+        let mut s = reliable_recv_stream(ConnectionEvents::default());
+        assert!(s.reset(7, 10, 4).is_ok());
+        assert_eq!(s.reset(9, 10, 4).unwrap_err(), Error::StreamState);
+    }
+
+    /// `reliable_size` may be reduced (dropping newly-excess data) but increases are ignored.
+    #[test]
+    fn reset_at_reduce_and_ignore_increase() {
+        let mut s = reliable_recv_stream(ConnectionEvents::default());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+        assert!(s.reset(7, 10, 8).is_ok());
+
+        // An increase is ignored.
+        assert!(s.reset(7, 10, 9).is_ok());
+        // A reduction drops the newly-excess data.
+        assert!(s.reset(7, 10, 4).is_ok());
+
+        let mut buf = [0; 64];
+        // Only `[0, 4)` survives.
+        assert_eq!(s.read(&mut buf).unwrap(), (4, false));
+        assert!(s.is_ended());
+    }
+
+    /// A plain `RESET_STREAM` is handled correctly after receiving `RESET_STREAM_AT`.
+    #[test]
+    fn reset_at_canceled_by_plain_reset() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+        assert!(s.reset(7, 10, 8).is_ok());
+        assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
+        assert_eq!(reset_count(&mut events), 0);
+
+        assert!(s.reset(7, 10, 0).is_ok());
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+    }
+
+    /// After `STOP_SENDING`, a `RESET_STREAM_AT` ignores `reliable_size` and ends promptly.
+    #[test]
+    fn reset_at_after_stop_sending() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 4]).unwrap();
+        assert!(!s.stop_sending(9));
+        assert!(s.reset(7, 10, 8).is_ok());
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+    }
+
+    /// `STOP_SENDING` while delivering a reliable prefix abandons it and ends promptly.
+    #[test]
+    fn stop_sending_in_size_known_at() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+        assert!(s.reset(7, 10, 8).is_ok());
+        assert!(matches!(s.state, RecvStreamState::SizeKnownAt { .. }));
+
+        assert!(s.stop_sending(9)); // ends the stream
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
+    }
+
+    /// A reliable reset releases all of the stream's flow control once complete.
+    #[test]
+    fn reset_at_releases_flow_control() {
+        const FC_LIMIT: u64 = 1024;
+
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), FC_LIMIT)));
+        let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
+        s.inbound_stream_frame(false, 0, &[0x42; 100]).unwrap();
+        // Reliable size 40, final size 100: the [40,100) tail is dropped.
+        assert!(s.reset(7, 100, 40).is_ok());
+
+        let mut buf = [0; 256];
+        assert_eq!(s.read(&mut buf).unwrap(), (40, false));
+        assert!(s.is_ended());
+        // All 100 bytes of session flow control are retired (40 read + 60 dropped tail).
+        check_fc(&session_fc.borrow(), 100, 100);
+
+        // Doing this again without reading retires the dropped tail [40,100) immediately; the
+        // still-unread prefix is retired only when the read side is later abandoned.
+        let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
+        assert!(s.reset(7, 100, 40).is_ok());
+        check_fc(&session_fc.borrow(), 200, 160);
+        assert!(s.stop_sending(9));
+        check_fc(&session_fc.borrow(), 200, 200);
+    }
+
+    /// The undeliverable tail's flow control is returned immediately on a reliable reset, before
+    /// the application reads the prefix.
+    #[test]
+    fn reset_releases_tail_flow_control_immediately() {
+        const FC_LIMIT: u64 = 1024;
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), FC_LIMIT)));
+        let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
+        s.inbound_stream_frame(false, 0, &[0x42; 100]).unwrap();
+
+        // Reliable size 40, final size 100: the [40,100) tail is retired right away, even though
+        // the 40-byte prefix has not been read yet.
+        assert!(s.reset(7, 100, 40).is_ok());
+        check_fc(&session_fc.borrow(), 100, 60);
+
+        // Reading the prefix retires the rest.
+        let mut buf = [0; 256];
+        assert_eq!(s.read(&mut buf).unwrap(), (40, false));
+        assert!(s.is_ended());
+        check_fc(&session_fc.borrow(), 100, 100);
+    }
+
+    /// Reducing `reliable_size` with a later frame returns credit for the newly-dropped range.
+    #[test]
+    fn reset_reduce_releases_more_flow_control() {
+        const FC_LIMIT: u64 = 1024;
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), FC_LIMIT)));
+        let mut s = create_stream_with_fc(Rc::clone(&session_fc), FC_LIMIT);
+        s.inbound_stream_frame(false, 0, &[0x42; 100]).unwrap();
+
+        // The difference between reliable (80) and final (100) sizes is retired.
+        assert!(s.reset(7, 100, 80).is_ok());
+        check_fc(&session_fc.borrow(), 100, 20);
+
+        // Increases are ignored.
+        assert!(s.reset(7, 100, 90).is_ok());
+        check_fc(&session_fc.borrow(), 100, 20);
+
+        // Only the reduction is retired.
+        assert!(s.reset(7, 100, 40).is_ok());
+        check_fc(&session_fc.borrow(), 100, 60);
+
+        let mut buf = [0; 256];
+        assert_eq!(s.read(&mut buf).unwrap(), (40, false));
+        assert!(s.is_ended());
+        check_fc(&session_fc.borrow(), 100, 100);
     }
 }

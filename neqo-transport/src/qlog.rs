@@ -623,10 +623,18 @@ impl From<Frame<'_>> for QuicFrame {
                     payload_length: None,
                 }
             }
+            // Note that qlog doesn't currently support `RESET_STREAM_AT`,
+            // so map it into `RESET_STREAM` for now.
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
                 final_size,
+            }
+            | Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                ..
             } => Self::ResetStream {
                 stream_id: stream_id.as_u64(),
                 error_code: application_error_code,
@@ -736,13 +744,13 @@ impl From<Frame<'_>> for QuicFrame {
                 trigger_frame_type: Some(frame_type),
             },
             Frame::HandshakeDone => Self::HandshakeDone,
+            Frame::Datagram { data, .. } => Self::Datagram {
+                length: to_u64(data.len()),
+                raw: None,
+            },
             Frame::AckFrequency { .. } => Self::Unknown {
                 frame_type_value: None,
                 raw_frame_type: frame.get_type().into(),
-                raw: None,
-            },
-            Frame::Datagram { data, .. } => Self::Datagram {
-                length: to_u64(data.len()),
                 raw: None,
             },
         }
