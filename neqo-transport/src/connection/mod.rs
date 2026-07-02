@@ -3982,6 +3982,16 @@ impl Connection {
         self.quic_datagrams.remote_datagram_size()
     }
 
+    /// Whether the peer advertised support for reliable stream reset (`RESET_STREAM_AT`).
+    /// Returns `false` until peer transport parameters are available.
+    #[must_use]
+    pub fn peer_supports_reliable_stream_reset(&self) -> bool {
+        let tps = self.tps.borrow();
+        tps.remote_handshake()
+            .or_else(|| tps.remote_0rtt())
+            .is_some_and(|tp| tp.get_empty(ResetStreamAt))
+    }
+
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.

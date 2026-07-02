@@ -34,6 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            TransportPrerequisites,
             send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
@@ -324,11 +325,13 @@ impl Http3Connection {
             ))),
             webtransport: ExtendedConnectFeature::new(
                 ExtendedConnectType::WebTransport,
-                conn_params.get_webtransport(),
+                role,
+                conn_params.webtransport_enabled(),
             ),
             connect_udp: ExtendedConnectFeature::new(
                 ExtendedConnectType::ConnectUdp,
-                conn_params.get_connect(),
+                role,
+                conn_params.connect_enabled(),
             ),
             local_params: conn_params,
             settings_state: Http3RemoteSettingsState::NotReceived,
@@ -544,7 +547,7 @@ impl Http3Connection {
             ReceiveOutput::ControlFrames(control_frames) => {
                 let mut rest = Vec::new();
                 for cf in control_frames {
-                    if let Some(not_handled) = self.handle_control_frame(cf)? {
+                    if let Some(not_handled) = self.handle_control_frame(conn, cf)? {
                         rest.push(not_handled);
                     }
                 }
@@ -1621,7 +1624,7 @@ impl Http3Connection {
     /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or
     /// `PriorityUpdateRequestPush` which handling is specific to the client and server, we must
     /// give them to the specific client/server handler.
-    fn handle_control_frame(&mut self, f: HFrame) -> Res<Option<HFrame>> {
+    fn handle_control_frame(&mut self, conn: &Connection, f: HFrame) -> Res<Option<HFrame>> {
         qdebug!("[{self}] Handle a control frame {f:?}");
         if !matches!(f, HFrame::Settings { .. })
             && !matches!(
@@ -1633,7 +1636,7 @@ impl Http3Connection {
         }
         match f {
             HFrame::Settings { settings } => {
-                self.handle_settings(settings)?;
+                self.handle_settings(conn, settings)?;
                 Ok(None)
             }
             HFrame::Goaway { .. }
@@ -1652,19 +1655,23 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_settings(&mut self, new_settings: HSettings) -> Res<()> {
+    fn handle_settings(&mut self, conn: &Connection, new_settings: HSettings) -> Res<()> {
         qdebug!("[{self}] Handle SETTINGS frame");
+        let prereqs = TransportPrerequisites::new(
+            conn.remote_datagram_size() > 0,
+            conn.peer_supports_reliable_stream_reset(),
+        );
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
                 self.set_qpack_settings(&new_settings)?;
-                self.webtransport.handle_settings(&new_settings);
-                self.connect_udp.handle_settings(&new_settings);
+                self.webtransport.handle_settings(&new_settings, &prereqs);
+                self.connect_udp.handle_settings(&new_settings, &prereqs);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
             }
             Http3RemoteSettingsState::ZeroRtt(settings) => {
-                self.webtransport.handle_settings(&new_settings);
-                self.connect_udp.handle_settings(&new_settings);
+                self.webtransport.handle_settings(&new_settings, &prereqs);
+                self.connect_udp.handle_settings(&new_settings, &prereqs);
                 let mut qpack_changed = false;
                 for st in &[
                     HSettingType::MaxHeaderListSize,
