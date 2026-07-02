@@ -54,7 +54,7 @@ impl NegotiationState {
 
     /// Enable the feature; triggered by the receipt of settings from the peer.
     /// `conditions_met` determines whether the feature can be enabled.
-    pub fn enable(&mut self, conditions_met: bool) {
+    pub fn negotiate(&mut self, conditions_met: bool) {
         let Self::Negotiating {
             feature_type,
             listener,
@@ -65,7 +65,7 @@ impl NegotiationState {
 
         let ft = *feature_type;
         let cb = mem::take(listener);
-        qtrace!("set_negotiated for {ft:?} conditions_met={conditions_met}");
+        qtrace!("negotiate {ft:?}: {conditions_met}");
         *self = if conditions_met {
             Self::Negotiated
         } else {

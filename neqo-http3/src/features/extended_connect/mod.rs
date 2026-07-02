@@ -144,7 +144,7 @@ impl ExtendedConnectFeature {
                 self.role == Role::Server || settings.get(HSettingType::EnableConnect) == 1
             }
         };
-        self.feature_negotiation.enable(conditions_met);
+        self.feature_negotiation.negotiate(conditions_met);
     }
 
     #[must_use]
