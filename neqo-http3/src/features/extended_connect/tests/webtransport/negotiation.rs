@@ -83,6 +83,10 @@ fn webtransport_prerequisites() {
 
         let mut server_off = WtTest::new_with_params(wt_default_parameters(), params);
         assert!(
+            !server_off.client.webtransport_enabled(),
+            "disabled after negotiation with server"
+        );
+        assert!(
             server_off
                 .client
                 .webtransport_create_session(now(), URL, &[])
