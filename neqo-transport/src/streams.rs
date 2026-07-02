@@ -316,14 +316,18 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
+    /// # Errors
+    ///
+    /// [`Error::FlowControlCap`] if a stream has data pending that can never be
+    /// sent because flow control has hit `FC_CAP`.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
-    ) {
-        self.send.write_frames(priority, builder, tokens, stats);
+    ) -> Res<()> {
+        self.send.write_frames(priority, builder, tokens, stats)
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
@@ -577,6 +581,14 @@ impl Streams {
 
     pub fn handle_data_blocked(&self) {
         self.receiver_fc.borrow_mut().send_flowc_update();
+    }
+
+    /// Fast-forward the connection-level receive flow control to just below
+    /// `FC_CAP`, leaving only `remaining` bytes of credit, so tests can drive the
+    /// peer into the cap without receiving `FC_CAP` bytes.
+    #[cfg(test)]
+    pub(crate) fn use_up_recv_flow_control_to_cap(&self, remaining: u64) {
+        self.receiver_fc.borrow_mut().use_up_to_cap(remaining);
     }
 
     pub fn set_initial_limits(&mut self) {

@@ -143,6 +143,8 @@ pub enum Error {
     Decrypt,
     #[error("disabled version")]
     DisabledVersion,
+    #[error("flow control limit reached the largest representable value")]
+    FlowControlCap,
     #[error("no packets received for longer than the idle timeout")]
     IdleTimeout,
     #[error("integer overflow")]

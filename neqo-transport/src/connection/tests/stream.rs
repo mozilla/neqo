@@ -487,6 +487,80 @@ fn exceed_max_data() {
     assert_error(&server, &CloseReason::Transport(Error::FlowControl));
 }
 
+/// Reaching the sender-side flow control cap (`FC_CAP`) terminates the
+/// connection with [`Error::FlowControlCap`], rather than stalling forever.
+///
+/// Sending `FC_CAP` bytes (2^62-1 on 64-bit, `usize::MAX` on 32-bit) for real
+/// would be far too slow, so we reach into the stream's send flow control and
+/// fast-forward `used` to just below the cap, then send the last few bytes of
+/// credit to reach it.
+#[test]
+fn sender_flow_control_cap() {
+    // Leave only a few bytes of stream send credit before the cap.
+    const REMAINING: usize = 4;
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+
+    // Fast-forward both the stream's and the connection's send flow control so
+    // only a few bytes of credit remain before the cap on each.
+    client
+        .streams
+        .get_send_stream_mut(stream_id)
+        .unwrap()
+        .use_up_flow_control_to_cap(to_u64(REMAINING));
+
+    // Consume the remaining credit, bringing `used` up to `FC_CAP`.
+    assert_eq!(
+        client.stream_send(stream_id, &[0; REMAINING]).unwrap(),
+        REMAINING
+    );
+
+    // The stream now has data pending that can never be sent, so the next output
+    // attempt terminates the connection instead of stalling.
+    drop(client.process_output(now()));
+    assert_error(&client, &CloseReason::Transport(Error::FlowControlCap));
+}
+
+/// Reaching the receive-side flow control cap (`FC_CAP`) terminates the
+/// connection with [`Error::FlowControlCap`].
+///
+/// As with the sender-side test, we fast-forward the receiver's connection-level
+/// flow control to just below the cap rather than actually receiving `FC_CAP`
+/// bytes, then have the peer send the last few bytes of credit.
+#[test]
+fn receiver_flow_control_cap() {
+    // Leave only a few bytes of connection receive credit before the cap.
+    const REMAINING: usize = 4;
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // Fast-forward the server's connection-level receive flow control so only a
+    // few bytes of credit remain before the cap.
+    server
+        .streams
+        .use_up_recv_flow_control_to_cap(to_u64(REMAINING));
+
+    // The client sends the last few bytes of credit; when the server consumes
+    // them its connection-level `consumed` reaches `FC_CAP` and it terminates the
+    // connection.
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(
+        client.stream_send(stream_id, &[0; REMAINING]).unwrap(),
+        REMAINING
+    );
+    let dgram = client.process_output(now()).dgram();
+    assert!(dgram.is_some());
+    drop(server.process(dgram, now()));
+
+    assert_error(&server, &CloseReason::Transport(Error::FlowControlCap));
+}
+
 #[test]
 // If we send a stop_sending to the peer, we should not accept more data from the peer.
 fn do_not_accept_data_after_stop_sending() {

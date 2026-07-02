@@ -53,6 +53,25 @@ pub const WINDOW_UPDATE_FRACTION: u64 = 4;
 /// congestion control window, in order to not unnecessarily limit throughput.
 const WINDOW_INCREASE_MULTIPLIER: u64 = 4;
 
+/// Cap the total amount of flow control credit to `usize::MAX`.
+///
+/// This does nothing on 64-bit systems, but on 32-bit
+/// we tend to assume that `usize` and `u64` are interchangeable,
+/// at least for anything that might be held in memory.
+///
+/// QUIC has the nice characteristic that flow control
+/// is a way to limit just about everything in the protocol.
+/// There are very few places that could involve larger numbers,
+/// unless they get past this control.
+/// Most uses of numbers are downstream from a flow control limit.
+/// On that basis, this stops most paths into the code that might result
+/// in a `u64` carrying a value that will need to transfer into `usize`.
+const FC_CAP: u64 = const_min_u64(MAX_VARINT, to_u64(usize::MAX));
+
+const fn const_min_u64(a: u64, b: u64) -> u64 {
+    [a, b][(a > b) as usize]
+}
+
 /// Subject for flow control auto-tuning, used to avoid heap allocations
 /// when logging.
 #[derive(Debug, Clone, Copy)]
@@ -108,7 +127,7 @@ where
     /// control if the change was an increase and `None` otherwise.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
         (limit > self.limit).then(|| {
-            self.limit = limit;
+            self.limit = min(limit, FC_CAP);
             self.blocked_frame = false;
             self.available()
         })
@@ -129,6 +148,25 @@ where
     /// How much data has been written.
     pub const fn used(&self) -> u64 {
         self.used
+    }
+
+    /// Whether the amount consumed has reached [`FC_CAP`].
+    ///
+    /// When this is true, no more data can ever be sent under this flow
+    /// control: the limit cannot be raised past [`FC_CAP`] (see
+    /// [`Self::update`]), so the connection needs to be terminated rather
+    /// than wait for credit that can never arrive.
+    pub const fn capped_out(&self) -> bool {
+        self.used >= FC_CAP
+    }
+
+    /// Raise the limit to [`FC_CAP`] and mark all but `remaining` bytes of it as
+    /// used. This lets tests reach the cap without actually transferring
+    /// `FC_CAP` bytes, which would be prohibitively slow.
+    #[cfg(test)]
+    pub(crate) const fn use_up_to_cap(&mut self, remaining: u64) {
+        self.limit = FC_CAP;
+        self.used = FC_CAP - remaining;
     }
 
     /// Mark flow control as blocked.
@@ -320,17 +358,28 @@ where
         self.frame_pending
     }
 
-    pub fn next_limit(&self) -> u64 {
+    fn next_limit(&self) -> u64 {
         min(
             self.retired + self.max_active,
             // Flow control limits are encoded as QUIC varints and are thus
-            // limited to the maximum QUIC varint value.
-            MAX_VARINT,
+            // limited to the maximum QUIC varint value.  See `FC_CAP` for details.
+            FC_CAP,
         )
     }
 
     pub const fn max_active(&self) -> u64 {
         self.max_active
+    }
+
+    /// Raise the advertised limit to [`FC_CAP`] and mark all but `remaining`
+    /// bytes of it as consumed. This lets tests reach the cap without the peer
+    /// actually sending `FC_CAP` bytes, which would be prohibitively slow.
+    #[cfg(test)]
+    pub(crate) const fn use_up_to_cap(&mut self, remaining: u64) {
+        self.max_allowed = FC_CAP;
+        self.max_active = FC_CAP;
+        self.consumed = FC_CAP - remaining;
+        self.retired = FC_CAP - remaining;
     }
 
     pub const fn frame_lost(&mut self, maximum_data: u64) {
@@ -514,6 +563,13 @@ impl ReceiverFlowControl<()> {
             );
             return Err(Error::FlowControl);
         }
+        // Ensure that we cap data effectively.
+        // Note: There is no need for a similar cap on the stream limits
+        // as those are always bounded by the connection-level limit.
+        if self.consumed + count >= FC_CAP {
+            return Err(Error::FlowControlCap);
+        }
+
         self.consumed += count;
         Ok(())
     }
@@ -775,7 +831,7 @@ mod test {
     use crate::{
         ConnectionParameters, Error, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA, Res,
         connection::params::{MAX_LOCAL_MAX_DATA, MAX_LOCAL_MAX_STREAM_DATA},
-        fc::WINDOW_UPDATE_FRACTION,
+        fc::{FC_CAP, WINDOW_UPDATE_FRACTION, const_min_u64},
         packet, recovery,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -1568,5 +1624,27 @@ mod test {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn const_min_sanity() {
+        assert_eq!(3, const_min_u64(3, 4));
+        assert_eq!(3, const_min_u64(4, 3));
+    }
+
+    #[test]
+    fn update_caps_limit_to_usize_max() {
+        let fc_cap_usize = usize::try_from(FC_CAP).expect("FC_CAP fits in usize");
+
+        let mut fc = SenderFlowControl::new((), 0);
+        assert_eq!(fc.update(u64::MAX), Some(fc_cap_usize)); // clamped, no overflow
+        assert_eq!(fc.available(), fc_cap_usize);
+        fc.consume(fc_cap_usize);
+        assert_eq!(fc.available(), 0);
+
+        let mut fc = ReceiverFlowControl::new((), FC_CAP);
+        fc.consume(100).unwrap();
+        fc.add_retired(100);
+        assert_eq!(fc.next_limit(), FC_CAP);
     }
 }

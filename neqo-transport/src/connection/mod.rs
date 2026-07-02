@@ -2333,12 +2333,16 @@ impl Connection {
 
     /// Write the frames that are exchanged in the application data space.
     /// The order of calls here determines the relative priority of frames.
+    /// # Errors
+    ///
+    /// [`Error::FlowControlCap`] if a stream has data pending that can never be
+    /// sent because flow control has hit `FC_CAP`.
     fn write_appdata_frames(
         &mut self,
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
         now: Instant,
-    ) {
+    ) -> Res<()> {
         let rtt = self.paths.primary().map_or_else(
             || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
             |p| p.borrow().rtt().estimate(),
@@ -2354,15 +2358,15 @@ impl Connection {
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
+            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats)?;
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.streams
             .write_maintenance_frames(builder, tokens, frame_stats, now, rtt);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.streams.write_frames(
@@ -2370,34 +2374,34 @@ impl Connection {
             builder,
             tokens,
             frame_stats,
-        );
+        )?;
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         // NEW_CONNECTION_ID, RETIRE_CONNECTION_ID, and ACK_FREQUENCY.
         self.cid_manager.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.paths.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
             self.streams
-                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+                .write_frames(prio, builder, tokens, &mut stats.frame_tx)?;
             if builder.is_full() {
-                return;
+                return Ok(());
             }
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
         self.quic_datagrams.write_frames(builder, tokens, stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2411,16 +2415,17 @@ impl Connection {
             frame_stats,
         );
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.new_token.write_frames(builder, tokens, frame_stats);
         if builder.is_full() {
-            return;
+            return Ok(());
         }
 
         self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
+            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats)?;
+        Ok(())
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
@@ -2483,7 +2488,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
-    ) -> (recovery::Tokens, bool, bool) {
+    ) -> Res<(recovery::Tokens, bool, bool)> {
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2519,7 +2524,7 @@ impl Connection {
 
         if profile.ack_only() {
             // If we are CC limited we can only send ACKs!
-            return (tokens, false, false);
+            return Ok((tokens, false, false));
         }
 
         if primary {
@@ -2536,7 +2541,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, now)?;
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
@@ -2573,7 +2578,7 @@ impl Connection {
             false
         };
 
-        (tokens, ack_eliciting, padded)
+        Ok((tokens, ack_eliciting, padded))
     }
 
     fn write_closing_frames<B: Buffer>(
@@ -2788,7 +2793,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now)?;
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.

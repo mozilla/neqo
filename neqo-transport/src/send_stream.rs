@@ -797,27 +797,40 @@ impl SendStream {
         self.has_next_bytes(retransmission)
     }
 
-    /// Return `false` if the builder is full and the caller should stop iterating.
+    /// Returns `Ok(false)` if the builder is full and the caller should stop
+    /// iterating.
     ///
     /// Any new frame type added here must also be reflected in `has_data_at`.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::FlowControlCap`] if the stream or connection flow control has
+    /// hit `FC_CAP` and can never grant more credit, so this stream has data
+    /// pending that can never be sent. This is a fatal condition and terminates
+    /// the connection.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
-    ) -> bool {
+    ) -> Res<bool> {
+        // This stream has data pending (`has_data_at` gated the call), so if
+        // flow control is capped out that data can never be sent.
+        if self.fc_capped_out() {
+            return Err(Error::FlowControlCap);
+        }
         if !self.write_reset_frame(priority, builder, tokens, stats) {
             self.write_blocked_frame(priority, builder, tokens, stats);
             if builder.is_full() {
-                return false;
+                return Ok(false);
             }
             self.write_stream_frame(priority, builder, tokens, stats);
             if builder.is_full() {
-                return false;
+                return Ok(false);
             }
         }
-        true
+        Ok(true)
     }
 
     pub const fn set_fairness(&mut self, make_fair: bool) {
@@ -1450,6 +1463,28 @@ impl SendStream {
             if conn_fc.borrow().available() <= needed_space {
                 conn_fc.borrow_mut().blocked();
             }
+        }
+    }
+
+    /// Whether the stream or connection flow control has hit `FC_CAP`, and so
+    /// can never grant more credit. When this is true, the stream can make no
+    /// further progress and the connection needs to be terminated.
+    fn fc_capped_out(&self) -> bool {
+        if let State::Ready { fc, conn_fc } | State::Send { fc, conn_fc, .. } = &self.state {
+            fc.capped_out() || conn_fc.borrow().capped_out()
+        } else {
+            false
+        }
+    }
+
+    /// Fast-forward both this stream's and the connection's send flow control to
+    /// just below `FC_CAP`, leaving only `remaining` bytes of credit on each, so
+    /// tests can reach the cap without sending `FC_CAP` bytes.
+    #[cfg(test)]
+    pub(crate) fn use_up_flow_control_to_cap(&mut self, remaining: u64) {
+        if let State::Ready { fc, conn_fc } | State::Send { fc, conn_fc, .. } = &mut self.state {
+            fc.use_up_to_cap(remaining);
+            conn_fc.borrow_mut().use_up_to_cap(remaining);
         }
     }
 
@@ -2177,13 +2212,17 @@ impl SendStreams {
         removed
     }
 
+    /// # Errors
+    ///
+    /// [`Error::FlowControlCap`] if a stream has data pending that can never be
+    /// sent because flow control has hit `FC_CAP`.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
-    ) {
+    ) -> Res<()> {
         // WebTransport data (which is Normal) may have a SendOrder
         // priority attached.  The spec states (6.3 write-chunk 6.1):
 
@@ -2223,7 +2262,7 @@ impl SendStreams {
                 continue;
             }
             qtrace!("   {stream}");
-            if !stream.write_frames(priority, builder, tokens, stats) {
+            if !stream.write_frames(priority, builder, tokens, stats)? {
                 break;
             }
         }
@@ -2239,7 +2278,7 @@ impl SendStreams {
             // No fair streams are registered (the common non-WebTransport case), so
             // there is nothing left to send.  Returning here avoids a wasteful second
             // walk of `map` searching for fair streams that don't exist.
-            return;
+            return Ok(());
         }
         let single_group_no_sendorder = num_groups == 1
             && self
@@ -2270,10 +2309,10 @@ impl SendStreams {
                 if !stream.is_fair() || !stream.has_data_at(priority) {
                     continue;
                 }
-                if !stream.write_frames(priority, builder, tokens, stats) {
+                if !stream.write_frames(priority, builder, tokens, stats)? {
                     // Resume after this stream next call so it can't monopolise.
                     self.fair_rr_next = (idx + 1) % n;
-                    return;
+                    return Ok(());
                 }
             }
         } else {
@@ -2327,10 +2366,10 @@ impl SendStreams {
                             // not on any builder growth (see flow-control note above).
                             let before = stats.stream;
                             if let Some(stream) = map.get_mut(&stream_id)
-                                && !stream.write_frames(priority, builder, tokens, stats)
+                                && !stream.write_frames(priority, builder, tokens, stats)?
                             {
                                 *per_group_next = (idx + 1) % num_groups;
-                                return;
+                                return Ok(());
                             }
                             if stats.stream > before {
                                 any_wrote = true;
@@ -2348,10 +2387,10 @@ impl SendStreams {
                         qtrace!("send group {idx}: stream {stream_id}");
                         let before = stats.stream;
                         if let Some(stream) = map.get_mut(&stream_id)
-                            && !stream.write_frames(priority, builder, tokens, stats)
+                            && !stream.write_frames(priority, builder, tokens, stats)?
                         {
                             *per_group_next = (idx + 1) % num_groups;
-                            return;
+                            return Ok(());
                         }
                         if stats.stream > before {
                             any_wrote = true;
@@ -2368,6 +2407,7 @@ impl SendStreams {
             // All groups had a chance this pass; advance the cursor for the next call.
             *per_group_next = (start + 1) % num_groups;
         }
+        Ok(())
     }
 
     #[allow(
@@ -2509,7 +2549,8 @@ mod tests {
                 &mut builder,
                 &mut tokens,
                 &mut FrameStats::default(),
-            );
+            )
+            .unwrap();
             while !tokens.is_empty() {
                 let id = as_stream_token(&tokens.remove(0)).id;
                 if !order.contains(&id) {
@@ -2575,7 +2616,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
 
         let mut served = std::collections::HashSet::new();
         while !tokens.is_empty() {
@@ -2633,7 +2675,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
 
         // Only STREAM frames produce `Stream` tokens; the blocked stream's
         // STREAM_DATA_BLOCKED token is a different variant and is skipped.
@@ -2698,7 +2741,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
 
         let mut served = std::collections::HashSet::new();
         while !tokens.is_empty() {
@@ -2755,7 +2799,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
 
         let mut served = std::collections::HashSet::new();
         while !tokens.is_empty() {
@@ -2803,7 +2848,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
 
         let mut served = std::collections::HashSet::new();
         while !tokens.is_empty() {
@@ -3601,7 +3647,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 6);
         assert_eq!(tokens.len(), 1);
         let f1_token = tokens.remove(0);
@@ -3615,7 +3662,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 10);
         assert_eq!(tokens.len(), 1);
         let f2_token = tokens.remove(0);
@@ -3628,7 +3676,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written);
         assert!(tokens.is_empty());
 
@@ -3643,7 +3692,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 7); // Needs a length this time.
         assert_eq!(tokens.len(), 1);
         let f4_token = tokens.remove(0);
@@ -3659,7 +3709,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(builder.len(), written + 10);
         assert_eq!(tokens.len(), 1);
         let f5_token = tokens.remove(0);
@@ -3701,7 +3752,8 @@ mod tests {
                 &mut builder,
                 &mut tokens,
                 &mut FrameStats::default(),
-            );
+            )
+            .unwrap();
             assert_eq!(tokens.len(), 1, "exactly one stream served per packet");
             let token = tokens.remove(0);
             served.insert(as_stream_token(&token).id);
@@ -3734,7 +3786,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f1_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f1_token).offset, 0);
         assert_eq!(as_stream_token(&f1_token).length, 10);
@@ -3746,7 +3799,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         assert!(tokens.is_empty());
 
         ss.get_mut(StreamId::from(0)).unwrap().close();
@@ -3756,7 +3810,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f2_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f2_token).offset, 10);
         assert_eq!(as_stream_token(&f2_token).length, 0);
@@ -3771,7 +3826,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f3_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f3_token).offset, 10);
         assert_eq!(as_stream_token(&f3_token).length, 0);
@@ -3786,7 +3842,8 @@ mod tests {
             &mut builder,
             &mut tokens,
             &mut FrameStats::default(),
-        );
+        )
+        .unwrap();
         let f4_token = tokens.remove(0);
         assert_eq!(as_stream_token(&f4_token).offset, 0);
         assert_eq!(as_stream_token(&f4_token).length, 10);
@@ -4927,12 +4984,15 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        assert!(s.write_frames(
-            TransmissionPriority::Normal,
-            &mut builder,
-            &mut tokens,
-            &mut stats
-        ));
+        assert!(
+            s.write_frames(
+                TransmissionPriority::Normal,
+                &mut builder,
+                &mut tokens,
+                &mut stats
+            )
+            .unwrap()
+        );
         assert!(!builder.is_full());
 
         // Both frames should be in this one packet.
