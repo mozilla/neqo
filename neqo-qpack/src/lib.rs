@@ -211,4 +211,16 @@ mod tests {
             Err(Error::Decompression)
         );
     }
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn max_encoder_table_size_enforced() {
+        _ = Settings::default().max_table_size_encoder(1 << 30);
+    }
+
+    #[test]
+    #[should_panic(expected = "assertion")]
+    fn max_decoder_table_size_enforced() {
+        _ = Settings::default().max_table_size_decoder(1 << 30);
+    }
 }
