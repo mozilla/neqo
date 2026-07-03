@@ -564,9 +564,13 @@ impl ReceiverFlowControl<()> {
             return Err(Error::FlowControl);
         }
         // Ensure that we cap data effectively.
+        // This aborts when receiving the ONE BYTE before the actual flow control limit,
+        // so that we can propagate an error that makes it clear what is going on.
+        // The peer has not violated the protocol, we just can't continue.
+        //
         // Note: There is no need for a similar cap on the stream limits
         // as those are always bounded by the connection-level limit.
-        if self.consumed + count >= FC_CAP {
+        if self.consumed + count > FC_CAP - 1 {
             return Err(Error::FlowControlCap);
         }
 
