@@ -177,6 +177,8 @@ impl Encoder {
         // every header block with a non-zero Required Insert Count has already been
         // acknowledged is a connection error of type QPACK_DECODER_STREAM_ERROR. Such a
         // stream has no entry in `unacked_header_blocks` (entries are removed once empty).
+        // We only remove entries in response to messages from the peer, so this will only fail
+        // if the peer references a stream that never generated unacknowledged blocks.
         let hb_list = self
             .unacked_header_blocks
             .get_mut(&stream_id)
