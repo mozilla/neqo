@@ -171,32 +171,40 @@ impl Encoder {
         Ok(())
     }
 
-    fn header_ack(&mut self, stream_id: StreamId) {
+    fn header_ack(&mut self, stream_id: StreamId) -> Res<()> {
         self.stats.header_acks_recv += 1;
+        // RFC 9204, Section 4.4.1: a Header Acknowledgment referring to a stream on which
+        // every header block with a non-zero Required Insert Count has already been
+        // acknowledged is a connection error of type QPACK_DECODER_STREAM_ERROR. Such a
+        // stream has no entry in `unacked_header_blocks` (entries are removed once empty).
+        // We only remove entries in response to messages from the peer, so this will only fail
+        // if the peer references a stream that never generated unacknowledged blocks.
+        let hb_list = self
+            .unacked_header_blocks
+            .get_mut(&stream_id)
+            .ok_or(Error::DecoderStream)?;
         let mut new_acked = self.table.get_acked_inserts_cnt();
-        if let Some(hb_list) = self.unacked_header_blocks.get_mut(&stream_id) {
-            if let Some(ref_list) = hb_list.pop_back() {
-                #[expect(
-                    clippy::iter_over_hash_type,
-                    reason = "OK to loop over unACKed blocks in an undefined order."
-                )]
-                for iter in ref_list {
-                    self.table.remove_ref(iter);
-                    if iter >= new_acked {
-                        new_acked = iter + 1;
-                    }
+        if let Some(ref_list) = hb_list.pop_back() {
+            #[expect(
+                clippy::iter_over_hash_type,
+                reason = "OK to loop over unACKed blocks in an undefined order."
+            )]
+            for iter in ref_list {
+                self.table.remove_ref(iter);
+                if iter >= new_acked {
+                    new_acked = iter + 1;
                 }
-            } else {
-                debug_assert!(false, "We should have at least one header block");
             }
-            if hb_list.is_empty() {
-                self.unacked_header_blocks.remove(&stream_id);
-            }
+        } else {
+            debug_assert!(false, "We should have at least one header block");
+        }
+        if hb_list.is_empty() {
+            self.unacked_header_blocks.remove(&stream_id);
         }
         if new_acked > self.table.get_acked_inserts_cnt() {
-            self.insert_count_instruction(new_acked - self.table.get_acked_inserts_cnt())
-                .expect("This should neve happen");
+            self.insert_count_instruction(new_acked - self.table.get_acked_inserts_cnt())?;
         }
+        Ok(())
     }
 
     fn stream_cancellation(&mut self, stream_id: StreamId) {
@@ -245,10 +253,7 @@ impl Encoder {
 
                 self.insert_count_instruction(increment)
             }
-            DecoderInstruction::HeaderAck { stream_id } => {
-                self.header_ack(stream_id);
-                Ok(())
-            }
+            DecoderInstruction::HeaderAck { stream_id } => self.header_ack(stream_id),
             DecoderInstruction::StreamCancellation { stream_id } => {
                 self.stream_cancellation(stream_id);
                 Ok(())
@@ -1026,6 +1031,28 @@ mod tests {
         encoder
             .peer_conn
             .stream_send(encoder.recv_stream_id, &[0x00])
+            .unwrap();
+        let out = encoder.peer_conn.process_output(now());
+        encoder.conn.process_input(out.dgram().unwrap(), now());
+        assert_eq!(
+            encoder
+                .encoder
+                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now()),
+            Err(Error::DecoderStream)
+        );
+    }
+
+    /// RFC 9204, Section 4.4.1: a Header Acknowledgment for a stream that has no
+    /// outstanding acknowledgment is a connection error of type `QPACK_DECODER_STREAM_ERROR`.
+    #[test]
+    fn header_ack_without_outstanding_block_is_rejected() {
+        let mut encoder = connect(false);
+
+        // 0x81 is a Header Acknowledgment for stream 1, which has never sent a header
+        // block referencing the dynamic table.
+        encoder
+            .peer_conn
+            .stream_send(encoder.recv_stream_id, HEADER_ACK_STREAM_ID_1)
             .unwrap();
         let out = encoder.peer_conn.process_output(now());
         encoder.conn.process_input(out.dgram().unwrap(), now());
