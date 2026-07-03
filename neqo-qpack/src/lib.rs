@@ -33,9 +33,67 @@ type Res<T> = Result<T, Error>;
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 #[expect(clippy::struct_field_names, reason = "That's how they are called.")]
 pub struct Settings {
-    pub max_table_size_decoder: u64,
-    pub max_table_size_encoder: u64,
-    pub max_blocked_streams: u16,
+    max_table_size_decoder: u64,
+    max_table_size_encoder: u64,
+    max_blocked_streams: u16,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        const MAX_TABLE_SIZE_DEFAULT: u64 = 65536;
+        const MAX_BLOCKED_STREAMS_DEFAULT: u16 = 20;
+        Self {
+            max_table_size_decoder: MAX_TABLE_SIZE_DEFAULT,
+            max_table_size_encoder: MAX_TABLE_SIZE_DEFAULT,
+            max_blocked_streams: MAX_BLOCKED_STREAMS_DEFAULT,
+        }
+    }
+}
+
+impl Settings {
+    /// The QPACK specification limits the table size to `(1 << 30) - 1`.
+    const TABLE_SIZE_LIMIT: u64 = (1 << 30) - 1;
+
+    #[must_use]
+    pub const fn get_max_table_size_decoder(&self) -> u64 {
+        self.max_table_size_decoder
+    }
+
+    /// # Panics
+    ///
+    /// The table size must be smaller than `1 << 30` by the spec.
+    #[must_use]
+    pub const fn max_table_size_decoder(mut self, v: u64) -> Self {
+        assert!(v <= Self::TABLE_SIZE_LIMIT);
+        self.max_table_size_decoder = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_max_table_size_encoder(&self) -> u64 {
+        self.max_table_size_encoder
+    }
+
+    /// # Panics
+    ///
+    /// The table size must be smaller than `1 << 30` by the spec.
+    #[must_use]
+    pub const fn max_table_size_encoder(mut self, v: u64) -> Self {
+        assert!(v <= Self::TABLE_SIZE_LIMIT);
+        self.max_table_size_encoder = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_max_blocked_streams(&self) -> u16 {
+        self.max_blocked_streams
+    }
+
+    #[must_use]
+    pub const fn max_blocked_streams(mut self, v: u16) -> Self {
+        self.max_blocked_streams = v;
+        self
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
