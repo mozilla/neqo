@@ -232,11 +232,12 @@ impl HeaderTable {
         qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
         // A static value match wins outright; otherwise a static name-only match is kept
         // as a fallback that a dynamic name-only match must not displace.
-        let mut static_match = Self::static_lookup(name, value);
+        let static_match = Self::static_lookup(name, value);
         if static_match.as_ref().is_some_and(|r| r.value_matches) {
             return static_match;
         }
 
+        let mut name_match = static_match;
         for iter in &self.dynamic {
             if !can_block && iter.index() >= self.acked_inserts_cnt {
                 continue;
@@ -250,14 +251,14 @@ impl HeaderTable {
                     });
                 }
 
-                static_match.get_or_insert_with(|| LookupResult {
+                name_match.get_or_insert_with(|| LookupResult {
                     index: iter.index(),
                     static_table: false,
                     value_matches: false,
                 });
             }
         }
-        static_match
+        name_match
     }
 
     fn evict_to(&mut self, reduce: u64) -> bool {

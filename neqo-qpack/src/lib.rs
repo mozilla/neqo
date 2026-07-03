@@ -37,7 +37,7 @@ pub struct Settings {
     pub max_table_size_encoder: u64,
     pub max_blocked_streams: u16,
     /// Upper bound on the number of streams the encoder tracks.
-    /// Dynamic table references will be blocked once this limit is hit.
+    /// Dynamic table references will be avoided once this limit is hit.
     pub max_tracked_streams: usize,
 }
 
