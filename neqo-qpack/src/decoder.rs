@@ -308,6 +308,7 @@ mod tests {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 100,
+            max_tracked_streams: 4096,
         });
         decoder.add_send_stream(send_stream_id);
 
@@ -840,6 +841,7 @@ mod tests {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 1,
+            max_tracked_streams: 4096,
         });
         // One blocked stream is within the advertised limit.
         assert!(
@@ -860,6 +862,7 @@ mod tests {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 0,
+            max_tracked_streams: 4096,
         });
         assert!(
             decoder
