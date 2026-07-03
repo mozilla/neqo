@@ -1129,22 +1129,26 @@ mod tests {
         }
     }
 
-    #[test]
-    fn write_frame_more_than_32_ranges() {
-        const RANGE_COUNT: usize = 40;
-
+    fn tracker_with_initial_ranges(range_count: usize) -> AckTracker {
         let mut stats = Stats::default();
         let mut tracker = AckTracker::default();
         let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
-        for i in 0..RANGE_COUNT {
+        for i in 0..range_count {
             recvd
-                .set_received(now(), (i * 2) as u64, true, &mut stats)
+                .set_received(now(), to_u64(i * 2), true, &mut stats)
                 .unwrap();
         }
-        assert_eq!(recvd.ranges.len(), RANGE_COUNT);
+        tracker
+    }
 
-        let mut builder =
-            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+    fn ack_builder(limit: usize) -> packet::Builder<Vec<u8>> {
+        packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit)
+    }
+
+    fn write_initial_ack_frame(
+        tracker: &mut AckTracker,
+        mut builder: packet::Builder<Vec<u8>>,
+    ) -> (packet::Builder<Vec<u8>>, recovery::Tokens) {
         let mut frame_stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
         tracker.write_frame(
@@ -1156,15 +1160,40 @@ mod tests {
             &mut frame_stats,
         );
         assert_eq!(frame_stats.ack, 1);
+        (builder, tokens)
+    }
 
+    fn assert_ack_token_range_count(tokens: &recovery::Tokens, expected: usize) {
         let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
             panic!("expected one ACK token");
         };
-        assert_eq!(tok.ranges.len(), RANGE_COUNT);
+        assert_eq!(tok.ranges.len(), expected);
+    }
 
+    fn decode_ack_from_builder(builder: &packet::Builder<Vec<u8>>) -> Frame<'_> {
         let mut dec = builder.as_decoder();
         dec.skip(1); // Skip the short header.
-        let frame = Frame::decode(&mut dec).unwrap();
+        Frame::decode(&mut dec).unwrap()
+    }
+
+    #[test]
+    fn write_frame_more_than_32_ranges() {
+        const RANGE_COUNT: usize = 40;
+
+        let mut tracker = tracker_with_initial_ranges(RANGE_COUNT);
+        assert_eq!(
+            tracker
+                .get_mut(PacketNumberSpace::Initial)
+                .unwrap()
+                .ranges
+                .len(),
+            RANGE_COUNT
+        );
+
+        let (builder, tokens) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
+        assert_ack_token_range_count(&tokens, RANGE_COUNT);
+
+        let frame = decode_ack_from_builder(&builder);
         let Frame::Ack {
             largest_acknowledged,
             first_ack_range,
@@ -1197,42 +1226,14 @@ mod tests {
             recovery::ACK_ONLY_SIZE_LIMIT - 1
         );
 
-        let mut stats = Stats::default();
-        let mut tracker = AckTracker::default();
-        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
-        for i in 0..(ACK_ONLY_RANGE_COUNT + 5) {
-            recvd
-                .set_received(now(), (i * 2) as u64, true, &mut stats)
-                .unwrap();
-        }
+        let mut tracker = tracker_with_initial_ranges(ACK_ONLY_RANGE_COUNT + 5);
 
-        let mut builder = packet::Builder::short(
-            Encoder::default(),
-            false,
-            None::<&[u8]>,
-            recovery::ACK_ONLY_SIZE_LIMIT - 1,
-        );
-        let mut frame_stats = FrameStats::default();
-        let mut tokens = recovery::Tokens::new();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut frame_stats,
-        );
-        assert_eq!(frame_stats.ack, 1);
+        let (builder, tokens) =
+            write_initial_ack_frame(&mut tracker, ack_builder(recovery::ACK_ONLY_SIZE_LIMIT - 1));
         assert!(builder.len() < recovery::ACK_ONLY_SIZE_LIMIT);
+        assert_ack_token_range_count(&tokens, ACK_ONLY_RANGE_COUNT);
 
-        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
-            panic!("expected one ACK token");
-        };
-        assert_eq!(tok.ranges.len(), ACK_ONLY_RANGE_COUNT);
-
-        let mut dec = builder.as_decoder();
-        dec.skip(1); // Skip the short header.
-        let frame = Frame::decode(&mut dec).unwrap();
+        let frame = decode_ack_from_builder(&builder);
         let Frame::Ack { ack_ranges, .. } = frame else {
             panic!("not an ACK!");
         };
@@ -1241,40 +1242,19 @@ mod tests {
 
     #[test]
     fn ack_frame_reserves_space_for_another_frame() {
-        let mut stats = Stats::default();
-        let mut tracker = AckTracker::default();
-        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
-        recvd.set_received(now(), 0, true, &mut stats).unwrap();
-        recvd.set_received(now(), 2, true, &mut stats).unwrap();
+        let mut tracker = tracker_with_initial_ranges(2);
 
-        let mut builder =
-            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut builder = ack_builder(packet::LIMIT);
         builder.set_limit(
             builder.len() + RecvdPackets::USEFUL_ACK_LEN + 16 + packet::Builder::MINIMUM_FRAME_SIZE
                 - 1,
         );
 
-        let mut frame_stats = FrameStats::default();
-        let mut tokens = recovery::Tokens::new();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut frame_stats,
-        );
-        assert_eq!(frame_stats.ack, 1);
+        let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
         assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
+        assert_ack_token_range_count(&tokens, 1);
 
-        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
-            panic!("expected one ACK token");
-        };
-        assert_eq!(tok.ranges.len(), 1);
-
-        let mut dec = builder.as_decoder();
-        dec.skip(1); // Skip the short header.
-        let frame = Frame::decode(&mut dec).unwrap();
+        let frame = decode_ack_from_builder(&builder);
         let Frame::Ack { ack_ranges, .. } = frame else {
             panic!("not an ACK!");
         };
@@ -1285,18 +1265,17 @@ mod tests {
     fn two_byte_ack_range_count_reduces_range_budget() {
         const RANGE_COUNT: usize = 65;
 
-        let mut stats = Stats::default();
-        let mut tracker = AckTracker::default();
-        let recvd = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
-        for i in 0..RANGE_COUNT {
-            recvd
-                .set_received(now(), (i * 2) as u64, true, &mut stats)
-                .unwrap();
-        }
-        assert_eq!(recvd.ranges.len(), RANGE_COUNT);
+        let mut tracker = tracker_with_initial_ranges(RANGE_COUNT);
+        assert_eq!(
+            tracker
+                .get_mut(PacketNumberSpace::Initial)
+                .unwrap()
+                .ranges
+                .len(),
+            RANGE_COUNT
+        );
 
-        let mut builder =
-            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut builder = ack_builder(packet::LIMIT);
         builder.set_limit(
             builder.len()
                 + RecvdPackets::USEFUL_ACK_LEN
@@ -1304,23 +1283,9 @@ mod tests {
                 + packet::Builder::MINIMUM_FRAME_SIZE,
         );
 
-        let mut frame_stats = FrameStats::default();
-        let mut tokens = recovery::Tokens::new();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut frame_stats,
-        );
-        assert_eq!(frame_stats.ack, 1);
+        let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
         assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
-
-        let [recovery::Token::Ack(tok)] = tokens.as_slice() else {
-            panic!("expected one ACK token");
-        };
-        assert_eq!(tok.ranges.len(), RANGE_COUNT - 1);
+        assert_ack_token_range_count(&tokens, RANGE_COUNT - 1);
     }
 
     #[test]
