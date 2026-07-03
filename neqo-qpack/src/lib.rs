@@ -173,6 +173,7 @@ impl Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::Error;
+    use crate::Settings;
 
     #[test]
     fn error_codes() {
