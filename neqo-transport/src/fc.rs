@@ -126,8 +126,11 @@ where
     /// Update the maximum. Returns `Some` with the updated available flow
     /// control if the change was an increase and `None` otherwise.
     pub fn update(&mut self, limit: u64) -> Option<usize> {
+        // Cap values that we can't handle.
+        // Only on 32-bit builds; the cap is higher than the protocol allows otherwise.
+        let limit = min(limit, FC_CAP);
         (limit > self.limit).then(|| {
-            self.limit = min(limit, FC_CAP);
+            self.limit = limit;
             self.blocked_frame = false;
             self.available()
         })
