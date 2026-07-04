@@ -3036,6 +3036,23 @@ impl Connection {
             let tps = self.tps.borrow();
             let remote = tps.remote_handshake().ok_or(Error::TransportParameter)?;
 
+            // RFC 9000, Section 18.2: `original_destination_connection_id`,
+            // `retry_source_connection_id`, and `stateless_reset_token` are only sent
+            // by a server. A server that receives one from a client rejects it with a
+            // transport parameter error. `preferred_address`, the fourth server-only
+            // parameter, is handled by the check below.
+            if self.role == Role::Server
+                && [
+                    OriginalDestinationConnectionId,
+                    RetrySourceConnectionId,
+                    StatelessResetToken,
+                ]
+                .into_iter()
+                .any(|tp| remote.has_value(tp))
+            {
+                return Err(Error::TransportParameter);
+            }
+
             // If the peer provided a preferred address, then we have to be a client
             // and they have to be using a non-empty connection ID.
             if remote.get_preferred_address().is_some()

@@ -961,6 +961,37 @@ fn preferred_address_client() {
     );
 }
 
+/// The other server-only transport parameters (RFC 9000, Section 18.2) also get
+/// rejected by a server when a client sends them.
+#[test]
+fn server_only_tparams_from_client() {
+    for (tp, value) in [
+        (
+            TransportParameterId::OriginalDestinationConnectionId,
+            TransportParameter::Bytes(vec![0x0b; 8]),
+        ),
+        (
+            TransportParameterId::RetrySourceConnectionId,
+            TransportParameter::Bytes(vec![0x0c; 8]),
+        ),
+        (
+            TransportParameterId::StatelessResetToken,
+            TransportParameter::Bytes(vec![0x0d; 16]),
+        ),
+    ] {
+        let mut client = default_client();
+        let mut server = default_server();
+        client.set_local_tparam(tp, value).unwrap();
+
+        connect_fail(
+            &mut client,
+            &mut server,
+            Error::Peer(Error::TransportParameter.code()),
+            Error::TransportParameter,
+        );
+    }
+}
+
 /// Test that migration isn't permitted if the connection isn't in the right state.
 #[test]
 fn migration_invalid_state() {
