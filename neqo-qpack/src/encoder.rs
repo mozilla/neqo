@@ -52,6 +52,9 @@ pub struct Encoder {
     instruction_reader: DecoderInstructionReader,
     local_stream: LocalStreamState,
     max_blocked_streams: u16,
+    /// Upper bound on the number of entries in `unacked_header_blocks`; see
+    /// [`Settings::max_tracked_streams`](crate::Settings::max_tracked_streams).
+    max_tracked_streams: usize,
     // Remember header blocks that are referring to dynamic table.
     // There can be multiple header blocks in one stream, headers, trailer, push stream request,
     // etc. This HashMap maps a stream ID to a list of header blocks. Each header block is a
@@ -73,6 +76,7 @@ impl Encoder {
             instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
+            max_tracked_streams: qpack_settings.max_tracked_streams,
             unacked_header_blocks: HashMap::default(),
             blocked_stream_cnt: 0,
             use_huffman,
@@ -383,8 +387,7 @@ impl Encoder {
                 hb_list
                     .iter()
                     .flatten()
-                    .max()
-                    .is_some_and(|max_ref| *max_ref >= self.table.get_acked_inserts_cnt())
+                    .any(|index| *index >= self.table.get_acked_inserts_cnt())
             })
     }
 
@@ -421,8 +424,16 @@ impl Encoder {
         let mut encoded_h =
             HeaderEncoder::new(self.table.base(), self.use_huffman, self.max_entries);
 
-        let stream_is_blocker = self.is_stream_blocker(stream_id);
-        let can_block = self.blocked_stream_cnt < self.max_blocked_streams || stream_is_blocker;
+        // Avoid the dynamic table unless we have space to track.
+        let stream_was_blocking = self.is_stream_blocker(stream_id);
+        let can_track = stream_was_blocking
+            || self.unacked_header_blocks.contains_key(&stream_id)
+            || self.unacked_header_blocks.len() < self.max_tracked_streams;
+
+        // Avoid blocking unless the stream is already blocked or
+        // we can use the dynamic table and there is space for blocked streams.
+        let can_block = stream_was_blocking
+            || (can_track && self.blocked_stream_cnt < self.max_blocked_streams);
 
         let mut ref_entries = HashSet::default();
 
@@ -431,11 +442,16 @@ impl Encoder {
             let value = iter.value();
             qtrace!("encoding {name:x?} {value:x?}");
 
+            let found = if can_track {
+                self.table.lookup(&name, value, can_block)
+            } else {
+                HeaderTable::static_lookup(&name, value)
+            };
             if let Some(LookupResult {
                 index,
                 static_table,
                 value_matches,
-            }) = self.table.lookup(&name, value, can_block)
+            }) = found
             {
                 qtrace!(
                     "[{self}] found a {} entry, value-match={value_matches}",
@@ -485,7 +501,7 @@ impl Encoder {
 
         encoded_h.encode_header_block_prefix();
 
-        if !stream_is_blocker {
+        if !stream_was_blocking {
             // The streams was not a blocker, check if the stream is a blocker now.
             if let Some(max_ref) = ref_entries.iter().max()
                 && *max_ref >= self.table.get_acked_inserts_cnt()
@@ -565,6 +581,7 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 mod tests {
     use std::time::Instant;
 
+    use neqo_common::to_usize;
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server, handshake,
@@ -648,6 +665,7 @@ mod tests {
                 max_table_size_encoder: 1500,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
+                max_tracked_streams: 4096,
             },
             huffman,
         );
@@ -690,11 +708,9 @@ mod tests {
     const CAP_INSTRUCTION_1000: &[u8] = &[0x02, 0x3f, 0xc9, 0x07];
     const CAP_INSTRUCTION_1500: &[u8] = &[0x02, 0x3f, 0xbd, 0x0b];
 
-    const HEADER_CONTENT_LENGTH: &[u8] = &[
-        0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
-    ];
-    const VALUE_1: &[u8] = &[0x31, 0x32, 0x33, 0x34];
-    const VALUE_2: &[u8] = &[0x31, 0x32, 0x33, 0x34, 0x35];
+    const HEADER_CONTENT_LENGTH: &[u8] = b"content-length";
+    const VALUE_1: &[u8] = b"1234";
+    const VALUE_2: &[u8] = b"12345";
 
     // HEADER_CONTENT_LENGTH and VALUE_1 encoded by instruction insert_with_name_literal.
     const HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL: &[u8] = &[
@@ -1754,5 +1770,106 @@ mod tests {
         recv_instruction(&mut encoder, STREAM_CANCELED_ID_1, now());
 
         recv_instruction(&mut encoder, &[0x01], now());
+    }
+
+    // A peer that acknowledges an insertion (so a dynamic entry becomes referenceable
+    // without blocking) but then resets its streams via STOP_SENDING *without* ever
+    // sending a Header Acknowledgement or Stream Cancellation instruction would, absent
+    // a cap, make `unacked_header_blocks` grow one entry per stream for the lifetime of
+    // the connection: every such stream references the acknowledged entry, which adds an
+    // entry to the map and bumps the table entry's reference count, while
+    // `blocked_stream_cnt` stays at 0 (so `max_blocked_streams` does not contain it).
+    //
+    // `Settings::max_tracked_streams` bounds this: once the map is full, new streams are
+    // encoded from the static table and literals only, so they create no reference and
+    // add nothing to the map.
+    #[test]
+    fn unacked_header_blocks_are_capped() {
+        const CAP: u64 = 5;
+
+        let mut encoder = connect(false);
+
+        // The encoder is never allowed to block a stream, and tracks at most CAP streams.
+        encoder.encoder.set_max_blocked_streams(0).unwrap();
+        encoder.encoder.max_tracked_streams = to_usize(CAP);
+        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.send_instructions(CAP_INSTRUCTION_200);
+
+        encoder.insert(
+            HEADER_CONTENT_LENGTH,
+            VALUE_1,
+            HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL,
+        );
+        recv_instruction(&mut encoder, &[0x01], now());
+
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
+        assert_eq!(encoder.encoder.unacked_header_blocks.len(), 0);
+
+        // Simulate more streams than the cap: each sends a header block referencing the
+        // acked entry and is then reset via STOP_SENDING, but the peer never sends a
+        // Header Ack or Stream Cancellation instruction for it.
+        for i in 0..CAP + 10 {
+            let buf = encoder.encoder.encode_header_block(
+                &mut encoder.conn,
+                &[Header::new(
+                    String::from_utf8_lossy(HEADER_CONTENT_LENGTH),
+                    VALUE_1,
+                )],
+                StreamId::new(i * 4),
+            );
+            // Dynamic entries are used up to the cap.
+            if i < CAP {
+                assert_is_index_to_dynamic(&buf);
+            } else {
+                assert_is_index_to_static_name_only(&buf);
+            }
+        }
+
+        // Nothing ever blocks, but the tracked state is bounded by the cap.
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
+        assert_eq!(encoder.encoder.unacked_header_blocks.len(), to_usize(CAP));
+    }
+
+    /// A stream that is already tracked is not subject to the tracking cap.
+    #[test]
+    fn tracked_stream_bypasses_tracked_cap() {
+        const CAP: usize = 1;
+
+        let mut encoder = connect(false);
+
+        encoder.encoder.set_max_blocked_streams(10).unwrap();
+        encoder.encoder.max_tracked_streams = CAP;
+        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.send_instructions(CAP_INSTRUCTION_200);
+
+        // STREAM_1 inserts and references a new, unacknowledged entry: it becomes a
+        // blocking stream and fills the single tracked-stream slot.
+        let buf = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("name1", "value1")],
+            STREAM_1,
+        );
+        assert_is_index_to_dynamic_post(&buf);
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
+        assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
+
+        // A brand-new stream is now over the cap and must fall back to a literal.
+        let buf = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("name2", "value2")],
+            STREAM_2,
+        );
+        assert_is_literal_value_literal_name(&buf);
+        assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
+
+        // An already-tracked STREAM_1 is not affected by the cap.
+        let buf = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("name3", "value3")],
+            STREAM_1,
+        );
+        assert_is_index_to_dynamic_post(&buf);
+        assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
     }
 }

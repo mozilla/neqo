@@ -659,7 +659,8 @@ mod tests {
             &qpack::Settings::default()
                 .max_table_size_encoder(100)
                 .max_table_size_decoder(0)
-                .max_blocked_streams(0),
+                .max_blocked_streams(0)
+                .max_tracked_streams(4096),
             true,
         );
         encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());

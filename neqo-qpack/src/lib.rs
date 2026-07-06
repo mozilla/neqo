@@ -36,16 +36,19 @@ pub struct Settings {
     max_table_size_decoder: u64,
     max_table_size_encoder: u64,
     max_blocked_streams: u16,
+    /// Upper bound on the number of streams the encoder tracks.
+    /// Dynamic table references will be avoided once this limit is hit.
+    max_tracked_streams: usize,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         const MAX_TABLE_SIZE_DEFAULT: u64 = 65536;
-        const MAX_BLOCKED_STREAMS_DEFAULT: u16 = 20;
         Self {
             max_table_size_decoder: MAX_TABLE_SIZE_DEFAULT,
             max_table_size_encoder: MAX_TABLE_SIZE_DEFAULT,
-            max_blocked_streams: MAX_BLOCKED_STREAMS_DEFAULT,
+            max_blocked_streams: 20,
+            max_tracked_streams: 1000,
         }
     }
 }
@@ -92,6 +95,17 @@ impl Settings {
     #[must_use]
     pub const fn max_blocked_streams(mut self, v: u16) -> Self {
         self.max_blocked_streams = v;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_max_tracked_streams(&self) -> usize {
+        self.max_tracked_streams
+    }
+
+    #[must_use]
+    pub const fn max_tracked_streams(mut self, v: usize) -> Self {
+        self.max_tracked_streams = v;
         self
     }
 }
