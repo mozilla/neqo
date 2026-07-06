@@ -2037,6 +2037,8 @@ fn retry_scid_matching_initial_dcid() {
         let mut dec = Decoder::from(&initial[5..]);
         let dcid = dec.decode_vec(1).expect("client DCID").to_vec();
         let scid = dec.decode_vec(1).expect("client SCID").to_vec();
+        assert!(!dcid.is_empty(), "client DCID is non-empty");
+        assert!(!scid.is_empty(), "client SCID is non-empty");
         (dcid, scid)
     }
 
@@ -2051,10 +2053,10 @@ fn retry_scid_matching_initial_dcid() {
     let (dcid, scid) = initial_cids(&initial);
     let retry = crate::packet::Builder::retry(
         Version::default(),
-        &scid,   // Retry Destination CID: the client's Source CID
-        &dcid,   // Retry Source CID equal to the client's Initial Destination CID
+        &scid,   // Destination CID: copied from the client as required
+        &dcid,   // Source CID: copied from client (bad!)
         &[0x01], // non-empty token
-        &dcid,   // integrity tag is keyed on the client's Initial Destination CID
+        &dcid,   // as required: a seed for authenticating the Retry
     )
     .expect("build retry");
     drop(client.process(Some(datagram(retry)), now()));
