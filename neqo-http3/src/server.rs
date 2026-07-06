@@ -438,6 +438,7 @@ mod tests {
         max_table_size_encoder: 100,
         max_table_size_decoder: 100,
         max_blocked_streams: 100,
+        max_tracked_streams: 4096,
     };
 
     fn http3params(qpack_settings: qpack::Settings) -> Http3Parameters {
@@ -662,6 +663,7 @@ mod tests {
                 max_table_size_encoder: 100,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
+                max_tracked_streams: 4096,
             },
             true,
         );

@@ -1372,6 +1372,7 @@ mod tests {
                     max_table_size_encoder: max_table_size,
                     max_table_size_decoder: max_table_size,
                     max_blocked_streams,
+                    max_tracked_streams: 4096,
                 },
                 true,
             )));
@@ -1394,6 +1395,7 @@ mod tests {
                     max_table_size_encoder: 128,
                     max_table_size_decoder: 128,
                     max_blocked_streams: 0,
+                    max_tracked_streams: 4096,
                 },
                 true,
             )));
