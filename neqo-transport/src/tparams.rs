@@ -302,7 +302,7 @@ impl TransportParameter {
         Ok(Self::Versions { current, other })
     }
 
-    fn decode(dec: &mut Decoder) -> Res<Option<(TransportParameterId, Self)>> {
+    fn decode(role: Role, dec: &mut Decoder) -> Res<Option<(TransportParameterId, Self)>> {
         let tp = dec.decode_varint().ok_or(Error::NoMoreData)?;
         let content = dec.decode_vvec().ok_or(Error::NoMoreData)?;
         qtrace!("TP {tp:x} length {:x}", content.len());
@@ -314,12 +314,17 @@ impl TransportParameter {
         let mut d = Decoder::from(content);
         let value = match tp {
             TransportParameterId::OriginalDestinationConnectionId
-            | TransportParameterId::InitialSourceConnectionId
             | TransportParameterId::RetrySourceConnectionId => {
+                if role == Role::Server {
+                    return Err(Error::TransportParameter);
+                }
+                Self::Bytes(d.decode_remainder().to_vec())
+            }
+            TransportParameterId::InitialSourceConnectionId => {
                 Self::Bytes(d.decode_remainder().to_vec())
             }
             TransportParameterId::StatelessResetToken => {
-                if d.remaining() != 16 {
+                if role == Role::Server || d.remaining() != 16 {
                     return Err(Error::TransportParameter);
                 }
                 Self::Bytes(d.decode_remainder().to_vec())
@@ -399,7 +404,7 @@ impl TransportParameters {
     ///
     /// # Errors
     /// When the transport parameters are malformed.
-    pub fn decode(d: &mut Decoder) -> Res<Self> {
+    pub fn decode(role: Role, d: &mut Decoder) -> Res<Self> {
         #[cfg(feature = "build-fuzzing-corpus")]
         neqo_common::write_item_to_fuzzing_corpus("tparams", d.as_ref());
 
@@ -407,7 +412,7 @@ impl TransportParameters {
         qtrace!("Parsed fixed TP header");
 
         while d.remaining() > 0 {
-            match TransportParameter::decode(d) {
+            match TransportParameter::decode(role, d) {
                 Ok(Some((tipe, tp))) => {
                     // RFC 9000, Section 7.4:
                     //
@@ -897,7 +902,7 @@ impl ExtensionHandler for TransportParametersHandler {
         }
 
         let mut dec = Decoder::from(d);
-        match TransportParameters::decode(&mut dec) {
+        match TransportParameters::decode(self.role, &mut dec) {
             Ok(tp) => {
                 if self.compatible_upgrade(&tp).is_ok() {
                     self.remote_handshake = Some(tp);
@@ -948,7 +953,8 @@ where
             return ZeroRttCheckResult::Fail;
         };
         let mut dec_tp = Decoder::from(tpslice);
-        let Ok(remembered) = TransportParameters::decode(&mut dec_tp) else {
+        // This runs on the server, but it is checking its own transport parameters.
+        let Ok(remembered) = TransportParameters::decode(Role::Client, &mut dec_tp) else {
             qinfo!("0-RTT: transport parameter decode error");
             return ZeroRttCheckResult::Fail;
         };
@@ -968,7 +974,7 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     use TransportParameterId::*;
-    use neqo_common::{Decoder, Encoder, qdebug, to_u64};
+    use neqo_common::{Decoder, Encoder, Role::Client, qdebug, to_u64};
 
     use super::PreferredAddress;
     use crate::{
@@ -1013,7 +1019,8 @@ mod tests {
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
 
-        let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+        let tps2 =
+            TransportParameters::decode(Client, &mut enc.as_decoder()).expect("Couldn't decode");
         assert_eq!(tps, tps2);
 
         println!("TPS = {tps:?}");
@@ -1036,7 +1043,7 @@ mod tests {
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
 
-        TransportParameters::decode(&mut enc.as_decoder()).expect("Couldn't decode");
+        TransportParameters::decode(Client, &mut enc.as_decoder()).expect("Couldn't decode");
     }
 
     /// Validate that default values don't get set.
@@ -1089,7 +1096,9 @@ mod tests {
         assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
-        let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
+        let (id, decoded) = TransportParameter::decode(Client, &mut dec)
+            .unwrap()
+            .unwrap();
         assert_eq!(id, PreferredAddress);
         assert_eq!(decoded, spa);
     }
@@ -1114,7 +1123,7 @@ mod tests {
         let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         assert_eq!(
-            TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
+            TransportParameter::decode(Client, &mut enc.as_decoder()).unwrap_err(),
             Error::TransportParameter
         );
     }
@@ -1124,7 +1133,9 @@ mod tests {
         let mut enc = Encoder::default();
         spa.encode(&mut enc, PreferredAddress);
         let mut dec = enc.as_decoder();
-        let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
+        let (id, decoded) = TransportParameter::decode(Client, &mut dec)
+            .unwrap()
+            .unwrap();
         assert_eq!(id, PreferredAddress);
         assert_eq!(&decoded, spa);
     }
@@ -1176,7 +1187,7 @@ mod tests {
         spa.encode(&mut enc, PreferredAddress);
         let mut dec = Decoder::from(&enc.as_ref()[..enc.len() - 1]);
         assert_eq!(
-            TransportParameter::decode(&mut dec).unwrap_err(),
+            TransportParameter::decode(Client, &mut dec).unwrap_err(),
             Error::NoMoreData
         );
     }
@@ -1301,7 +1312,7 @@ mod tests {
 
         // When decoding a set of transport parameters with an invalid ACTIVE_CONNECTION_ID_LIMIT
         // the result should be an error.
-        let invalid_decode_result = TransportParameters::decode(&mut enc.as_decoder());
+        let invalid_decode_result = TransportParameters::decode(Client, &mut enc.as_decoder());
         assert!(invalid_decode_result.is_err());
     }
 
@@ -1313,7 +1324,7 @@ mod tests {
         TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
         TransportParameter::Integer(20).encode(&mut enc, IdleTimeout);
         assert_eq!(
-            TransportParameters::decode(&mut enc.as_decoder()).unwrap_err(),
+            TransportParameters::decode(Client, &mut enc.as_decoder()).unwrap_err(),
             Error::TransportParameter
         );
     }
@@ -1324,7 +1335,8 @@ mod tests {
         let mut enc = Encoder::default();
         TransportParameter::Integer(10).encode(&mut enc, IdleTimeout);
         TransportParameter::Integer(20).encode(&mut enc, InitialMaxData);
-        let tps = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
+        let tps =
+            TransportParameters::decode(Client, &mut enc.as_decoder()).expect("should decode");
         assert_eq!(tps.get_integer(IdleTimeout), 10);
         assert_eq!(tps.get_integer(InitialMaxData), 20);
     }
@@ -1339,7 +1351,8 @@ mod tests {
 
         let mut enc = Encoder::default();
         tps.encode(&mut enc);
-        let tps2 = TransportParameters::decode(&mut enc.as_decoder()).expect("should decode");
+        let tps2 =
+            TransportParameters::decode(Client, &mut enc.as_decoder()).expect("should decode");
         assert!(tps2.get_empty(ResetStreamAt));
         assert_eq!(tps, tps2);
     }
@@ -1351,7 +1364,7 @@ mod tests {
         enc.encode_varint(ResetStreamAt);
         enc.encode_vvec(&[0x01]); // non-empty content
         assert_eq!(
-            TransportParameter::decode(&mut enc.as_decoder()).unwrap_err(),
+            TransportParameter::decode(Client, &mut enc.as_decoder()).unwrap_err(),
             Error::TooMuchData
         );
     }
@@ -1363,7 +1376,7 @@ mod tests {
         TransportParameter::Empty.encode(&mut enc, ResetStreamAt);
         TransportParameter::Empty.encode(&mut enc, ResetStreamAt);
         assert_eq!(
-            TransportParameters::decode(&mut enc.as_decoder()).unwrap_err(),
+            TransportParameters::decode(Client, &mut enc.as_decoder()).unwrap_err(),
             Error::TransportParameter
         );
     }
@@ -1405,7 +1418,9 @@ mod tests {
         assert_eq!(enc.as_ref(), ENCODED);
 
         let mut dec = enc.as_decoder();
-        let (id, decoded) = TransportParameter::decode(&mut dec).unwrap().unwrap();
+        let (id, decoded) = TransportParameter::decode(Client, &mut dec)
+            .unwrap()
+            .unwrap();
         assert_eq!(id, VersionInformation);
         assert_eq!(decoded, vn);
     }
@@ -1418,7 +1433,7 @@ mod tests {
         ];
         let mut dec = Decoder::from(&TRUNCATED);
         assert_eq!(
-            TransportParameter::decode(&mut dec).unwrap_err(),
+            TransportParameter::decode(Client, &mut dec).unwrap_err(),
             Error::NoMoreData
         );
     }
@@ -1430,12 +1445,12 @@ mod tests {
 
         let mut dec = Decoder::from(&ZERO1);
         assert_eq!(
-            TransportParameter::decode(&mut dec).unwrap_err(),
+            TransportParameter::decode(Client, &mut dec).unwrap_err(),
             Error::TransportParameter
         );
         let mut dec = Decoder::from(&ZERO2);
         assert_eq!(
-            TransportParameter::decode(&mut dec).unwrap_err(),
+            TransportParameter::decode(Client, &mut dec).unwrap_err(),
             Error::TransportParameter
         );
     }
@@ -1491,7 +1506,7 @@ mod tests {
     fn decode_tp_integer(tp: TransportParameterId, v: u64) -> crate::Res<TransportParameter> {
         let mut enc = Encoder::default();
         TransportParameter::Integer(v).encode(&mut enc, tp);
-        TransportParameter::decode(&mut enc.as_decoder()).map(|r| r.unwrap().1)
+        TransportParameter::decode(Client, &mut enc.as_decoder()).map(|r| r.unwrap().1)
     }
 
     #[test]
@@ -1540,7 +1555,7 @@ mod tests {
         let mut raw: Vec<u8> = enc.into();
         raw[1] += 1; // Increase vvec length by 1 (second byte is the length).
         raw.push(0xff); // Extra byte.
-        let err = TransportParameter::decode(&mut Decoder::from(&raw[..])).unwrap_err();
+        let err = TransportParameter::decode(Client, &mut Decoder::from(&raw[..])).unwrap_err();
         assert_eq!(err, Error::TooMuchData);
     }
 
