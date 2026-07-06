@@ -803,8 +803,8 @@ impl Connection {
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp =
-            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
+        let tp = TransportParameters::decode(Role::Client, &mut dec_tp)
+            .map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
