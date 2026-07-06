@@ -1324,14 +1324,24 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
-        if !packet.is_valid_retry(
-            self.original_destination_cid
-                .as_ref()
-                .ok_or(Error::InvalidRetry)?,
-        ) {
+        let odcid = self
+            .original_destination_cid
+            .as_ref()
+            .ok_or(Error::InvalidRetry)?;
+        if !packet.is_valid_retry(odcid) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
+            return Ok(());
+        }
+        // RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet that
+        // carries a Source Connection ID identical to the Destination Connection ID
+        // of its Initial. The Retry integrity key is public, so this comparison is
+        // one of the few checks that constrains an off-path injected Retry.
+        if packet.scid() == *odcid {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry with SCID matching our Initial DCID");
             return Ok(());
         }
         // At this point, we should only have the connection ID that we generated.
