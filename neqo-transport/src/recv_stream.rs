@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, to_u64, to_usize};
+use neqo_common::{Buffer, Role, qtrace, qwarn, to_u64, to_usize};
 use smallvec::SmallVec;
 use strum::Display;
 
