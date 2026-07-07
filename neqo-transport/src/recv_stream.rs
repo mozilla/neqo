@@ -1933,7 +1933,7 @@ mod tests {
         // Filling every gap coalesces the disjoint ranges into a single one.
         let filler = vec![0u8; to_usize(offset)];
         stream.inbound_stream_frame(false, 0, &filler).unwrap();
-        assert_eq!(stream.state.recv_buf().unwrap().data_ranges.len(), 1);
+        assert_eq!(stream.state.recv_buf().unwrap().discontiguous_ranges(), 1);
 
         // The stream must now accept `limit - 1` additional discontiguous ranges.
         insert_discontiguous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
