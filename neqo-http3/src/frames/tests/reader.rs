@@ -4,7 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_asserts_for_indexing, reason = "OK in tests")]
+#![allow(
+    clippy::missing_asserts_for_indexing,
+    clippy::unwrap_in_result,
+    reason = "OK in tests"
+)]
 
 use std::{cmp::min, fmt::Debug};
 
@@ -13,9 +17,12 @@ use neqo_transport::{Connection, StreamId, StreamType};
 use test_fixture::{connect, now};
 
 use crate::{
-    Error, PushId,
+    Error, PushId, Res,
     frames::{
-        FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame, reader::FrameDecoder,
+        FrameReader, HFrame, HFrameType, StreamReaderConnectionWrapper, WebTransportFrame,
+        capsule::{Capsule, MAX_DATAGRAM_BYTES},
+        hframe::{MAX_BUFFERED_FRAME_BYTES, MAX_HEADER_BYTES, MAX_SINGLE_VARINT_FRAME_BYTES},
+        reader::FrameDecoder,
     },
     settings::{HSetting, HSettingType, HSettings},
 };
@@ -53,6 +60,24 @@ impl FrameReaderTest {
         assert!(!fin);
         frame
     }
+
+    fn try_process<T: FrameDecoder<T>>(&mut self, v: &[u8]) -> Res<(Option<T>, bool)> {
+        self.conn_s.stream_send(self.stream_id, v).unwrap();
+        let out = self.conn_s.process_output(now());
+        _ = self.conn_c.process(out.dgram(), now());
+        self.fr.receive::<T>(
+            &mut StreamReaderConnectionWrapper::new(&mut self.conn_c, self.stream_id),
+            now(),
+        )
+    }
+}
+
+// Builds just the type + length varints of a frame header, no payload.
+fn encode_frame_header(frame_type: HFrameType, len: usize) -> Vec<u8> {
+    let mut enc = Encoder::default();
+    enc.encode_varint(frame_type.0);
+    enc.encode_len(len);
+    enc.into()
 }
 
 // Test receiving byte by byte for a SETTINGS frame.
@@ -127,6 +152,95 @@ fn frame_reading_with_stream_push_promise() {
     } else {
         panic!("wrong frame type");
     }
+}
+
+// Oversized HEADERS/PUSH_PROMISE lengths are rejected before any payload is buffered.
+#[test]
+fn headers_frame_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(HFrameType::HEADERS, MAX_HEADER_BYTES + 1);
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<HFrame>(&buf)
+    );
+}
+
+#[test]
+fn push_promise_frame_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(HFrameType::PUSH_PROMISE, MAX_HEADER_BYTES + 1);
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<HFrame>(&buf)
+    );
+}
+
+#[test]
+fn headers_frame_length_at_cap_not_rejected_by_length_check() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(HFrameType::HEADERS, MAX_HEADER_BYTES);
+    assert_eq!(Ok((None, false)), fr.try_process::<HFrame>(&buf));
+}
+
+// Same unbounded-buffering shape applies to other known frame types that
+// carry only a small payload; each has its own small cap.
+#[test]
+fn cancel_push_frame_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(HFrameType::CANCEL_PUSH, MAX_SINGLE_VARINT_FRAME_BYTES + 1);
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<HFrame>(&buf)
+    );
+}
+
+#[test]
+fn settings_frame_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(HFrameType::SETTINGS, MAX_BUFFERED_FRAME_BYTES + 1);
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<HFrame>(&buf)
+    );
+}
+
+#[test]
+fn priority_update_frame_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(
+        HFrameType::PRIORITY_UPDATE_REQUEST,
+        MAX_BUFFERED_FRAME_BYTES + 1,
+    );
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<HFrame>(&buf)
+    );
+}
+
+#[test]
+fn wt_close_session_frame_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(
+        HFrameType(0x2843), // WebTransportFrame::CLOSE_SESSION
+        WebTransportFrame::MAX_CLOSE_SESSION_BYTES + 1,
+    );
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<WebTransportFrame>(&buf)
+    );
+}
+
+#[test]
+fn capsule_datagram_length_exceeds_cap_rejected() {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(
+        HFrameType(0x00), // capsule::CAPSULE_TYPE_DATAGRAM
+        MAX_DATAGRAM_BYTES + 1,
+    );
+    assert_eq!(
+        Err(Error::HttpExcessiveLoad),
+        fr.try_process::<Capsule>(&buf)
+    );
 }
 
 // Test DATA

@@ -86,8 +86,8 @@ pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
 pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
 
-// Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
-const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
+/// Maximum size of a QUIC DATAGRAM frame, as specified in <https://datatracker.ietf.org/doc/html/rfc9221#section-3-4>.
+pub const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
