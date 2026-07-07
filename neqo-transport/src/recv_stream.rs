@@ -846,10 +846,11 @@ impl RecvStream {
         }
 
         // Limit the memory a peer can pin by sending non-contiguous STREAM frames.
-        if self.state.recv_buf().is_some_and(|recv_buf| {
-            recv_buf.discontiguous_ranges() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES
-        }) {
-            qwarn!("Excessive discontiguous STREAM ranges on {}, closing connection", self.stream_id);
+        if self.discontiguous_ranges() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES {
+            qwarn!(
+                "Excessive discontiguous STREAM ranges on stream {}, closing connection",
+                self.stream_id
+            );
             return Err(Error::ProtocolViolation);
         }
 
@@ -1086,6 +1087,12 @@ impl RecvStream {
         self.state
             .recv_buf()
             .is_some_and(RxStreamOrderer::data_ready)
+    }
+
+    fn discontiguous_ranges(&self) -> usize {
+        self.state
+            .recv_buf()
+            .map_or(0, RxStreamOrderer::discontiguous_ranges)
     }
 
     /// # Errors
@@ -1900,12 +1907,20 @@ mod tests {
         offset
     }
 
+    /// A stream with a session window large enough that only the discontiguous-range
+    /// limit is exercised, plus that limit for convenience.
+    fn create_stream_at_range_limit() -> (RecvStream, u64) {
+        (
+            create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA)),
+            to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES),
+        )
+    }
+
     /// A stream must not buffer an unbounded number of out-of-order ranges.
     #[test]
     fn rejects_unbounded_fragmentation() {
         const FRAME_LEN: u64 = 1;
-        let mut stream = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
-        let limit = to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
+        let (mut stream, limit) = create_stream_at_range_limit();
         let offset = insert_discontiguous_frames(&mut stream, 1, limit - 1, FRAME_LEN);
 
         // The range that reaches the limit must still be accepted.
@@ -1923,8 +1938,7 @@ mod tests {
     #[test]
     fn release_entries_on_fill() {
         const FRAME_LEN: u64 = 1;
-        let mut stream = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
-        let limit = to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
+        let (mut stream, limit) = create_stream_at_range_limit();
 
         // Accumulate discontiguous ranges up to the limit: every one of these must be accepted.
         let offset = insert_discontiguous_frames(&mut stream, 1, limit, FRAME_LEN);
@@ -1933,13 +1947,17 @@ mod tests {
         // Filling every gap coalesces the disjoint ranges into a single one.
         let filler = vec![0u8; to_usize(offset)];
         stream.inbound_stream_frame(false, 0, &filler).unwrap();
-        assert_eq!(stream.state.recv_buf().unwrap().discontiguous_ranges(), 1);
+        assert_eq!(stream.discontiguous_ranges(), 1);
 
         // The stream must now accept `limit - 1` additional discontiguous ranges.
-        insert_discontiguous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
+        let next_offset =
+            insert_discontiguous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
+        assert_eq!(to_u64(stream.discontiguous_ranges()), limit);
+
+        // One more range must still be rejected.
         assert_eq!(
-            to_u64(stream.state.recv_buf().unwrap().discontiguous_ranges()),
-            limit
+            stream.inbound_stream_frame(false, next_offset, &[0u8]),
+            Err(Error::ProtocolViolation)
         );
     }
 
@@ -1969,9 +1987,9 @@ mod tests {
             );
         }
 
-        let recv_buf = stream.state.recv_buf().unwrap();
-        assert!(recv_buf.data_ranges.len() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
-        assert_eq!(recv_buf.discontiguous_ranges(), 1);
+        let raw_entries = stream.state.recv_buf().unwrap().data_ranges.len();
+        assert!(raw_entries > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
+        assert_eq!(stream.discontiguous_ranges(), 1);
         assert!(stream.data_ready(), "in-order data must be readable");
     }
 
