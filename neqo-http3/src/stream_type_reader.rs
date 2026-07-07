@@ -56,8 +56,13 @@ impl NewStreamType {
                 // The "stream_type" for a bidirectional stream is a frame type. We accept
                 // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
                 // but any other frame type is bad if we know about it.
-                if <HFrame as FrameDecoder<HFrame>>::is_known_type(HFrameType(stream_type))
-                    && HFrameType(stream_type) != HFrameType::HEADERS
+                let frame_type = HFrameType(stream_type);
+                if HFrameType::RESERVED.contains(&frame_type) {
+                    // A reserved (HTTP/2) frame type is a connection error, not an unknown type
+                    // to ignore, even when it starts a request stream.
+                    Err(Error::HttpFrameUnexpected)
+                } else if <HFrame as FrameDecoder<HFrame>>::is_known_type(frame_type)
+                    && frame_type != HFrameType::HEADERS
                 {
                     Err(Error::HttpFrame)
                 } else {
@@ -444,6 +449,22 @@ mod tests {
             &Err(Error::HttpFrame),
             true,
         );
+    }
+
+    #[test]
+    fn decode_stream_reserved_frame_type() {
+        // A reserved (HTTP/2) frame type that starts a request stream is a connection error of
+        // type H3_FRAME_UNEXPECTED, the same as when it arrives as a later frame, rather than
+        // being discharged like an unknown type (RFC 9114, Sections 7.1 and 11.2.1).
+        for reserved in HFrameType::RESERVED {
+            let mut t = Test::new(StreamType::BiDi, Role::Server);
+            t.decode(
+                &[u64::from(*reserved)],
+                false,
+                &Err(Error::HttpFrameUnexpected),
+                true,
+            );
+        }
     }
 
     #[test]
