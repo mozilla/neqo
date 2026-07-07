@@ -397,9 +397,9 @@ impl Paths {
         });
     }
 
-    /// The number of connection IDs that have been retired locally but not yet
-    /// acknowledged via `RETIRE_CONNECTION_ID`.
-    pub const fn retire_queue_len(&self) -> usize {
+    /// The number of connection IDs that have been retired locally but whose
+    /// `RETIRE_CONNECTION_ID` frames have not yet been ACK'ed.
+    pub(crate) const fn retire_queue_len(&self) -> usize {
         self.to_retire.len()
     }
 

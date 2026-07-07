@@ -1069,34 +1069,33 @@ fn migration_invalid_address() {
     );
 }
 
-/// Writes `count` `NEW_CONNECTION_ID` frames with consecutive sequence numbers
-/// starting at `seqno`, each retiring every previously issued connection ID.
+/// Writes `count` `NEW_CONNECTION_ID` frames with consecutive sequence numbers,
+/// each retiring every previously issued connection ID.
 struct NewConnectionIds {
-    seqno: u64,
     count: u64,
     cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>,
 }
 
 impl NewConnectionIds {
-    fn new(seqno: u64, count: u64, cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
-        Self {
-            seqno,
-            count,
-            cid_gen,
-        }
+    // Use a sequence number that is large enough that all existing values
+    // will be lower (so they get retired).
+    const SEQNO: u64 = 100;
+
+    fn new(count: u64, cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
+        Self { count, cid_gen }
     }
 
     /// A single `NEW_CONNECTION_ID` frame that retires every previously issued
     /// connection ID.
     fn retire_all(cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
-        Self::new(100, 1, cid_gen)
+        Self::new(1, cid_gen)
     }
 }
 
 impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         for i in 0..self.count {
-            let seqno = self.seqno + i;
+            let seqno = Self::SEQNO + i;
             let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
             let mut srt = [0; 16];
             srt[..8].copy_from_slice(&seqno.to_be_bytes());
@@ -1171,11 +1170,7 @@ fn retire_cid_queue_bounded() {
     // active-connection-ID-limit check never fires; only a dedicated bound on the
     // retirement queue can stop this.
     let count = to_u64(ConnectionIdManager::MAX_RETIRE_QUEUE) + 1;
-    let ncids = send_with_extra(
-        &mut server,
-        NewConnectionIds::new(100, count, cid_gen),
-        now(),
-    );
+    let ncids = send_with_extra(&mut server, NewConnectionIds::new(count, cid_gen), now());
     client.process_input(ncids, now());
 
     assert!(matches!(
