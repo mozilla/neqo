@@ -849,6 +849,7 @@ impl RecvStream {
         if self.state.recv_buf().is_some_and(|recv_buf| {
             recv_buf.discontiguous_ranges() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES
         }) {
+            qwarn!("Excessive discontiguous STREAM ranges, closing connection");
             return Err(Error::ProtocolViolation);
         }
 
