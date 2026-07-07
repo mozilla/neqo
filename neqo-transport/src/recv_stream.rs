@@ -1937,7 +1937,7 @@ mod tests {
         // The stream must now accept `limit - 1` additional discontiguous ranges.
         insert_discontiguous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
         assert_eq!(
-            to_u64(stream.state.recv_buf().unwrap().data_ranges.len()),
+            to_u64(stream.state.recv_buf().unwrap().discontiguous_ranges()),
             limit
         );
     }
