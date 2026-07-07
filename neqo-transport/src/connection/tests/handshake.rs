@@ -17,6 +17,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(not(feature = "disable-encryption"))]
+use neqo_common::Decoder;
 use neqo_common::{Datagram, event::Provider as _, qdebug, to_u64};
 use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
@@ -2021,4 +2023,59 @@ fn export_keying_material_after_closed() {
         server.export_keying_material("EXPORTER-WebTransport", &[], &mut [0u8; 32]),
         Err(Error::NotConnected)
     ));
+}
+
+/// RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet whose Source
+/// Connection ID is identical to the Destination Connection ID of its Initial. A
+/// Retry with a distinct Source Connection ID is still processed.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn retry_scid_matching_initial_dcid() {
+    // Read the connection IDs carried in the client's Initial: skip the first byte
+    // and the 4-byte version, then two length-prefixed connection IDs (DCID, SCID).
+    fn initial_cids(initial: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        let mut dec = Decoder::from(&initial[5..]);
+        let dcid = dec.decode_vec(1).expect("client DCID").to_vec();
+        let scid = dec.decode_vec(1).expect("client SCID").to_vec();
+        assert!(!dcid.is_empty(), "client DCID is non-empty");
+        assert!(!scid.is_empty(), "client SCID is non-empty");
+        (dcid, scid)
+    }
+
+    // A Retry whose Source Connection ID equals our Initial's Destination
+    // Connection ID is dropped, leaving the client in its initial state.
+    let mut client = default_client();
+    let initial = client
+        .process_output(now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec();
+    let (dcid, scid) = initial_cids(&initial);
+    let retry = crate::packet::Builder::retry(
+        Version::default(),
+        &scid,   // Destination CID: copied from the client as required
+        &dcid,   // Source CID: copied from client (bad!)
+        &[0x01], // non-empty token
+        &dcid,   // as required: a seed for authenticating the Retry
+    )
+    .expect("build retry");
+    drop(client.process(Some(datagram(retry)), now()));
+    assert_eq!(client.stats().dropped_rx, 1);
+    assert_eq!(*client.state(), State::WaitInitial);
+
+    // The same Retry with a distinct Source Connection ID is accepted.
+    let mut client = default_client();
+    let initial = client
+        .process_output(now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec();
+    let (dcid, scid) = initial_cids(&initial);
+    let mut server_scid = dcid.clone();
+    server_scid[0] ^= 0xff;
+    let retry =
+        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+            .expect("build retry");
+    drop(client.process(Some(datagram(retry)), now()));
+    assert_eq!(client.stats().dropped_rx, 0);
 }
