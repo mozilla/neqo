@@ -198,6 +198,9 @@ impl RxStreamOrderer {
     /// extended chunk can end up slightly larger than `RANGE_TARGET` (by up to one frame's worth).
     const RANGE_TARGET: usize = 4096;
 
+    /// Maximum number of discontiguous ranges buffered.
+    const MAX_DISCONTIGUOUS_RANGES: usize = 2048;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -819,6 +822,13 @@ impl RecvStream {
             | RecvStreamState::ResetRecvd { .. } => {
                 qtrace!("data received when we are in state {}", self.state);
             }
+        }
+
+        // Limit the memory a peer can pin by sending non-contiguous STREAM frames.
+        if self.state.recv_buf().is_some_and(|recv_buf| {
+            recv_buf.data_ranges.len() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES
+        }) {
+            return Err(Error::FlowControl);
         }
 
         if !already_data_ready && (self.data_ready() || self.needs_to_inform_app_about_fin()) {
@@ -1847,6 +1857,68 @@ mod tests {
         s.inbound_stream_frame(false, 0, &big_buf).unwrap();
         s.inbound_stream_frame(false, to_u64(INITIAL_LOCAL_MAX_STREAM_DATA), &[1; 1])
             .unwrap_err();
+    }
+
+    /// Feeds `range_count` frames of `frame_len` bytes into `stream`, starting at
+    /// `start_offset` and leaving a one-byte hole before each.
+    fn insert_discontinous_frames(
+        stream: &mut RecvStream,
+        start_offset: u64,
+        range_count: u64,
+        frame_len: u64,
+    ) -> u64 {
+        let payload = vec![0u8; to_usize(frame_len)];
+        let mut offset = start_offset;
+        for _ in 0..range_count {
+            stream
+                .inbound_stream_frame(false, offset, &payload)
+                .unwrap();
+            offset += frame_len + 1;
+        }
+        offset
+    }
+
+    /// A stream must not buffer an unbounded number of out-of-order ranges.
+    #[test]
+    fn rejects_unbounded_fragmentation() {
+        const FRAME_LEN: u64 = 1;
+        let mut stream = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
+        let limit = to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
+        let offset = insert_discontinous_frames(&mut stream, 1, limit - 1, FRAME_LEN);
+
+        // The range that reaches the limit must still be accepted.
+        assert_eq!(stream.inbound_stream_frame(false, offset, &[0u8]), Ok(()));
+        assert!(!stream.data_ready(), "stream must not be readable");
+
+        // The range that pushes the count past the limit must be rejected.
+        assert_eq!(
+            stream.inbound_stream_frame(false, offset + FRAME_LEN + 1, &[0u8]),
+            Err(Error::FlowControl)
+        );
+    }
+
+    /// Ranges freed by coalescing must stop counting towards the limit.
+    #[test]
+    fn release_entries_on_fill() {
+        const FRAME_LEN: u64 = 1;
+        let mut stream = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
+        let limit = to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
+
+        // Accumulate discontiguous ranges up to the limit: every one of these must be accepted.
+        let offset = insert_discontinous_frames(&mut stream, 1, limit, FRAME_LEN);
+        assert!(!stream.data_ready(), "stream must not be readable");
+
+        // Filling every gap coalesces the disjoint ranges into a single one.
+        let filler = vec![0u8; to_usize(offset)];
+        stream.inbound_stream_frame(false, 0, &filler).unwrap();
+        assert_eq!(stream.state.recv_buf().unwrap().data_ranges.len(), 1);
+
+        // The stream must now accept `limit - 1` additional discontiguous ranges.
+        insert_discontinous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
+        assert_eq!(
+            to_u64(stream.state.recv_buf().unwrap().data_ranges.len()),
+            limit
+        );
     }
 
     #[test]
