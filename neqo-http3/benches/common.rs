@@ -90,6 +90,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
     fixture_init();
     for (group_name, setup_fn, params) in CONFIGS {
         let mut group = c.benchmark_group(group_name);
+        group.noise_threshold(0.03);
         for &(streams, data_size) in params {
             group.throughput(Throughput::Bytes(to_u64(streams * data_size)));
             group.bench_function(
