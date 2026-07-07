@@ -436,6 +436,27 @@ impl RxStreamOrderer {
         }
     }
 
+    /// Number of discontiguous runs of buffered data.
+    ///
+    /// `inbound_frame` may store perfectly contiguous data as several *adjacent*
+    /// `data_ranges` entries once an entry reaches `RANGE_TARGET` bytes (a
+    /// deliberate optimization that avoids repeatedly reallocating a growing
+    /// `Vec`). As a result `data_ranges.len()` overcounts: it cannot tell a
+    /// genuine gap apart from a split of otherwise-contiguous data. This returns
+    /// the number of maximal contiguous runs (entries separated by an actual
+    /// gap), which is the quantity the anti-fragmentation limit must bound.
+    fn discontiguous_ranges(&self) -> usize {
+        let mut runs = 0;
+        let mut prev_end = None;
+        for (&start, data) in &self.data_ranges {
+            if prev_end != Some(start) {
+                runs += 1;
+            }
+            prev_end = Some(start + to_u64(data.len()));
+        }
+        runs
+    }
+
     /// Data bytes buffered. Could be more than `bytes_readable` if there are
     /// ranges missing.
     fn buffered(&self) -> u64 {
@@ -826,9 +847,9 @@ impl RecvStream {
 
         // Limit the memory a peer can pin by sending non-contiguous STREAM frames.
         if self.state.recv_buf().is_some_and(|recv_buf| {
-            recv_buf.data_ranges.len() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES
+            recv_buf.discontiguous_ranges() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES
         }) {
-            return Err(Error::FlowControl);
+            return Err(Error::ProtocolViolation);
         }
 
         if !already_data_ready && (self.data_ready() || self.needs_to_inform_app_about_fin()) {
@@ -1861,7 +1882,7 @@ mod tests {
 
     /// Feeds `range_count` frames of `frame_len` bytes into `stream`, starting at
     /// `start_offset` and leaving a one-byte hole before each.
-    fn insert_discontinous_frames(
+    fn insert_discontiguous_frames(
         stream: &mut RecvStream,
         start_offset: u64,
         range_count: u64,
@@ -1884,7 +1905,7 @@ mod tests {
         const FRAME_LEN: u64 = 1;
         let mut stream = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let limit = to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
-        let offset = insert_discontinous_frames(&mut stream, 1, limit - 1, FRAME_LEN);
+        let offset = insert_discontiguous_frames(&mut stream, 1, limit - 1, FRAME_LEN);
 
         // The range that reaches the limit must still be accepted.
         assert_eq!(stream.inbound_stream_frame(false, offset, &[0u8]), Ok(()));
@@ -1893,7 +1914,7 @@ mod tests {
         // The range that pushes the count past the limit must be rejected.
         assert_eq!(
             stream.inbound_stream_frame(false, offset + FRAME_LEN + 1, &[0u8]),
-            Err(Error::FlowControl)
+            Err(Error::ProtocolViolation)
         );
     }
 
@@ -1905,7 +1926,7 @@ mod tests {
         let limit = to_u64(RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
 
         // Accumulate discontiguous ranges up to the limit: every one of these must be accepted.
-        let offset = insert_discontinous_frames(&mut stream, 1, limit, FRAME_LEN);
+        let offset = insert_discontiguous_frames(&mut stream, 1, limit, FRAME_LEN);
         assert!(!stream.data_ready(), "stream must not be readable");
 
         // Filling every gap coalesces the disjoint ranges into a single one.
@@ -1914,11 +1935,43 @@ mod tests {
         assert_eq!(stream.state.recv_buf().unwrap().data_ranges.len(), 1);
 
         // The stream must now accept `limit - 1` additional discontiguous ranges.
-        insert_discontinous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
+        insert_discontiguous_frames(&mut stream, offset + 1, limit - 1, FRAME_LEN);
         assert_eq!(
             to_u64(stream.state.recv_buf().unwrap().data_ranges.len()),
             limit
         );
+    }
+
+    /// A slow reader receiving purely in-order data must not be mistaken for a
+    /// fragmentation attack. Once an entry reaches `RANGE_TARGET`, contiguous
+    /// data is stored as additional adjacent `data_ranges` entries, so the raw
+    /// entry count can exceed `MAX_DISCONTIGUOUS_RANGES` with zero gaps. Such a
+    /// stream must be accepted, not torn down.
+    #[test]
+    fn accepts_contiguous_data_split_across_many_entries() {
+        const FRAME_LEN: usize = RxStreamOrderer::RANGE_TARGET;
+        let ranges = RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES + 2;
+
+        // Window large enough to buffer every (unread) contiguous byte, so that
+        // flow control never fires and only the fragmentation check is exercised.
+        let window = to_u64((ranges + 1) * FRAME_LEN);
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), window)));
+        let mut stream = create_stream_with_fc(Rc::clone(&session_fc), window);
+
+        let payload = vec![0u8; FRAME_LEN];
+        for i in 0..ranges {
+            let offset = to_u64(i * FRAME_LEN);
+            assert_eq!(
+                stream.inbound_stream_frame(false, offset, &payload),
+                Ok(()),
+                "in-order frame {i} must be accepted"
+            );
+        }
+
+        let recv_buf = stream.state.recv_buf().unwrap();
+        assert!(recv_buf.data_ranges.len() > RxStreamOrderer::MAX_DISCONTIGUOUS_RANGES);
+        assert_eq!(recv_buf.discontiguous_ranges(), 1);
+        assert!(stream.data_ready(), "in-order data must be readable");
     }
 
     #[test]
