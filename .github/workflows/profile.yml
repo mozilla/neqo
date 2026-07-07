@@ -113,8 +113,9 @@ jobs:
       matrix:
         include:
           - { client: neqo, server: neqo }
-          - { client: neqo, server: msquic }
-          - { client: msquic, server: neqo }
+          # msquic disabled from profiling; re-enable by uncommenting.
+          # - { client: neqo, server: msquic }
+          # - { client: msquic, server: neqo }
           - { client: neqo, server: quiche }
           - { client: quiche, server: neqo }
 

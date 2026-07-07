@@ -32,11 +32,11 @@ IMPLS = {
         "build-neqo/neqo/neqo-server _cc _pacing _flags -Q 1 {host}:{port}",
         "--output-dir .", "",
     ),
-    "msquic": ImplConfig(
-        "build-msquic/quicinterop -test:D -custom:{host} -port:{port} -urls:https://{host}:{port}/{size}",
-        "build-msquic/quicinteropserver -root:{tmp} -listen:{host} -port:{port} -file:{tmp}/cert -key:{tmp}/key -noexit",
-        "", "-a hq-interop",
-    ),
+    # "msquic": ImplConfig(
+    #     "build-msquic/quicinterop -test:D -custom:{host} -port:{port} -urls:https://{host}:{port}/{size}",
+    #     "build-msquic/quicinteropserver -root:{tmp} -listen:{host} -port:{port} -file:{tmp}/cert -key:{tmp}/key -noexit",
+    #     "", "-a hq-interop",
+    # ),
     "google": ImplConfig(
         "build-google/quic_client --disable_certificate_verification https://{host}:{port}/{size}",
         "build-google/quic_server --generate_dynamic_responses --port {port} --certificate_file {tmp}/cert --key_file {tmp}/key",

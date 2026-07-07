@@ -51,20 +51,20 @@ jobs:
           baseline-ref: origin/${{ env.BASE_REF }}
           nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
-  build-msquic:
-    name: Build msquic
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: ./.github/actions/quic-build
-        with:
-          impl: msquic
-          token: ${{ secrets.GITHUB_TOKEN }}
-          artifact-name: build-msquic
+  # build-msquic:
+  #   name: Build msquic
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+  #       with:
+  #         sparse-checkout: .github/actions
+  #         persist-credentials: false
+  #
+  #     - uses: ./.github/actions/quic-build
+  #       with:
+  #         impl: msquic
+  #         token: ${{ secrets.GITHUB_TOKEN }}
+  #         artifact-name: build-msquic
 
   build-google:
     name: Build google/quiche
@@ -114,7 +114,7 @@ jobs:
   perfcompare:
     name: Performance comparison
     runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
-    needs: [build-neqo, build-msquic, build-google, build-quiche, build-s2n]
+    needs: [build-neqo, build-google, build-quiche, build-s2n] # build-msquic
     defaults:
       run:
         shell: bash
@@ -147,10 +147,10 @@ jobs:
         with:
           name: build-neqo
           path: build-neqo
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: build-msquic
-          path: build-msquic
+      # - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      #   with:
+      #     name: build-msquic
+      #     path: build-msquic
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-google
@@ -170,7 +170,7 @@ jobs:
           # perfcompare.py recreates and populates binaries/ during the run.
           rm -rf binaries
           chmod +x build-neqo/neqo/* build-neqo/neqo-baseline/* \
-            build-msquic/* build-google/* build-quiche/* build-s2n/*
+            build-google/* build-quiche/* build-s2n/* # build-msquic/*
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build-neqo/lib:$LD_LIBRARY_PATH"
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
@@ -309,5 +309,5 @@ jobs:
           done
           sudo fuser -k 4433/udp 4433/tcp 2>/dev/null || true
           rm -- * || true
-          rm -r -- binaries build-neqo build-msquic build-google build-quiche build-s2n \
+          rm -r -- binaries build-neqo build-google build-quiche build-s2n \ # build-msquic
             comment-data hyperfine hyperfine-baseline || true
