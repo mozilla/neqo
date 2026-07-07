@@ -397,6 +397,12 @@ impl Paths {
         });
     }
 
+    /// The number of connection IDs that have been retired locally but not yet
+    /// acknowledged via `RETIRE_CONNECTION_ID`.
+    pub const fn retire_queue_len(&self) -> usize {
+        self.to_retire.len()
+    }
+
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
     pub fn write_frames<B: Buffer>(
         &mut self,

@@ -457,6 +457,11 @@ pub struct ConnectionIdManager {
 impl ConnectionIdManager {
     pub const ACTIVE_LIMIT: usize = 8;
 
+    /// The maximum number of connection IDs that may be pending retirement.
+    /// RFC 9000, Section 5.1.2 recommends allowing for at least twice
+    /// `active_connection_id_limit`.
+    pub const MAX_RETIRE_QUEUE: usize = 2 * Self::ACTIVE_LIMIT;
+
     /// A special value.  See `ConnectionIdManager::add_odcid`.
     const SEQNO_ODCID: u64 = u64::MAX;
 

@@ -3417,7 +3417,9 @@ impl Connection {
                     stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
-                if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
+                if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT
+                    || self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE
+                {
                     qinfo!("[{self}] received too many connection IDs");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }

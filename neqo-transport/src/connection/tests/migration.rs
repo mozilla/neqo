@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug};
+use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
@@ -1069,26 +1069,44 @@ fn migration_invalid_address() {
     );
 }
 
-/// This inserts a frame into packets that provides a single new
-/// connection ID and retires all others.
-struct RetireAll {
+/// Writes `count` `NEW_CONNECTION_ID` frames with consecutive sequence numbers
+/// starting at `seqno`, each retiring every previously issued connection ID.
+struct NewConnectionIds {
+    seqno: u64,
+    count: u64,
     cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>,
 }
 
-impl crate::connection::test_internal::FrameWriter for RetireAll {
+impl NewConnectionIds {
+    fn new(seqno: u64, count: u64, cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
+        Self {
+            seqno,
+            count,
+            cid_gen,
+        }
+    }
+
+    /// A single `NEW_CONNECTION_ID` frame that retires every previously issued
+    /// connection ID.
+    fn retire_all(cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
+        Self::new(100, 1, cid_gen)
+    }
+}
+
+impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
-        // Use a sequence number that is large enough that all existing values
-        // will be lower (so they get retired).  As the code doesn't care about
-        // gaps in sequence numbers, this is safe, even though the gap might
-        // hint that there are more outstanding connection IDs that are allowed.
-        const SEQNO: u64 = 100;
-        let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
-        builder
-            .encode_varint(FrameType::NewConnectionId)
-            .encode_varint(SEQNO)
-            .encode_varint(SEQNO) // Retire Prior To
-            .encode_vec(1, &cid)
-            .encode([0x7f; 16]);
+        for i in 0..self.count {
+            let seqno = self.seqno + i;
+            let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
+            let mut srt = [0; 16];
+            srt[..8].copy_from_slice(&seqno.to_be_bytes());
+            builder
+                .encode_varint(FrameType::NewConnectionId)
+                .encode_varint(seqno)
+                .encode_varint(seqno) // Retire Prior To
+                .encode_vec(1, &cid)
+                .encode(srt);
+        }
     }
 }
 
@@ -1110,10 +1128,9 @@ fn retire_all() {
 
     let original_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
 
-    let ncid = send_with_extra(&mut server, RetireAll { cid_gen }, now());
-
     let new_cid_before = client.stats().frame_rx.new_connection_id;
     let retire_cid_before = client.stats().frame_tx.retire_connection_id;
+    let ncid = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
     client.process_input(ncid, now());
     let retire = send_something(&mut client, now());
     assert_eq!(
@@ -1126,6 +1143,48 @@ fn retire_all() {
     );
 
     assert_ne!(get_cid(&retire), original_cid);
+}
+
+/// RFC 9000, Section 5.1.2: an endpoint SHOULD bound the number of connection IDs it
+/// has retired but not yet had acknowledged, and MAY treat exceeding that bound as a
+/// `CONNECTION_ID_LIMIT_ERROR`.  A peer that streams `NEW_CONNECTION_ID` frames with an
+/// ever-increasing Retire Prior To value, while the victim cannot flush its
+/// `RETIRE_CONNECTION_ID` frames, must not be able to grow that queue without bound.
+#[test]
+fn retire_cid_queue_bounded() {
+    let mut client = default_client();
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+
+    // The client never runs `process_output` here, so it cannot send (or get
+    // acknowledgement for) any `RETIRE_CONNECTION_ID` frames: its pending-retirement
+    // queue only grows.  Because every frame retires all prior connection IDs, the
+    // store stays at one active connection ID and the existing
+    // active-connection-ID-limit check never fires; only a dedicated bound on the
+    // retirement queue can stop this.
+    let count = to_u64(ConnectionIdManager::MAX_RETIRE_QUEUE) + 1;
+    let ncids = send_with_extra(
+        &mut server,
+        NewConnectionIds::new(100, count, cid_gen),
+        now(),
+    );
+    client.process_input(ncids, now());
+
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ConnectionIdLimitExceeded),
+            ..
+        }
+    ));
 }
 
 /// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
@@ -1192,7 +1251,7 @@ fn retire_prior_to_migration_failure() {
 
     // Have the server receive the probe, but separately have it decide to
     // retire all of the available connection IDs.
-    let retire_all = send_with_extra(&mut server, RetireAll { cid_gen }, now());
+    let retire_all = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
 
     let resp = server.process(Some(probe), now()).dgram().unwrap();
     assert_v4_path(&resp, true);
@@ -1247,7 +1306,7 @@ fn retire_prior_to_migration_success() {
 
     // Have the server receive the probe, but separately have it decide to
     // retire all of the available connection IDs.
-    let retire_all = send_with_extra(&mut server, RetireAll { cid_gen }, now());
+    let retire_all = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
 
     let resp = server.process(Some(probe), now()).dgram().unwrap();
     assert_v4_path(&resp, true);
@@ -1286,7 +1345,7 @@ fn error_on_new_path_with_no_connection_id() {
 
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
-    let retire_all = send_with_extra(&mut server, RetireAll { cid_gen }, now());
+    let retire_all = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
 
     client.process_input(retire_all, now());
 
