@@ -100,7 +100,7 @@ mod tests {
     #[test]
     fn max_frame_data_unknown_type_is_unbounded() {
         assert_eq!(
-            WebTransportFrame::max_frame_data(HFrameType(0x1234)),
+            WebTransportFrame::max_frame_data(HFrameType(0x1230)),
             usize::MAX
         );
     }

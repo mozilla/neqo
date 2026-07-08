@@ -154,92 +154,70 @@ fn frame_reading_with_stream_push_promise() {
     }
 }
 
-// Oversized HEADERS/PUSH_PROMISE lengths are rejected before any payload is buffered.
-#[test]
-fn headers_frame_length_exceeds_cap_rejected() {
+fn assert_cap_rejected<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFrameType, cap: usize) {
     let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(HFrameType::HEADERS, MAX_HEADER_BYTES + 1);
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<HFrame>(&buf)
-    );
+    let buf = encode_frame_header(frame_type, cap + 1);
+    assert_eq!(Err(Error::HttpExcessiveLoad), fr.try_process::<T>(&buf));
+}
+
+fn assert_cap_not_rejected<T: FrameDecoder<T> + PartialEq + Debug>(
+    frame_type: HFrameType,
+    cap: usize,
+) {
+    let mut fr = FrameReaderTest::new();
+    let buf = encode_frame_header(frame_type, cap);
+    assert_eq!(Ok((None, false)), fr.try_process::<T>(&buf));
 }
 
 #[test]
-fn push_promise_frame_length_exceeds_cap_rejected() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(HFrameType::PUSH_PROMISE, MAX_HEADER_BYTES + 1);
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<HFrame>(&buf)
-    );
+fn hframe_length_exceeds_cap_rejected() {
+    const CHECKS: &[(usize, &[HFrameType])] = &[
+        (
+            MAX_HEADER_BYTES,
+            &[HFrameType::HEADERS, HFrameType::PUSH_PROMISE],
+        ),
+        (
+            MAX_SINGLE_VARINT_FRAME_BYTES,
+            &[
+                HFrameType::CANCEL_PUSH,
+                HFrameType::GOAWAY,
+                HFrameType::MAX_PUSH_ID,
+            ],
+        ),
+        (
+            MAX_BUFFERED_FRAME_BYTES,
+            &[
+                HFrameType::SETTINGS,
+                HFrameType::PRIORITY_UPDATE_REQUEST,
+                HFrameType::PRIORITY_UPDATE_PUSH,
+            ],
+        ),
+    ];
+    for &(cap, frame_types) in CHECKS {
+        for &frame_type in frame_types {
+            assert_cap_rejected::<HFrame>(frame_type, cap);
+        }
+    }
 }
 
 #[test]
 fn headers_frame_length_at_cap_not_rejected_by_length_check() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(HFrameType::HEADERS, MAX_HEADER_BYTES);
-    assert_eq!(Ok((None, false)), fr.try_process::<HFrame>(&buf));
-}
-
-// Same unbounded-buffering shape applies to other known frame types that
-// carry only a small payload; each has its own small cap.
-#[test]
-fn cancel_push_frame_length_exceeds_cap_rejected() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(HFrameType::CANCEL_PUSH, MAX_SINGLE_VARINT_FRAME_BYTES + 1);
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<HFrame>(&buf)
-    );
-}
-
-#[test]
-fn settings_frame_length_exceeds_cap_rejected() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(HFrameType::SETTINGS, MAX_BUFFERED_FRAME_BYTES + 1);
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<HFrame>(&buf)
-    );
-}
-
-#[test]
-fn priority_update_frame_length_exceeds_cap_rejected() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(
-        HFrameType::PRIORITY_UPDATE_REQUEST,
-        MAX_BUFFERED_FRAME_BYTES + 1,
-    );
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<HFrame>(&buf)
-    );
+    assert_cap_not_rejected::<HFrame>(HFrameType::HEADERS, MAX_HEADER_BYTES);
 }
 
 #[test]
 fn wt_close_session_frame_length_exceeds_cap_rejected() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(
+    assert_cap_rejected::<WebTransportFrame>(
         HFrameType(0x2843), // WebTransportFrame::CLOSE_SESSION
-        WebTransportFrame::MAX_CLOSE_SESSION_BYTES + 1,
-    );
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<WebTransportFrame>(&buf)
+        WebTransportFrame::MAX_CLOSE_SESSION_BYTES,
     );
 }
 
 #[test]
 fn capsule_datagram_length_exceeds_cap_rejected() {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(
+    assert_cap_rejected::<Capsule>(
         HFrameType(0x00), // capsule::CAPSULE_TYPE_DATAGRAM
-        MAX_DATAGRAM_BYTES + 1,
-    );
-    assert_eq!(
-        Err(Error::HttpExcessiveLoad),
-        fr.try_process::<Capsule>(&buf)
+        MAX_DATAGRAM_BYTES,
     );
 }
 

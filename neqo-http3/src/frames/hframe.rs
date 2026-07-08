@@ -27,8 +27,7 @@ pub const MAX_HEADER_BYTES: usize = neqo_qpack::reader::LiteralReader::MAX_LEN;
 pub const MAX_SINGLE_VARINT_FRAME_BYTES: usize = 8;
 
 /// Limit for other buffered frame types (`SETTINGS`, `PRIORITY_UPDATE_*`).
-/// Matches Google quiche's `kPayloadLengthLimit`.
-pub const MAX_BUFFERED_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_BUFFERED_FRAME_BYTES: usize = 4 * 1024;
 
 impl HFrameType {
     pub const DATA: Self = Self(0x0);

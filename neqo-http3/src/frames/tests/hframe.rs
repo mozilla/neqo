@@ -17,7 +17,7 @@ use crate::{
 
 #[test]
 fn max_frame_data_unknown_type_is_unbounded() {
-    assert_eq!(HFrame::max_frame_data(HFrameType(0x1234)), usize::MAX);
+    assert_eq!(HFrame::max_frame_data(HFrameType(0x124b)), usize::MAX);
 }
 
 #[test]
