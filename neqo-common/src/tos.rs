@@ -7,12 +7,13 @@
 use std::fmt::{self, Debug, Formatter};
 
 use enum_map::Enum;
+use serde::Serialize;
 use strum::{EnumIter, FromRepr};
 
 /// ECN (Explicit Congestion Notification) codepoints mapped to the
 /// lower 2 bits of the TOS field.
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
-#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, EnumIter)]
+#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, EnumIter, Serialize)]
 #[repr(u8)]
 pub enum Ecn {
     #[default]
@@ -60,7 +61,7 @@ impl Ecn {
 
 /// Diffserv codepoints, mapped to the upper six bits of the TOS field.
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
-#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr)]
+#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, Serialize)]
 #[repr(u8)]
 pub enum Dscp {
     #[default]

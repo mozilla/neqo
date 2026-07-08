@@ -23,7 +23,8 @@ use std::{
     path::PathBuf,
     pin::Pin,
     process::exit,
-    rc::Rc,
+    ptr,
+    rc::{Rc, Weak},
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -97,6 +98,12 @@ pub struct Args {
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
     ech: bool,
+
+    /// Print connection stats when a connection closes. Optionally give a
+    /// filename to append the stats to (as JSON), instead of logging them.
+    #[arg(name = "stats", long)]
+    #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
+    stats: Option<Option<PathBuf>>,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -109,6 +116,7 @@ impl Default for Args {
             key: "key".to_string(),
             retry: false,
             ech: false,
+            stats: None,
         }
     }
 }
@@ -208,6 +216,39 @@ impl Args {
                 _ => exit(127),
             }
         }
+    }
+}
+
+/// Tracks connections a server has already reported.
+pub(super) struct ReportedConnections<T>(Vec<Weak<RefCell<T>>>);
+
+impl<T> Default for ReportedConnections<T> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<T> ReportedConnections<T> {
+    /// Records `conn` as reported. Returns `true` the first time a given
+    /// connection is seen, `false` on every subsequent call for the same one.
+    pub(super) fn insert(&mut self, conn: &Rc<RefCell<T>>) -> bool {
+        self.0.retain(|w| w.strong_count() > 0);
+        if self.0.iter().any(|w| ptr::eq(w.as_ptr(), Rc::as_ptr(conn))) {
+            false
+        } else {
+            self.0.push(Rc::downgrade(conn));
+            true
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) const fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    #[cfg(test)]
+    pub(super) const fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -584,9 +625,141 @@ pub fn run(
     }
 }
 
+/// Test helpers shared by `http09::tests` and `http3::tests`: both drive a
+/// handshake against their respective server type (`neqo_transport::server::Server`
+/// and `Http3Server`) before exercising `--stats` close-detection.
+#[cfg(test)]
+pub(super) mod test_support {
+    use std::time::Instant;
+
+    use neqo_common::Datagram;
+    use neqo_http3::Http3Server;
+    use neqo_transport::{
+        Connection, Output, State,
+        server::{Server, ValidateAddress},
+    };
+    use nss::AuthenticationStatus;
+    use test_fixture::now;
+
+    use super::Args;
+
+    pub(super) fn stats_args(stats: bool) -> Args {
+        let mut args = Args::default();
+        args.shared.alpn = "alpn".to_string(); // matches test_fixture::DEFAULT_ALPN
+        args.stats = stats.then_some(None); // Some(None): log, not a file
+        args
+    }
+
+    /// Minimal common surface of `neqo_transport::server::Server` and
+    /// `Http3Server` needed to drive a handshake in tests.
+    pub(super) trait ProcessServer {
+        fn set_validation(&self, v: ValidateAddress);
+        fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    }
+
+    impl ProcessServer for Server {
+        fn set_validation(&self, v: ValidateAddress) {
+            self.set_validation(v);
+        }
+        fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+            self.process(dgram, now)
+        }
+    }
+
+    impl ProcessServer for Http3Server {
+        fn set_validation(&self, v: ValidateAddress) {
+            self.set_validation(v);
+        }
+        fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+            self.process(dgram, now)
+        }
+    }
+
+    /// Complete a handshake between `client` and `server`. Adapted from
+    /// `neqo-transport/tests/common/mod.rs::connect`.
+    pub(super) fn connect(client: &mut Connection, server: &mut impl ProcessServer) {
+        server.set_validation(ValidateAddress::Never);
+
+        assert_eq!(*client.state(), State::Init);
+        let out = client.process_output(now()); // ClientHello
+        let out2 = client.process_output(now()); // ClientHello
+        assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+        _ = server.process(out.dgram(), now()); // ACK
+        let out = server.process(out2.dgram(), now()); // ServerHello...
+        assert!(out.as_dgram_ref().is_some());
+
+        // Ingest the server Certificate.
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
+        let out = server.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
+
+        // Now mark the server as authenticated.
+        client.authenticated(AuthenticationStatus::Ok, now());
+        let out = client.process_output(now());
+        assert!(out.as_dgram_ref().is_some());
+        assert_eq!(*client.state(), State::Connected);
+        let out = server.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
+
+        // Have the client process the HANDSHAKE_DONE.
+        let out = client.process(out.dgram(), now());
+        assert!(out.as_dgram_ref().is_none());
+        assert_eq!(*client.state(), State::Confirmed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::response_for_path;
+    use std::{cell::RefCell, path::PathBuf, rc::Rc};
+
+    use clap::Parser as _;
+
+    use super::{Args, ReportedConnections, response_for_path};
+
+    #[test]
+    fn reported_connections_first_insert_reports() {
+        let mut reported = ReportedConnections::default();
+        let conn = Rc::new(RefCell::new(0));
+        assert!(reported.insert(&conn), "first sighting must report");
+    }
+
+    #[test]
+    fn reported_connections_dedupes_same_connection() {
+        let mut reported = ReportedConnections::default();
+        let conn = Rc::new(RefCell::new(0));
+        assert!(reported.insert(&conn));
+        assert!(!reported.insert(&conn), "must not report twice");
+    }
+
+    #[test]
+    fn reported_connections_tracks_distinct_connections_separately() {
+        let mut reported = ReportedConnections::default();
+        let a = Rc::new(RefCell::new(0));
+        let b = Rc::new(RefCell::new(0));
+        assert!(reported.insert(&a));
+        assert!(reported.insert(&b), "a different connection must report");
+    }
+
+    #[test]
+    fn stats_flag_defaults_to_none() {
+        let args = Args::parse_from(["neqo-server"]);
+        assert_eq!(args.stats, None);
+    }
+
+    #[test]
+    fn stats_flag_parses_bare_and_with_filename() {
+        assert_eq!(
+            Args::parse_from(["neqo-server", "--stats"]).stats,
+            Some(None)
+        );
+        assert_eq!(
+            Args::parse_from(["neqo-server", "--stats", "out.json"]).stats,
+            Some(Some(PathBuf::from("out.json")))
+        );
+    }
 
     #[test]
     fn response_for_path_qns_not_found() {

@@ -27,6 +27,8 @@ nss = { workspace = true }
 mtu = { path = "../mtu" }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
+serde = { workspace = true }
+serde_with = { version = "3.12", default-features = false, features = ["macros"] }
 smallvec = { version = "1", default-features = false, features = ["union", "const_generics"] }
 static_assertions = { workspace = true }
 strum = { workspace = true }
@@ -35,6 +37,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 criterion = { version = "5", package = "codspeed-criterion-compat", default-features = false }
 neqo-transport = { path = ".", default-features = false, features = ["draft-29"] }
+serde_json = { workspace = true }
 test-fixture = { path = "../test-fixture" }
 
 [features]

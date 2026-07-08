@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
+use neqo_common::{Datagram, event::Provider as _, json, qdebug, qinfo, qtrace};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
@@ -213,7 +213,7 @@ impl sim::Node for Node {
 
     fn print_summary(&self, test_name: &str) {
         match &self.c {
-            Endpoint::Client(c) => qinfo!("{test_name}: {:?}", c.transport_stats()),
+            Endpoint::Client(c) => qinfo!("{test_name}: {}", json::compact(&c.transport_stats())),
             Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
         }
     }
