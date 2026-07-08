@@ -25,7 +25,7 @@ const DEFAULT_OPTIONS: Options = Options {
 ///
 /// Arrays and objects that fit within [`DEFAULT_OPTIONS`]'s line length are printed on a single
 /// line; larger ones fall back to one-entry-per-line formatting. Object keys are sorted
-/// alphabetically .
+/// alphabetically.
 ///
 /// # Panics
 ///
@@ -43,7 +43,8 @@ fn render_root<T: Serialize>(value: &T, opts: &Options) -> String {
 }
 
 fn write_key(out: &mut String, key: &str) {
-    write!(out, "{key:?}: ").expect("write! to a String cannot fail");
+    let key = serde_json::to_string(key).expect("string always serializes");
+    write!(out, "{key}: ").expect("write! to a String cannot fail");
 }
 
 /// Render `value`, choosing between [`render_inline`] and [`render_block`]
