@@ -57,11 +57,9 @@ impl NewStreamType {
                 // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
                 // but any other frame type is bad if we know about it.
                 let frame_type = HFrameType(stream_type);
-                if HFrameType::RESERVED.contains(&frame_type) {
-                    // A reserved (HTTP/2) frame type is a connection error, not an unknown type
-                    // to ignore, even when it starts a request stream.
-                    Err(Error::HttpFrameUnexpected)
-                } else if <HFrame as FrameDecoder<HFrame>>::is_known_type(frame_type)
+                // This checks for reserved frame types here, which are not allowed.
+                <HFrame as FrameDecoder<HFrame>>::frame_type_allowed(frame_type)?;
+                if <HFrame as FrameDecoder<HFrame>>::is_known_type(frame_type)
                     && frame_type != HFrameType::HEADERS
                 {
                     Err(Error::HttpFrame)
