@@ -791,6 +791,33 @@ mod tests {
         priority_update_check_id(StreamId::new(1_000_000_000), false);
     }
 
+    // RFC 9218, Section 7.2: the push variant of PRIORITY_UPDATE must reference a
+    // promised push stream. This server promises no pushes, so any Push ID is
+    // invalid and must be a connection error of type H3_ID_ERROR.
+    fn priority_update_push_check(push_id: u64) {
+        let (mut hconn, mut peer_conn) = connect();
+        let frame = HFrame::PriorityUpdatePush {
+            element_id: push_id,
+            priority: Priority::default(),
+        };
+        let mut e = Encoder::default();
+        frame.encode(&mut e);
+        peer_conn.control_send(e.as_ref());
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&hconn, &Error::HttpId);
+    }
+
+    #[test]
+    fn priority_update_push_id_zero_rejected() {
+        priority_update_push_check(0);
+    }
+
+    #[test]
+    fn priority_update_push_large_id_rejected() {
+        priority_update_push_check(1_000_000_000);
+    }
+
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
         let (mut hconn, mut peer_conn) = connect();
 
