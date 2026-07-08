@@ -1527,7 +1527,7 @@ impl CryptoStreams {
 
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
-        rx.inbound_frame(offset, data);
+        rx.inbound_frame(offset, data)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
             Ok(())
         } else {
