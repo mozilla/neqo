@@ -162,7 +162,7 @@ pub struct Args {
 
     /// Print connection stats after close. Optionally give a filename to
     /// append the stats to (as JSON), instead of logging them.
-    #[arg(name = "stats", long)]
+    #[arg(name = "stats", long, require_equals = true)]
     #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
     stats: Option<Option<PathBuf>>,
 

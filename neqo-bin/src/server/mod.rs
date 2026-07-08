@@ -101,7 +101,7 @@ pub struct Args {
 
     /// Print connection stats when a connection closes. Optionally give a
     /// filename to append the stats to (as JSON), instead of logging them.
-    #[arg(name = "stats", long)]
+    #[arg(name = "stats", long, require_equals = true)]
     #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
     stats: Option<Option<PathBuf>>,
 }
@@ -756,7 +756,7 @@ mod tests {
             Some(None)
         );
         assert_eq!(
-            Args::parse_from(["neqo-server", "--stats", "out.json"]).stats,
+            Args::parse_from(["neqo-server", "--stats=out.json"]).stats,
             Some(Some(PathBuf::from("out.json")))
         );
     }
