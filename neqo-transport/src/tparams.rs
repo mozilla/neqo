@@ -364,7 +364,12 @@ impl TransportParameter {
             | TransportParameterId::GreaseQuicBit
             | TransportParameterId::Scone
             | TransportParameterId::ResetStreamAt => Self::Empty,
-            TransportParameterId::PreferredAddress => Self::decode_preferred_address(&mut d)?,
+            TransportParameterId::PreferredAddress => {
+                if role == Role::Server {
+                    return Err(Error::TransportParameter);
+                }
+                Self::decode_preferred_address(&mut d)?
+            }
             TransportParameterId::MinAckDelay => match d.decode_varint() {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
                 _ => return Err(Error::TransportParameter),
@@ -975,7 +980,10 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+        str::FromStr as _,
+    };
 
     use TransportParameterId::*;
     use neqo_common::{
@@ -1581,12 +1589,24 @@ mod tests {
             OriginalDestinationConnectionId,
             RetrySourceConnectionId,
             StatelessResetToken,
+            PreferredAddress,
         ] {
             let mut enc = Encoder::default();
-            let value = if tp == StatelessResetToken {
-                TransportParameter::Bytes(vec![0xab; 16])
-            } else {
-                TransportParameter::Bytes(vec![0xab; 8])
+            let value = match tp {
+                PreferredAddress => {
+                    let v4addr = SocketAddrV4::from_str("1.2.3.4:23").unwrap();
+                    TransportParameter::PreferredAddress {
+                        v4: Some(v4addr),
+                        v6: None,
+                        cid: ConnectionId::generate_initial(),
+                        srt: Srt::new([8; Srt::LEN]),
+                    }
+                }
+                StatelessResetToken => TransportParameter::Bytes(vec![7; Srt::LEN]),
+                OriginalDestinationConnectionId | RetrySourceConnectionId => {
+                    TransportParameter::Bytes(vec![0xab; 8])
+                }
+                _ => unreachable!(),
             };
             value.encode(&mut enc, tp);
             let res = TransportParameter::decode(Server, &mut enc.as_decoder());
