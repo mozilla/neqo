@@ -65,7 +65,7 @@ pub use self::{
         Connection, Output, OutputBatch, State, ZeroRttState,
         params::{
             ConnectionParameters, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
-            MAX_LOCAL_MAX_STREAM_DATA,
+            MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA,
         },
     },
     events::{ConnectionEvent, ConnectionEvents},

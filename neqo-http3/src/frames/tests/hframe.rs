@@ -11,9 +11,14 @@ use test_fixture::fixture_init;
 use super::enc_dec_hframe;
 use crate::{
     Priority, PushId,
-    frames::HFrame,
+    frames::{HFrame, HFrameType, reader::FrameDecoder as _},
     settings::{HSetting, HSettingType, HSettings},
 };
+
+#[test]
+fn max_frame_data_unknown_type_is_unbounded() {
+    assert_eq!(HFrame::max_frame_data(HFrameType(0x124b)), usize::MAX);
+}
 
 #[test]
 fn data_frame() {
