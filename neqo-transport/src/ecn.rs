@@ -160,7 +160,7 @@ pub enum ValidationOutcome {
 
 impl Serialize for ValidationOutcome {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&format!("{self:?}"))
+        serializer.collect_str(&format_args!("{self:?}"))
     }
 }
 
