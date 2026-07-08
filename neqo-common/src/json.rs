@@ -23,7 +23,7 @@ const DEFAULT_OPTIONS: Options = Options {
 
 /// Serialize `value` as JSON, trading vertical space for horizontal space.
 ///
-/// Arrays and objects that fit within [`DEFAULT_OPTIONS`]'s line length are printed on a single
+/// Arrays and objects that fit within `DEFAULT_OPTIONS`'s line length are printed on a single
 /// line; larger ones fall back to one-entry-per-line formatting. Object keys are sorted
 /// alphabetically.
 ///
@@ -118,8 +118,9 @@ fn render_block<'a>(
     }
     out.push(open);
     out.push('\n');
+    let pad = " ".repeat((depth + 1) * opts.indent);
     for (i, (key, val)) in entries.enumerate() {
-        out.push_str(&" ".repeat((depth + 1) * opts.indent));
+        out.push_str(&pad);
         if let Some(k) = key {
             write_key(out, k);
         }
@@ -129,7 +130,7 @@ fn render_block<'a>(
         }
         out.push('\n');
     }
-    out.push_str(&" ".repeat(depth * opts.indent));
+    out.push_str(&pad[..depth * opts.indent]);
     out.push(close);
 }
 
