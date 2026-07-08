@@ -8,6 +8,7 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     num::NonZeroUsize,
+    path::PathBuf,
     rc::Rc,
     slice,
     time::Instant,
@@ -15,9 +16,9 @@ use std::{
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
 use neqo_http3::{
-    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
+    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, StreamId,
 };
-use neqo_transport::{ConnectionIdGenerator, OutputBatch};
+use neqo_transport::{Connection, ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
 use rustc_hash::FxHashMap as HashMap;
 
@@ -25,6 +26,7 @@ use super::Args;
 use crate::{
     now,
     send_data::{SendData, SendResult},
+    server::ReportedConnections,
 };
 
 pub struct HttpServer {
@@ -34,6 +36,10 @@ pub struct HttpServer {
     /// Tracks POST requests: (bytes received, optional response size from path)
     posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
+    #[expect(clippy::option_option, reason = "clap flag-with-optional-value shape")]
+    stats: Option<Option<PathBuf>>,
+    /// Connections already reported via `--stats`.
+    reported: ReportedConnections<Connection>,
 }
 
 impl HttpServer {
@@ -108,6 +114,8 @@ impl HttpServer {
             remaining_data: HashMap::default(),
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
+            stats: args.stats.clone(),
+            reported: ReportedConnections::default(),
         }
     }
 }
@@ -208,6 +216,16 @@ impl super::HttpServer for HttpServer {
                         self.send_response(&stream, response, now);
                     }
                 }
+                Http3ServerEvent::StateChange {
+                    conn,
+                    state: Http3State::Closing(_) | Http3State::Closed(_),
+                } => {
+                    if let Some(path) = &self.stats
+                        && self.reported.insert(&conn.connection())
+                    {
+                        crate::report_stats(&conn.borrow().stats(), path.as_deref()).unwrap();
+                    }
+                }
                 _ => {}
             }
         }
@@ -215,5 +233,64 @@ impl super::HttpServer for HttpServer {
 
     fn has_events(&self) -> bool {
         self.server.has_events()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_transport::RandomConnectionIdGenerator;
+    use test_fixture::{anti_replay, default_client, fixture_init, now};
+
+    use super::{Args, HttpServer};
+    use crate::server::{
+        HttpServer as _,
+        test_support::{connect, stats_args},
+    };
+
+    fn make_server(args: &Args) -> HttpServer {
+        HttpServer::new(
+            args,
+            anti_replay(),
+            Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10))),
+        )
+    }
+
+    #[test]
+    fn reports_stats_once_on_close_when_enabled() {
+        fixture_init();
+        let args = stats_args(true);
+        let mut server = make_server(&args);
+        let mut client = default_client();
+        connect(&mut client, &mut server.server);
+
+        client.close(now(), 0, "bye");
+        let out = client.process_output(now());
+        _ = server.server.process(out.dgram(), now());
+
+        server.process_events(now());
+        assert_eq!(server.reported.len(), 1, "should report exactly once");
+
+        // A second pass over the same (now draining/closed) connection must
+        // not double-report.
+        server.process_events(now());
+        assert_eq!(server.reported.len(), 1, "must not double-report");
+    }
+
+    #[test]
+    fn does_not_report_when_stats_disabled() {
+        fixture_init();
+        let args = stats_args(false);
+        let mut server = make_server(&args);
+        let mut client = default_client();
+        connect(&mut client, &mut server.server);
+
+        client.close(now(), 0, "bye");
+        let out = client.process_output(now());
+        _ = server.server.process(out.dgram(), now());
+
+        server.process_events(now());
+        assert!(server.reported.is_empty());
     }
 }

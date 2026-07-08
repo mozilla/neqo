@@ -29,7 +29,7 @@ if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
 fi
 
 client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
-server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
+server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags --stats $addr:$port"
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
 tcpdump_pid=$!

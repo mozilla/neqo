@@ -8,7 +8,6 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Debug},
     ops::{Deref, DerefMut},
     rc::Rc,
     time::Duration,
@@ -16,11 +15,13 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
+use serde::{Serialize, Serializer, ser::SerializeMap as _};
+use serde_with::skip_serializing_none;
 use strum::IntoEnumIterator as _;
 
 use crate::{cc::CongestionTrigger, ecn, packet, version::Version};
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct FrameStats {
     pub ack: usize,
     pub largest_acknowledged: packet::Number,
@@ -55,46 +56,6 @@ pub struct FrameStats {
     pub datagram: usize,
 }
 
-impl Debug for FrameStats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
-            f,
-            "    crypto {} done {} token {} close {}",
-            self.crypto, self.handshake_done, self.new_token, self.connection_close,
-        )?;
-        writeln!(
-            f,
-            "    ack {} (max {}) ping {} padding {}",
-            self.ack, self.largest_acknowledged, self.ping, self.padding
-        )?;
-        writeln!(
-            f,
-            "    stream {} reset {} reset_at {} stop {}",
-            self.stream, self.reset_stream, self.reset_stream_at, self.stop_sending,
-        )?;
-        writeln!(
-            f,
-            "    max: stream {} data {} stream_data {}",
-            self.max_streams, self.max_data, self.max_stream_data,
-        )?;
-        writeln!(
-            f,
-            "    blocked: stream {} data {} stream_data {}",
-            self.streams_blocked, self.data_blocked, self.stream_data_blocked,
-        )?;
-        writeln!(f, "    datagram {}", self.datagram)?;
-        writeln!(
-            f,
-            "    ncid {} rcid {} pchallenge {} presponse {}",
-            self.new_connection_id,
-            self.retire_connection_id,
-            self.path_challenge,
-            self.path_response,
-        )?;
-        writeln!(f, "    ack_frequency {}", self.ack_frequency)
-    }
-}
-
 #[cfg(test)]
 impl FrameStats {
     pub const fn all(&self) -> usize {
@@ -125,7 +86,7 @@ impl FrameStats {
 }
 
 /// Datagram stats
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq, Serialize)]
 pub struct DatagramStats {
     /// The number of datagrams declared lost.
     pub lost: usize,
@@ -136,7 +97,7 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SlowStartExitReason {
     /// Exited due to a congestion event. Carries the trigger (loss or ECN).
     CongestionEvent(CongestionTrigger),
@@ -144,7 +105,7 @@ pub enum SlowStartExitReason {
     Heuristic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SlowStartExitStats {
     /// The reason slow start was exited. The `CongestionEvent` variant carries a
     /// `CongestionTrigger` (`Loss` or `Ecn`) and `Loss` carries the amount of lost packets.
@@ -165,7 +126,7 @@ pub struct SlowStartExitStats {
 /// `loss` and `ecn` are mutually exclusive triggers (their sum equals the total number of
 /// congestion events). `spurious` is an orthogonal category that applies to a subset of
 /// loss-triggered congestion events.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Default, Clone, PartialEq, Eq, Serialize)]
 pub struct CongestionEventStats {
     /// Congestion events triggered by packet loss.
     pub loss: usize,
@@ -178,14 +139,16 @@ pub struct CongestionEventStats {
 
 /// Tracks SEARCH reset occurrences: how many times SEARCH reset and the maximum number of bins
 /// skipped across all resets.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[skip_serializing_none]
+#[derive(Default, Clone, PartialEq, Eq, Serialize)]
 pub struct SearchResetStats {
     pub count: usize,
     pub max_passed_bins: Option<usize>,
 }
 
 /// Congestion Control stats
-#[derive(Default, Clone, PartialEq)]
+#[skip_serializing_none]
+#[derive(Default, Clone, PartialEq, Serialize)]
 pub struct CongestionControlStats {
     /// Congestion event counters. Includes trigger type and other qualifier flags.
     pub congestion_events: CongestionEventStats,
@@ -238,16 +201,17 @@ pub struct CongestionControlStats {
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
-impl Debug for EcnCount {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Serialize for EcnCount {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
         for (pt, count) in self.0 {
             // Don't show all-zero rows.
             if count.is_empty() {
                 continue;
             }
-            writeln!(f, "      {pt:?} {count:?}")?;
+            map.serialize_entry(&pt, &count)?;
         }
-        Ok(())
+        map.end()
     }
 }
 
@@ -281,23 +245,32 @@ impl DerefMut for EcnTransitions {
     }
 }
 
-impl Debug for EcnTransitions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+/// Transitions recorded for a single "from" ECN mark, keyed by "to" mark.
+struct EcnTransitionRow<'a>(&'a EnumMap<Ecn, Option<(packet::Type, packet::Number)>>);
+
+impl Serialize for EcnTransitionRow<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
+        for to in Ecn::iter() {
+            if let Some(pkt) = self.0[to] {
+                map.serialize_entry(&to, &pkt)?;
+            }
+        }
+        map.end()
+    }
+}
+
+impl Serialize for EcnTransitions {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut outer = serializer.serialize_map(None)?;
         for from in Ecn::iter() {
             // Don't show all-None rows.
             if self.0[from].iter().all(|(_, v)| v.is_none()) {
                 continue;
             }
-            write!(f, "      First {from:?} ")?;
-            for to in Ecn::iter() {
-                // Don't show transitions that were not recorded.
-                if let Some(pkt) = self.0[from][to] {
-                    write!(f, "to {to:?} {pkt:?} ")?;
-                }
-            }
-            writeln!(f)?;
+            outer.serialize_entry(&from, &EcnTransitionRow(&self.0[from]))?;
         }
-        Ok(())
+        outer.end()
     }
 }
 
@@ -305,16 +278,17 @@ impl Debug for EcnTransitions {
 #[derive(Default, Clone, PartialEq, Eq)]
 pub struct DscpCount(EnumMap<Dscp, usize>);
 
-impl Debug for DscpCount {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Serialize for DscpCount {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut map = serializer.serialize_map(None)?;
         for (dscp, count) in self.0 {
             // Don't show zero counts.
             if count == 0 {
                 continue;
             }
-            write!(f, "{dscp:?}: {count} ")?;
+            map.serialize_entry(&dscp, &count)?;
         }
-        Ok(())
+        map.end()
     }
 }
 
@@ -332,7 +306,8 @@ impl DerefMut for DscpCount {
 }
 
 /// Connection statistics
-#[derive(Default, Clone, PartialEq)]
+#[skip_serializing_none]
+#[derive(Default, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub info: String,
 
@@ -460,67 +435,6 @@ impl Stats {
     }
 }
 
-impl Debug for Stats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "stats for {}", self.info)?;
-        writeln!(f, "  version: {:?}", self.version)?;
-        writeln!(
-            f,
-            "  rx: {} drop {} dup {} saved {}",
-            self.packets_rx, self.dropped_rx, self.dups_rx, self.saved_datagrams
-        )?;
-        writeln!(
-            f,
-            "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
-            self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
-        )?;
-        writeln!(f, "  cc:")?;
-        writeln!(
-            f,
-            "    ce_loss {} ce_ecn {} ce_spurious {}",
-            self.cc.congestion_events.loss,
-            self.cc.congestion_events.ecn,
-            self.cc.congestion_events.spurious,
-        )?;
-        writeln!(
-            f,
-            "    final_cwnd {:?} ss_exit_cwnd {:?} ss_exit_reason {:?}",
-            self.cc.cwnd,
-            self.cc.slow_start_exit.as_ref().map(|e| e.exit_cwnd),
-            self.cc.slow_start_exit.as_ref().map(|e| &e.reason),
-        )?;
-        writeln!(
-            f,
-            "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
-            self.pmtud_tx,
-            self.pmtud_ack,
-            self.pmtud_lost,
-            self.pmtud_iface_mtu,
-            self.pmtud_peer_max_udp_payload,
-            self.pmtud_pmtu
-        )?;
-        writeln!(f, "  resumed: {}", self.resumed)?;
-        writeln!(f, "  frames rx:")?;
-        self.frame_rx.fmt(f)?;
-        writeln!(f, "  frames tx:")?;
-        self.frame_tx.fmt(f)?;
-        writeln!(f, "  ecn:\n    tx:")?;
-        self.ecn_tx.fmt(f)?;
-        writeln!(f, "    acked:")?;
-        self.ecn_tx_acked.fmt(f)?;
-        writeln!(f, "    rx:")?;
-        self.ecn_rx.fmt(f)?;
-        writeln!(
-            f,
-            "    path validation outcomes: {:?}",
-            self.ecn_path_validation
-        )?;
-        writeln!(f, "    mark transitions:")?;
-        self.ecn_rx_transition.fmt(f)?;
-        writeln!(f, "  dscp: {:?}", self.dscp_rx)
-    }
-}
-
 #[derive(Default, Clone)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
@@ -533,32 +447,29 @@ impl Deref for StatsCell {
     }
 }
 
-impl Debug for StatsCell {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.stats.borrow().fmt(f)
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Ecn;
+    use neqo_common::{Ecn, json};
 
     use super::{EcnCount, EcnTransitions, Stats, StatsCell};
-    use crate::packet;
+    use crate::{
+        packet,
+        stats::{CongestionControlStats, DscpCount, SearchResetStats},
+    };
 
     #[test]
     fn stats_init_sets_info() {
         let mut stats = Stats::default();
         stats.init("conn-1".into());
-        assert!(format!("{stats:?}").contains("conn-1"));
+        assert_eq!(stats.info, "conn-1");
     }
 
     #[test]
-    fn stats_cell_debug() {
+    fn stats_cell_init_sets_info() {
         let cell = StatsCell::default();
         cell.borrow_mut().init("cell-test".into());
-        assert!(format!("{cell:?}").contains("cell-test"));
+        assert_eq!(cell.borrow().info, "cell-test");
     }
 
     #[test]
@@ -570,59 +481,55 @@ mod tests {
     }
 
     #[test]
-    fn ecn_count_debug_nonempty() {
-        let mut counts = EcnCount::default();
-        counts[packet::Type::Short][Ecn::Ce] = 3;
-        let s = format!("{counts:?}");
-        assert!(s.contains("Short"));
-    }
-
-    #[test]
     fn ecn_transitions_deref_mut_and_deref() {
         let mut trans = EcnTransitions::default();
         trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
         assert_eq!(trans[Ecn::Ect0][Ecn::Ce], Some((packet::Type::Short, 42)));
     }
-}
 
-#[test]
-fn debug() {
-    let stats = Stats::default();
-    assert_eq!(
-        format!("{stats:?}"),
-        "stats for\u{0020}
-  version: Version1
-  rx: 0 drop 0 dup 0 saved 0
-  tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
-  cc:
-    ce_loss 0 ce_ecn 0 ce_spurious 0
-    final_cwnd None ss_exit_cwnd None ss_exit_reason None
-  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
-  resumed: false
-  frames rx:
-    crypto 0 done 0 token 0 close 0
-    ack 0 (max 0) ping 0 padding 0
-    stream 0 reset 0 reset_at 0 stop 0
-    max: stream 0 data 0 stream_data 0
-    blocked: stream 0 data 0 stream_data 0
-    datagram 0
-    ncid 0 rcid 0 pchallenge 0 presponse 0
-    ack_frequency 0
-  frames tx:
-    crypto 0 done 0 token 0 close 0
-    ack 0 (max 0) ping 0 padding 0
-    stream 0 reset 0 reset_at 0 stop 0
-    max: stream 0 data 0 stream_data 0
-    blocked: stream 0 data 0 stream_data 0
-    datagram 0
-    ncid 0 rcid 0 pchallenge 0 presponse 0
-    ack_frequency 0
-  ecn:
-    tx:
-    acked:
-    rx:
-    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
-    mark transitions:
-  dscp: \n"
-    );
+    #[test]
+    fn ecn_count_json_skips_only_empty_rows() {
+        assert_eq!(json::compact(&EcnCount::default()), "{}");
+
+        let mut counts = EcnCount::default();
+        counts[packet::Type::Short][Ecn::Ce] = 3;
+        let json = json::compact(&counts);
+        assert!(json.contains("Short"));
+        assert!(!json.contains("Initial") && !json.contains("Handshake"));
+    }
+
+    #[test]
+    fn ecn_transitions_json_skips_rows_with_no_transitions() {
+        assert_eq!(json::compact(&EcnTransitions::default()), "{}");
+    }
+
+    #[test]
+    fn dscp_count_json_skips_zero_entries() {
+        assert_eq!(json::compact(&DscpCount::default()), "{}");
+    }
+
+    #[test]
+    fn skip_serializing_none_omits_none_and_keeps_some() {
+        let stats = Stats {
+            ecn_last_mark: Some(Ecn::Ect0),
+            pmtud_peer_max_udp_payload: None,
+            cc: CongestionControlStats {
+                w_max: Some(1.0),
+                search_reset: SearchResetStats {
+                    max_passed_bins: None,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let json = json::compact(&stats);
+
+        for field in ["ecn_last_mark", "w_max"] {
+            assert!(json.contains(&format!("\"{field}\"")));
+        }
+        for field in ["pmtud_peer_max_udp_payload", "max_passed_bins"] {
+            assert!(!json.contains(&format!("\"{field}\"")));
+        }
+    }
 }
