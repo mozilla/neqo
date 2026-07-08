@@ -353,9 +353,11 @@ impl RxStreamOrderer {
                 // Continue, since we may have more overlaps
             }
 
-            for start in to_remove {
-                self.data_ranges.remove(&start);
-            }
+            self.mutate_ranges(|data_ranges| {
+                for start in to_remove {
+                    data_ranges.remove(&start);
+                }
+            });
         }
 
         if !to_add.is_empty() {
@@ -441,20 +443,21 @@ impl RxStreamOrderer {
         reason = "OK here."
     )]
     pub fn discard_after(&mut self, offset: u64) {
-        self.data_ranges.split_off(&offset);
-        // Truncate a range that straddles `offset`.
-        if let Some(mut e) = self.data_ranges.last_entry() {
-            // Note: no underflow risk, all ranges that start at or after offset are gone.
-            let start = *e.key();
-            let keep = to_usize(offset - start);
-            let data = e.get_mut();
-            data.truncate(keep);
+        let retired = self.retired;
+        self.end = self.mutate_ranges(|data_ranges| {
+            data_ranges.split_off(&offset);
+            // Truncate a range that straddles `offset`.
+            data_ranges.last_entry().map_or(retired, |mut e| {
+                // Note: no underflow risk, all ranges that start at or after offset are gone.
+                let start = *e.key();
+                let keep = to_usize(offset - start);
+                let data = e.get_mut();
+                data.truncate(keep);
 
-            // No overflow risk: neither start nor offset can exceed 1<<62.
-            self.end = start + to_u64(data.len());
-        } else {
-            self.end = self.retired;
-        }
+                // No overflow risk: neither start nor offset can exceed 1<<62.
+                start + to_u64(data.len())
+            })
+        });
     }
 
     /// Count non-adjacent ("split") runs of buffered data, for test validation.
@@ -484,7 +487,6 @@ impl RxStreamOrderer {
     fn read(&mut self, buf: &mut [u8]) -> usize {
         qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
-        let entries_before = self.data_ranges.len();
 
         for (&range_start, range_data) in &mut self.data_ranges {
             let mut keep = false;
@@ -512,23 +514,27 @@ impl RxStreamOrderer {
                 keep = true;
             }
             if keep {
-                let mut keep = self.data_ranges.split_off(&range_start);
-                mem::swap(&mut self.data_ranges, &mut keep);
-                self.adjust_split_ranges(entries_before);
+                self.mutate_ranges(|data_ranges| {
+                    let mut keep = data_ranges.split_off(&range_start);
+                    mem::swap(data_ranges, &mut keep);
+                });
                 return copied;
             }
         }
 
-        self.data_ranges.clear();
+        self.mutate_ranges(BTreeMap::clear);
         self.end = self.retired; // All entries were consumed.
-        self.adjust_split_ranges(entries_before);
         copied
     }
 
-    /// Reduce `split_ranges` count.
-    fn adjust_split_ranges(&mut self, entries_before: usize) {
+    /// Runs `f` against `data_ranges`, then reduces `split_ranges` by however many
+    /// entries `f` removed.
+    fn mutate_ranges<T>(&mut self, f: impl FnOnce(&mut BTreeMap<u64, Vec<u8>>) -> T) -> T {
+        let entries_before = self.data_ranges.len();
+        let result = f(&mut self.data_ranges);
         let released = entries_before.saturating_sub(self.data_ranges.len());
         self.split_ranges = self.split_ranges.saturating_sub(released);
+        result
     }
 
     /// Extend the given Vector with any available data.
@@ -2034,6 +2040,46 @@ mod tests {
         let read = s.read(&mut buf);
         assert_eq!(read, N * RxStreamOrderer::RANGE_TARGET);
         assert!(s.data_ranges.is_empty());
+        assert_eq!(s.split_ranges, 0);
+    }
+
+    #[test]
+    fn split_ranges_reduced_after_discard_after() {
+        const N: usize = 5;
+        let mut s = RxStreamOrderer::default();
+        for i in 0..N {
+            let offset = to_u64(i * RxStreamOrderer::RANGE_TARGET);
+            s.inbound_frame(offset, &[0u8; RxStreamOrderer::RANGE_TARGET])
+                .unwrap();
+        }
+        assert_eq!(s.split_ranges, N);
+
+        // Discard the last three chunks and verify correct accounting.
+        s.discard_after(to_u64(2 * RxStreamOrderer::RANGE_TARGET));
+        assert_eq!(s.data_ranges.len(), 2);
+        assert_eq!(s.split_ranges, 2);
+    }
+
+    #[test]
+    fn split_ranges_reduced_after_overlap_removal() {
+        let mut s = RxStreamOrderer::default();
+        // The very first insert is always credited.
+        s.inbound_frame(0, &[0u8; 1]).unwrap();
+        assert_eq!(s.split_ranges, 1);
+
+        // Two later, non-adjacent inserts: not credited.
+        s.inbound_frame(10, &[0u8; 1]).unwrap();
+        s.inbound_frame(20, &[0u8; 1]).unwrap();
+        assert_eq!(s.data_ranges.len(), 3);
+        assert_eq!(s.split_ranges, 1);
+
+        // An overlapping frame spanning [0, 20) entirely swallows the entry at 10
+        // (via the `to_remove` path) and extends the entry at 0; the entry at 20
+        // survives untouched. Net effect: one entry disappears.
+        s.inbound_frame(0, &[0u8; 20]).unwrap();
+        assert_eq!(s.data_ranges.len(), 2, "entry at 10 was fully absorbed");
+
+        // The credit accounting must reflect the entry that vanished.
         assert_eq!(s.split_ranges, 0);
     }
 
