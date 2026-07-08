@@ -402,6 +402,10 @@ impl TransportParameters {
     /// Decode is a static function that parses transport parameters
     /// using the provided decoder.
     ///
+    /// `role` is the intended recipient of the transport parameters.
+    /// A server will pass [`Role::Client`] when recovering the saved value
+    /// of its own transport parameters when validating 0-RTT, as an exception.
+    ///
     /// # Errors
     /// When the transport parameters are malformed.
     pub fn decode(role: Role, d: &mut Decoder) -> Res<Self> {
@@ -974,7 +978,11 @@ mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
 
     use TransportParameterId::*;
-    use neqo_common::{Decoder, Encoder, Role::Client, qdebug, to_u64};
+    use neqo_common::{
+        Decoder, Encoder,
+        Role::{Client, Server},
+        qdebug, to_u64,
+    };
 
     use super::PreferredAddress;
     use crate::{
@@ -1565,5 +1573,24 @@ mod tests {
         let cid = ConnectionId::from(&[0xab; ConnectionId::MAX_LEN]);
         let spa = mutate_spa(|_, _, cid_out| *cid_out = cid);
         assert_valid_spa(&spa);
+    }
+
+    #[test]
+    fn server_rejects_server_only_tparams() {
+        for tp in [
+            OriginalDestinationConnectionId,
+            RetrySourceConnectionId,
+            StatelessResetToken,
+        ] {
+            let mut enc = Encoder::default();
+            let value = if tp == StatelessResetToken {
+                TransportParameter::Bytes(vec![0xab; 16])
+            } else {
+                TransportParameter::Bytes(vec![0xab; 8])
+            };
+            value.encode(&mut enc, tp);
+            let res = TransportParameter::decode(Server, &mut enc.as_decoder());
+            assert_eq!(res, Err(Error::TransportParameter));
+        }
     }
 }
