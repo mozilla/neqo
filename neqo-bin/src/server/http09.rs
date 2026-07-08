@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug, qwarn};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qerror, qwarn};
 use neqo_http3::Error;
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
@@ -240,8 +240,9 @@ impl super::HttpServer for HttpServer {
                     ConnectionEvent::StateChange(state) if state.closed() => {
                         if let Some(path) = &self.stats
                             && self.reported.insert(&acr.connection())
+                            && let Err(e) = report_stats(&acr.borrow().stats(), path.as_deref())
                         {
-                            report_stats(&acr.borrow().stats(), path.as_deref()).unwrap();
+                            qerror!("Failed to report stats: {e}");
                         }
                     }
                     ConnectionEvent::StateChange(_)

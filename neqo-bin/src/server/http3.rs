@@ -222,8 +222,9 @@ impl super::HttpServer for HttpServer {
                 } => {
                     if let Some(path) = &self.stats
                         && self.reported.insert(&conn.connection())
+                        && let Err(e) = crate::report_stats(&conn.borrow().stats(), path.as_deref())
                     {
-                        crate::report_stats(&conn.borrow().stats(), path.as_deref()).unwrap();
+                        qerror!("Failed to report stats: {e}");
                     }
                 }
                 _ => {}

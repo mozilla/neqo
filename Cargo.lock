@@ -819,7 +819,6 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "serde",
- "serde_json",
  "serde_with",
  "smallvec",
  "static_assertions",
