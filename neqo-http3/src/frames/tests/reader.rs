@@ -154,68 +154,62 @@ fn frame_reading_with_stream_push_promise() {
     }
 }
 
-fn assert_cap_rejected<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFrameType, cap: usize) {
+/// Assert that a declared length one byte over `cap` is rejected before buffering,
+/// while exactly `cap` is accepted (i.e. the check is `>`, not `>=`).
+fn assert_cap_boundary<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFrameType, cap: usize) {
     let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(frame_type, cap + 1);
-    assert_eq!(Err(Error::HttpExcessiveLoad), fr.try_process::<T>(&buf));
+    let over = encode_frame_header(frame_type, cap + 1);
+    assert_eq!(Err(Error::HttpExcessiveLoad), fr.try_process::<T>(&over));
+
+    let mut fr = FrameReaderTest::new();
+    let at = encode_frame_header(frame_type, cap);
+    assert_eq!(Ok((None, false)), fr.try_process::<T>(&at));
 }
 
-fn assert_cap_not_rejected<T: FrameDecoder<T> + PartialEq + Debug>(
-    frame_type: HFrameType,
-    cap: usize,
-) {
-    let mut fr = FrameReaderTest::new();
-    let buf = encode_frame_header(frame_type, cap);
-    assert_eq!(Ok((None, false)), fr.try_process::<T>(&buf));
-}
+/// Each buffered `HFrame` type paired with the cap that applies to it.
+const HFRAME_CAPS: &[(usize, &[HFrameType])] = &[
+    (
+        MAX_HEADER_BYTES,
+        &[HFrameType::HEADERS, HFrameType::PUSH_PROMISE],
+    ),
+    (
+        MAX_SINGLE_VARINT_FRAME_BYTES,
+        &[
+            HFrameType::CANCEL_PUSH,
+            HFrameType::GOAWAY,
+            HFrameType::MAX_PUSH_ID,
+        ],
+    ),
+    (
+        MAX_BUFFERED_FRAME_BYTES,
+        &[
+            HFrameType::SETTINGS,
+            HFrameType::PRIORITY_UPDATE_REQUEST,
+            HFrameType::PRIORITY_UPDATE_PUSH,
+        ],
+    ),
+];
 
 #[test]
-fn hframe_length_exceeds_cap_rejected() {
-    const CHECKS: &[(usize, &[HFrameType])] = &[
-        (
-            MAX_HEADER_BYTES,
-            &[HFrameType::HEADERS, HFrameType::PUSH_PROMISE],
-        ),
-        (
-            MAX_SINGLE_VARINT_FRAME_BYTES,
-            &[
-                HFrameType::CANCEL_PUSH,
-                HFrameType::GOAWAY,
-                HFrameType::MAX_PUSH_ID,
-            ],
-        ),
-        (
-            MAX_BUFFERED_FRAME_BYTES,
-            &[
-                HFrameType::SETTINGS,
-                HFrameType::PRIORITY_UPDATE_REQUEST,
-                HFrameType::PRIORITY_UPDATE_PUSH,
-            ],
-        ),
-    ];
-    for &(cap, frame_types) in CHECKS {
+fn hframe_length_cap_boundary() {
+    for &(cap, frame_types) in HFRAME_CAPS {
         for &frame_type in frame_types {
-            assert_cap_rejected::<HFrame>(frame_type, cap);
+            assert_cap_boundary::<HFrame>(frame_type, cap);
         }
     }
 }
 
 #[test]
-fn headers_frame_length_at_cap_not_rejected_by_length_check() {
-    assert_cap_not_rejected::<HFrame>(HFrameType::HEADERS, MAX_HEADER_BYTES);
-}
-
-#[test]
-fn wt_close_session_frame_length_exceeds_cap_rejected() {
-    assert_cap_rejected::<WebTransportFrame>(
+fn wt_close_session_length_cap_boundary() {
+    assert_cap_boundary::<WebTransportFrame>(
         HFrameType(0x2843), // WebTransportFrame::CLOSE_SESSION
         WebTransportFrame::MAX_CLOSE_SESSION_BYTES,
     );
 }
 
 #[test]
-fn capsule_datagram_length_exceeds_cap_rejected() {
-    assert_cap_rejected::<Capsule>(
+fn capsule_datagram_length_cap_boundary() {
+    assert_cap_boundary::<Capsule>(
         HFrameType(0x00), // capsule::CAPSULE_TYPE_DATAGRAM
         MAX_DATAGRAM_BYTES,
     );
