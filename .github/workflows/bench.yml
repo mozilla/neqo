@@ -146,20 +146,29 @@ jobs:
               bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
             fi
           done
-          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
-            BIN_NAME=$(basename "$BENCH")
-            VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
-            if [ -n "$VARIANTS" ]; then
-              while IFS= read -r VARIANT; do
-                SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
+          profile_dir() {
+            local dir="$1" suffix="$2"
+            for BENCH in "$dir"/!(neqo-client|neqo-server); do
+              BIN_NAME=$(basename "$BENCH")
+              VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+              if [ -n "$VARIANTS" ]; then
+                while IFS= read -r VARIANT; do
+                  SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
+                  # shellcheck disable=SC2086
+                  bench_exec perf -- $PERF_OPT -o "../$SAFE_NAME$suffix.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
+                done <<< "$VARIANTS"
+              else
                 # shellcheck disable=SC2086
-                bench_exec perf -- $PERF_OPT -o "../$SAFE_NAME.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
-              done <<< "$VARIANTS"
-            else
-              # shellcheck disable=SC2086
-              bench_exec perf -- $PERF_OPT -o "../$BIN_NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
-            fi
-          done
+                bench_exec perf -- $PERF_OPT -o "../$BIN_NAME$suffix.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+              fi
+            done
+          }
+          profile_dir ../dist/neqo ""
+          # Also profile the baseline. build-neqo always builds dist/neqo-baseline
+          # (BASE_REF defaults to main outside of pull requests), so this isn't
+          # gated on event type; profile_dir's nullglob'd loop is a no-op if
+          # the directory is ever empty.
+          profile_dir ../dist/neqo-baseline "-baseline"
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../*.perf
 

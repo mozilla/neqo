@@ -27,19 +27,48 @@ defaults:
 
 jobs:
   bench-matrix:
-    name: Determine bench matrix
+    name: Determine bench matrix and refs
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.matrix.outputs.all }}
+      # Only profile the baseline (PR base branch) on pull requests, so it can
+      # be compared against the PR profile on profiler.firefox.com. Computed
+      # once here so bench-profile and perfcompare-profile can't diverge.
+      # Uses exact commit SHAs (not branch names) so the checkout is
+      # reproducible even if the base branch moves during the run.
+      refs: ${{ steps.refs.outputs.refs }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - id: matrix
         uses: ./.github/actions/bench-matrix
+      - id: refs
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "refs=[{\"name\":\"pr\",\"sha\":\"$HEAD_SHA\"},{\"name\":\"base\",\"sha\":\"$BASE_SHA\"}]" >> "$GITHUB_OUTPUT"
+          else
+            echo 'refs=[{"name":"pr","sha":""}]' >> "$GITHUB_OUTPUT"
+          fi
+
+  build-quiche:
+    name: Build cloudflare/quiche
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/quic-build
+        with:
+          impl: quiche
+          token: ${{ secrets.GITHUB_TOKEN }}
+          artifact-name: quiche-binaries
 
   bench-profile:
-    name: Profile ${{ matrix.bench.bench }}
+    name: Profile ${{ matrix.bench.bench }} (${{ matrix.ref.name }})
     runs-on: ubuntu-24.04
     needs: bench-matrix
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
@@ -47,16 +76,19 @@ jobs:
       fail-fast: false
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+        ref: ${{ fromJson(needs.bench-matrix.outputs.refs) }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ matrix.ref.sha }}
 
       - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
+          sccache: true
 
       - id: nss-version
         uses: ./.github/actions/minimum-version
@@ -71,11 +103,18 @@ jobs:
         env:
           CRATE: ${{ matrix.bench.crate }}
           BENCH: ${{ matrix.bench.bench }}
+          REF: ${{ matrix.ref.name }}
         run: |
-          cargo bench --locked --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt
           mkdir -p binaries
-          BENCH_BIN=$(grep Executable bench-build.txt | cut -d'(' -f2 | cut -d')' -f1)
-          cp "$BENCH_BIN" "binaries/$BENCH"
+          if cargo bench --locked --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt; then
+            BENCH_BIN=$(grep Executable bench-build.txt | cut -d'(' -f2 | cut -d')' -f1)
+            cp "$BENCH_BIN" "binaries/$BENCH"
+          elif [ "$REF" = "base" ]; then
+            # The bench may not exist on the base ref if it's new in this PR.
+            echo "::warning::Bench $BENCH not found on base ref; skipping."
+          else
+            exit 1
+          fi
 
       - name: Enable perf
         run: sudo sysctl -w kernel.perf_event_paranoid=-1
@@ -84,8 +123,10 @@ jobs:
         env:
           BENCH: ${{ matrix.bench.bench }}
         run: |
-          # shellcheck disable=SC2086
-          perf $PERF_OPT -o "$BENCH.perf" -- "binaries/$BENCH" --bench --noplot || true
+          if [ -f "binaries/$BENCH" ]; then
+            # shellcheck disable=SC2086
+            perf $PERF_OPT -o "$BENCH.perf" -- "binaries/$BENCH" --bench --noplot || true
+          fi
 
       - name: Process with samply
         env:
@@ -98,7 +139,7 @@ jobs:
       - name: Upload profile
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}
+          name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-${{ matrix.ref.name }}
           path: |
             *.samply.json.gz
             binaries
@@ -106,26 +147,30 @@ jobs:
           if-no-files-found: ignore
 
   perfcompare-profile:
-    name: Profile ${{ matrix.client }}-${{ matrix.server }}
+    name: Profile ${{ matrix.combo.client }}-${{ matrix.combo.server }} (${{ matrix.ref.name }})
     runs-on: ubuntu-24.04
+    needs: [bench-matrix, build-quiche]
     strategy:
       fail-fast: false
       matrix:
-        include:
+        combo:
           - { client: neqo, server: neqo }
           - { client: neqo, server: quiche }
           - { client: quiche, server: neqo }
+        ref: ${{ fromJson(needs.bench-matrix.outputs.refs) }}
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ matrix.ref.sha }}
 
       - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
+          sccache: true
 
       - id: nss-version
         uses: ./.github/actions/minimum-version
@@ -142,12 +187,15 @@ jobs:
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
 
-      - name: Build cloudflare/quiche
-        if: matrix.client == 'quiche' || matrix.server == 'quiche'
-        uses: ./.github/actions/quic-build
+      - name: Download cloudflare/quiche
+        if: matrix.combo.client == 'quiche' || matrix.combo.server == 'quiche'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          impl: quiche
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: quiche-binaries
+          path: binaries
+
+      - name: Fix binary permissions
+        run: chmod +x binaries/*
 
       - name: Calculate perf size
         run: echo "PERF_SIZE=$((TRANSFER_SIZE * 20))" >> "$GITHUB_ENV"
@@ -161,8 +209,8 @@ jobs:
         id: commands
         uses: ./.github/actions/perfcompare-commands
         with:
-          client: ${{ matrix.client }}
-          server: ${{ matrix.server }}
+          client: ${{ matrix.combo.client }}
+          server: ${{ matrix.combo.server }}
           size: ${{ env.PERF_SIZE }}
 
       - name: Set command environment
@@ -211,7 +259,7 @@ jobs:
       - name: Upload profiles
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: perfcompare-${{ matrix.client }}-${{ matrix.server }}
+          name: perfcompare-${{ matrix.combo.client }}-${{ matrix.combo.server }}-${{ matrix.ref.name }}
           path: |
             profiles/*.samply.json.gz
             binaries
@@ -235,7 +283,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: |
           ARTIFACTS=$(gh api "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" \
-            --jq '.artifacts | map(select(.name | test("^bench-|^perfcompare-"))) | sort_by(.name) | .[] | "- [\(.name)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))"')
+            --jq '.artifacts | map(select(.name | test("^bench-|^perfcompare-"))) | sort_by([(.name | sub("-(pr|base)$"; "")), (.name | endswith("-pr") | not)]) | .[] | "- [\(.name)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))"')
           {
             echo "### Performance Profiles"
             echo
