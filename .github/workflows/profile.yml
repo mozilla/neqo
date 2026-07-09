@@ -31,11 +31,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.matrix.outputs.all }}
-      # Only profile the baseline (PR base branch) on pull requests, so it can
-      # be compared against the PR profile on profiler.firefox.com. Computed
-      # once here so bench-profile and perfcompare-profile can't diverge.
-      # Uses exact commit SHAs (not branch names) so the checkout is
-      # reproducible even if the base branch moves during the run.
+      # Only profile the baseline (PR base branch) on pull requests
       refs: ${{ steps.refs.outputs.refs }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

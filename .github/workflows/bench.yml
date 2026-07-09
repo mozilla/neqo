@@ -164,10 +164,7 @@ jobs:
             done
           }
           profile_dir ../dist/neqo ""
-          # Also profile the baseline. build-neqo always builds dist/neqo-baseline
-          # (BASE_REF defaults to main outside of pull requests), so this isn't
-          # gated on event type; profile_dir's nullglob'd loop is a no-op if
-          # the directory is ever empty.
+          # Also profile the baseline
           profile_dir ../dist/neqo-baseline "-baseline"
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../*.perf
