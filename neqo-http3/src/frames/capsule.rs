@@ -11,6 +11,10 @@ use crate::Res;
 
 pub const CAPSULE_TYPE_DATAGRAM: HFrameType = HFrameType(0x00);
 
+/// Limit on the declared length of a `DATAGRAM` capsule we'll buffer before decoding.
+pub const MAX_DATAGRAM_BYTES: usize =
+    neqo_common::to_usize(neqo_transport::MAX_DATAGRAM_FRAME_SIZE);
+
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Capsule {
     Datagram { payload: Bytes },
@@ -48,6 +52,14 @@ impl FrameDecoder<Self> for Capsule {
 
     fn is_known_type(frame_type: HFrameType) -> bool {
         frame_type == CAPSULE_TYPE_DATAGRAM
+    }
+
+    fn max_frame_data(frame_type: HFrameType) -> usize {
+        if frame_type == CAPSULE_TYPE_DATAGRAM {
+            MAX_DATAGRAM_BYTES
+        } else {
+            usize::MAX
+        }
     }
 }
 
@@ -115,6 +127,11 @@ mod tests {
     fn decode_unknown_capsule_type() {
         let res = Capsule::decode(HFrameType(0x17), 4, Some(&[0xaa, 0xbb, 0xcc, 0xdd])).unwrap();
         assert_eq!(res, None);
+    }
+
+    #[test]
+    fn max_frame_data_unknown_type_is_unbounded() {
+        assert_eq!(Capsule::max_frame_data(HFrameType(0x17)), usize::MAX);
     }
 
     #[test]

@@ -803,8 +803,8 @@ impl Connection {
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp =
-            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
+        let tp = TransportParameters::decode(Role::Client, &mut dec_tp)
+            .map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
@@ -3417,8 +3417,18 @@ impl Connection {
                     stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
-                if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
-                    qinfo!("[{self}] received too many connection IDs");
+                let too_many = if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
+                    Some("received too many active connection IDs")
+                } else if self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE {
+                    // `MAX_RETIRE_QUEUE` is the actual allowed maximum.  A single call to
+                    // `retire_cids` above can add at most `ACTIVE_LIMIT` entries, so the
+                    // queue can only ever temporarily exceed the bound by that.
+                    Some("too many connection IDs pending retirement")
+                } else {
+                    None
+                };
+                if let Some(msg) = too_many {
+                    qinfo!("[{self}] {msg}");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }
             }
