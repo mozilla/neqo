@@ -364,7 +364,12 @@ impl TransportParameter {
             | TransportParameterId::GreaseQuicBit
             | TransportParameterId::Scone
             | TransportParameterId::ResetStreamAt => Self::Empty,
-            TransportParameterId::PreferredAddress => Self::decode_preferred_address(&mut d)?,
+            TransportParameterId::PreferredAddress => {
+                if role == Role::Server {
+                    return Err(Error::TransportParameter);
+                }
+                Self::decode_preferred_address(&mut d)?
+            }
             TransportParameterId::MinAckDelay => match d.decode_varint() {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
                 _ => return Err(Error::TransportParameter),
@@ -401,6 +406,10 @@ impl TransportParameters {
 
     /// Decode is a static function that parses transport parameters
     /// using the provided decoder.
+    ///
+    /// `role` is the intended recipient of the transport parameters.
+    /// A server will pass [`Role::Client`] when recovering the saved value
+    /// of its own transport parameters when validating 0-RTT, as an exception.
     ///
     /// # Errors
     /// When the transport parameters are malformed.
@@ -971,10 +980,17 @@ where
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+        str::FromStr as _,
+    };
 
     use TransportParameterId::*;
-    use neqo_common::{Decoder, Encoder, Role::Client, qdebug, to_u64};
+    use neqo_common::{
+        Decoder, Encoder,
+        Role::{Client, Server},
+        qdebug, to_u64,
+    };
 
     use super::PreferredAddress;
     use crate::{
@@ -1565,5 +1581,36 @@ mod tests {
         let cid = ConnectionId::from(&[0xab; ConnectionId::MAX_LEN]);
         let spa = mutate_spa(|_, _, cid_out| *cid_out = cid);
         assert_valid_spa(&spa);
+    }
+
+    #[test]
+    fn server_rejects_server_only_tparams() {
+        for tp in [
+            OriginalDestinationConnectionId,
+            RetrySourceConnectionId,
+            StatelessResetToken,
+            PreferredAddress,
+        ] {
+            let mut enc = Encoder::default();
+            let value = match tp {
+                PreferredAddress => {
+                    let v4addr = SocketAddrV4::from_str("1.2.3.4:23").unwrap();
+                    TransportParameter::PreferredAddress {
+                        v4: Some(v4addr),
+                        v6: None,
+                        cid: ConnectionId::generate_initial(),
+                        srt: Srt::new([8; Srt::LEN]),
+                    }
+                }
+                StatelessResetToken => TransportParameter::Bytes(vec![7; Srt::LEN]),
+                OriginalDestinationConnectionId | RetrySourceConnectionId => {
+                    TransportParameter::Bytes(vec![0xab; 8])
+                }
+                _ => unreachable!(),
+            };
+            value.encode(&mut enc, tp);
+            let res = TransportParameter::decode(Server, &mut enc.as_decoder());
+            assert_eq!(res, Err(Error::TransportParameter));
+        }
     }
 }
