@@ -455,8 +455,10 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
         }
 
-        if let Some(path) = &self.args.shared.stats {
-            report_stats(&self.client.stats(), path.as_deref())?;
+        if let Some(path) = &self.args.shared.stats
+            && let Err(e) = report_stats(&self.client.stats(), path.as_deref())
+        {
+            qerror!("Failed to report stats: {e}");
         }
 
         Ok(self.handler.take_token())

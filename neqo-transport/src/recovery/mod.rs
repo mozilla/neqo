@@ -472,6 +472,7 @@ impl PtoState {
     }
 }
 
+#[derive(Debug)]
 pub struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,

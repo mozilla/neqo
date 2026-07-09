@@ -86,7 +86,7 @@ impl FrameStats {
 }
 
 /// Datagram stats
-#[derive(Default, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct DatagramStats {
     /// The number of datagrams declared lost.
     pub lost: usize,
@@ -126,7 +126,7 @@ pub struct SlowStartExitStats {
 /// `loss` and `ecn` are mutually exclusive triggers (their sum equals the total number of
 /// congestion events). `spurious` is an orthogonal category that applies to a subset of
 /// loss-triggered congestion events.
-#[derive(Default, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct CongestionEventStats {
     /// Congestion events triggered by packet loss.
     pub loss: usize,
@@ -140,7 +140,7 @@ pub struct CongestionEventStats {
 /// Tracks SEARCH reset occurrences: how many times SEARCH reset and the maximum number of bins
 /// skipped across all resets.
 #[skip_serializing_none]
-#[derive(Default, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct SearchResetStats {
     pub count: usize,
     pub max_passed_bins: Option<usize>,
@@ -148,7 +148,7 @@ pub struct SearchResetStats {
 
 /// Congestion Control stats
 #[skip_serializing_none]
-#[derive(Default, Clone, PartialEq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct CongestionControlStats {
     /// Congestion event counters. Includes trigger type and other qualifier flags.
     pub congestion_events: CongestionEventStats,
@@ -198,7 +198,7 @@ pub struct CongestionControlStats {
 }
 
 /// ECN counts by QUIC [`packet::Type`].
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
 impl Serialize for EcnCount {
@@ -229,7 +229,7 @@ impl DerefMut for EcnCount {
 }
 
 /// Packet types and numbers of the first ECN mark transition between two marks.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>);
 
 impl Deref for EcnTransitions {
@@ -275,7 +275,7 @@ impl Serialize for EcnTransitions {
 }
 
 /// Received packet counts by DSCP value.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DscpCount(EnumMap<Dscp, usize>);
 
 impl Serialize for DscpCount {
@@ -307,7 +307,7 @@ impl DerefMut for DscpCount {
 
 /// Connection statistics
 #[skip_serializing_none]
-#[derive(Default, Clone, PartialEq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub info: String,
 
@@ -435,7 +435,7 @@ impl Stats {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
 }
