@@ -157,12 +157,6 @@ pub struct Args {
     #[arg(name = "upload-size", long, default_value = "100")]
     upload_size: usize,
 
-    /// Print connection stats after close. Optionally give a filename to
-    /// append the stats to (as JSON), instead of logging them.
-    #[arg(name = "stats", long, require_equals = true)]
-    #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
-    stats: Option<Option<PathBuf>>,
-
     /// The length of the local connection ID.
     #[arg(name = "cid-length", short = 'l', long, default_value = "0",
           value_parser = clap::value_parser!(u8).range(..=20))]
@@ -209,7 +203,6 @@ impl Args {
             ipv6_only: false,
             test: None,
             upload_size,
-            stats: None,
             cid_len: 0,
         }
     }
@@ -458,7 +451,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
         }
 
-        if let Some(path) = &self.args.stats {
+        if let Some(path) = &self.args.shared.stats {
             report_stats(&self.client.stats(), path.as_deref())?;
         }
 

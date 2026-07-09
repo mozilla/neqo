@@ -67,6 +67,12 @@ pub struct SharedArgs {
 
     #[command(flatten)]
     quic_parameters: QuicParameters,
+
+    /// Print connection stats when a connection closes. Optionally give a
+    /// filename to append the stats to (as JSON), instead of logging them.
+    #[arg(name = "stats", long, require_equals = true)]
+    #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
+    stats: Option<Option<PathBuf>>,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -82,6 +88,7 @@ impl Default for SharedArgs {
             ciphers: vec![],
             qns_test: None,
             quic_parameters: QuicParameters::default(),
+            stats: None,
         }
     }
 }
@@ -301,14 +308,15 @@ fn now() -> Instant {
 /// If `path` is given and the file can't be opened or written to.
 pub fn report_stats(stats: &Stats, path: Option<&Path>) -> std::io::Result<()> {
     let json = json::compact(stats);
-    let Some(path) = path else {
+    if let Some(path) = path {
+        writeln!(
+            OpenOptions::new().create(true).append(true).open(path)?,
+            "{json}"
+        )
+    } else {
         qinfo!("{json}");
-        return Ok(());
-    };
-    writeln!(
-        OpenOptions::new().create(true).append(true).open(path)?,
-        "{json}"
-    )
+        Ok(())
+    }
 }
 
 #[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
