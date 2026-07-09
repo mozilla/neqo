@@ -149,7 +149,7 @@ jobs:
           profile_dir() {
             local dir="$1" outdir
             outdir=$(basename "$dir")
-            local BENCH BIN_NAME VARIANTS SAFE_NAME
+            local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
             mkdir -p "../profiles/$outdir"
             for BENCH in "$dir"/!(neqo-client|neqo-server); do
               BIN_NAME=$(basename "$BENCH")
@@ -166,9 +166,9 @@ jobs:
               fi
             done
           }
-          profile_dir ../dist/neqo neqo
+          profile_dir ../dist/neqo
           # Also profile the baseline
-          profile_dir ../dist/neqo-baseline neqo-baseline
+          profile_dir ../dist/neqo-baseline
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../profiles
 

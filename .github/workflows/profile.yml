@@ -202,7 +202,7 @@ jobs:
     name: Profile ${{ matrix.combo.client }}-${{ matrix.combo.server }} (${{ matrix.ref.name }})
     runs-on: ubuntu-24.04
     needs: [bench-matrix, build-others, build-neqo]
-    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' }}
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.build-neqo.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
