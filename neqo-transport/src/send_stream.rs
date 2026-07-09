@@ -728,8 +728,12 @@ pub struct SendStream {
     fair: bool,
     send_group: Option<SendGroupId>,
     writable_event_low_watermark: NonZeroUsize,
-    /// `has_data_at` cache: true iff `has_data_at(self.priority)` would return true.
-    has_data: bool,
+    /// `has_data_at` cache: `Some(true) if has_data_at(self.priority) would return true`,
+    /// or `None` if stale.
+    has_data: Option<bool>,
+    /// Whether a pending `ResetSent`/`ResetSentReliable` priority is tracking
+    /// `effective_priority` (set by `reset_lost`) rather than `priority` (set by `reset`).
+    reset_priority_is_effective: bool,
 }
 
 impl SendStream {
@@ -754,7 +758,8 @@ impl SendStream {
             fair: false,
             send_group: None,
             writable_event_low_watermark: NonZeroUsize::MIN,
-            has_data: false,
+            has_data: Some(false),
+            reset_priority_is_effective: false,
         };
         if ss.avail() > 0 {
             ss.conn_events.send_stream_writable(stream_id);
@@ -790,13 +795,9 @@ impl SendStream {
             {
                 return true;
             }
-            // STREAM pending?
-            #[cfg(debug_assertions)]
-            {
-                let computed = self.has_next_bytes(false);
-                assert_eq!(self.has_data, computed, "has_data cache out of sync");
-            }
-            return self.has_data;
+            let has_data = self.has_data.unwrap_or_else(|| self.has_next_bytes(false));
+            self.has_data = Some(has_data);
+            return has_data;
         }
 
         if priority == self.effective_priority {
@@ -804,14 +805,6 @@ impl SendStream {
         }
 
         false
-    }
-
-    /// Update the cache that backs the `has_data_at(self.priority)` STREAM check.
-    ///
-    /// Call this whenever the `TxBuffer` or stream state changes in a way that could affect whether
-    /// there are unsent data bytes.
-    fn update_has_data(&mut self) {
-        self.has_data = self.has_next_bytes(false);
     }
 
     /// Return `false` if the builder is full and the caller should stop iterating.
@@ -861,17 +854,21 @@ impl SendStream {
         retransmission: RetransmissionPriority,
     ) {
         let new_effective = transmission + retransmission;
-        // Keep a pending RESET_STREAM priority-aligned so it remains schedulable.
+        // Keep a pending RESET_STREAM/RESET_STREAM_AT priority-aligned so it remains schedulable.
         if let State::ResetSent {
+            priority: Some(ref mut p),
+            ..
+        }
+        | State::ResetSentReliable {
             priority: Some(ref mut p),
             ..
         } = self.state
         {
-            if *p == self.priority {
-                *p = transmission;
-            } else if *p == self.effective_priority {
-                *p = new_effective;
-            }
+            *p = if self.reset_priority_is_effective {
+                new_effective
+            } else {
+                transmission
+            };
         }
         self.priority = transmission;
         self.effective_priority = new_effective;
@@ -1159,6 +1156,7 @@ impl SendStream {
         reason = "OK here."
     )]
     pub fn reset_acked(&mut self) {
+        self.has_data = None;
         match self.state {
             State::Ready { .. }
             | State::Send { .. }
@@ -1198,10 +1196,10 @@ impl SendStream {
             }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
-        self.update_has_data();
     }
 
     pub fn reset_lost(&mut self) {
+        self.has_data = None;
         match self.state {
             State::ResetSent {
                 ref mut priority, ..
@@ -1210,11 +1208,11 @@ impl SendStream {
                 ref mut priority, ..
             } => {
                 *priority = Some(self.effective_priority);
+                self.reset_priority_is_effective = true;
             }
             State::ResetRecvd { .. } => (),
             _ => unreachable!(),
         }
-        self.update_has_data();
     }
 
     /// Maybe write a `RESET_STREAM` or `RESET_STREAM_AT` frame.
@@ -1277,9 +1275,7 @@ impl SendStream {
             }
             *priority = None;
         }
-        if written {
-            self.update_has_data();
-        }
+        self.has_data = None;
         // Even if the write was successful, if we have reliable data pending, return false.
         written && !matches!(self.state, State::ResetSentReliable { .. })
     }
@@ -1315,6 +1311,7 @@ impl SendStream {
     )]
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
         self.bytes_sent = max(self.bytes_sent, offset + to_u64(len));
+        self.has_data = None;
 
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
@@ -1324,10 +1321,6 @@ impl SendStream {
         if fin && let State::DataSent { fin_sent, .. } = &mut self.state {
             *fin_sent = true;
         }
-
-        if len > 0 || fin {
-            self.update_has_data();
-        }
     }
 
     #[allow(
@@ -1336,6 +1329,7 @@ impl SendStream {
         reason = "OK here."
     )]
     pub fn mark_as_acked(&mut self, offset: u64, len: usize, fin: bool) {
+        self.has_data = None;
         match self.state {
             State::Send {
                 ref mut send_buf, ..
@@ -1400,7 +1394,6 @@ impl SendStream {
             }
             _ => qtrace!("[{self}] mark_as_acked called from state {:?}", self.state),
         }
-        self.update_has_data();
     }
 
     #[allow(
@@ -1414,6 +1407,8 @@ impl SendStream {
             "[{self}] mark_as_lost retransmission offset={}",
             self.retransmission_offset
         );
+        self.has_data = None;
+
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_lost(offset, len);
         }
@@ -1427,7 +1422,6 @@ impl SendStream {
         {
             *fin_sent = *fin_acked;
         }
-        self.update_has_data();
     }
 
     /// Bytes sendable on stream. Constrained by stream credit available,
@@ -1544,12 +1538,14 @@ impl SendStream {
             _ => Err(Error::FinalSize),
         };
         if result.is_ok() {
-            self.has_data = true;
+            // Just buffered unsent data, so there is definitely something to send.
+            self.has_data = Some(true);
         }
         result
     }
 
     pub fn close(&mut self) {
+        self.has_data = None;
         match &mut self.state {
             State::Ready { .. } => {
                 self.state.transition(State::DataSent {
@@ -1581,7 +1577,6 @@ impl SendStream {
             }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
-        self.update_has_data();
     }
 
     /// Commit to reliably delivering all data buffered so far: that prefix is delivered even if
@@ -1661,6 +1656,8 @@ impl SendStream {
             }
         }
 
+        self.has_data = None;
+        self.reset_priority_is_effective = false;
         let priority = self.priority;
         let new_state = match &mut self.state {
             State::Ready { fc, .. } => State::ResetSent {
@@ -1709,6 +1706,7 @@ impl SendStream {
     /// retransmission of the reset frame is a plain `RESET_STREAM`), or straight to `ResetRecvd` if
     /// the reset frame is already acked.
     pub(crate) fn drop_commitment(&mut self) {
+        self.has_data = None;
         match &mut self.state {
             State::Send { committed, .. } | State::DataSent { committed, .. } => {
                 *committed = 0;
@@ -1746,7 +1744,6 @@ impl SendStream {
             }
             _ => {}
         }
-        self.update_has_data();
     }
 
     #[cfg(test)]
@@ -4542,6 +4539,33 @@ mod tests {
         // Reset lost: priority set back to Some(effective_priority).
         s.reset_lost();
         assert_has_data_only_at(&mut s, &[eff]);
+    }
+
+    #[test]
+    fn set_priority_after_reset_lost_disambiguates_bucket() {
+        // Critical + Higher == Critical (see the TransmissionPriority::Add impl), so
+        // priority == effective_priority here even with the *default* RetransmissionPriority.
+        let mut s = stream_with_priority(
+            TransmissionPriority::Critical,
+            RetransmissionPriority::Higher,
+        );
+        assert_eq!(s.priority, TransmissionPriority::Critical);
+        assert_eq!(s.effective_priority, TransmissionPriority::Critical);
+
+        s.send(b"hello").unwrap();
+        s.reset(0);
+        assert!(reset_frame_written(&mut s, TransmissionPriority::Critical));
+        // Reset frame lost: stored priority moves to Some(effective_priority) == Some(Critical).
+        s.reset_lost();
+
+        // Now diverge priority and effective_priority.
+        s.set_priority(
+            TransmissionPriority::Low,
+            RetransmissionPriority::MuchHigher,
+        );
+        let new_eff = TransmissionPriority::Low + RetransmissionPriority::MuchHigher;
+        assert_eq!(new_eff, TransmissionPriority::High);
+        assert_has_data_only_at(&mut s, &[new_eff]);
     }
 
     // --- RESET_STREAM_AT (reliable stream reset) ---
