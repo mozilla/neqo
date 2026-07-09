@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F2999 --call-graph fp -g
+  PERF_OPT: record -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
   SCCACHE_CACHE_SIZE: 128G
   SCCACHE_DIRECT: true
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: mozilla/neqo
           path: neqo
@@ -62,7 +62,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: mozilla/neqo
           path: neqo
@@ -77,10 +77,10 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+        uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: flamegraph, samply
+          tools: inferno, samply
           token: ${{ secrets.GITHUB_TOKEN }}
           sccache: true
 
@@ -124,17 +124,28 @@ jobs:
           # Fix any root-owned files left by a previous run before removing them
           sudo chown -R "$(id -u)" target/criterion 2>/dev/null || true
           rm -rf target/criterion
-          # Run the baseline builds first, to establish a baseline.
-          for BENCH in ../dist/neqo-baseline/!(neqo-client|neqo-server); do
-            bench_exec "$BENCH" -- --bench --save-baseline baseline --noplot | filter_cset | tee -a ../results-baseline.txt
-          done
-          # Run pull request builds twice, once without perf for baseline comparison, and once with perf for profiling.
-          # (Perf seems to introduce some variability in the results.)
-          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
-            # --baseline-lenient allows us to add new benchmarks in pull requests.
-            bench_exec "$BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
-          done
+          # Run baseline and PR builds interleaved.
           sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
+          for PR_BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
+            BIN_NAME=$(basename "$PR_BENCH")
+            BASELINE_BENCH="../dist/neqo-baseline/$BIN_NAME"
+            [ -f "$BASELINE_BENCH" ] || BASELINE_BENCH=""
+            VARIANTS=$("$PR_BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+            if [ -n "$VARIANTS" ]; then
+              BASELINE_VARIANTS=""
+              [ -n "$BASELINE_BENCH" ] && BASELINE_VARIANTS=$("$BASELINE_BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+              while IFS= read -r VARIANT; do
+                if [ -n "$BASELINE_BENCH" ] && grep -qxF "$VARIANT" <<< "$BASELINE_VARIANTS"; then
+                  bench_exec "$BASELINE_BENCH" -- --bench --save-baseline baseline --noplot --exact "$VARIANT" | filter_cset | tee -a ../results-baseline.txt
+                fi
+                # --baseline-lenient allows us to add new benchmarks in pull requests.
+                bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot --exact "$VARIANT" | filter_cset | tee -a ../results.txt
+              done <<< "$VARIANTS"
+            else
+              [ -n "$BASELINE_BENCH" ] && bench_exec "$BASELINE_BENCH" -- --bench --save-baseline baseline --noplot | filter_cset | tee -a ../results-baseline.txt
+              bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
+            fi
+          done
           for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
             BIN_NAME=$(basename "$BENCH")
             VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
@@ -164,8 +175,8 @@ jobs:
           for f in *.perf; do
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
-            # Generate flamegraphs
-            flamegraph --perfdata "$f" --palette rust -o "${f//.perf/.svg}"
+            # Generate flamegraphs from the cycles event (perf.data has multiple events)
+            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
 
       - name: Format results as Markdown

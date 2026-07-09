@@ -18,7 +18,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace};
+use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace, to_u64, to_usize};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
@@ -32,7 +32,7 @@ use crate::{
     recovery::{self, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::StreamId,
-    streams::SendOrder,
+    streams::{SendGroupId, SendOrder},
     tparams::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
@@ -198,7 +198,7 @@ impl RangeTracker {
         reason = "OK here."
     )]
     pub fn mark_acked(&mut self, new_off: u64, new_len: usize) {
-        let end = new_off + u64::try_from(new_len).expect("usize fits in u64");
+        let end = new_off + to_u64(new_len);
         let new_off = max(self.acked, new_off);
         let mut new_len = end.saturating_sub(new_off);
         if new_len == 0 {
@@ -301,7 +301,7 @@ impl RangeTracker {
         reason = "OK here."
     )]
     pub fn mark_sent(&mut self, mut new_off: u64, new_len: usize) {
-        let new_end = new_off + u64::try_from(new_len).expect("usize fits in u64");
+        let new_end = new_off + to_u64(new_len);
         new_off = max(self.acked, new_off);
         let mut new_len = new_end.saturating_sub(new_off);
         if new_len == 0 {
@@ -392,7 +392,7 @@ impl RangeTracker {
         }
 
         self.first_unmarked = None;
-        let len = u64::try_from(len).expect("usize fits in u64");
+        let len = to_u64(len);
         let end_off = off + len;
 
         let mut to_remove = SmallVec::<[_; 8]>::new();
@@ -451,10 +451,7 @@ impl RangeTracker {
     /// On 32-bit machines where far too much is sent before calling this.
     /// Note that this should not be called for handshakes, which should never exceed that limit.
     pub fn unmark_sent(&mut self) {
-        self.unmark_range(
-            0,
-            usize::try_from(self.highest_offset()).expect("u64 fits in usize"),
-        );
+        self.unmark_range(0, to_usize(self.highest_offset()));
     }
 
     #[cfg(feature = "bench")]
@@ -477,8 +474,7 @@ impl TxBuffer {
     ///
     /// See [`MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
     /// concrete value.
-    #[expect(clippy::cast_possible_truncation, reason = "Checked by const_assert!")]
-    pub const MAX_SIZE: usize = MAX_LOCAL_MAX_STREAM_DATA as usize;
+    pub const MAX_SIZE: usize = to_usize(MAX_LOCAL_MAX_STREAM_DATA);
 
     #[must_use]
     pub fn new() -> Self {
@@ -497,7 +493,7 @@ impl TxBuffer {
 
     fn first_unmarked_range(&mut self) -> Option<(u64, Option<u64>)> {
         let (start, maybe_len) = self.ranges.first_unmarked_range();
-        let buffered = u64::try_from(self.buffered()).ok()?;
+        let buffered = to_u64(self.buffered());
         (start != self.retired() + buffered).then_some((start, maybe_len))
     }
 
@@ -520,7 +516,7 @@ impl TxBuffer {
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = usize::try_from(start - self.retired()).ok()?;
+        let buff_off = to_usize(start - self.retired());
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.
@@ -530,9 +526,7 @@ impl TxBuffer {
             &self.send_buf.as_slices().1[buff_off - self.send_buf.as_slices().0.len()..]
         };
 
-        let len = maybe_len.map_or(slc.len(), |range_len| {
-            min(usize::try_from(range_len).unwrap_or(usize::MAX), slc.len())
-        });
+        let len = maybe_len.map_or(slc.len(), |range_len| min(to_usize(range_len), slc.len()));
 
         debug_assert!(len > 0);
         debug_assert!(len <= slc.len());
@@ -554,8 +548,7 @@ impl TxBuffer {
         self.ranges.mark_acked(offset, len);
 
         // Any newly-retired bytes can be dropped from the buffer.
-        let new_retirable =
-            usize::try_from(self.retired() - prev_retired).expect("u64 fits in usize");
+        let new_retirable = to_usize(self.retired() - prev_retired);
         debug_assert!(new_retirable <= self.buffered());
         self.send_buf.drain(..new_retirable);
     }
@@ -583,7 +576,7 @@ impl TxBuffer {
     }
 
     fn used(&self) -> u64 {
-        self.retired() + u64::try_from(self.buffered()).expect("usize fits in u64")
+        self.retired() + to_u64(self.buffered())
     }
 }
 
@@ -598,6 +591,8 @@ pub enum State {
         fc: SenderFlowControl<StreamId>,
         conn_fc: Rc<RefCell<SenderFlowControl<()>>>,
         send_buf: TxBuffer,
+        /// The committed (reliable) offset, set via [`SendStream::commit`].
+        committed: u64,
     },
     // Note: `DataSent` is entered when the stream is closed, not when all data has been
     // sent for the first time.
@@ -605,17 +600,35 @@ pub enum State {
         send_buf: TxBuffer,
         fin_sent: bool,
         fin_acked: bool,
+        /// See [`State::Send::committed`].
+        committed: u64,
     },
     DataRecvd {
         retired: u64,
         written: u64,
     },
+    // A reset has been sent and no committed data below `reliable_size` is still outstanding
+    // (either `reliable_size == 0`, i.e. a plain `RESET_STREAM`, or all committed data has
+    // already been acked). The send buffer is dropped.
     ResetSent {
         err: AppError,
         final_size: u64,
+        /// The reliable size. `0` ⇒ emit `RESET_STREAM`; `> 0` ⇒ emit `RESET_STREAM_AT`.
+        reliable_size: u64,
         priority: Option<TransmissionPriority>,
         final_retired: u64,
         final_written: u64,
+    },
+    // A `RESET_STREAM_AT` has been sent, but committed data below `reliable_size` is still in
+    // flight, so the `TxBuffer` is retained to (re)transmit it.
+    ResetSentReliable {
+        send_buf: TxBuffer,
+        err: AppError,
+        final_size: u64,
+        reliable_size: u64,
+        priority: Option<TransmissionPriority>,
+        /// Whether the `RESET_STREAM_AT` frame itself has been acked.
+        reset_acked: bool,
     },
     ResetRecvd {
         final_retired: u64,
@@ -626,7 +639,9 @@ pub enum State {
 impl State {
     const fn tx_buf_mut(&mut self) -> Option<&mut TxBuffer> {
         match self {
-            Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => Some(send_buf),
+            Self::Send { send_buf, .. }
+            | Self::DataSent { send_buf, .. }
+            | Self::ResetSentReliable { send_buf, .. } => Some(send_buf),
             Self::Ready { .. }
             | Self::DataRecvd { .. }
             | Self::ResetSent { .. }
@@ -639,7 +654,11 @@ impl State {
             // In Ready, TxBuffer not yet allocated but size is known
             Self::Ready { .. } => TxBuffer::MAX_SIZE,
             Self::Send { send_buf, .. } | Self::DataSent { send_buf, .. } => send_buf.avail(),
-            Self::DataRecvd { .. } | Self::ResetSent { .. } | Self::ResetRecvd { .. } => 0,
+            // No application data can be added after a reset.
+            Self::DataRecvd { .. }
+            | Self::ResetSent { .. }
+            | Self::ResetSentReliable { .. }
+            | Self::ResetRecvd { .. } => 0,
         }
     }
 
@@ -707,6 +726,7 @@ pub struct SendStream {
     sendorder: Option<SendOrder>,
     bytes_sent: u64,
     fair: bool,
+    send_group: Option<SendGroupId>,
     writable_event_low_watermark: NonZeroUsize,
 }
 
@@ -730,6 +750,7 @@ impl SendStream {
             sendorder: None,
             bytes_sent: 0,
             fair: false,
+            send_group: None,
             writable_event_low_watermark: NonZeroUsize::MIN,
         };
         if ss.avail() > 0 {
@@ -744,12 +765,19 @@ impl SendStream {
     /// Must mirror every frame-emission path in [`Self::write_frames`]; any new
     /// frame type added there must also be reflected here.
     fn has_data_at(&mut self, priority: TransmissionPriority) -> bool {
-        // RESET_STREAM pending?
-        if let State::ResetSent {
-            priority: Some(p), ..
-        } = self.state
-        {
-            return p == priority;
+        // RESET_STREAM / RESET_STREAM_AT pending?
+        match self.state {
+            // A plain reset emits no other frames, so this is the only thing to check.
+            State::ResetSent {
+                priority: reset_priority,
+                ..
+            } => return reset_priority == Some(priority),
+            // A reliable reset may also have committed STREAM data pending, so only short-circuit
+            // when the reset frame itself is queued at this priority; otherwise fall through.
+            State::ResetSentReliable {
+                priority: Some(p), ..
+            } if p == priority => return true,
+            _ => {}
         }
         // STREAM_DATA_BLOCKED pending?
         if priority == self.priority
@@ -801,6 +829,15 @@ impl SendStream {
         self.fair
     }
 
+    #[must_use]
+    pub const fn send_group(&self) -> Option<SendGroupId> {
+        self.send_group
+    }
+
+    pub(crate) const fn set_send_group(&mut self, group_id: Option<SendGroupId>) {
+        self.send_group = group_id;
+    }
+
     pub fn set_priority(
         &mut self,
         transmission: TransmissionPriority,
@@ -819,12 +856,15 @@ impl SendStream {
         self.sendorder = sendorder;
     }
 
-    /// If all data has been buffered or written, how much was sent.
+    /// If the stream's final size is established, what it is. This is known once the stream is
+    /// closed (`DataSent`) or reset (`ResetSent`/`ResetSentReliable`).
     #[must_use]
     pub fn final_size(&self) -> Option<u64> {
         match &self.state {
             State::DataSent { send_buf, .. } => Some(send_buf.used()),
-            State::ResetSent { final_size, .. } => Some(*final_size),
+            State::ResetSent { final_size, .. } | State::ResetSentReliable { final_size, .. } => {
+                Some(*final_size)
+            }
             _ => None,
         }
     }
@@ -842,8 +882,10 @@ impl SendStream {
     )]
     pub fn bytes_written(&self) -> u64 {
         match &self.state {
-            State::Send { send_buf, .. } | State::DataSent { send_buf, .. } => {
-                send_buf.retired() + u64::try_from(send_buf.buffered()).expect("usize fits in u64")
+            State::Send { send_buf, .. }
+            | State::DataSent { send_buf, .. }
+            | State::ResetSentReliable { send_buf, .. } => {
+                send_buf.retired() + to_u64(send_buf.buffered())
             }
             State::DataRecvd {
                 retired, written, ..
@@ -865,7 +907,9 @@ impl SendStream {
     #[must_use]
     pub const fn bytes_acked(&self) -> u64 {
         match &self.state {
-            State::Send { send_buf, .. } | State::DataSent { send_buf, .. } => send_buf.retired(),
+            State::Send { send_buf, .. }
+            | State::DataSent { send_buf, .. }
+            | State::ResetSentReliable { send_buf, .. } => send_buf.retired(),
             State::DataRecvd { retired, .. } => *retired,
             State::ResetSent { final_retired, .. } | State::ResetRecvd { final_retired, .. } => {
                 *final_retired
@@ -891,6 +935,20 @@ impl SendStream {
                 fin_sent,
                 ..
             } => send_buf.has_next_bytes() || !fin_sent,
+            // Only committed data below `reliable_size` is (re)transmitted (and on a
+            // retransmission, only data below the retransmission offset); no FIN.
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                ..
+            } => {
+                let limit = if retransmission_only {
+                    min(self.retransmission_offset, reliable_size)
+                } else {
+                    reliable_size
+                };
+                send_buf.has_next_bytes_before(limit)
+            }
             _ => false,
         }
     }
@@ -910,12 +968,11 @@ impl SendStream {
                         self.retransmission_offset
                     );
                     (self.retransmission_offset > offset).then(|| {
-                        let Ok(delta) = usize::try_from(self.retransmission_offset - offset) else {
-                            return None;
-                        };
+                        let delta = usize::try_from(self.retransmission_offset - offset)
+                            .unwrap_or(usize::MAX);
                         let len = min(delta, slice.len());
-                        Some((offset, &slice[..len]))
-                    })?
+                        (offset, &slice[..len])
+                    })
                 } else {
                     Some((offset, slice))
                 }
@@ -936,6 +993,27 @@ impl SendStream {
                     Some((used, &[]))
                 }
             }
+            // (Re)transmit committed data, truncated so `offset + len <= reliable_size`, and
+            // never a FIN (the end is signalled by the RESET_STREAM_AT frame). This caps fresh
+            // sends at `reliable_size` and, on a retransmission, additionally caps at the
+            // retransmission offset so only lost data below `reliable_size` is resent.
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                ..
+            } => {
+                let limit = if retransmission_only {
+                    min(self.retransmission_offset, reliable_size)
+                } else {
+                    reliable_size
+                };
+                let (offset, slice) = send_buf.next_bytes()?;
+                (offset < limit).then(|| {
+                    let cap = usize::try_from(limit - offset).unwrap_or(usize::MAX);
+                    let len = min(cap, slice.len());
+                    (offset, &slice[..len])
+                })
+            }
             State::Ready { .. }
             | State::DataRecvd { .. }
             | State::ResetSent { .. }
@@ -955,7 +1033,7 @@ impl SendStream {
         // Estimate size of the length field based on the available space,
         // less 1, which is the worst case.
         let length = min(space.saturating_sub(1), data_len);
-        let length_len = Encoder::varint_len(u64::try_from(length).expect("usize fits in u64"));
+        let length_len = Encoder::varint_len(to_u64(length));
         debug_assert!(length_len <= space); // We don't depend on this being true, but it is true.
 
         // From here we can always fit `data_len`, but we might as well fill
@@ -987,7 +1065,13 @@ impl SendStream {
         };
 
         let id = self.stream_id;
-        let final_size = self.final_size();
+        // Avoid `Self::final_size`, because we don't want to send the FIN flag
+        // after `RESET_STREAM_AT`, even if we have all the data.
+        // If we did, packet loss or reordering could drop the reset being delivered.
+        let fin_offset = match &self.state {
+            State::DataSent { send_buf, .. } => Some(send_buf.used()),
+            _ => None,
+        };
         if let Some((offset, data)) = self.next_bytes(retransmission) {
             let overhead = 1 // Frame type
                 + Encoder::varint_len(id.as_u64())
@@ -1002,8 +1086,7 @@ impl SendStream {
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
-            let fin = final_size
-                .is_some_and(|fs| fs == offset + u64::try_from(length).expect("usize fits in u64"));
+            let fin = fin_offset.is_some_and(|fo| fo == offset + to_u64(length));
             if length == 0 && !fin {
                 qtrace!("[{self}] write_frame no data, no fin");
                 return;
@@ -1040,6 +1123,11 @@ impl SendStream {
         }
     }
 
+    #[allow(
+        clippy::allow_attributes,
+        clippy::missing_panics_doc,
+        reason = "OK here."
+    )]
     pub fn reset_acked(&mut self) {
         match self.state {
             State::Ready { .. }
@@ -1052,10 +1140,32 @@ impl SendStream {
                 final_retired,
                 final_written,
                 ..
-            } => self.state.transition(State::ResetRecvd {
-                final_retired,
-                final_written,
-            }),
+            } => {
+                // Reaching `ResetRecvd` does not signal stream completion, even for a reliable
+                // reset that delivered committed data.
+                self.state.transition(State::ResetRecvd {
+                    final_retired,
+                    final_written,
+                });
+            }
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                reset_acked: ref mut frame_acked,
+                ..
+            } => {
+                // Complete only once all committed data has also been acked.
+                if send_buf.retired() >= reliable_size {
+                    let final_retired = send_buf.retired();
+                    let final_written = to_u64(send_buf.buffered());
+                    self.state.transition(State::ResetRecvd {
+                        final_retired,
+                        final_written,
+                    });
+                } else {
+                    *frame_acked = true;
+                }
+            }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
     }
@@ -1063,6 +1173,9 @@ impl SendStream {
     pub fn reset_lost(&mut self) {
         match self.state {
             State::ResetSent {
+                ref mut priority, ..
+            }
+            | State::ResetSentReliable {
                 ref mut priority, ..
             } => {
                 *priority = Some(self.effective_priority);
@@ -1072,7 +1185,11 @@ impl SendStream {
         }
     }
 
-    /// Maybe write a `RESET_STREAM` frame.
+    /// Maybe write a `RESET_STREAM` or `RESET_STREAM_AT` frame.
+    /// Returns true if the reset is successfully sent
+    /// and that is the only data that needs sending.
+    /// Returns false when there is no reset to send
+    /// or when a `RESET_STREAM_AT` frame needs to be followed by stream data.
     pub fn write_reset_frame<B: Buffer>(
         &mut self,
         p: TransmissionPriority,
@@ -1080,34 +1197,56 @@ impl SendStream {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) -> bool {
-        if let State::ResetSent {
-            final_size,
+        let (State::ResetSent {
             err,
-            ref mut priority,
+            final_size,
+            reliable_size,
+            priority,
             ..
-        } = self.state
-        {
-            if *priority != Some(p) {
-                return false;
-            }
-            if builder.write_varint_frame(&[
+        }
+        | State::ResetSentReliable {
+            err,
+            final_size,
+            reliable_size,
+            priority,
+            ..
+        }) = &mut self.state
+        else {
+            return false;
+        };
+        if *priority != Some(p) {
+            return false;
+        }
+        // `reliable_size == 0` ⇒ plain `RESET_STREAM`; otherwise `RESET_STREAM_AT`.
+        let written = if *reliable_size == 0 {
+            builder.write_varint_frame(&[
                 FrameType::ResetStream.into(),
                 self.stream_id.as_u64(),
-                err,
-                final_size,
-            ]) {
-                tokens.push(recovery::Token::Stream(StreamRecoveryToken::ResetStream {
-                    stream_id: self.stream_id,
-                }));
-                stats.reset_stream += 1;
-                *priority = None;
-                true
-            } else {
-                false
-            }
+                *err,
+                *final_size,
+            ])
         } else {
-            false
+            builder.write_varint_frame(&[
+                FrameType::ResetStreamAt.into(),
+                self.stream_id.as_u64(),
+                *err,
+                *final_size,
+                *reliable_size,
+            ])
+        };
+        if written {
+            tokens.push(recovery::Token::Stream(StreamRecoveryToken::ResetStream {
+                stream_id: self.stream_id,
+            }));
+            if *reliable_size == 0 {
+                stats.reset_stream += 1;
+            } else {
+                stats.reset_stream_at += 1;
+            }
+            *priority = None;
         }
+        // Even if the write was successful, if we have reliable data pending, return false.
+        written && !matches!(self.state, State::ResetSentReliable { .. })
     }
 
     pub fn blocked_lost(&mut self, limit: u64) {
@@ -1140,10 +1279,7 @@ impl SendStream {
         reason = "OK here."
     )]
     pub fn mark_as_sent(&mut self, offset: u64, len: usize, fin: bool) {
-        self.bytes_sent = max(
-            self.bytes_sent,
-            offset + u64::try_from(len).expect("usize fits in u64"),
-        );
+        self.bytes_sent = max(self.bytes_sent, offset + to_u64(len));
 
         if let Some(buf) = self.state.tx_buf_mut() {
             buf.mark_as_sent(offset, len);
@@ -1182,11 +1318,45 @@ impl SendStream {
                 if *fin_acked && send_buf.buffered() == 0 {
                     self.conn_events.send_stream_complete(self.stream_id);
                     let retired = send_buf.retired();
-                    let buffered = u64::try_from(send_buf.buffered()).expect("usize fits in u64");
+                    let buffered = to_u64(send_buf.buffered());
                     self.state.transition(State::DataRecvd {
                         retired,
                         written: buffered,
                     });
+                }
+            }
+            State::ResetSentReliable {
+                ref mut send_buf,
+                reliable_size,
+                reset_acked,
+                err,
+                final_size,
+                priority,
+            } => {
+                send_buf.mark_as_acked(offset, len);
+                // Wait until all committed data (`< reliable_size`) is acked.
+                if send_buf.retired() >= reliable_size {
+                    let final_retired = send_buf.retired();
+                    let final_written = to_u64(send_buf.buffered());
+                    if reset_acked {
+                        // Both the frame and the committed data are acked: reach `ResetRecvd`.
+                        self.state.transition(State::ResetRecvd {
+                            final_retired,
+                            final_written,
+                        });
+                    } else {
+                        // Committed data is acked but the frame is not: drop the buffer and
+                        // await the frame ack in `ResetSent` (which keeps `reliable_size` so
+                        // that the frame is still retransmitted as RESET_STREAM_AT).
+                        self.state.transition(State::ResetSent {
+                            err,
+                            final_size,
+                            reliable_size,
+                            priority,
+                            final_retired,
+                            final_written,
+                        });
+                    }
                 }
             }
             _ => qtrace!("[{self}] mark_as_acked called from state {:?}", self.state),
@@ -1199,10 +1369,7 @@ impl SendStream {
         reason = "OK here."
     )]
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
-        self.retransmission_offset = max(
-            self.retransmission_offset,
-            offset + u64::try_from(len).expect("usize fits in u64"),
-        );
+        self.retransmission_offset = max(self.retransmission_offset, offset + to_u64(len));
         qtrace!(
             "[{self}] mark_as_lost retransmission offset={}",
             self.retransmission_offset
@@ -1299,6 +1466,7 @@ impl SendStream {
                 fc: owned_fc,
                 conn_fc: owned_conn_fc,
                 send_buf: TxBuffer::new(),
+                committed: 0,
             });
         }
 
@@ -1325,6 +1493,7 @@ impl SendStream {
                 fc,
                 conn_fc,
                 send_buf,
+                ..
             } => {
                 let sent = send_buf.send(buf);
                 fc.consume(sent);
@@ -1342,67 +1511,194 @@ impl SendStream {
                     send_buf: TxBuffer::new(),
                     fin_sent: false,
                     fin_acked: false,
+                    committed: 0,
                 });
             }
-            State::Send { send_buf, .. } => {
+            State::Send {
+                send_buf,
+                committed,
+                ..
+            } => {
                 let owned_buf = mem::replace(send_buf, TxBuffer::new());
+                let committed = *committed;
                 self.state.transition(State::DataSent {
                     send_buf: owned_buf,
                     fin_sent: false,
                     fin_acked: false,
+                    committed,
                 });
             }
             State::DataSent { .. } => qtrace!("[{self}] already in DataSent state"),
             State::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
             State::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
+            State::ResetSentReliable { .. } => {
+                qtrace!("[{self}] already in ResetSentReliable state");
+            }
             State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
         }
     }
 
+    /// Commit to reliably delivering all data buffered so far: that prefix is delivered even if
+    /// the stream is later reset (via `RESET_STREAM_AT`). Call this *after* writing the data to
+    /// be protected. The committed offset only ever grows (the buffered total never shrinks).
+    /// The caller is responsible for ensuring that their peer supports this feature.
+    ///
+    /// # Errors
+    /// [`Error::StreamState`] when the stream has already been reset.
+    pub fn commit(&mut self) -> Res<()> {
+        match &mut self.state {
+            // Nothing has been buffered yet, so the implicit committed offset stays 0; and once
+            // all data has been received there is nothing left to commit. Both are no-ops.
+            State::Ready { .. } | State::DataRecvd { .. } => Ok(()),
+            State::Send {
+                send_buf,
+                committed,
+                ..
+            }
+            | State::DataSent {
+                send_buf,
+                committed,
+                ..
+            } => {
+                *committed = send_buf.used();
+                Ok(())
+            }
+            State::ResetSent { .. }
+            | State::ResetSentReliable { .. }
+            | State::ResetRecvd { .. } => Err(Error::StreamState),
+        }
+    }
+
+    /// Reset the stream. When a non-zero commitment exists (set via [`Self::commit`], which is
+    /// only reachable when the peer supports the feature), a `RESET_STREAM_AT` is emitted
+    /// (reliably delivering `[0, reliable_size)`); otherwise a plain `RESET_STREAM` is sent.
     #[allow(
         clippy::allow_attributes,
         clippy::missing_panics_doc,
         reason = "OK here."
     )]
     pub fn reset(&mut self, err: AppError) {
-        match &self.state {
-            State::Ready { fc, .. } => {
-                let final_size = fc.used();
-                self.state.transition(State::ResetSent {
+        /// Build the reset state for a stream that has a `send_buf`, choosing between a buffer-less
+        /// `ResetSent` and a `ResetSentReliable` that retains the buffer for committed data.
+        fn make_reset_state(
+            err: AppError,
+            priority: TransmissionPriority,
+            send_buf: &mut TxBuffer,
+            final_size: u64,
+            committed: u64,
+        ) -> State {
+            // A non-zero committed offset implies the peer supports reliable reset (`commit`
+            // enforces that), so it is safe to emit `RESET_STREAM_AT`.
+            let reliable_size = min(committed, final_size);
+            let final_retired = send_buf.retired();
+            let final_written = to_u64(send_buf.buffered());
+            if reliable_size == 0 || final_retired >= reliable_size {
+                // No committed data is still outstanding: drop the buffer.
+                State::ResetSent {
                     err,
                     final_size,
-                    priority: Some(self.priority),
-                    final_retired: 0,
-                    final_written: 0,
-                });
-            }
-            State::Send { fc, send_buf, .. } => {
-                let final_size = fc.used();
-                let final_retired = send_buf.retired();
-                let buffered = u64::try_from(send_buf.buffered()).expect("usize fits in u64");
-                self.state.transition(State::ResetSent {
-                    err,
-                    final_size,
-                    priority: Some(self.priority),
+                    reliable_size,
+                    priority: Some(priority),
                     final_retired,
-                    final_written: buffered,
-                });
+                    final_written,
+                }
+            } else {
+                // Committed data below `reliable_size` is still in flight: keep the buffer.
+                State::ResetSentReliable {
+                    send_buf: mem::take(send_buf),
+                    err,
+                    final_size,
+                    reliable_size,
+                    reset_acked: false,
+                    priority: Some(priority),
+                }
             }
-            State::DataSent { send_buf, .. } => {
+        }
+
+        let priority = self.priority;
+        let new_state = match &mut self.state {
+            State::Ready { fc, .. } => State::ResetSent {
+                err,
+                final_size: fc.used(),
+                reliable_size: 0,
+                priority: Some(priority),
+                final_retired: 0,
+                final_written: 0,
+            },
+            State::Send {
+                fc,
+                send_buf,
+                committed,
+                ..
+            } => {
+                let final_size = fc.used();
+                make_reset_state(err, priority, send_buf, final_size, *committed)
+            }
+            State::DataSent {
+                send_buf,
+                committed,
+                ..
+            } => {
                 let final_size = send_buf.used();
-                let final_retired = send_buf.retired();
-                let buffered = u64::try_from(send_buf.buffered()).expect("usize fits in u64");
-                self.state.transition(State::ResetSent {
-                    err,
-                    final_size,
-                    priority: Some(self.priority),
-                    final_retired,
-                    final_written: buffered,
-                });
+                make_reset_state(err, priority, send_buf, final_size, *committed)
             }
-            State::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
-            State::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
-            State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
+            State::DataRecvd { .. }
+            | State::ResetSent { .. }
+            | State::ResetSentReliable { .. }
+            | State::ResetRecvd { .. } => {
+                qtrace!("[{}] reset called in terminal state", self.stream_id);
+                return;
+            }
+        };
+        self.state.transition(new_state);
+    }
+
+    /// Drop any commitment made via [`Self::commit`] in response to a `STOP_SENDING`: the peer has
+    /// no interest in the data, so there is nothing left to deliver reliably.
+    ///
+    /// Before a reset is sent, this just clears the committed offset so that a subsequent
+    /// [`Self::reset`] emits a plain `RESET_STREAM` (`reliable_size == 0`). If a `RESET_STREAM_AT`
+    /// has already been sent (`ResetSentReliable`), the buffer of still-in-flight committed data is
+    /// dropped and the stream moves to `ResetSent` with `reliable_size` reset to 0 (so any
+    /// retransmission of the reset frame is a plain `RESET_STREAM`), or straight to `ResetRecvd` if
+    /// the reset frame is already acked.
+    pub(crate) fn drop_commitment(&mut self) {
+        match &mut self.state {
+            State::Send { committed, .. } | State::DataSent { committed, .. } => {
+                *committed = 0;
+            }
+            State::ResetSentReliable {
+                send_buf,
+                err,
+                final_size,
+                reset_acked,
+                priority,
+                ..
+            } => {
+                let final_retired = send_buf.retired();
+                let final_written = to_u64(send_buf.buffered());
+                let new_state = if *reset_acked {
+                    // The reset is already acked, so abandoning the data completes the reset.
+                    State::ResetRecvd {
+                        final_retired,
+                        final_written,
+                    }
+                } else {
+                    // Drop the buffer and await the frame ack in `ResetSent`. Clearing
+                    // `reliable_size` makes any retransmission of the reset frame a plain
+                    // `RESET_STREAM`.
+                    State::ResetSent {
+                        err: *err,
+                        final_size: *final_size,
+                        reliable_size: 0,
+                        priority: *priority,
+                        final_retired,
+                        final_written,
+                    }
+                };
+                self.state.transition(new_state);
+            }
+            _ => {}
         }
     }
 
@@ -1534,6 +1830,46 @@ impl Iterator for OrderGroupIter<'_> {
     }
 }
 
+/// Per-send-group scheduling queues, mirroring the ungrouped `regular`/`sendordered` structure.
+///
+/// Streams in a send group use their own sendOrder namespace: sendOrder values in different
+/// groups are not compared against each other (spec requirement).  Within the group, higher
+/// sendOrder starves lower sendOrder, same as for ungrouped streams.
+#[derive(Debug, Default)]
+struct PerGroupQueues {
+    sendordered: BTreeMap<SendOrder, OrderGroup>,
+    regular: OrderGroup,
+}
+
+impl PerGroupQueues {
+    fn group_mut(&mut self, sendorder: Option<SendOrder>) -> &mut OrderGroup {
+        if let Some(order) = sendorder {
+            self.sendordered.entry(order).or_default()
+        } else {
+            &mut self.regular
+        }
+    }
+
+    fn remove_stream(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) {
+        if let Some(order) = sendorder {
+            if let Some(grp) = self.sendordered.get_mut(&order) {
+                grp.remove(stream_id);
+                if grp.stream_ids().is_empty() {
+                    self.sendordered.remove(&order);
+                }
+            }
+        } else {
+            self.regular.remove(stream_id);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        // `remove_stream` prunes empty `sendordered` entries, so any remaining entry is
+        // non-empty: the map being empty is equivalent to having no sendordered streams.
+        self.regular.stream_ids().is_empty() && self.sendordered.is_empty()
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SendStreams {
     map: IndexMap<StreamId, SendStream, FxBuildHasher>,
@@ -1557,20 +1893,25 @@ pub struct SendStreams {
     // processing loop.  The second adds insertion and removal costs, but
     // avoids a CPU penalty for WebTransport streams.  For now we'll do #1.
     //
-    // So we use a sorted Vec<> for the regular streams (that's usually all of
-    // them), and then a BTreeMap of an entry for each SendOrder value, and
-    // for each of those entries a Vec of the stream_ids at that
-    // sendorder.  In most cases (such as stream-per-frame), there will be
-    // a single stream at a given sendorder.
-
-    // These both store stream_ids, which need to be looked up in 'map'.
-    // This avoids the complexity of trying to hold references to the
-    // Streams which are owned by the IndexMap.
-    sendordered: BTreeMap<SendOrder, OrderGroup>,
-    regular: OrderGroup, // streams with no SendOrder set, sorted in stream_id order
+    // Per-send-group queues, including NULL_GROUP_ID for ungrouped fair streams.
+    // Groups are served round-robin; within a group sendOrder determines priority.
     /// Set when any stream has ended; cleared by `remove_ended`.
     has_ended: bool,
+
+    per_group: IndexMap<SendGroupId, PerGroupQueues>,
+    per_group_next: usize, // round-robin cursor over per_group entries
+
+    // Round-robin cursor (index into `map`) for the single-group no-sendOrder fast
+    // path.  Lets that path iterate `map` by index (cache-friendly, no per-stream
+    // hash lookup) while still resuming after the last-served stream when the packet
+    // builder fills mid-pass, preserving fairness.
+    fair_rr_next: usize,
 }
+
+/// Key used in `per_group` to represent the null sendGroup (ungrouped fair streams).
+/// Real [`SendGroupId`] values start at 1 (see `neqo-http3` `send_group.rs`), so 0 is safe
+/// as a sentinel here.
+const NULL_GROUP_ID: SendGroupId = SendGroupId::new(0);
 
 impl SendStreams {
     #[allow(
@@ -1600,12 +1941,92 @@ impl SendStreams {
         self.map.insert(id, stream);
     }
 
-    fn group_mut(&mut self, sendorder: Option<SendOrder>) -> &mut OrderGroup {
-        if let Some(order) = sendorder {
-            self.sendordered.entry(order).or_default()
-        } else {
-            &mut self.regular
+    /// Insert `stream_id` into group `gid`'s queue for `sendorder`, creating the group
+    /// if it does not exist yet.
+    fn insert_into_group(
+        &mut self,
+        gid: SendGroupId,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) {
+        self.per_group
+            .entry(gid)
+            .or_default()
+            .group_mut(sendorder)
+            .insert(stream_id);
+    }
+
+    /// Remove `stream_id` (queued at `sendorder`) from group `gid`, dropping the group
+    /// once it becomes empty and keeping the round-robin cursor in bounds.
+    fn remove_from_group(
+        &mut self,
+        gid: SendGroupId,
+        stream_id: StreamId,
+        sendorder: Option<SendOrder>,
+    ) {
+        if let Some(grp_queues) = self.per_group.get_mut(&gid) {
+            grp_queues.remove_stream(stream_id, sendorder);
+            if grp_queues.is_empty() {
+                self.per_group.shift_remove(&gid);
+                if self.per_group_next >= self.per_group.len() {
+                    self.per_group_next = 0;
+                }
+            }
         }
+    }
+
+    /// Assign `stream_id` to a send group, or pass `None` to move it back to the
+    /// ungrouped queues.  The group is created implicitly if it doesn't exist yet;
+    /// empty groups are removed automatically.
+    ///
+    /// # Errors
+    /// Returns [`Error::InvalidStreamId`] if the stream does not exist. Returns
+    /// [`Error::InvalidInput`] if `group_id` is the reserved `NULL_GROUP_ID` (0), or if
+    /// `group_id` is `Some` for a stream that is not fair (a send group only applies to
+    /// fair streams).
+    pub fn set_sendgroup(&mut self, stream_id: StreamId, group_id: Option<SendGroupId>) -> Res<()> {
+        // Extract the info we need before any other mutable borrows.
+        let (was_fair, old_sendorder, old_group) = {
+            let stream = self.map.get(&stream_id).ok_or(Error::InvalidStreamId)?;
+            (stream.is_fair(), stream.sendorder(), stream.send_group())
+        };
+
+        // NULL_GROUP_ID (0) is the internal sentinel for ungrouped fair streams; accepting it
+        // as an explicit group would conflate the two and corrupt the per-group queues.
+        if group_id == Some(NULL_GROUP_ID) {
+            return Err(Error::InvalidInput);
+        }
+
+        if old_group == group_id {
+            return Ok(());
+        }
+
+        // A send group only applies to fair streams: a non-fair stream is served by
+        // the unfair loop in `write_frames`, so also placing it in a per-group queue
+        // would serve it twice (double bandwidth). Reject this at the API boundary --
+        // both this and `Connection::stream_sendgroup` are public and callers must set
+        // fairness first.
+        if group_id.is_some() && !was_fair {
+            return Err(Error::InvalidInput);
+        }
+
+        // Remove from current location: an explicit group, or the null-group
+        // (ungrouped) slot if the stream was fair but ungrouped.
+        if let Some(gid) = old_group.or_else(|| was_fair.then_some(NULL_GROUP_ID)) {
+            self.remove_from_group(gid, stream_id, old_sendorder);
+        }
+
+        // Update the stream record.
+        if let Some(stream) = self.map.get_mut(&stream_id) {
+            stream.set_send_group(group_id);
+        }
+
+        // Insert into the new location: an explicit group, or the null-group
+        // (ungrouped) slot if the stream is fair but ungrouped.
+        if let Some(gid) = group_id.or_else(|| was_fair.then_some(NULL_GROUP_ID)) {
+            self.insert_into_group(gid, stream_id, old_sendorder);
+        }
+        Ok(())
     }
 
     #[allow(
@@ -1615,26 +2036,27 @@ impl SendStreams {
     )]
     pub fn set_sendorder(&mut self, stream_id: StreamId, sendorder: Option<SendOrder>) -> Res<()> {
         self.set_fairness(stream_id, true)?;
-        if let Some(stream) = self.map.get_mut(&stream_id) {
-            // don't grab stream here; causes borrow errors
-            let old_sendorder = stream.sendorder();
-            if old_sendorder != sendorder {
-                // we have to remove it from the list it was in, and reinsert it with the new
-                // sendorder key
-                let mut group = self.group_mut(old_sendorder);
-                group.remove(stream_id);
-                self.get_mut(stream_id)?.set_sendorder(sendorder);
-                group = self.group_mut(sendorder);
-                group.insert(stream_id);
-                qtrace!(
-                    "ordering of stream_ids: {:?}",
-                    self.sendordered.values().collect::<Vec::<_>>()
-                );
+        // Extract what we need before any further borrows.
+        let (old_sendorder, send_group) = {
+            let stream = self.map.get(&stream_id).ok_or(Error::InvalidStreamId)?;
+            (stream.sendorder(), stream.send_group())
+        };
+        if old_sendorder != sendorder {
+            // Grouped and ungrouped fair streams both live in `per_group` (ungrouped
+            // under NULL_GROUP_ID), and the prior `set_fairness` ensures the group
+            // exists. Move the stream between sendOrder buckets within its group; we
+            // re-insert immediately, so skip the empty-group cleanup on removal.
+            let gid = send_group.unwrap_or(NULL_GROUP_ID);
+            if let Some(grp_queues) = self.per_group.get_mut(&gid) {
+                grp_queues.remove_stream(stream_id, old_sendorder);
             }
-            Ok(())
-        } else {
-            Err(Error::InvalidStreamId)
+            if let Some(stream) = self.map.get_mut(&stream_id) {
+                stream.set_sendorder(sendorder);
+            }
+            self.insert_into_group(gid, stream_id, sendorder);
+            qtrace!("stream {stream_id} sendorder -> {sendorder:?} in group {gid:?}");
         }
+        Ok(())
     }
 
     #[allow(
@@ -1645,37 +2067,41 @@ impl SendStreams {
     pub fn set_fairness(&mut self, stream_id: StreamId, make_fair: bool) -> Res<()> {
         let stream: &mut SendStream = self.map.get_mut(&stream_id).ok_or(Error::InvalidStreamId)?;
         let was_fair = stream.fair;
+        let send_group = stream.send_group();
+        let sendorder = stream.sendorder;
         stream.set_fairness(make_fair);
         if !was_fair && make_fair {
-            // Move to the regular OrderGroup.
+            // A newly fair stream with no send_group goes to the null-group slot in per_group,
+            // so it participates in round-robin alongside all explicit sendGroups (spec: equal).
+            // Streams with a send_group are managed by set_sendgroup; don't add here.
+            if send_group.is_none() {
+                // This normally is only called when a new stream is created.  If
+                // so, because of how we allocate StreamIds, it should always have
+                // the largest value.  This means we can just append it.  However,
+                // if we were ever to change this invariant, things would break subtly.
 
-            // We know sendorder can't have been set, since
-            // set_sendorder() will call this routine if it's not
-            // already set as fair.
-
-            // This normally is only called when a new stream is created.  If
-            // so, because of how we allocate StreamIds, it should always have
-            // the largest value.  This means we can just append it to the
-            // regular vector.  However, if we were ever to change this
-            // invariant, things would break subtly.
-
-            // To be safe we can try to insert at the end and if not
-            // fall back to binary-search insertion
-            if matches!(self.regular.stream_ids().last(), Some(last) if stream_id > *last) {
-                self.regular.push(stream_id);
-            } else {
-                self.regular.insert(stream_id);
+                // To be safe we can try to insert at the end and if not
+                // fall back to binary-search insertion.
+                let null_grp = self.per_group.entry(NULL_GROUP_ID).or_default();
+                let grp = null_grp.group_mut(sendorder);
+                if matches!(grp.stream_ids().last(), Some(last) if stream_id > *last) {
+                    grp.push(stream_id);
+                } else {
+                    grp.insert(stream_id);
+                }
             }
         } else if was_fair && !make_fair {
-            // remove from the OrderGroup
-            let group = if let Some(sendorder) = stream.sendorder {
-                self.sendordered
-                    .get_mut(&sendorder)
-                    .ok_or(Error::Internal)?
-            } else {
-                &mut self.regular
-            };
-            group.remove(stream_id);
+            // Remove from whichever queue currently owns this stream: an explicit
+            // group, or the null-group (ungrouped) slot.
+            let gid = send_group.unwrap_or(NULL_GROUP_ID);
+            self.remove_from_group(gid, stream_id, sendorder);
+            // A send group applies only to fair streams (see `set_sendgroup`). Clear it
+            // so a later `set_fairness(true)` re-queues the stream in the null group;
+            // otherwise it stays recorded in a group it is no longer queued in and is
+            // never scheduled again.
+            if let Some(stream) = self.map.get_mut(&stream_id) {
+                stream.set_send_group(None);
+            }
         }
         Ok(())
     }
@@ -1714,9 +2140,10 @@ impl SendStreams {
 
     pub fn clear(&mut self) {
         self.map.clear();
-        self.sendordered.clear();
-        self.regular.clear();
         self.has_ended = false;
+        self.per_group.clear();
+        self.per_group_next = 0;
+        self.fair_rr_next = 0;
     }
 
     /// Remove ended streams. Returns `true` if any were removed.
@@ -1727,22 +2154,25 @@ impl SendStreams {
         }
         self.has_ended = false;
         let mut removed = false;
-        for (stream_id, stream) in self
-            .map
-            .extract_if(.., |_, stream: &mut SendStream| stream.is_ended())
-        {
+        for (stream_id, stream) in self.map.extract_if(.., |_, s| s.is_ended()) {
             removed = true;
             if stream.is_fair() {
-                match stream.sendorder() {
-                    None => self.regular.remove(stream_id),
-                    Some(sendorder) => {
-                        if let Some(group) = self.sendordered.get_mut(&sendorder) {
-                            group.remove(stream_id);
-                        }
-                    }
+                let group_id = stream.send_group().unwrap_or(NULL_GROUP_ID);
+                if let Some(grp_queues) = self.per_group.get_mut(&group_id) {
+                    grp_queues.remove_stream(stream_id, stream.sendorder());
                 }
             }
-            // if unfair, we're done
+        }
+        // Clean up now-empty groups.
+        self.per_group.retain(|_, grp| !grp.is_empty());
+        if self.per_group_next >= self.per_group.len() {
+            self.per_group_next = 0;
+        }
+        // `extract_if` shifts `map` indices, so the round-robin cursor may now be past
+        // the end; clamp it rather than resetting to 0, which would give the first fair
+        // stream an extra turn after every removal.
+        if self.fair_rr_next >= self.map.len() {
+            self.fair_rr_next = 0;
         }
         removed
     }
@@ -1785,8 +2215,8 @@ impl SendStreams {
         // more expensive searches for insertion and removal (since the
         // sorted order would be lost).
 
-        // Iterate the map, but only those without fairness, then iterate
-        // OrderGroups, then iterate each group
+        // First: unfair streams (non-WebTransport H3 streams, by creation order).
+        // Then: all fair streams via per-group round-robin (includes null sendGroup).
         qtrace!("processing streams...  unfair:");
         for stream in self.map.values_mut() {
             if stream.is_fair() || !stream.has_data_at(priority) {
@@ -1797,27 +2227,146 @@ impl SendStreams {
                 break;
             }
         }
-        qtrace!("fair streams:");
-        let stream_ids = self.regular.iter().chain(
-            self.sendordered
-                .values_mut()
-                .rev()
-                .flat_map(|group| group.iter()),
-        );
-        for stream_id in stream_ids {
-            if let Some(stream) = self.map.get_mut(&stream_id) {
-                if !stream.has_data_at(priority) {
+        // Send groups: round-robin between all groups, including NULL_GROUP_ID (ungrouped
+        // fair streams).  The null sendGroup is bandwidth-equal to all explicit sendGroups
+        // (spec: "The user agent considers WebTransportSendGroups as equals when allocating
+        // bandwidth.").  Each group contributes one stream attempt per scheduler pass so
+        // groups get equal bandwidth share regardless of differing sendOrder values between
+        // groups.  Within a group, the highest-sendOrder stream is served first (starving
+        // lower sendOrder within the same group), matching the spec starvation requirement.
+        let num_groups = self.per_group.len();
+        if num_groups == 0 {
+            // No fair streams are registered (the common non-WebTransport case), so
+            // there is nothing left to send.  Returning here avoids a wasteful second
+            // walk of `map` searching for fair streams that don't exist.
+            return;
+        }
+        let single_group_no_sendorder = num_groups == 1
+            && self
+                .per_group
+                .first()
+                .is_some_and(|(_, grp)| grp.sendordered.is_empty());
+        if single_group_no_sendorder {
+            // Fast path: a single group with no sendOrder set (typical case).
+            //
+            // Walk `map` by index rather than via the group's `regular` OrderGroup:
+            // `get_index_mut` is direct Vec access (no per-stream hash lookup), giving
+            // the same cache-friendly cost as the original `values_mut()` walk.
+            // `fair_rr_next` is a round-robin cursor into `map`; when the builder fills
+            // mid-pass we resume at the stream *after* the one that filled, so later
+            // fair streams are not starved (WebTransport spec write-chunk 6.3 step 6.1:
+            // null-sendOrder streams MUST NOT starve).
+            let n = self.map.len();
+            if self.fair_rr_next >= n {
+                self.fair_rr_next = 0;
+            }
+            let start = self.fair_rr_next;
+            for off in 0..n {
+                let idx = (start + off) % n;
+                // `idx < n`, so this always succeeds; `else` is just to avoid a panic.
+                let Some((_, stream)) = self.map.get_index_mut(idx) else {
+                    continue;
+                };
+                if !stream.is_fair() || !stream.has_data_at(priority) {
                     continue;
                 }
-                if let Some(order) = stream.sendorder() {
-                    qtrace!("   {stream_id} ({order})");
-                } else {
-                    qtrace!("   None");
-                }
                 if !stream.write_frames(priority, builder, tokens, stats) {
+                    // Resume after this stream next call so it can't monopolise.
+                    self.fair_rr_next = (idx + 1) % n;
+                    return;
+                }
+            }
+        } else {
+            if self.per_group_next >= num_groups {
+                self.per_group_next = 0;
+            }
+            let start = self.per_group_next;
+            // Split borrows on disjoint fields so we can access both per_group (for
+            // priority ordering) and map (for the stream itself) in the same loop body
+            // without an intermediate Vec.
+            let (per_group, map, per_group_next) =
+                (&mut self.per_group, &mut self.map, &mut self.per_group_next);
+            // Repeat the round-robin pass until no group can write any more (or the
+            // builder fills, which returns directly).  A single pass gives each group at
+            // most one STREAM frame, which would leave most of the packet empty when there
+            // are fewer groups than fit; looping fills the remaining capacity while keeping
+            // each group's per-pass turn equal (inter-group fairness) and advancing each
+            // group's within-group round-robin cursor between passes.
+            //
+            // Each pass re-scans a group's higher-sendOrder buckets from the top, so a
+            // drained-but-open higher bucket is walked again on every pass before a lower
+            // bucket with data is reached -- O(buckets^2) bucket visits per packet when
+            // many buckets drain. An alternative would remember exhausted buckets between
+            // passes and skip them, but it isn't used: the re-scan is bounded by
+            // frames-per-packet * buckets, each visit is a cheap map lookup, and it only
+            // affects the WebTransport sendOrder path, so the cost is sub-microsecond next
+            // to the per-packet crypto and I/O that filling the packet saves.
+            loop {
+                let mut any_wrote = false;
+                'groups: for i in 0..num_groups {
+                    let idx = (start + i) % num_groups;
+                    let Some((_, grp)) = per_group.get_index_mut(idx) else {
+                        continue;
+                    };
+                    // Serve streams in strict sendOrder priority within the group: the
+                    // highest [[SendOrder]] bucket first, then lower buckets, and the regular
+                    // (null-sendOrder) bucket last. A stream must starve until all bytes queued
+                    // on same-group streams with a higher [[SendOrder]] -- that are neither
+                    // errored nor blocked by flow control -- have been sent (WebTransport
+                    // send-order rules). A stream blocked by flow control emits only a
+                    // STREAM_DATA_BLOCKED frame (no STREAM progress) and must not starve its
+                    // lower-priority peers, so fall through to the next bucket in that case.
+                    for order_grp in grp.sendordered.values_mut().rev() {
+                        // Scan the bucket until a stream actually writes data. A drained-but-open
+                        // or flow-control-blocked stream at the round-robin cursor must not let a
+                        // lower-sendOrder bucket jump ahead while a same-bucket peer still has
+                        // sendable data (WebTransport send-order rules).
+                        for stream_id in order_grp.iter() {
+                            qtrace!("send group {idx}: stream {stream_id}");
+                            // End the group's turn only if an actual STREAM frame was written,
+                            // not on any builder growth (see flow-control note above).
+                            let before = stats.stream;
+                            if let Some(stream) = map.get_mut(&stream_id)
+                                && !stream.write_frames(priority, builder, tokens, stats)
+                            {
+                                *per_group_next = (idx + 1) % num_groups;
+                                return;
+                            }
+                            if stats.stream > before {
+                                any_wrote = true;
+                                continue 'groups;
+                            }
+                        }
+                    }
+                    // Lowest priority in the group: the null-sendOrder bucket, reached only when
+                    // no higher-sendOrder stream had sendable data this pass. Scan it rather than
+                    // attempting only the cursor stream so a drained-but-open or flow-blocked
+                    // stream doesn't waste the group's turn while a sendable peer waits. Null-
+                    // sendOrder streams have no priority among themselves, so this only affects
+                    // latency, not the WebTransport "MUST NOT starve" guarantee.
+                    for stream_id in grp.regular.iter() {
+                        qtrace!("send group {idx}: stream {stream_id}");
+                        let before = stats.stream;
+                        if let Some(stream) = map.get_mut(&stream_id)
+                            && !stream.write_frames(priority, builder, tokens, stats)
+                        {
+                            *per_group_next = (idx + 1) % num_groups;
+                            return;
+                        }
+                        if stats.stream > before {
+                            any_wrote = true;
+                            continue 'groups;
+                        }
+                    }
+                }
+                // A full pass wrote nothing: every group is drained, errored, or
+                // flow-control blocked, so further passes can't make progress.
+                if !any_wrote {
                     break;
                 }
             }
+            // All groups had a chance this pass; advance the cursor for the next call.
+            *per_group_next = (start + 1) % num_groups;
         }
     }
 
@@ -1866,22 +2415,404 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex_with_len, qtrace};
+    use neqo_common::{
+        Encoder, MAX_VARINT, event::Provider as _, hex::HexWithLen, qtrace, to_u64, to_usize,
+    };
 
     use super::RecoveryToken;
     use crate::{
-        ConnectionEvents, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
+        ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         connection::{RetransmissionPriority, TransmissionPriority},
         events::ConnectionEvent,
         fc::SenderFlowControl,
         packet,
         recovery::{self, StreamRecoveryToken},
-        send_stream::{RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer},
+        send_stream::{
+            NULL_GROUP_ID, RangeState, RangeTracker, SendStream, SendStreams, State, TxBuffer,
+        },
         stats::FrameStats,
+        streams::SendGroupId,
     };
 
     fn connection_fc(limit: u64) -> Rc<RefCell<SenderFlowControl<()>>> {
         Rc::new(RefCell::new(SenderFlowControl::new((), limit)))
+    }
+
+    /// A send group only applies to fair streams: assigning one to a non-fair stream
+    /// would let it be served by both the unfair loop and the per-group round-robin
+    /// (double bandwidth), so `set_sendgroup` must reject it. Once the stream is fair,
+    /// the assignment succeeds.
+    #[test]
+    fn set_sendgroup_requires_fair_stream() {
+        let id = StreamId::from(0);
+        let mut ss = SendStreams::default();
+        ss.insert(
+            id,
+            SendStream::new(id, 100, connection_fc(100), ConnectionEvents::default()),
+        );
+
+        assert!(ss.set_sendgroup(id, Some(SendGroupId::new(1))).is_err());
+
+        ss.set_fairness(id, true).unwrap();
+        ss.set_sendgroup(id, Some(SendGroupId::new(1))).unwrap();
+    }
+
+    /// `SendGroupId(0)` is the internal sentinel for ungrouped fair streams, so passing it
+    /// as an explicit group must be rejected rather than corrupt the per-group queues.
+    #[test]
+    fn set_sendgroup_rejects_null_group_id() {
+        let id = StreamId::from(0);
+        let mut ss = SendStreams::default();
+        ss.insert(
+            id,
+            SendStream::new(id, 100, connection_fc(100), ConnectionEvents::default()),
+        );
+        ss.set_fairness(id, true).unwrap();
+
+        assert!(ss.set_sendgroup(id, Some(NULL_GROUP_ID)).is_err());
+    }
+
+    /// A group containing both a regular (null-sendOrder) and a sendordered stream,
+    /// both with data: the higher-sendOrder stream is served first, and once it has
+    /// drained the regular stream gets its turn. The regular stream must not be
+    /// *permanently* starved (WebTransport send-order rules: a stream starves only
+    /// until higher-sendOrder same-group bytes have been sent, and must not starve
+    /// otherwise). This is the complement of
+    /// `regular_stream_must_not_starve_sendordered_in_group`, which checks the other
+    /// direction (the regular stream must not starve the sendordered one).
+    #[test]
+    fn round_robin_serves_regular_and_sendordered_in_group() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        let regular = StreamId::from(0);
+        let sendordered = StreamId::from(4);
+        for id in [regular, sendordered] {
+            let mut s = SendStream::new(id, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+            s.send(&[0; 8]).unwrap();
+            ss.insert(id, s);
+            ss.set_fairness(id, true).unwrap();
+            ss.set_sendgroup(id, Some(SendGroupId::new(1))).unwrap();
+        }
+        ss.set_sendorder(sendordered, Some(100)).unwrap();
+
+        // Strict priority means the sendordered stream drains first, then the regular
+        // stream gets a turn in a later pass; collect the order across several passes.
+        let mut order = Vec::new();
+        for _ in 0..4 {
+            let mut tokens = recovery::Tokens::new();
+            let mut builder =
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+            ss.write_frames(
+                TransmissionPriority::default(),
+                &mut builder,
+                &mut tokens,
+                &mut FrameStats::default(),
+            );
+            while !tokens.is_empty() {
+                let id = as_stream_token(&tokens.remove(0)).id;
+                if !order.contains(&id) {
+                    order.push(id);
+                }
+            }
+        }
+
+        assert_eq!(
+            order.first(),
+            Some(&sendordered),
+            "higher-sendOrder stream should be served before the regular stream"
+        );
+        assert!(
+            order.contains(&regular),
+            "regular stream permanently starved by the sendordered stream in the same group"
+        );
+    }
+
+    /// Within a group, a null-sendOrder (regular) stream with enough data to fill a
+    /// packet must not starve a higher-priority sendordered stream in the same group.
+    /// A regular stream that fills the packet must still leave the group's turn to the
+    /// higher-sendOrder stream first (the sendordered stream must get served).
+    ///
+    /// This mirrors `round_robin_serves_regular_and_sendordered_in_group`, but with a
+    /// realistic payload: that test sends only 8 bytes, so the regular stream never fills
+    /// the packet and the inversion stays hidden.
+    #[test]
+    fn regular_stream_must_not_starve_sendordered_in_group() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        let regular = StreamId::from(0);
+        let sendordered = StreamId::from(4);
+
+        // Regular (null-sendOrder) stream with more data than fits in one packet.
+        let mut r = SendStream::new(regular, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+        r.send(&[0; 4096]).unwrap();
+        ss.insert(regular, r);
+        ss.set_fairness(regular, true).unwrap();
+        ss.set_sendgroup(regular, Some(SendGroupId::new(1)))
+            .unwrap();
+
+        // Higher-priority sendordered stream with only a few bytes: it easily fits
+        // alongside the regular stream if the scheduler gives it a turn.
+        let mut s = SendStream::new(sendordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        s.send(&[0; 8]).unwrap();
+        ss.insert(sendordered, s);
+        ss.set_fairness(sendordered, true).unwrap();
+        ss.set_sendgroup(sendordered, Some(SendGroupId::new(1)))
+            .unwrap();
+        ss.set_sendorder(sendordered, Some(100)).unwrap();
+
+        // Constrain the packet so a single stream's frame fills it, forcing the
+        // scheduler to choose which stream to serve first.
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        builder.set_limit(builder.len() + 30);
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        let mut served = std::collections::HashSet::new();
+        while !tokens.is_empty() {
+            served.insert(as_stream_token(&tokens.remove(0)).id);
+        }
+        assert!(
+            served.contains(&sendordered),
+            "higher-priority sendordered stream starved by the regular stream in the same group"
+        );
+    }
+
+    /// A highest-sendOrder stream blocked by flow control emits only `STREAM_DATA_BLOCKED`,
+    /// which must not end its group's turn and starve a lower-sendOrder peer with sendable
+    /// data in the same group (WebTransport spec write-chunk 6.3 step 6.1). A second group
+    /// forces the multi-group scheduler path rather than the single-group fast path.
+    #[test]
+    fn flow_control_blocked_stream_does_not_starve_sendorder_peer() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        // Group 1: a high-sendOrder stream blocked by stream flow control (an atomic write
+        // larger than its credit marks it blocked without buffering any data, so it emits
+        // only STREAM_DATA_BLOCKED), plus a lower-sendOrder stream that can send.
+        let blocked_high = StreamId::from(0);
+        let mut s = SendStream::new(blocked_high, 2, Rc::clone(&conn_fc), conn_events.clone());
+        assert_eq!(s.send_atomic(&[0; 8]).unwrap(), 0);
+        ss.insert(blocked_high, s);
+        ss.set_fairness(blocked_high, true).unwrap();
+        ss.set_sendgroup(blocked_high, Some(SendGroupId::new(1)))
+            .unwrap();
+        ss.set_sendorder(blocked_high, Some(100)).unwrap();
+
+        let low = StreamId::from(4);
+        let mut s = SendStream::new(low, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+        s.send(&[0; 8]).unwrap();
+        ss.insert(low, s);
+        ss.set_fairness(low, true).unwrap();
+        ss.set_sendgroup(low, Some(SendGroupId::new(1))).unwrap();
+        ss.set_sendorder(low, Some(50)).unwrap();
+
+        // Group 2: a separate group so the multi-group scheduler path is taken.
+        let other = StreamId::from(8);
+        let mut s = SendStream::new(other, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        s.send(&[0; 8]).unwrap();
+        ss.insert(other, s);
+        ss.set_fairness(other, true).unwrap();
+        ss.set_sendgroup(other, Some(SendGroupId::new(2))).unwrap();
+
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        // Only STREAM frames produce `Stream` tokens; the blocked stream's
+        // STREAM_DATA_BLOCKED token is a different variant and is skipped.
+        let mut served = std::collections::HashSet::new();
+        while !tokens.is_empty() {
+            if let recovery::Token::Stream(StreamRecoveryToken::Stream(rt)) = &tokens.remove(0) {
+                served.insert(rt.id);
+            }
+        }
+        assert!(
+            served.contains(&low),
+            "lower-sendOrder stream starved by a flow-control-blocked higher-sendOrder peer"
+        );
+    }
+
+    /// Two streams share the highest sendOrder bucket; the round-robin cursor starts on a
+    /// drained-but-open stream. Serving a single stream per bucket would skip the bucket
+    /// entirely (the cursor stream has no data) and fall through to a lower-sendOrder
+    /// stream -- even though the bucket's other stream has sendable data. Per the
+    /// WebTransport send-order rules a lower-sendOrder stream MUST starve until all bytes
+    /// on higher-sendOrder same-group streams (that are neither errored nor flow-blocked)
+    /// have been sent, so the bucket must be scanned until a data-bearing stream is found.
+    #[test]
+    fn drained_stream_must_not_starve_sendorder_peer_in_bucket() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        // Lowest StreamId in the highest bucket, so the round-robin cursor lands here
+        // first -- but it has no queued data.
+        let drained_high = StreamId::from(0);
+        let data_high = StreamId::from(4);
+        let low = StreamId::from(8);
+
+        let s = SendStream::new(
+            drained_high,
+            1 << 20,
+            Rc::clone(&conn_fc),
+            conn_events.clone(),
+        );
+        ss.insert(drained_high, s);
+        ss.set_sendorder(drained_high, Some(100)).unwrap();
+
+        // More data than fits the packet below, so the higher bucket still has unsent
+        // bytes after this stream is served -- the lower bucket must keep starving.
+        let mut s = SendStream::new(data_high, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+        s.send(&[0; 256]).unwrap();
+        ss.insert(data_high, s);
+        ss.set_sendorder(data_high, Some(100)).unwrap();
+
+        let mut s = SendStream::new(low, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        s.send(&[0; 8]).unwrap();
+        ss.insert(low, s);
+        ss.set_sendorder(low, Some(50)).unwrap();
+
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        builder.set_limit(builder.len() + 30);
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        let mut served = std::collections::HashSet::new();
+        while !tokens.is_empty() {
+            served.insert(as_stream_token(&tokens.remove(0)).id);
+        }
+        assert!(
+            served.contains(&data_high),
+            "data-bearing stream in the highest sendOrder bucket was starved"
+        );
+        assert!(
+            !served.contains(&low),
+            "lower-sendOrder stream served while a higher-sendOrder peer had sendable data"
+        );
+    }
+
+    /// In the null-sendOrder (regular) bucket the round-robin cursor may land on a
+    /// drained-but-open stream. The group must still serve another regular stream that has
+    /// data this pass rather than wasting its turn (null-sendOrder streams have no priority
+    /// among themselves, so this is a latency property, not strict ordering). A drained
+    /// sendordered stream keeps `sendordered` non-empty, forcing the general scheduler path
+    /// rather than the single-group fast path so the regular bucket is reached here.
+    #[test]
+    fn drained_regular_stream_does_not_waste_group_turn() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        // Regular (null-sendOrder) bucket: a drained stream at the cursor (lowest StreamId)
+        // plus a stream with data.
+        let drained = StreamId::from(0);
+        let data = StreamId::from(4);
+        let s = SendStream::new(drained, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+        ss.insert(drained, s);
+        ss.set_fairness(drained, true).unwrap();
+
+        let mut s = SendStream::new(data, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+        s.send(&[0; 8]).unwrap();
+        ss.insert(data, s);
+        ss.set_fairness(data, true).unwrap();
+
+        // A drained sendordered stream makes `sendordered` non-empty so write_frames takes
+        // the general path and reaches the regular bucket after the (empty) ordered pass.
+        let ordered = StreamId::from(8);
+        let s = SendStream::new(ordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        ss.insert(ordered, s);
+        ss.set_sendorder(ordered, Some(100)).unwrap();
+
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        builder.set_limit(builder.len() + 30);
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        let mut served = std::collections::HashSet::new();
+        while !tokens.is_empty() {
+            served.insert(as_stream_token(&tokens.remove(0)).id);
+        }
+        assert!(
+            served.contains(&data),
+            "data-bearing regular stream starved by a drained peer at the cursor"
+        );
+    }
+
+    /// A grouped stream made non-fair and then fair again must be re-queued, not left
+    /// recorded in a group it was removed from. Otherwise the general (multi-group)
+    /// scheduler never serves it (permanent starvation).
+    #[test]
+    fn set_fairness_false_then_true_requeues_grouped_stream() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut ss = SendStreams::default();
+
+        let groups = [
+            (StreamId::from(0), SendGroupId::new(1)),
+            (StreamId::from(4), SendGroupId::new(2)),
+            (StreamId::from(8), SendGroupId::new(3)),
+        ];
+        let toggled = groups[0].0;
+        for (id, gid) in groups {
+            let mut s = SendStream::new(id, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+            s.send(&[0; 8]).unwrap();
+            ss.insert(id, s);
+            ss.set_fairness(id, true).unwrap();
+            ss.set_sendgroup(id, Some(gid)).unwrap();
+        }
+
+        // Two other groups remain after `toggled` leaves its group, forcing the general
+        // multi-group scheduler path rather than the single-group fast path.
+        ss.set_fairness(toggled, false).unwrap();
+        ss.set_fairness(toggled, true).unwrap();
+
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        ss.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        let mut served = std::collections::HashSet::new();
+        while !tokens.is_empty() {
+            served.insert(as_stream_token(&tokens.remove(0)).id);
+        }
+        assert!(
+            served.contains(&toggled),
+            "stream starved after fair -> non-fair -> fair transition"
+        );
     }
 
     #[test]
@@ -2352,8 +3283,8 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark almost all as sent. Get what's left
-        let one_byte_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 1;
-        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
+        let one_byte_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 1;
+        txb.mark_as_sent(0, to_usize(one_byte_from_end));
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
                          && start == one_byte_from_end
@@ -2372,7 +3303,7 @@ mod tests {
 
         // Mark a larger range lost, including beyond what's in the buffer even.
         // Get a little more
-        let five_bytes_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 5;
+        let five_bytes_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 5;
         txb.mark_as_lost(five_bytes_from_end, 100);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 5
@@ -2382,7 +3313,7 @@ mod tests {
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, to_usize(five_bytes_from_end));
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
@@ -2397,7 +3328,7 @@ mod tests {
         txb.mark_as_sent(five_bytes_from_end, 5);
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 30
-                         && start == INITIAL_LOCAL_MAX_STREAM_DATA as u64
+                         && start == to_u64(INITIAL_LOCAL_MAX_STREAM_DATA)
                          && x.iter().all(|ch| *ch == 2)));
     }
 
@@ -2413,9 +3344,9 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // As above
-        let forty_bytes_from_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 - 40;
+        let forty_bytes_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 40;
 
-        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, to_usize(forty_bytes_from_end));
         assert!(matches!(txb.next_bytes(),
                  Some((start, x)) if x.len() == 40
                  && start == forty_bytes_from_end
@@ -2433,7 +3364,7 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Mark a range 'A' in second slice as sent. Should still return the same
-        let range_a_start = INITIAL_LOCAL_MAX_STREAM_DATA as u64 + 30;
+        let range_a_start = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) + 30;
         let range_a_end = range_a_start + 10;
         txb.mark_as_sent(range_a_start, 10);
         assert!(matches!(txb.next_bytes(),
@@ -2442,8 +3373,8 @@ mod tests {
                          && x.iter().all(|ch| *ch == 1)));
 
         // Ack entire first slice and into second slice
-        let ten_bytes_past_end = INITIAL_LOCAL_MAX_STREAM_DATA as u64 + 10;
-        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
+        let ten_bytes_past_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) + 10;
+        txb.mark_as_acked(0, to_usize(ten_bytes_past_end));
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),
@@ -2499,7 +3430,7 @@ mod tests {
         // should now hit the tx buffer size
         conn_fc
             .borrow_mut()
-            .update(INITIAL_LOCAL_MAX_STREAM_DATA as u64);
+            .update(to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
         let res = s.send(&big_buf).unwrap();
         assert_eq!(res, INITIAL_LOCAL_MAX_STREAM_DATA - 4096);
 
@@ -2733,6 +3664,54 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         let f5_token = tokens.remove(0);
         assert!(as_stream_token(&f5_token).fin);
+    }
+
+    /// Several fair streams in the single null sendGroup with no sendOrder, each
+    /// with more data than a (tightly limited) packet can carry.  When the builder
+    /// fills after one stream per call, the single-group fast path must round-robin
+    /// so every stream makes progress: per the WebTransport spec (write-chunk 6.3
+    /// step 6.1) null-sendOrder streams "MUST NOT starve".  The earlier map-order
+    /// fast path always re-served the first stream, starving the rest -- this test
+    /// fails against that behaviour.
+    #[test]
+    fn write_frames_fair_round_robin_no_starvation() {
+        const STREAMS: u64 = 4;
+        let conn_fc = connection_fc(1 << 20);
+        let conn_events = ConnectionEvents::default();
+
+        let mut ss = SendStreams::default();
+        for i in 0..STREAMS {
+            let id = StreamId::from(i * 4);
+            let mut s = SendStream::new(id, 1 << 20, Rc::clone(&conn_fc), conn_events.clone());
+            s.send(&[0; 4096]).unwrap();
+            ss.insert(id, s);
+            ss.set_fairness(id, true).unwrap();
+        }
+
+        // Each call uses a fresh, tightly limited builder so only one stream's
+        // frame fits, exercising the round-robin cursor across packets.
+        let mut served = std::collections::HashSet::new();
+        for _ in 0..STREAMS {
+            let mut tokens = recovery::Tokens::new();
+            let mut builder =
+                packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+            builder.set_limit(builder.len() + 30);
+            ss.write_frames(
+                TransmissionPriority::default(),
+                &mut builder,
+                &mut tokens,
+                &mut FrameStats::default(),
+            );
+            assert_eq!(tokens.len(), 1, "exactly one stream served per packet");
+            let token = tokens.remove(0);
+            served.insert(as_stream_token(&token).id);
+        }
+
+        assert_eq!(
+            u64::try_from(served.len()).expect("count fits in u64"),
+            STREAMS,
+            "every fair stream must make progress (no starvation); served {served:?}"
+        );
     }
 
     #[test]
@@ -3015,6 +3994,7 @@ mod tests {
             fc,
             conn_fc,
             send_buf,
+            committed: 0,
         };
         s
     }
@@ -3049,7 +4029,7 @@ mod tests {
         );
         qtrace!(
             "STREAM frame: {}",
-            hex_with_len(&builder.as_ref()[header_len..])
+            HexWithLen::new(&builder.as_ref()[header_len..])
         );
         stats.stream > 0
     }
@@ -3156,7 +4136,7 @@ mod tests {
 
         // The minimum amount of extra space for getting another frame in.
         let mut enc = Encoder::default();
-        enc.encode_varint(u64::try_from(data.len()).unwrap());
+        enc.encode_len(data.len());
         let len_buf = Vec::from(enc);
         let minimum_extra = len_buf.len() + packet::Builder::MINIMUM_FRAME_SIZE;
 
@@ -3255,7 +4235,7 @@ mod tests {
     }
 
     fn make_send_stream(data: &[u8]) -> (SendStream, u64) {
-        let len = data.len() as u64;
+        let len = to_u64(data.len());
         let mut s = SendStream::new(
             StreamId::new(100),
             0,
@@ -3354,7 +4334,8 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut tokens = recovery::Tokens::new();
         let mut stats = FrameStats::default();
-        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats)
+        s.write_reset_frame(priority, &mut builder, &mut tokens, &mut stats);
+        stats.reset_stream + stats.reset_stream_at == 1
     }
 
     #[test]
@@ -3514,5 +4495,448 @@ mod tests {
         // Reset lost: priority set back to Some(effective_priority).
         s.reset_lost();
         assert_has_data_only_at(&mut s, &[eff]);
+    }
+
+    // --- RESET_STREAM_AT (reliable stream reset) ---
+
+    const RR_STREAM: StreamId = StreamId::new(100);
+
+    /// A `Send`-state stream with `data` buffered and a generous flow-control window, sharing the
+    /// caller's `ConnectionEvents` so emitted events (e.g. `SendStreamComplete`) can be observed.
+    fn reliable_stream(data: &[u8], events: ConnectionEvents) -> SendStream {
+        let len = data.len() as u64;
+        let mut s = SendStream::new(RR_STREAM, 0, connection_fc(len * 2), events);
+        s.set_max_stream_data(len * 2);
+        s.send(data).unwrap();
+        s
+    }
+
+    /// A `Send`-state stream that buffers `prefix`, commits it (so the committed offset is
+    /// `prefix.len()`), then buffers `rest`. Used to test a committed prefix smaller than the
+    /// final size.
+    fn reliable_stream_committed(
+        prefix: &[u8],
+        rest: &[u8],
+        events: ConnectionEvents,
+    ) -> SendStream {
+        let total = (prefix.len() + rest.len()) as u64;
+        let mut s = SendStream::new(RR_STREAM, 0, connection_fc(total * 2), events);
+        s.set_max_stream_data(total * 2);
+        s.send(prefix).unwrap();
+        s.commit().unwrap();
+        if !rest.is_empty() {
+            s.send(rest).unwrap();
+        }
+        s
+    }
+
+    /// Write the pending reset frame at `Normal` priority and return the frame stats.
+    fn send_reset_frame(s: &mut SendStream) -> FrameStats {
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_reset_frame(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
+        assert_eq!(stats.reset_stream + stats.reset_stream_at, 1);
+        stats
+    }
+
+    /// `commit` is a no-op in `Ready`, succeeds once data is buffered, and fails after reset.
+    #[test]
+    fn commit_validation() {
+        let mut s = SendStream::new(
+            RR_STREAM,
+            1024,
+            connection_fc(1024),
+            ConnectionEvents::default(),
+        );
+        // In `Ready` there is nothing to commit, but it is not an error.
+        assert!(matches!(s.state(), State::Ready { .. }));
+        assert!(s.commit().is_ok());
+
+        // In `Send`, commit captures the buffered data.
+        s.send(&[0x42; 10]).unwrap();
+        assert!(matches!(s.state(), State::Send { .. }));
+        assert!(s.commit().is_ok());
+
+        // After reset, commit fails with a stream-state error.
+        s.reset(0);
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert_eq!(s.commit().unwrap_err(), Error::StreamState);
+    }
+
+    /// `commit` after the stream has been fully received (`DataRecvd`) is a no-op.
+    #[test]
+    fn commit_after_received_is_noop() {
+        let mut s = reliable_stream(&[0x42; 5], ConnectionEvents::default());
+        s.close();
+        s.mark_as_sent(0, 5, true);
+        s.mark_as_acked(0, 5, true);
+        assert!(matches!(s.state(), State::DataRecvd { .. }));
+        assert!(s.commit().is_ok());
+    }
+
+    /// Without a commitment, a reset emits a plain `RESET_STREAM`.
+    #[test]
+    fn reset_without_commit_is_plain() {
+        let mut s = reliable_stream(&[0x42; 10], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+    }
+
+    /// A commitment with the peer's support and data still in flight enters `ResetSentReliable`
+    /// and emits `RESET_STREAM_AT`.
+    #[test]
+    fn reset_with_commit_emits_reset_stream_at() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 0);
+        assert_eq!(stats.reset_stream_at, 1);
+    }
+
+    /// A `STOP_SENDING` drops any commitment, so the reset is a plain `RESET_STREAM` even though
+    /// data was committed.
+    #[test]
+    fn stop_sending_drops_commitment_emits_reset_stream() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.drop_commitment();
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+    }
+
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` was already sent drops the in-flight committed
+    /// data (moving to `ResetSent`) but leaves `reliable_size` unchanged.
+    #[test]
+    fn stop_sending_after_reset_stream_at_drops_to_reset_sent() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        // Keep effective priority == Normal so the post-`reset_lost` retransmission is written at
+        // the same priority as the initial send.
+        s.set_priority(TransmissionPriority::Normal, RetransmissionPriority::Same);
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                reset_acked: false,
+                ..
+            }
+        ));
+
+        // STOP_SENDING: stop delivering the committed prefix, dropping to `ResetSent` with
+        // `reliable_size` cleared to 0 (any frame retransmission is now a plain `RESET_STREAM`).
+        s.drop_commitment();
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 0,
+                ..
+            }
+        ));
+        assert!(!s.is_ended());
+
+        // A retransmission of the reset frame is now a plain RESET_STREAM.
+        s.reset_lost();
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+        assert_eq!(stats.reset_stream_at, 0);
+
+        // Once the frame is acked, the stream ends without waiting for the data.
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` whose frame is already acked completes the reset
+    /// immediately, abandoning the still-in-flight committed data.
+    #[test]
+    fn stop_sending_after_reset_stream_at_acked_completes() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        // Frame acked, committed data still in flight.
+        s.reset_acked();
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert!(!s.is_ended());
+
+        s.drop_commitment();
+        assert!(s.is_ended());
+    }
+
+    /// When all committed data is already acked at reset time, the buffer is dropped (the
+    /// stream uses `ResetSent`) but `RESET_STREAM_AT` is still emitted.
+    #[test]
+    fn reset_with_commit_already_acked_drops_buffer() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.mark_as_sent(0, 10, false);
+        s.mark_as_acked(0, 5, false); // retire up to the committed offset
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream_at, 1);
+    }
+
+    /// A reliable reset commits at most `final_size` and never emits a STREAM FIN, capping
+    /// (re)transmission at the reliable offset.
+    #[test]
+    fn reliable_reset_caps_data_and_omits_fin() {
+        let mut s = reliable_stream_committed(&[0x42; 4], &[0x42; 6], ConnectionEvents::default());
+        s.reset(0);
+
+        // The final size is reported accurately even while reliably resetting.
+        assert_eq!(s.final_size(), Some(10));
+
+        // Only `[0, 4)` is offered.
+        let (offset, data) = s.next_bytes(false).expect("committed data");
+        assert_eq!(offset, 0);
+        assert_eq!(data.len(), 4);
+        s.mark_as_sent(0, 4, false);
+        assert!(!s.has_next_bytes(false));
+
+        // A loss below the reliable offset is retransmitted; nothing above it ever is.
+        s.mark_as_lost(0, 4, false);
+        let (offset, data) = s.next_bytes(false).expect("retransmit committed data");
+        assert_eq!(offset, 0);
+        assert_eq!(data.len(), 4);
+    }
+
+    /// Even when the committed prefix equals the final size (so the written data offset reaches
+    /// `final_size`), a reliable reset's STREAM frame carries no FIN.
+    #[test]
+    fn reliable_reset_omits_fin_at_final_size() {
+        // Commit all 5 bytes, so reliable_size == final_size == 5.
+        let mut s = reliable_stream_committed(&[0x42; 5], &[], ConnectionEvents::default());
+        s.reset(0);
+        assert_eq!(s.final_size(), Some(5));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        s.write_stream_frame(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
+        assert_eq!(stats.stream, 1);
+        assert_eq!(tokens.len(), 1);
+        assert!(
+            !as_stream_token(&tokens.remove(0)).fin,
+            "reliable reset must not emit a FIN"
+        );
+    }
+
+    /// On a retransmission, only lost data below the retransmission offset is offered; fresh
+    /// data (still below `reliable_size`) is not pulled forward to the retransmission priority.
+    #[test]
+    fn reliable_reset_retransmission_respects_offset() {
+        // Commit all 8 bytes, so `reliable_size == 8`.
+        let mut s = reliable_stream_committed(&[0x42; 8], &[], ConnectionEvents::default());
+        s.reset(0);
+
+        // Send `[0, 4)`; `[4, 8)` remains unsent. Then lose `[0, 2)` (retransmission offset = 2).
+        s.mark_as_sent(0, 4, false);
+        s.mark_as_lost(0, 2, false);
+
+        // Retransmission only offers the lost `[0, 2)`.
+        assert!(s.has_next_bytes(true));
+        let (offset, data) = s.next_bytes(true).expect("retransmit lost data");
+        assert_eq!(offset, 0);
+        assert_eq!(data.len(), 2);
+        s.mark_as_sent(0, 2, false);
+
+        // Nothing more to retransmit: fresh `[4, 8)` is above the retransmission offset.
+        assert!(!s.has_next_bytes(true));
+        assert!(s.next_bytes(true).is_none());
+
+        // But it is still available as a fresh send (below `reliable_size`).
+        assert!(s.has_next_bytes(false));
+        let (offset, data) = s.next_bytes(false).expect("fresh committed data");
+        assert_eq!(offset, 4);
+        assert_eq!(data.len(), 4);
+    }
+
+    /// Data-then-frame ack order reaches `ResetRecvd` without firing `SendStreamComplete`.
+    #[test]
+    fn reliable_reset_completion_data_then_frame() {
+        let events = ConnectionEvents::default();
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events);
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                reset_acked: false,
+                ..
+            }
+        ));
+
+        // Ack the committed data first: collapses to ResetSent, not yet ended.
+        s.mark_as_acked(0, 5, false);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        assert!(!s.is_ended());
+
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// Frame-then-data ack order reaches `ResetRecvd` without firing `SendStreamComplete`.
+    #[test]
+    fn reliable_reset_completion_frame_then_data() {
+        let events = ConnectionEvents::default();
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events);
+        s.reset(0);
+        s.mark_as_sent(0, 5, false);
+        _ = send_reset_frame(&mut s);
+
+        // Ack the frame first: stays in ResetSentReliable awaiting the data.
+        s.reset_acked();
+        assert!(matches!(s.state(), State::ResetSentReliable { .. }));
+        assert!(!s.is_ended());
+
+        s.mark_as_acked(0, 5, false);
+        assert!(s.is_ended());
+    }
+
+    /// When the committed data is already acked at reset time, the eventual frame ack reaches
+    /// `ResetRecvd` without firing `SendStreamComplete`.
+    #[test]
+    fn reliable_reset_completion_preacked() {
+        let events = ConnectionEvents::default();
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events);
+        s.mark_as_sent(0, 10, false);
+        s.mark_as_acked(0, 5, false);
+        s.reset(0);
+        _ = send_reset_frame(&mut s);
+        assert!(matches!(
+            s.state(),
+            State::ResetSent {
+                reliable_size: 5,
+                ..
+            }
+        ));
+
+        s.reset_acked();
+        assert!(s.is_ended());
+    }
+
+    /// Neither a plain reset nor a reliable reset fires `SendStreamComplete`.
+    #[test]
+    fn reset_does_not_complete() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_stream(&[0x42; 10], events.clone());
+        s.reset(0);
+        _ = send_reset_frame(&mut s);
+        s.reset_acked();
+        assert!(s.is_ended());
+
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], events.clone());
+        s.mark_as_sent(0, 10, false);
+        s.mark_as_acked(0, 5, false);
+        s.reset(0);
+        _ = send_reset_frame(&mut s);
+        s.reset_acked();
+        assert!(s.is_ended());
+
+        let completions = events
+            .events()
+            .filter(|e| matches!(e, ConnectionEvent::SendStreamComplete { .. }))
+            .count();
+        assert_eq!(completions, 0);
+    }
+
+    /// A lost reliable reset frame is re-armed for retransmission.
+    #[test]
+    fn reliable_reset_frame_lost_rearms() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(reset_frame_written(&mut s, TransmissionPriority::Normal));
+        // In flight: nothing pending at Normal.
+        assert!(!reset_frame_written(&mut s, TransmissionPriority::Normal));
+        // Lost: re-armed at effective priority (Normal + default retransmission).
+        s.reset_lost();
+        let eff = TransmissionPriority::Normal + RetransmissionPriority::default();
+        assert!(reset_frame_written(&mut s, eff));
+    }
+
+    /// A reliably-reset stream with committed data still in flight has both a `RESET_STREAM_AT`
+    /// frame and the committed STREAM data pending at the same priority. A single `write_frames`
+    /// call into a packet with ample room should emit both, so the reset and the data it protects
+    /// travel together in one packet.
+    #[test]
+    fn reset_and_committed_data_are_coalesced() {
+        let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
+        s.reset(0);
+        assert!(matches!(
+            s.state(),
+            State::ResetSentReliable {
+                reliable_size: 5,
+                ..
+            }
+        ));
+        assert!(s.has_data_at(TransmissionPriority::Normal));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        assert!(s.write_frames(
+            TransmissionPriority::Normal,
+            &mut builder,
+            &mut tokens,
+            &mut stats
+        ));
+        assert!(!builder.is_full());
+
+        // Both frames should be in this one packet.
+        assert_eq!(stats.reset_stream_at, 1);
+        assert_eq!(stats.stream, 1);
     }
 }

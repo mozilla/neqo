@@ -18,8 +18,12 @@ use std::{
 };
 
 use neqo_common::{
-    Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram, event::Provider as EventProvider,
-    hex, hex_snip_middle, hex_with_len, hrtime, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
+    Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
+    event::Provider as EventProvider,
+    hex::{Hex, HexSnipMiddle, HexWithLen},
+    hrtime, qdebug, qerror, qinfo,
+    qlog::Qlog,
+    qtrace, qwarn, to_u64, to_usize,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -53,13 +57,13 @@ use crate::{
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
     stream_id::StreamType,
-    streams::{SendOrder, Streams},
+    streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
         TransportParameterId::{
             self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit,
             InitialSourceConnectionId, MaxAckDelay, MaxDatagramFrameSize, MaxUdpPayloadSize,
-            MinAckDelay, OriginalDestinationConnectionId, RetrySourceConnectionId,
+            MinAckDelay, OriginalDestinationConnectionId, ResetStreamAt, RetrySourceConnectionId,
             StatelessResetToken,
         },
         TransportParameters, TransportParametersHandler,
@@ -440,7 +444,6 @@ impl Connection {
         let quic_datagrams = QuicDatagrams::new(
             conn_params.get_datagram_size(),
             conn_params.get_outgoing_datagram_queue(),
-            conn_params.get_incoming_datagram_queue(),
             events.clone(),
         );
 
@@ -781,7 +784,7 @@ impl Connection {
 
         qinfo!(
             "[{self}] resumption token {}",
-            hex_snip_middle(token.as_ref())
+            HexSnipMiddle::new(token.as_ref())
         );
         let mut dec = Decoder::from(token.as_ref());
 
@@ -798,16 +801,16 @@ impl Connection {
         qtrace!("[{self}]   RTT {rtt:?}");
 
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!("[{self}]   transport parameters {}", hex(tp_slice));
+        qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp =
-            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
+        let tp = TransportParameters::decode(Role::Client, &mut dec_tp)
+            .map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
-        qtrace!("[{self}]   Initial token {}", hex(init_token));
+        qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
 
         let tok = dec.decode_remainder();
-        qtrace!("[{self}]   TLS token {}", hex(tok));
+        qtrace!("[{self}]   TLS token {}", Hex::new(tok));
 
         match self.crypto.tls_mut() {
             Agent::Client(c) => {
@@ -863,7 +866,7 @@ impl Connection {
             });
             enc.encode(extra);
             let records = s.send_ticket(now, enc.as_ref())?;
-            qdebug!("[{self}] send session ticket {}", hex(&enc));
+            qdebug!("[{self}] send session ticket {}", Hex::new(&enc));
             self.crypto.buffer_records(records)?;
         } else {
             unreachable!();
@@ -1321,14 +1324,24 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
-        if !packet.is_valid_retry(
-            self.original_destination_cid
-                .as_ref()
-                .ok_or(Error::InvalidRetry)?,
-        ) {
+        let odcid = self
+            .original_destination_cid
+            .as_ref()
+            .ok_or(Error::InvalidRetry)?;
+        if !packet.is_valid_retry(odcid) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
+            return Ok(());
+        }
+        // RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet that
+        // carries a Source Connection ID identical to the Destination Connection ID
+        // of its Initial. The Retry integrity key is public, so this comparison is
+        // one of the few checks that constrains an off-path injected Retry.
+        if packet.scid() == *odcid {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry with SCID matching our Initial DCID");
             return Ok(());
         }
         // At this point, we should only have the connection ID that we generated.
@@ -1345,7 +1358,7 @@ impl Connection {
         let retry_scid = ConnectionId::from(packet.scid());
         qinfo!(
             "[{self}] Valid Retry received, token={} scid={retry_scid}",
-            hex(packet.token())
+            Hex::new(packet.token())
         );
 
         let lost_packets = self.loss_recovery.retry(&path, now);
@@ -1396,7 +1409,7 @@ impl Connection {
             // indicate that there is a stateless reset present.
             qdebug!(
                 "[{self}] Stateless reset: {}",
-                hex(&d[d.len() - Srt::LEN..])
+                Hex::new(&d[d.len() - Srt::LEN..])
             );
             self.state_signaling.reset();
             self.set_state(
@@ -1763,7 +1776,7 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
-        qtrace!("[{self}] {} input {}", path.borrow(), hex(&d));
+        qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
         let mut slc = d.as_mut();
@@ -1853,8 +1866,10 @@ impl Connection {
                             self.save_datagram(epoch, d, remaining, now);
                             return Ok(());
                         }
-                        Error::KeysExhausted => {
-                            // Exhausting read keys is fatal.
+                        // Exhausting read keys is fatal. So is a packet that
+                        // authenticated but broke the protocol (e.g. reserved
+                        // bits set), which closes the connection.
+                        Error::KeysExhausted | Error::ProtocolViolation => {
                             return Err(e.error);
                         }
                         Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
@@ -2307,8 +2322,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len = size_of::<packet::Number>()
-            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
+        let pn_len =
+            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3053,12 +3068,11 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            if let Ok(max_udp_payload) = usize::try_from(remote.get_integer(MaxUdpPayloadSize)) {
-                path.borrow_mut()
-                    .pmtud_mut()
-                    .set_peer_max_udp_payload(max_udp_payload);
-                self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
-            }
+            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
+            path.borrow_mut()
+                .pmtud_mut()
+                .set_peer_max_udp_payload(max_udp_payload);
+            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
@@ -3095,7 +3109,7 @@ impl Connection {
             qwarn!(
                 "[{self}] ISCID test failed: self cid {:?} != tp cid {:?}",
                 self.remote_initial_source_cid,
-                tp.map(hex),
+                tp.map(Hex::new),
             );
             return Err(Error::ProtocolViolation);
         }
@@ -3111,7 +3125,7 @@ impl Connection {
                 qwarn!(
                     "[{self}] ODCID test failed: self cid {:?} != tp cid {:?}",
                     self.original_destination_cid,
-                    tp.map(hex),
+                    tp.map(Hex::new),
                 );
                 return Err(Error::ProtocolViolation);
             }
@@ -3128,7 +3142,7 @@ impl Connection {
             if expected != tp.map(ConnectionIdRef::from) {
                 qwarn!(
                     "[{self}] RSCID test failed. self cid {expected:?} != tp cid {:?}",
-                    tp.map(hex),
+                    tp.map(Hex::new),
                 );
                 return Err(Error::ProtocolViolation);
             }
@@ -3233,7 +3247,7 @@ impl Connection {
     ) -> Res<()> {
         qtrace!(
             "[{self}] Handshake space={space} data: {:?}",
-            data.as_ref().map(hex_with_len),
+            data.as_ref().map(HexWithLen::new),
         );
 
         let was_authentication_pending =
@@ -3346,7 +3360,7 @@ impl Connection {
             Frame::Crypto { offset, data } => {
                 qtrace!(
                     "[{self}] Crypto frame on space={space} offset={offset}: {d}",
-                    d = hex_snip_middle(data),
+                    d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
                 self.crypto
@@ -3405,14 +3419,24 @@ impl Connection {
                     stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
-                if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
-                    qinfo!("[{self}] received too many connection IDs");
+                let too_many = if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
+                    Some("received too many active connection IDs")
+                } else if self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE {
+                    // `MAX_RETIRE_QUEUE` is the actual allowed maximum.  A single call to
+                    // `retire_cids` above can add at most `ACTIVE_LIMIT` entries, so the
+                    // queue can only ever temporarily exceed the bound by that.
+                    Some("too many connection IDs pending retirement")
+                } else {
+                    None
+                };
+                if let Some(msg) = too_many {
+                    qinfo!("[{self}] {msg}");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }
             }
             Frame::RetireConnectionId { sequence_number } => {
                 self.stats.borrow_mut().frame_rx.retire_connection_id += 1;
-                self.cid_manager.retire(sequence_number);
+                self.cid_manager.retire(sequence_number)?;
             }
             Frame::PathChallenge { data } => {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
@@ -3496,8 +3520,7 @@ impl Connection {
             }
             Frame::Datagram { data, .. } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams
-                    .handle_datagram(data, &mut self.stats.borrow_mut())?;
+                self.quic_datagrams.handle_datagram(data)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }
@@ -3793,6 +3816,19 @@ impl Connection {
         self.streams.set_fairness(stream_id, fairness)
     }
 
+    /// Assign a stream to a send group for per-group sendOrder namespacing and fair
+    /// bandwidth allocation between groups per the WebTransport spec.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        group_id: Option<SendGroupId>,
+    ) -> Res<()> {
+        self.streams.set_sendgroup(stream_id, group_id)
+    }
+
     /// # Errors
     /// When the stream does not exist.
     pub fn send_stream_stats(&self, stream_id: StreamId) -> Res<send_stream::Stats> {
@@ -3891,7 +3927,27 @@ impl Connection {
         Ok(())
     }
 
+    /// Commit to reliably delivering all stream data buffered so far: if the stream is later
+    /// reset via [`Self::stream_reset_send`], that prefix is still delivered using
+    /// `RESET_STREAM_AT`. Call this after writing the data to be protected.
+    /// # Errors
+    /// When the stream ID is invalid, the peer did not enable reliable reset
+    /// ([`Error::NotAvailable`]), or the stream has already been reset ([`Error::StreamState`]).
+    pub fn stream_commit(&mut self, stream_id: StreamId) -> Res<()> {
+        // Get the stream first: it cannot exist without remote transport parameters, so
+        // `remote()` below won't panic.
+        let stream = self.streams.get_send_stream_mut(stream_id)?;
+        if !self.tps.borrow().remote().get_empty(ResetStreamAt) {
+            return Err(Error::NotAvailable);
+        }
+        stream.commit()
+    }
+
     /// Abandon transmission of in-flight and future stream data.
+    ///
+    /// If a reliable prefix was committed via [`Self::stream_commit`] and the peer advertised
+    /// support for reliable reset, the committed prefix is delivered using `RESET_STREAM_AT`;
+    /// otherwise a plain `RESET_STREAM` is sent.
     /// # Errors
     /// When the stream ID is invalid.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
@@ -3987,9 +4043,9 @@ impl Connection {
                 .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
         );
 
-        let data_len_possible = u64::try_from(
+        let data_len_possible = to_u64(
             mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
-        )?;
+        );
         Ok(min(data_len_possible, max_dgram_size))
     }
 

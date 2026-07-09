@@ -23,14 +23,13 @@ use rustc_hash::FxHashMap as HashMap;
 
 use crate::{
     Http3Parameters, Http3StreamInfo, Res,
+    connect_udp::{self, ServerEvents as _},
     connection::Http3State,
     connection_server::Http3ServerHandler,
     server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
-    server_events::{
-        ConnectUdpRequest, Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents,
-        WebTransportRequest,
-    },
+    server_events::{Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents},
     settings::HttpZeroRttChecker,
+    webtransport::{ServerEvents as _, ServerSession},
 };
 
 type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
@@ -257,7 +256,7 @@ impl Http3Server {
                         headers,
                     }) => {
                         self.events.webtransport_new_session(
-                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                            ServerSession::new(conn.clone(), Rc::clone(handler), stream_id),
                             headers,
                         );
                     }
@@ -266,7 +265,11 @@ impl Http3Server {
                         headers,
                     }) => {
                         self.events.connect_udp_new_session(
-                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                stream_id,
+                            ),
                             headers,
                         );
                     }
@@ -276,7 +279,7 @@ impl Http3Server {
                         headers,
                         ..
                     }) => self.events.webtransport_session_closed(
-                        WebTransportRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                        ServerSession::new(conn.clone(), Rc::clone(handler), stream_id),
                         reason,
                         headers,
                     ),
@@ -286,7 +289,11 @@ impl Http3Server {
                         headers,
                         ..
                     }) => self.events.connect_udp_session_closed(
-                        ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), stream_id),
+                        connect_udp::ServerSession::new(
+                            conn.clone(),
+                            Rc::clone(handler),
+                            stream_id,
+                        ),
                         reason,
                         headers,
                     ),
@@ -304,7 +311,7 @@ impl Http3Server {
                         datagram,
                     }) => {
                         self.events.webtransport_datagram(
-                            WebTransportRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            ServerSession::new(conn.clone(), Rc::clone(handler), session_id),
                             datagram,
                         );
                     }
@@ -313,7 +320,11 @@ impl Http3Server {
                         datagram,
                     }) => {
                         self.events.connect_udp_datagram(
-                            ConnectUdpRequest::new(conn.clone(), Rc::clone(handler), session_id),
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ),
                             datagram,
                         );
                     }
@@ -427,6 +438,7 @@ mod tests {
         max_table_size_encoder: 100,
         max_table_size_decoder: 100,
         max_blocked_streams: 100,
+        max_tracked_streams: 4096,
     };
 
     fn http3params(qpack_settings: qpack::Settings) -> Http3Parameters {
@@ -651,6 +663,7 @@ mod tests {
                 max_table_size_encoder: 100,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
+                max_tracked_streams: 4096,
             },
             true,
         );

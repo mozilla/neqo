@@ -6,8 +6,10 @@
 
 use std::{cell::RefCell, rc::Rc, time::Instant};
 
-use neqo_common::Encoder;
-use neqo_transport::{Connection, StreamId, recv_stream, send_stream};
+use neqo_common::{Encoder, qdebug, to_u64};
+use neqo_transport::{
+    Connection, Error as TransportError, StreamId, recv_stream, send_stream, streams::SendGroupId,
+};
 
 use super::session::Session;
 use crate::{
@@ -92,7 +94,7 @@ impl RecvStream for WebTransportRecvStream {
             } else {
                 TYPE_LEN_BIDI
             };
-            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+            to_u64(id_len + Encoder::varint_len(self.session_id.as_u64()))
         } else {
             0
         };
@@ -127,6 +129,7 @@ pub struct WebTransportSendStream {
     events: Box<dyn SendStreamEvents>,
     session: Rc<RefCell<Session>>,
     session_id: StreamId,
+    send_group: Option<SendGroupId>,
 }
 
 impl WebTransportSendStream {
@@ -136,6 +139,7 @@ impl WebTransportSendStream {
         events: Box<dyn SendStreamEvents>,
         session: Rc<RefCell<Session>>,
         local: bool,
+        send_group: Option<SendGroupId>,
     ) -> Self {
         Self {
             stream_id,
@@ -158,7 +162,23 @@ impl WebTransportSendStream {
             events,
             session_id,
             session,
+            send_group,
         }
+    }
+
+    #[expect(dead_code, reason = "pending send group further integration")]
+    pub(crate) const fn send_group(&self) -> Option<SendGroupId> {
+        self.send_group
+    }
+
+    pub(crate) fn update_send_group(&mut self, send_group: Option<SendGroupId>) -> Res<()> {
+        if let Some(group_id) = send_group
+            && !self.session.borrow().validate_send_group(group_id)
+        {
+            return Err(crate::Error::InvalidState);
+        }
+        self.send_group = send_group;
+        Ok(())
     }
 
     fn set_done(&mut self, close_type: CloseType) {
@@ -176,21 +196,47 @@ impl Stream for WebTransportSendStream {
 
 impl SendStream for WebTransportSendStream {
     fn send(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
-        if let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state {
-            let sent = conn.stream_send(self.stream_id, &buf[..])?;
-            if sent == buf.len() {
-                if fin {
-                    conn.stream_close_send(self.stream_id)?;
-                    self.set_done(CloseType::Done);
-                } else {
-                    self.state = WebTransportSenderStreamState::SendingData;
-                }
-            } else {
-                let b = buf.split_off(sent);
-                *buf = b;
+        let WebTransportSenderStreamState::SendingInit { ref mut buf, fin } = self.state else {
+            return Ok(());
+        };
+
+        let sent = conn.stream_send(self.stream_id, &buf[..])?;
+        if sent == buf.len() {
+            // Note that it is safe to commit here because WebTransport requires reliable reset.
+            // However, there are other reasons that a commit or send might fail
+            // and we don't want to get stuck in the `SendingInit` state.
+            // So defer reporting of errors to guarantee that the state transition completes.
+            let mut res = conn.stream_commit(self.stream_id);
+            if res == Err(TransportError::NotAvailable) {
+                qdebug!("[{conn}]: Peer supports webtransport, but not reliable reset: ignoring");
+                // Old versions might need to work when reliable resets are not available.
+                // TODO: Remove this override when we remove support for old WebTransport versions.
+                res = Ok(());
             }
+            if fin {
+                let close = conn.stream_close_send(self.stream_id);
+                res = res.and(close);
+                self.set_done(CloseType::Done);
+            } else {
+                self.state = WebTransportSenderStreamState::SendingData;
+            }
+            res?;
+        } else {
+            let b = buf.split_off(sent);
+            *buf = b;
         }
         Ok(())
+    }
+
+    fn commit(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        self.send(conn, now)?;
+        if self.state == WebTransportSenderStreamState::SendingData {
+            conn.stream_commit(self.stream_id)?;
+            Ok(())
+        } else {
+            // Avoid committing unless the preface is successfully sent.
+            Err(crate::Error::FlowControlLimit)
+        }
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -243,7 +289,7 @@ impl SendStream for WebTransportSendStream {
             } else {
                 TYPE_LEN_BIDI
             };
-            (id_len + Encoder::varint_len(self.session_id.as_u64())) as u64
+            to_u64(id_len + Encoder::varint_len(self.session_id.as_u64()))
         } else {
             0
         };
@@ -264,5 +310,12 @@ impl SendStream for WebTransportSendStream {
             bytes_sent,
             bytes_acked,
         ))
+    }
+
+    fn set_send_group(&mut self, send_group: SendGroupId) -> Res<()> {
+        self.update_send_group(Some(send_group))
+    }
+    fn clear_send_group(&mut self) -> Res<()> {
+        self.update_send_group(None)
     }
 }

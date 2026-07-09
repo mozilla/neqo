@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Decoder, Encoder, to_usize};
 
 use super::hframe::HFrameType;
 use crate::{Error, Res, frames::reader::FrameDecoder};
@@ -27,13 +27,16 @@ impl WebTransportFrame {
     /// The value 1024 is used to limit the message size for security and interoperability.
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
+    /// Limit on the declared length of a `CLOSE_SESSION` frame.
+    pub const MAX_CLOSE_SESSION_BYTES: usize = to_usize(Self::CLOSE_MAX_MESSAGE_SIZE) + 4;
+
     pub fn encode(&self, enc: &mut Encoder) {
         #[cfg(feature = "build-fuzzing-corpus")]
         let start = enc.len();
 
         enc.encode_varint(Self::CLOSE_SESSION);
         let Self::CloseSession { error, message } = &self;
-        enc.encode_varint(4 + message.len() as u64);
+        enc.encode_len(4 + message.len());
         enc.encode_uint(4, *error);
         enc.encode(message.as_bytes());
 
@@ -69,11 +72,21 @@ impl FrameDecoder<Self> for WebTransportFrame {
     fn is_known_type(frame_type: HFrameType) -> bool {
         frame_type == HFrameType(Self::CLOSE_SESSION)
     }
+
+    fn max_frame_data(frame_type: HFrameType) -> usize {
+        if frame_type == HFrameType(Self::CLOSE_SESSION) {
+            Self::MAX_CLOSE_SESSION_BYTES
+        } else {
+            usize::MAX
+        }
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::to_u64;
+
     use super::{HFrameType, WebTransportFrame};
     use crate::frames::reader::FrameDecoder as _;
 
@@ -82,6 +95,14 @@ mod tests {
         assert!(WebTransportFrame::is_known_type(HFrameType(
             WebTransportFrame::CLOSE_SESSION
         )));
+    }
+
+    #[test]
+    fn max_frame_data_unknown_type_is_unbounded() {
+        assert_eq!(
+            WebTransportFrame::max_frame_data(HFrameType(0x1230)),
+            usize::MAX
+        );
     }
 
     #[test]
@@ -96,7 +117,7 @@ mod tests {
         let large_message = vec![0u8; 1025];
         let mut payload = vec![0, 0, 0, 0]; // 4-byte error code
         payload.extend(&large_message);
-        let frame_len = payload.len() as u64;
+        let frame_len = to_u64(payload.len());
 
         let result = WebTransportFrame::decode(
             HFrameType(WebTransportFrame::CLOSE_SESSION),
@@ -112,7 +133,7 @@ mod tests {
         let message = vec![b'a'; 1024];
         let mut payload = vec![0, 0, 0, 0]; // 4-byte error code
         payload.extend(&message);
-        let frame_len = payload.len() as u64;
+        let frame_len = to_u64(payload.len());
 
         let result = WebTransportFrame::decode(
             HFrameType(WebTransportFrame::CLOSE_SESSION),

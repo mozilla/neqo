@@ -59,6 +59,8 @@ pub enum FrameType {
     ConnectionCloseTransport = 0x1c,
     ConnectionCloseApplication = 0x1d,
     HandshakeDone = 0x1e,
+    // draft-ietf-quic-reliable-stream-reset
+    ResetStreamAt = 0x24,
     // draft-ietf-quic-ack-delay
     AckFrequency = 0xaf,
     // draft-ietf-quic-datagram
@@ -172,6 +174,12 @@ pub enum Frame<'a> {
         application_error_code: AppError,
         final_size: u64,
     },
+    ResetStreamAt {
+        stream_id: StreamId,
+        application_error_code: AppError,
+        final_size: u64,
+        reliable_size: u64,
+    },
     StopSending {
         stream_id: StreamId,
         application_error_code: AppError,
@@ -261,6 +269,7 @@ impl<'a> Frame<'a> {
             Self::Ping => FrameType::Ping,
             Self::Ack { .. } => FrameType::Ack,
             Self::ResetStream { .. } => FrameType::ResetStream,
+            Self::ResetStreamAt { .. } => FrameType::ResetStreamAt,
             Self::StopSending { .. } => FrameType::StopSending,
             Self::Crypto { .. } => FrameType::Crypto,
             Self::NewToken { .. } => FrameType::NewToken,
@@ -301,6 +310,7 @@ impl<'a> Frame<'a> {
         matches!(
             self,
             Self::ResetStream { .. }
+                | Self::ResetStreamAt { .. }
                 | Self::StopSending { .. }
                 | Self::Stream { .. }
                 | Self::MaxData { .. }
@@ -430,7 +440,10 @@ impl<'a> Frame<'a> {
                 error_code: CloseError::Transport(_),
                 ..
             } => pt != packet::Type::ZeroRtt,
-            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == packet::Type::Short,
+            Self::NewToken { .. }
+            | Self::ConnectionClose { .. }
+            | Self::PathResponse { .. }
+            | Self::HandshakeDone => pt == packet::Type::Short,
             _ => pt == packet::Type::ZeroRtt || pt == packet::Type::Short,
         }
     }
@@ -524,6 +537,22 @@ impl<'a> Frame<'a> {
                 application_error_code: dv(dec)?,
                 final_size: dv(dec)?,
             }),
+            FrameType::ResetStreamAt => {
+                let stream_id = StreamId::from(dv(dec)?);
+                let application_error_code = dv(dec)?;
+                let final_size = dv(dec)?;
+                let reliable_size = dv(dec)?;
+                // Reject `reliable_size > final_size` at the earliest point.
+                if reliable_size > final_size {
+                    return Err(Error::FrameEncoding);
+                }
+                Ok(Self::ResetStreamAt {
+                    stream_id,
+                    application_error_code,
+                    final_size,
+                    reliable_size,
+                })
+            }
             FrameType::Ack => decode_ack(dec, false),
             FrameType::AckEcn => decode_ack(dec, true),
             FrameType::StopSending => Ok(Self::StopSending {
@@ -603,16 +632,23 @@ impl<'a> Frame<'a> {
                 stream_data_limit: dv(dec)?,
             }),
             FrameType::StreamsBlockedBiDi | FrameType::StreamsBlockedUniDi => {
+                let m = dv(dec)?;
+                if m > (1 << 60) {
+                    return Err(Error::StreamLimit);
+                }
                 Ok(Self::StreamsBlocked {
                     stream_type: t.try_into()?,
-                    stream_limit: dv(dec)?,
+                    stream_limit: m,
                 })
             }
             FrameType::NewConnectionId => {
                 let sequence_number = dv(dec)?;
                 let retire_prior = dv(dec)?;
+                if retire_prior > sequence_number {
+                    return Err(Error::FrameEncoding);
+                }
                 let connection_id = d(dec.decode_vec(1))?;
-                if connection_id.len() > ConnectionId::MAX_LEN {
+                if connection_id.is_empty() || connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
                 let stateless_reset_token = Srt::try_from(dec)?;
@@ -802,6 +838,72 @@ mod tests {
     }
 
     #[test]
+    fn reset_stream_at() {
+        let f = Frame::ResetStreamAt {
+            stream_id: StreamId::from(0x1234),
+            application_error_code: 0x77,
+            final_size: 0x3456,
+            reliable_size: 0x12,
+        };
+
+        just_dec(&f, "2452344077745612");
+    }
+
+    /// A `RESET_STREAM_AT` frame with `reliable_size > final_size` is rejected at decode.
+    #[test]
+    fn reset_stream_at_reliable_exceeds_final() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(FrameType::ResetStreamAt);
+        enc.encode_varint(0x1234u64); // stream_id
+        enc.encode_varint(0x77u64); // application_error_code
+        enc.encode_varint(0x10u64); // final_size
+        enc.encode_varint(0x20u64); // reliable_size > final_size
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    /// `reliable_size == final_size` is the boundary case and must decode.
+    #[test]
+    fn reset_stream_at_reliable_equals_final() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(FrameType::ResetStreamAt);
+        enc.encode_varint(0x1234u64); // stream_id
+        enc.encode_varint(0x77u64); // application_error_code
+        enc.encode_varint(0x3456u64); // final_size
+        enc.encode_varint(0x3456u64); // reliable_size == final_size
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap(),
+            Frame::ResetStreamAt {
+                stream_id: StreamId::from(0x1234),
+                application_error_code: 0x77,
+                final_size: 0x3456,
+                reliable_size: 0x3456,
+            }
+        );
+    }
+
+    /// `RESET_STREAM_AT` relies on the default arms of `ack_eliciting`/`is_allowed`,
+    /// matching `RESET_STREAM`: ack-eliciting, and allowed only in `ZeroRtt`/`Short`.
+    #[test]
+    fn reset_stream_at_ack_eliciting_and_allowed() {
+        let f = Frame::ResetStreamAt {
+            stream_id: StreamId::from(1),
+            application_error_code: 2,
+            final_size: 3,
+            reliable_size: 1,
+        };
+        assert!(f.ack_eliciting());
+        assert!(f.is_allowed(packet::Type::Short));
+        assert!(f.is_allowed(packet::Type::ZeroRtt));
+        assert!(!f.is_allowed(packet::Type::Handshake));
+        assert!(!f.is_allowed(packet::Type::Initial));
+        assert!(f.is_stream());
+        assert_eq!(f.get_type(), FrameType::ResetStreamAt);
+    }
+
+    #[test]
     fn stop_sending() {
         let f = Frame::StopSending {
             stream_id: StreamId::from(63),
@@ -956,6 +1058,29 @@ mod tests {
     fn too_large_new_connection_id() {
         let mut enc = Encoder::from_hex("18523400"); // up to the CID
         enc.encode_vvec(&[0x0c; ConnectionId::MAX_LEN + 10]);
+        enc.encode(&[0x11; 16][..]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
+    fn zero_length_new_connection_id() {
+        let mut enc = Encoder::from_hex("18523400"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[]); // zero-length connection ID
+        enc.encode(&[0x11; 16][..]);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
+    fn new_connection_id_retire_prior_after_sequence_number() {
+        // retire_prior (5) greater than sequence_number (2).
+        let mut enc = Encoder::from_hex("180205"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[0x01, 0x02]);
         enc.encode(&[0x11; 16][..]);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
@@ -1120,7 +1245,7 @@ mod tests {
         let mut e = Encoder::default();
         e.encode_varint(FrameType::Padding);
         // `Frame::Padding` uses u16 to store length. Try to overflow length.
-        e.pad_to(u16::MAX as usize + 1, 0);
+        e.pad_to(usize::from(u16::MAX) + 1, 0);
         assert_eq!(Frame::decode(&mut e.as_decoder()), Err(Error::TooMuchData));
     }
 
@@ -1334,6 +1459,22 @@ mod tests {
         assert!(!app_close.is_allowed(packet::Type::ZeroRtt));
     }
 
+    /// `is_allowed`: `PATH_RESPONSE` and `HANDSHAKE_DONE` are only allowed in
+    /// 1-RTT packets (RFC 9000, Table 3).
+    #[test]
+    fn is_allowed_path_response_and_handshake_done() {
+        let path_response = Frame::PathResponse { data: [0; 8] };
+        assert!(path_response.is_allowed(packet::Type::Short));
+        assert!(!path_response.is_allowed(packet::Type::ZeroRtt));
+
+        assert!(Frame::HandshakeDone.is_allowed(packet::Type::Short));
+        assert!(!Frame::HandshakeDone.is_allowed(packet::Type::ZeroRtt));
+
+        // PATH_CHALLENGE, by contrast, is permitted in 0-RTT packets.
+        let path_challenge = Frame::PathChallenge { data: [0; 8] };
+        assert!(path_challenge.is_allowed(packet::Type::ZeroRtt));
+    }
+
     /// `decode_ack_frame` rejects invalid range configurations.
     #[test]
     fn decode_ack_frame_boundaries() {
@@ -1420,6 +1561,18 @@ mod tests {
     fn decode_max_streams_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x12); // MaxStreamsBiDi
+        enc.encode_varint((1u64 << 60) + 1);
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::StreamLimit
+        );
+    }
+
+    /// A `StreamsBlocked` frame with value > 2^60 is rejected.
+    #[test]
+    fn decode_streams_blocked_exceeds_limit() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x16); // StreamsBlockedBiDi
         enc.encode_varint((1u64 << 60) + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),

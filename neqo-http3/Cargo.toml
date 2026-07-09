@@ -33,7 +33,7 @@ strum = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
+criterion = { version = "5", package = "codspeed-criterion-compat", default-features = false }
 neqo-http3 = { path = ".", default-features = false, features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 
@@ -65,7 +65,6 @@ bench = false
 [[package.metadata.bench]]
 name = "streams_simulated"
 codspeed.mode = "simulation"
-codspeed.memory = false # Memory profiling is incompatible with iter_custom() because CodSpeed's instrumentation hooks are bypassed.
 
 [[package.metadata.bench]]
 name = "streams_walltime"

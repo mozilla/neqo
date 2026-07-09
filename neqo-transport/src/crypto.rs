@@ -25,7 +25,11 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, Encoder, Role, hex, hex_snip_middle, qdebug, qinfo, qtrace};
+use neqo_common::{
+    Buffer, Encoder, Role,
+    hex::{Hex, HexSnipMiddle},
+    qdebug, qinfo, qtrace, to_u64,
+};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
@@ -387,7 +391,7 @@ impl Crypto {
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
-                qtrace!("TLS token {}", hex(t.as_ref()));
+                qtrace!("TLS token {}", Hex::new(t.as_ref()));
                 let mut enc = Encoder::default();
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
@@ -396,7 +400,7 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                qdebug!("resumption token {}", hex_snip_middle(enc.as_ref()));
+                qdebug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
                 ResumptionToken::new(enc.into(), t.expiration_time())
             })
         } else {
@@ -689,7 +693,11 @@ impl CryptoDxState {
         sample: &[u8; hp::Key::SAMPLE_SIZE],
     ) -> Res<[u8; hp::Key::SAMPLE_SIZE]> {
         let mask = self.hpkey.mask(sample)?;
-        qtrace!("[{self}] HP sample={} mask={}", hex(sample), hex(mask));
+        qtrace!(
+            "[{self}] HP sample={} mask={}",
+            Hex::new(sample),
+            Hex::new(mask)
+        );
         Ok(mask)
     }
 
@@ -707,8 +715,8 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
-            hex(data[hdr.clone()].as_ref()),
-            hex(data[hdr.end..].as_ref())
+            Hex::new(data[hdr.clone()].as_ref()),
+            Hex::new(data[hdr.end..].as_ref())
         );
 
         // The numbers in `Self::limit` assume a maximum packet size of `LIMIT`.
@@ -728,7 +736,7 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        qtrace!("[{self}] encrypt ct={}", hex(&data[..len]));
+        qtrace!("[{self}] encrypt ct={}", Hex::new(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
         Ok(len)
@@ -748,8 +756,8 @@ impl CryptoDxState {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
-            hex(data[hdr.clone()].as_ref()),
-            hex(data[hdr.end..].as_ref())
+            Hex::new(data[hdr.clone()].as_ref()),
+            Hex::new(data[hdr.end..].as_ref())
         );
         self.invoked()?;
         let (hdr, data) = data.split_at_mut(hdr.end);
@@ -1076,7 +1084,7 @@ impl CryptoStates {
         for v in versions {
             qdebug!(
                 "[{self}] Creating initial cipher state v={v:?}, role={role:?} dcid={}",
-                hex(dcid)
+                Hex::new(dcid)
             );
 
             let mut initial = CryptoState {
@@ -1630,8 +1638,7 @@ impl CryptoStreams {
             // - remaining space, less the header, which counts only one byte for the length at
             //   first to avoid underestimating length
             let length = min(data.len(), builder.remaining() - header_len);
-            header_len +=
-                Encoder::varint_len(u64::try_from(length).expect("usize fits in u64")) - 1;
+            header_len += Encoder::varint_len(to_u64(length)) - 1;
             let length = min(data.len(), builder.remaining() - header_len);
 
             builder.encode_frame(FrameType::Crypto, |b| {
@@ -1674,7 +1681,7 @@ impl CryptoStreams {
                 // `left` is short enough to fit into this packet. So send from the *end*
                 // of `right`, so that the second half of the SNI is in another packet.
                 let right_len = right.len() + left.len() - limit;
-                right_offset += right_len as u64;
+                right_offset += to_u64(right_len);
                 (_, right) = right.split_at(right_len);
             } else if right.len() <= limit {
                 // `right` is short enough to fit into this packet. So only send a part of `left`.
@@ -1706,7 +1713,7 @@ impl CryptoStreams {
                     let packets_needed = data.len().div_ceil(builder.limit());
                     let limit = data.len() / packets_needed;
                     let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + mid as u64, right), limit);
+                        limit_chunks((offset, left), (offset + to_u64(mid), right), limit);
                     (
                         write_chunk(right_offset, right, builder),
                         write_chunk(left_offset, left, builder),

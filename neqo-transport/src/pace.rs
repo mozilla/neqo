@@ -21,7 +21,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, to_u64};
 
 use crate::rtt::GRANULARITY;
 
@@ -104,7 +104,7 @@ impl Pacer {
             return self.t;
         };
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
-        let divisor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        let divisor = to_u64(cwnd).saturating_mul(Self::SPEEDUP);
         let w_ns = rtt_ns.saturating_mul(deficit) / divisor;
 
         // If the increment is below the timer granularity, send immediately.
@@ -134,7 +134,7 @@ impl Pacer {
     fn bytes_for(cwnd: usize, rtt: Duration, elapsed: Duration) -> Option<u64> {
         let rtt_ns = u64::try_from(rtt.as_nanos()).unwrap_or(u64::MAX);
         let elapsed_ns = u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX);
-        let factor = (cwnd as u64).saturating_mul(Self::SPEEDUP);
+        let factor = to_u64(cwnd).saturating_mul(Self::SPEEDUP);
         elapsed_ns.saturating_mul(factor).checked_div(rtt_ns)
     }
 
@@ -145,16 +145,17 @@ impl Pacer {
         Self::bytes_for(cwnd, rtt, Duration::from_secs(1))
     }
 
-    /// Spend credit. Returns `true` when the next send would be pacing-limited,
-    /// i.e., [`Pacer::next`] now returns a time strictly after `now`.
-    /// Always returns `false` when pacing is disabled.
+    /// Spend credit. This cannot fail, but instead may carry debt into the
+    /// future (see [`Pacer::c`]). Users of this API are expected to call
+    /// [`Pacer::next`] to determine when to spend.
     ///
-    /// This cannot fail, but instead may carry debt into the future (see
-    /// [`Pacer::c`]).
-    pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) -> bool {
+    /// This function takes the current time (`now`), an estimate of the round
+    /// trip time (`rtt`), the estimated congestion window (`cwnd`), and the
+    /// number of bytes that were sent (`count`).
+    pub fn spend(&mut self, now: Instant, rtt: Duration, cwnd: usize, count: usize) {
         if !self.enabled {
             self.t = now;
-            return false;
+            return;
         }
 
         qtrace!("[{self}] spend {count} over {cwnd}, {rtt:?}");
@@ -172,7 +173,6 @@ impl Pacer {
                 .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
         );
         self.t = now;
-        self.next(rtt, cwnd) > now
     }
 }
 
@@ -206,7 +206,7 @@ mod tests {
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
-        assert!(p.spend(n, RTT, CWND, PACKET));
+        p.spend(n, RTT, CWND, PACKET);
         assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
@@ -216,7 +216,7 @@ mod tests {
         let mut p = Pacer::new(true, n + RTT, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n + RTT);
         // Now spend some credit in the past using a time machine.
-        assert!(p.spend(n, RTT, CWND, PACKET));
+        p.spend(n, RTT, CWND, PACKET);
         assert_eq!(p.next(RTT, CWND), n + (RTT / 20));
     }
 
@@ -225,7 +225,7 @@ mod tests {
         let n = now();
         let mut p = Pacer::new(false, n, PACKET, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
-        assert!(!p.spend(n, RTT, CWND, PACKET));
+        p.spend(n, RTT, CWND, PACKET);
         assert_eq!(p.next(RTT, CWND), n);
     }
 
@@ -235,9 +235,11 @@ mod tests {
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
         assert_eq!(p.next(SHORT_RTT, CWND), n);
-        assert!(
-            !p.spend(n, SHORT_RTT, CWND, PACKET),
-            "sub-granularity delay should not be pacing-limited"
+        p.spend(n, SHORT_RTT, CWND, PACKET);
+        assert_eq!(
+            p.next(SHORT_RTT, CWND),
+            n,
+            "Expect packet to be sent immediately, instead of being paced below timer granularity"
         );
     }
 
@@ -287,9 +289,12 @@ mod tests {
         const CWND_AT_GRANULARITY: usize = 5000; // yields w = 1ms = GRANULARITY
         let n = now();
         let mut p = Pacer::new(true, n, PACKET, PACKET);
-        assert!(
-            p.spend(n, SHORT_RTT, CWND_AT_GRANULARITY, PACKET),
-            "at exactly GRANULARITY should be pacing-limited"
+        p.spend(n, SHORT_RTT, CWND_AT_GRANULARITY, PACKET);
+        // w == GRANULARITY: should schedule for later, not send immediately.
+        assert_ne!(
+            p.next(SHORT_RTT, CWND_AT_GRANULARITY),
+            n,
+            "at exactly GRANULARITY should not send immediately"
         );
     }
 

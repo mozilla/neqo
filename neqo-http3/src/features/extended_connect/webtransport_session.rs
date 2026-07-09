@@ -11,7 +11,7 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
-use neqo_transport::{Connection, Error as TransportError, StreamId};
+use neqo_transport::{Connection, StreamId, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 use sfv::{BareItem, Item, Parser};
 
@@ -37,6 +37,8 @@ pub struct Session {
     pending_streams: HashSet<StreamId>,
     /// The negotiated protocol from server response headers.
     negotiated_protocol: Option<String>,
+    /// Send groups registered for this session.
+    send_groups: HashSet<SendGroupId>,
 }
 
 impl Display for Session {
@@ -56,7 +58,22 @@ impl Session {
             role,
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
+            send_groups: HashSet::default(),
         }
+    }
+    /// Register a send group with a caller-provided ID for this session.
+    ///
+    /// Returns an error if the ID is already in use.
+    pub(crate) fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        self.send_groups
+            .insert(id)
+            .then_some(())
+            .ok_or(Error::InvalidState)
+    }
+
+    /// Validate that a send group belongs to this session.
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.send_groups.contains(&group_id)
     }
 }
 
@@ -223,6 +240,14 @@ impl Protocol for Session {
         self.negotiated_protocol.as_deref()
     }
 
+    fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        Self::register_send_group(self, id)
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        Self::validate_send_group(self, group_id)
+    }
+
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
         // WebTransport does not add prefix (i.e. context ID).
     }
@@ -257,43 +282,5 @@ impl Protocol for Session {
             "[{self}] WebTransport does not support datagram capsules."
         );
         Ok(())
-    }
-}
-
-pub trait WebTransportExportKeyingMaterial {
-    fn webtransport_export_keying_material(
-        &self,
-        session_id: StreamId,
-        label: &[u8],
-        context: &[u8],
-        out: &mut [u8],
-    ) -> Res<()>;
-}
-
-impl WebTransportExportKeyingMaterial for Connection {
-    fn webtransport_export_keying_material(
-        &self,
-        session_id: StreamId,
-        label: &[u8],
-        context: &[u8],
-        out: &mut [u8],
-    ) -> Res<()> {
-        // encode_vec(1, …) uses a 1-byte length prefix, so max 255 bytes.
-        if out.is_empty() || label.len() > 255 || context.len() > 255 {
-            return Err(Error::InvalidInput);
-        }
-
-        let mut wt_context = Encoder::with_capacity(
-            Encoder::varint_len(session_id.as_u64()) + 1 + label.len() + 1 + context.len(),
-        );
-        wt_context.encode_varint(session_id.as_u64());
-        wt_context.encode_vec(1, label);
-        wt_context.encode_vec(1, context);
-
-        self.export_keying_material("EXPORTER-WebTransport", wt_context.as_ref(), out)
-            .map_err(|e| match e {
-                TransportError::InvalidInput => Error::InvalidInput,
-                other => Error::Transport(other),
-            })
     }
 }

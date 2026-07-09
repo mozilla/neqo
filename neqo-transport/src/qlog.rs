@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Decoder, Ecn, hex, qinfo, qlog::Qlog};
+use neqo_common::{Decoder, Ecn, hex::Hex, qinfo, qlog::Qlog, to_u64};
 use qlog::events::{
     ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
     connectivity::{
@@ -51,6 +51,11 @@ use crate::{
     version::{self, Version},
 };
 
+/// Allocation-performing hex conversion for qlog only.
+fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
+    Hex::new(v).to_string()
+}
+
 pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
     qlog.add_event_at(
         || {
@@ -61,8 +66,8 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
                     owner: Some(TransportOwner::Remote),
                     original_destination_connection_id: remote
                         .get_bytes(OriginalDestinationConnectionId)
-                        .map(hex),
-                    stateless_reset_token: remote.get_bytes(StatelessResetToken).map(hex),
+                        .map(to_hex),
+                    stateless_reset_token: remote.get_bytes(StatelessResetToken).map(to_hex),
                     disable_active_migration: remote.get_empty(DisableMigration).then_some(true),
                     max_idle_timeout: Some(remote.get_integer(TransportParameterId::IdleTimeout)),
                     max_udp_payload_size: Some(remote.get_integer(MaxUdpPayloadSize) as u32),
@@ -88,7 +93,7 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
                             port_v4: paddr.ipv4()?.port(),
                             port_v6: paddr.ipv6()?.port(),
                             connection_id: cid.connection_id().to_string(),
-                            stateless_reset_token: hex(cid.reset_token()),
+                            stateless_reset_token: to_hex(cid.reset_token()),
                         })
                     }),
                     ..Default::default()
@@ -225,7 +230,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
-                length: Some(meta.length() as u64),
+                length: Some(to_u64(meta.length())),
                 payload_length: None,
                 data: None,
             };
@@ -264,7 +269,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
             let header =
                 PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
             let raw = RawInfo {
-                length: Some(decrypt_err.len() as u64),
+                length: Some(to_u64(decrypt_err.len())),
                 ..Default::default()
             };
 
@@ -328,9 +333,7 @@ pub fn recovery_parameters_set(
                 timer_granularity: Some(u16::try_from(GRANULARITY.as_millis()).expect("fits")),
                 initial_rtt: Some(DEFAULT_INITIAL_RTT.as_secs_f32() * 1000.0),
                 max_datagram_size: Some(u32::try_from(plpmtu).expect("MTU fits in u32")),
-                initial_congestion_window: Some(
-                    u64::try_from(CWND_INITIAL_PKTS * plpmtu).expect("fits"),
-                ),
+                initial_congestion_window: Some(to_u64(CWND_INITIAL_PKTS * plpmtu)),
                 minimum_congestion_window: Some(
                     u32::try_from(2 * plpmtu).expect("MTU fits in u32"),
                 ),
@@ -429,13 +432,13 @@ pub fn metrics_updated<M: IntoIterator<Item = Metric>>(
                         pto_count = Some(u16::try_from(v).expect("fits in u16"));
                     }
                     Metric::CongestionWindow(v) => {
-                        congestion_window = Some(u64::try_from(v).expect("fits in u64"));
+                        congestion_window = Some(to_u64(v));
                     }
                     Metric::BytesInFlight(v) => {
-                        bytes_in_flight = Some(u64::try_from(v).expect("fits in u64"));
+                        bytes_in_flight = Some(to_u64(v));
                     }
                     Metric::SsThresh(v) => {
-                        ssthresh = Some(u64::try_from(v).expect("fits in u64"));
+                        ssthresh = Some(to_u64(v));
                     }
                     Metric::PacketsInFlight(v) => packets_in_flight = Some(v),
                     Metric::PacingRate(v) => pacing_rate = Some(v),
@@ -620,10 +623,18 @@ impl From<Frame<'_>> for QuicFrame {
                     payload_length: None,
                 }
             }
+            // Note that qlog doesn't currently support `RESET_STREAM_AT`,
+            // so map it into `RESET_STREAM` for now.
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
                 final_size,
+            }
+            | Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                ..
             } => Self::ResetStream {
                 stream_id: stream_id.as_u64(),
                 error_code: application_error_code,
@@ -642,15 +653,15 @@ impl From<Frame<'_>> for QuicFrame {
             },
             Frame::Crypto { offset, data } => Self::Crypto {
                 offset,
-                length: data.len() as u64,
+                length: to_u64(data.len()),
             },
             Frame::NewToken { token } => Self::NewToken {
                 token: qlog::Token {
                     ty: None,
                     details: None,
                     raw: Some(RawInfo {
-                        data: Some(hex(token)),
-                        length: Some(token.len() as u64),
+                        data: Some(to_hex(token)),
+                        length: Some(to_u64(token.len())),
                         payload_length: None,
                     }),
                 },
@@ -664,7 +675,7 @@ impl From<Frame<'_>> for QuicFrame {
             } => Self::Stream {
                 stream_id: stream_id.as_u64(),
                 offset,
-                length: data.len() as u64,
+                length: to_u64(data.len()),
                 fin: Some(fin),
                 raw: None,
             },
@@ -709,17 +720,17 @@ impl From<Frame<'_>> for QuicFrame {
                 sequence_number: sequence_number as u32,
                 retire_prior_to: retire_prior as u32,
                 connection_id_length: Some(connection_id.len() as u8),
-                connection_id: hex(connection_id),
-                stateless_reset_token: Some(hex(stateless_reset_token)),
+                connection_id: to_hex(connection_id),
+                stateless_reset_token: Some(to_hex(stateless_reset_token)),
             },
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
                 sequence_number: sequence_number as u32,
             },
             Frame::PathChallenge { data } => Self::PathChallenge {
-                data: Some(hex(data)),
+                data: Some(to_hex(data)),
             },
             Frame::PathResponse { data } => Self::PathResponse {
-                data: Some(hex(data)),
+                data: Some(to_hex(data)),
             },
             Frame::ConnectionClose {
                 error_code,
@@ -733,13 +744,13 @@ impl From<Frame<'_>> for QuicFrame {
                 trigger_frame_type: Some(frame_type),
             },
             Frame::HandshakeDone => Self::HandshakeDone,
+            Frame::Datagram { data, .. } => Self::Datagram {
+                length: to_u64(data.len()),
+                raw: None,
+            },
             Frame::AckFrequency { .. } => Self::Unknown {
                 frame_type_value: None,
                 raw_frame_type: frame.get_type().into(),
-                raw: None,
-            },
-            Frame::Datagram { data, .. } => Self::Datagram {
-                length: data.len() as u64,
                 raw: None,
             },
         }

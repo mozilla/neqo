@@ -8,7 +8,8 @@ use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
-    hex_snip_middle, hex_with_len, qtrace,
+    hex::{HexSnipMiddle, HexWithLen},
+    qtrace,
 };
 use neqo_transport::{Connection, StreamId};
 
@@ -31,6 +32,9 @@ pub trait FrameDecoder<T> {
     fn frame_type_allowed(_frame_type: HFrameType) -> Res<()> {
         Ok(())
     }
+
+    /// Upper bound on a known frame's declared length that we'll buffer before decoding.
+    fn max_frame_data(frame_type: HFrameType) -> usize;
 
     /// # Errors
     ///
@@ -116,7 +120,7 @@ impl Debug for FrameReader {
         f.debug_struct("FrameReader")
             .field("state", &self.state)
             .field("frame_type", &self.frame_type)
-            .field("frame", &hex_snip_middle(&self.buffer[..frame_len]))
+            .field("frame", &HexSnipMiddle::new(&self.buffer[..frame_len]))
             .finish()
     }
 }
@@ -238,7 +242,7 @@ impl FrameReader {
                     qtrace!(
                         "received frame {:?}: {}",
                         self.frame_type,
-                        hex_with_len(&data[..])
+                        HexWithLen::new(&data[..])
                     );
                     return self.frame_data_decoded::<T>(&data);
                 }
@@ -279,10 +283,12 @@ impl FrameReader {
             }
             None => {
                 if T::is_known_type(self.frame_type) {
+                    let len = usize::try_from(len).or(Err(Error::HttpFrame))?;
+                    if len > T::max_frame_data(self.frame_type) {
+                        return Err(Error::HttpExcessiveLoad);
+                    }
                     self.state = FrameReaderState::GetData {
-                        decoder: IncrementalDecoderBuffer::new(
-                            usize::try_from(len).or(Err(Error::HttpFrame))?,
-                        ),
+                        decoder: IncrementalDecoderBuffer::new(len),
                     };
                 } else if self.frame_len == 0 {
                     self.reset();

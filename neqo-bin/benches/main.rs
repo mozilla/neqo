@@ -10,11 +10,18 @@
     reason = "Inherent in codspeed criterion_group! macro."
 )]
 
-use std::{env, hint::black_box, net::SocketAddr};
+use std::{env, hint::black_box, net::SocketAddr, time::Duration};
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use neqo_bin::{client, server};
+use neqo_common::to_u64;
 use tokio::runtime::Builder;
+
+fn criterion_config() -> Criterion {
+    Criterion::default()
+        .warm_up_time(Duration::from_secs(5))
+        .measurement_time(Duration::from_secs(15))
+}
 
 struct Benchmark {
     name: &'static str,
@@ -62,10 +69,11 @@ fn transfer(c: &mut Criterion) {
             .as_ref()
             .map_or_else(|| name.to_string(), |suffix| format!("{name}{suffix}"));
         let mut group = c.benchmark_group("transfer");
+        group.noise_threshold(0.03);
         group.throughput(if num_requests == 1 {
-            Throughput::Bytes((upload_size + download_size) as u64)
+            Throughput::Bytes(to_u64(upload_size + download_size))
         } else {
-            Throughput::Elements(num_requests as u64)
+            Throughput::Elements(to_u64(num_requests))
         });
         group.bench_function(&bench_name, |b| {
             b.to_async(Builder::new_current_thread().enable_all().build().unwrap())
@@ -80,12 +88,10 @@ fn transfer(c: &mut Criterion) {
                         ));
                         (server_handle, client)
                     },
-                    |(server_handle, client)| {
-                        black_box(async move {
-                            client.await.unwrap();
-                            // Tell server to shut down.
-                            server_handle.send(()).unwrap();
-                        })
+                    |(server_handle, client)| async move {
+                        black_box(client.await.unwrap());
+                        // Tell server to shut down.
+                        server_handle.send(()).unwrap();
                     },
                     BatchSize::PerIteration,
                 );
@@ -122,5 +128,9 @@ fn spawn_server() -> (tokio::sync::oneshot::Sender<()>, SocketAddr) {
     (done_sender, addr_receiver.recv().unwrap())
 }
 
-criterion_group!(benches, transfer);
+criterion_group! {
+    name = benches;
+    config = criterion_config();
+    targets = transfer
+}
 criterion_main!(benches);

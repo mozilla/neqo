@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use neqo_common::{Datagram, Decoder, Role, hex_with_len, qtrace};
+use neqo_common::{Datagram, Decoder, Role, hex::HexWithLen, qtrace};
 use nss::{
     Mode, RecordProtection as Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
@@ -147,8 +147,8 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
         .expect("Failed to generate header protection mask");
     qtrace!(
         "sample={} mask={}",
-        hex_with_len(&packet[sample_start..sample_end]),
-        hex_with_len(mask)
+        HexWithLen::new(&packet[sample_start..sample_end]),
+        HexWithLen::new(mask)
     );
     packet[0] ^= mask[0] & 0xf;
     for i in 0..(pn_bytes.end - pn_bytes.start) {

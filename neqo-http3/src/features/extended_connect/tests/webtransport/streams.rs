@@ -4,11 +4,17 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_transport::StreamType;
+use neqo_common::to_u64;
+use neqo_transport::{ConnectionParameters, StreamType};
+use test_fixture::now;
 
 use crate::{
-    Error,
-    features::extended_connect::{CloseReason, tests::webtransport::WtTest},
+    Error, Http3Parameters,
+    features::extended_connect::{
+        CloseReason,
+        tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
+    },
+    webtransport::ClientSession as _,
 };
 
 #[test]
@@ -26,17 +32,17 @@ fn wt_client_stream_uni() {
     wt.send_data_client(wt_stream, BUF_CLIENT);
     wt.receive_data_server(wt_stream, true, BUF_CLIENT, false);
     let send_stats = wt.send_stream_stats(wt_stream).unwrap();
-    assert_eq!(send_stats.bytes_written(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_sent(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_acked(), BUF_CLIENT.len() as u64);
+    assert_eq!(send_stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_sent(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_acked(), to_u64(BUF_CLIENT.len()));
 
     // Send data again to test if the stats has the expected values.
     wt.send_data_client(wt_stream, BUF_CLIENT);
     wt.receive_data_server(wt_stream, false, BUF_CLIENT, false);
     let send_stats = wt.send_stream_stats(wt_stream).unwrap();
-    assert_eq!(send_stats.bytes_written(), (BUF_CLIENT.len() * 2) as u64);
-    assert_eq!(send_stats.bytes_sent(), (BUF_CLIENT.len() * 2) as u64);
-    assert_eq!(send_stats.bytes_acked(), (BUF_CLIENT.len() * 2) as u64);
+    assert_eq!(send_stats.bytes_written(), to_u64(BUF_CLIENT.len() * 2));
+    assert_eq!(send_stats.bytes_sent(), to_u64(BUF_CLIENT.len() * 2));
+    assert_eq!(send_stats.bytes_acked(), to_u64(BUF_CLIENT.len() * 2));
 
     let recv_stats = wt.recv_stream_stats(wt_stream);
     assert_eq!(recv_stats.unwrap_err(), Error::InvalidStreamId);
@@ -55,13 +61,13 @@ fn wt_client_stream_bidi() {
     wt.send_data_server(&wt_server_stream, BUF_SERVER);
     wt.receive_data_client(wt_client_stream, false, BUF_SERVER, false);
     let send_stats = wt.send_stream_stats(wt_client_stream).unwrap();
-    assert_eq!(send_stats.bytes_written(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_sent(), BUF_CLIENT.len() as u64);
-    assert_eq!(send_stats.bytes_acked(), BUF_CLIENT.len() as u64);
+    assert_eq!(send_stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_sent(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(send_stats.bytes_acked(), to_u64(BUF_CLIENT.len()));
 
     let recv_stats = wt.recv_stream_stats(wt_client_stream).unwrap();
-    assert_eq!(recv_stats.bytes_received(), BUF_SERVER.len() as u64);
-    assert_eq!(recv_stats.bytes_read(), BUF_SERVER.len() as u64);
+    assert_eq!(recv_stats.bytes_received(), to_u64(BUF_SERVER.len()));
+    assert_eq!(recv_stats.bytes_read(), to_u64(BUF_SERVER.len()));
 }
 
 #[test]
@@ -77,8 +83,8 @@ fn wt_server_stream_uni() {
     assert_eq!(send_stats.unwrap_err(), Error::InvalidStreamId);
 
     let recv_stats = wt.recv_stream_stats(wt_server_stream.stream_id()).unwrap();
-    assert_eq!(recv_stats.bytes_received(), BUF_SERVER.len() as u64);
-    assert_eq!(recv_stats.bytes_read(), BUF_SERVER.len() as u64);
+    assert_eq!(recv_stats.bytes_received(), to_u64(BUF_SERVER.len()));
+    assert_eq!(recv_stats.bytes_read(), to_u64(BUF_SERVER.len()));
 }
 
 #[test]
@@ -94,13 +100,13 @@ fn wt_server_stream_bidi() {
     wt.send_data_client(wt_server_stream.stream_id(), BUF_CLIENT);
     drop(wt.receive_data_server(wt_server_stream.stream_id(), false, BUF_CLIENT, false));
     let stats = wt.send_stream_stats(wt_server_stream.stream_id()).unwrap();
-    assert_eq!(stats.bytes_written(), BUF_CLIENT.len() as u64);
-    assert_eq!(stats.bytes_sent(), BUF_CLIENT.len() as u64);
-    assert_eq!(stats.bytes_acked(), BUF_CLIENT.len() as u64);
+    assert_eq!(stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(stats.bytes_sent(), to_u64(BUF_CLIENT.len()));
+    assert_eq!(stats.bytes_acked(), to_u64(BUF_CLIENT.len()));
 
     let recv_stats = wt.recv_stream_stats(wt_server_stream.stream_id()).unwrap();
-    assert_eq!(recv_stats.bytes_received(), BUF_SERVER.len() as u64);
-    assert_eq!(recv_stats.bytes_read(), BUF_SERVER.len() as u64);
+    assert_eq!(recv_stats.bytes_received(), to_u64(BUF_SERVER.len()));
+    assert_eq!(recv_stats.bytes_read(), to_u64(BUF_SERVER.len()));
 }
 
 #[test]
@@ -173,6 +179,87 @@ fn wt_client_stream_uni_reset() {
     drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
     wt.reset_stream_client(wt_stream);
     wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+#[test]
+fn wt_client_stream_uni_reset_is_reliable() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
+
+    // No explicit commit: the H3 layer auto-commits the session-id prefix when it is sent, so
+    // resetting the stream is delivered as RESET_STREAM_AT.
+    let before = wt.client.transport_stats().frame_tx.reset_stream_at;
+    wt.reset_stream_client(wt_stream);
+    assert_eq!(
+        wt.client.transport_stats().frame_tx.reset_stream_at,
+        before + 1
+    );
+    wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+#[test]
+fn wt_client_stream_uni_commit_reset() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
+
+    // Commit the buffered data, then reset: this is delivered as RESET_STREAM_AT.
+    wt.commit_stream_client(wt_stream);
+    let before = wt.client.transport_stats().frame_tx.reset_stream_at;
+    wt.reset_stream_client(wt_stream);
+    assert_eq!(
+        wt.client.transport_stats().frame_tx.reset_stream_at,
+        before + 1
+    );
+    wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+/// When a WebTransport stream's preface cannot be flushed to the transport (here because the
+/// connection send credit is exhausted), sends are blocked and committing is safe. The preface is
+/// sent atomically, so the transport never holds — and so can never commit — a partial preface.
+#[test]
+fn wt_client_stream_commit_blocked_preface_is_safe() {
+    let mut wt = WtTest::new_with_params(
+        wt_default_parameters(),
+        Http3Parameters::default()
+            .webtransport(true)
+            .connection_parameters(
+                ConnectionParameters::default()
+                    .datagram_size(DATAGRAM_SIZE)
+                    .max_data(2000),
+            ),
+    );
+    let wt_session = wt.create_wt_session();
+
+    // Soak up the connection's send credit on one stream (its preface flushes while credit is
+    // still available).
+    let filler = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    let buf = [0; 1024];
+    while wt.client.send_data(filler, &buf, now()).unwrap() > 0 {}
+
+    // A fresh stream can no longer flush its preface.
+    let blocked = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+
+    // Sending and committing is blocked at this point.
+    assert_eq!(wt.client.send_data(blocked, &[0; 10], now()).unwrap(), 0);
+    assert_eq!(
+        wt.client.stream_commit(blocked, now()),
+        Err(Error::FlowControlLimit)
+    );
+
+    wt.exchange_packets();
+
+    assert_eq!(wt.client.send_data(blocked, &[0; 10], now()).unwrap(), 10);
+    assert_eq!(wt.client.stream_commit(blocked, now()), Ok(()));
 }
 
 #[test]

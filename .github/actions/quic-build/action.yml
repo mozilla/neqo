@@ -1,9 +1,9 @@
 name: Build QUIC implementation
-description: Build a QUIC implementation (msquic, google/quiche, cloudflare/quiche, s2n-quic)
+description: Build a QUIC implementation (google/quiche, cloudflare/quiche, s2n-quic)
 
 inputs:
   impl:
-    description: Implementation to build (msquic, google, quiche, s2n)
+    description: Implementation to build (google, quiche, s2n)
     required: true
   token:
     description: GitHub token for API access
@@ -31,7 +31,6 @@ runs:
       run: |
         {
           echo "CACHE_VERSION=v3"
-          echo "MSQUIC_VERSION=v2.5.8"
           echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
           echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
           echo "S2N_QUIC_VERSION=v1.82.0"
@@ -39,7 +38,7 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
       with:
         version: stable
         token: ${{ inputs.token }}
@@ -54,7 +53,6 @@ runs:
       run: |
         # Determine version based on implementation
         case "$IMPL" in
-          msquic) VERSION="$MSQUIC_VERSION" ;;
           google) VERSION="$GOOGLE_QUICHE_REF" ;;
           quiche) VERSION="$CLOUDFLARE_QUICHE_VERSION" ;;
           s2n)    VERSION="$S2N_QUIC_VERSION" ;;
@@ -73,7 +71,7 @@ runs:
 
     - name: Restore cache
       id: cache-restore
-      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: binaries
         key: ${{ steps.cache-key.outputs.key }}
@@ -85,7 +83,6 @@ runs:
       env:
         IMPL: ${{ inputs.impl }}
         OUTPUT_PATH: binaries
-        MSQUIC_VERSION: ${{ env.MSQUIC_VERSION }}
         GOOGLE_QUICHE_REF: ${{ env.GOOGLE_QUICHE_REF }}
         CLOUDFLARE_QUICHE_VERSION: ${{ env.CLOUDFLARE_QUICHE_VERSION }}
         S2N_QUIC_VERSION: ${{ env.S2N_QUIC_VERSION }}
@@ -93,24 +90,6 @@ runs:
         mkdir -p "$OUTPUT_PATH"
 
         case "$IMPL" in
-          msquic)
-            git clone --depth 1 --recurse-submodules -b "$MSQUIC_VERSION" https://github.com/microsoft/msquic msquic-src
-            cd msquic-src
-            mkdir build && cd build
-            cmake -GNinja \
-              -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-              -DQUIC_BUILD_TOOLS=1 \
-              -DQUIC_BUILD_PERF=1 \
-              -DQUIC_BUILD_SHARED=OFF \
-              -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
-              ..
-            cmake --build .
-            cp bin/Release/quicinterop bin/Release/quicinteropserver "../../$OUTPUT_PATH/"
-            cd ../..
-            rm -rf msquic-src
-            echo "binaries=quicinterop quicinteropserver" >> "$GITHUB_OUTPUT"
-            ;;
-
           google)
             # Install bazelisk if not present
             if ! command -v bazel &> /dev/null; then
@@ -182,7 +161,6 @@ runs:
         IMPL: ${{ inputs.impl }}
       run: |
         case "$IMPL" in
-          msquic) echo "binaries=quicinterop quicinteropserver" >> "$GITHUB_OUTPUT" ;;
           google) echo "binaries=quic_server quic_client" >> "$GITHUB_OUTPUT" ;;
           quiche) echo "binaries=quiche-client quiche-server" >> "$GITHUB_OUTPUT" ;;
           s2n)    echo "binaries=s2n-quic-qns" >> "$GITHUB_OUTPUT" ;;
@@ -190,7 +168,7 @@ runs:
 
     - name: Save cache
       if: steps.cache-restore.outputs.cache-hit != 'true'
-      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: binaries
         key: ${{ steps.cache-key.outputs.key }}

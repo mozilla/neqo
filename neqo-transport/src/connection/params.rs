@@ -6,6 +6,8 @@
 
 use std::{cmp::max, time::Duration};
 
+use neqo_common::to_u64;
+
 pub use crate::recovery::FAST_PTO_SCALE;
 use crate::{
     CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
@@ -18,7 +20,7 @@ use crate::{
             ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit, IdleTimeout, InitialMaxData,
             InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni,
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxDatagramFrameSize,
-            MinAckDelay, PreferredAddress as PreferredAddressTp, Scone,
+            MinAckDelay, PreferredAddress as PreferredAddressTp, ResetStreamAt, Scone,
         },
         TransportParametersHandler,
     },
@@ -64,7 +66,7 @@ pub const INITIAL_LOCAL_MAX_STREAM_DATA: usize = 1024 * 1024;
 /// implementation for details.
 ///
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
-pub const INITIAL_LOCAL_MAX_DATA: u64 = INITIAL_LOCAL_MAX_STREAM_DATA as u64 * CONNECTION_FACTOR;
+pub const INITIAL_LOCAL_MAX_DATA: u64 = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) * CONNECTION_FACTOR;
 
 /// Limit for the maximum amount of bytes active on a single stream, i.e. limit
 /// for the size of the stream receive window.
@@ -84,8 +86,8 @@ pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
 pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
 
-// Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
-const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
+/// Maximum size of a QUIC DATAGRAM frame, as specified in <https://datatracker.ietf.org/doc/html/rfc9221#section-3-4>.
+pub const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
@@ -136,7 +138,6 @@ pub struct ConnectionParameters {
     preferred_address: PreferredAddressConfig,
     datagram_size: u64,
     outgoing_datagram_queue: usize,
-    incoming_datagram_queue: usize,
     initial_rtt: Duration,
     fast_pto: u8,
     grease: bool,
@@ -154,6 +155,9 @@ pub struct ConnectionParameters {
     randomize_first_pn: bool,
     /// Whether to send the SCONE transport parameter.
     scone: bool,
+    /// Whether to advertise support for `RESET_STREAM_AT` (reliable stream reset) via the
+    /// `reset_stream_at` transport parameter.
+    reliable_stream_reset: bool,
     /// Whether to recover from spurious congestion events by restoring prior Congestion Controller
     /// state. Detection and metrics are always active regardless of this setting.
     spurious_recovery: bool,
@@ -167,12 +171,9 @@ impl Default for ConnectionParameters {
             slow_start: SlowStart::Classic,
             hystart_css_baseline: HyStartCssBaseline::CurrentRoundMinRtt,
             max_data: INITIAL_LOCAL_MAX_DATA,
-            max_stream_data_bidi_remote: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
-                .expect("usize fits in u64"),
-            max_stream_data_bidi_local: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
-                .expect("usize fits in u64"),
-            max_stream_data_uni: u64::try_from(INITIAL_LOCAL_MAX_STREAM_DATA)
-                .expect("usize fits in u64"),
+            max_stream_data_bidi_remote: to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
+            max_stream_data_bidi_local: to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
+            max_stream_data_uni: to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
             max_streams_bidi: LOCAL_STREAM_LIMIT_BIDI,
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: Self::DEFAULT_ACK_RATIO,
@@ -180,7 +181,6 @@ impl Default for ConnectionParameters {
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: MAX_DATAGRAM_FRAME_SIZE,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
-            incoming_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             initial_rtt: DEFAULT_INITIAL_RTT,
             fast_pto: FAST_PTO_SCALE,
             grease: true,
@@ -192,6 +192,7 @@ impl Default for ConnectionParameters {
             mlkem: true,
             randomize_first_pn: true,
             scone: false,
+            reliable_stream_reset: true,
             spurious_recovery: true,
         }
     }
@@ -400,18 +401,6 @@ impl ConnectionParameters {
     }
 
     #[must_use]
-    pub const fn get_incoming_datagram_queue(&self) -> usize {
-        self.incoming_datagram_queue
-    }
-
-    #[must_use]
-    pub fn incoming_datagram_queue(mut self, v: usize) -> Self {
-        // The max queue length must be at least 1.
-        self.incoming_datagram_queue = max(v, 1);
-        self
-    }
-
-    #[must_use]
     pub const fn get_fast_pto(&self) -> u8 {
         self.fast_pto
     }
@@ -533,6 +522,17 @@ impl ConnectionParameters {
     }
 
     #[must_use]
+    pub const fn reliable_stream_reset_enabled(&self) -> bool {
+        self.reliable_stream_reset
+    }
+
+    #[must_use]
+    pub const fn reliable_stream_reset(mut self, reliable_stream_reset: bool) -> Self {
+        self.reliable_stream_reset = reliable_stream_reset;
+        self
+    }
+
+    #[must_use]
     pub const fn spurious_recovery_enabled(&self) -> bool {
         self.spurious_recovery
     }
@@ -556,7 +556,7 @@ impl ConnectionParameters {
         // default parameters
         tps.local_mut().set_integer(
             ActiveConnectionIdLimit,
-            u64::try_from(ConnectionIdManager::ACTIVE_LIMIT)?,
+            to_u64(ConnectionIdManager::ACTIVE_LIMIT),
         );
         if self.disable_migration {
             tps.local_mut().set_empty(DisableMigration);
@@ -566,6 +566,9 @@ impl ConnectionParameters {
         }
         if self.scone {
             tps.local_mut().set_empty(Scone);
+        }
+        if self.reliable_stream_reset {
+            tps.local_mut().set_empty(ResetStreamAt);
         }
         tps.local_mut().set_integer(
             MaxAckDelay,
@@ -651,6 +654,17 @@ mod tests {
         // Default is false; verify builder can toggle it.
         assert!(!ConnectionParameters::default().scone_enabled());
         assert!(ConnectionParameters::default().scone(true).scone_enabled());
+    }
+
+    #[test]
+    fn reliable_stream_reset_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().reliable_stream_reset_enabled());
+        assert!(
+            !ConnectionParameters::default()
+                .reliable_stream_reset(false)
+                .reliable_stream_reset_enabled()
+        );
     }
 
     #[test]
