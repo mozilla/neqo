@@ -71,7 +71,7 @@ impl HttpServer {
             read_state: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
-            stats: args.stats.clone(),
+            stats: args.shared.stats.clone(),
             reported: ReportedConnections::default(),
         })
     }

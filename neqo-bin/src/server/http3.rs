@@ -114,7 +114,7 @@ impl HttpServer {
             remaining_data: HashMap::default(),
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
-            stats: args.stats.clone(),
+            stats: args.shared.stats.clone(),
             reported: ReportedConnections::default(),
         }
     }
