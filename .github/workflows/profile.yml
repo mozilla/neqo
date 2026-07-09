@@ -50,18 +50,74 @@ jobs:
             echo 'refs=[{"name":"pr","sha":""}]' >> "$GITHUB_OUTPUT"
           fi
 
-  build-quiche:
-    name: Build cloudflare/quiche
+  build-others:
+    name: Build ${{ matrix.impl }}
     runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        impl: [quiche, s2n]
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          sparse-checkout: .github/actions
       - uses: ./.github/actions/quic-build
         with:
-          impl: quiche
+          impl: ${{ matrix.impl }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          artifact-name: quiche-binaries
+          artifact-name: ${{ matrix.impl }}-binaries
+
+  build-neqo:
+    name: Build neqo (${{ matrix.ref.name }})
+    runs-on: ubuntu-24.04
+    needs: bench-matrix
+    strategy:
+      matrix:
+        ref: ${{ fromJson(needs.bench-matrix.outputs.refs) }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ matrix.ref.sha }}
+
+      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        with:
+          version: stable
+          token: ${{ secrets.GITHUB_TOKEN }}
+          sccache: true
+
+      - id: nss-version
+        uses: ./.github/actions/minimum-version
+        with:
+          directory: .
+      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        with:
+          minimum-version: ${{ steps.nss-version.outputs.minimum }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build neqo
+        run: |
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+          mkdir -p binaries
+          cp target/release/neqo-client target/release/neqo-server binaries/
+
+      - name: Bundle NSS libraries
+        run: |
+          mkdir -p binaries/lib
+          if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
+            cp -L "$NSS_DIR"/../dist/Release/lib/*.so binaries/lib/ 2>/dev/null || true
+            cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* binaries/lib/ 2>/dev/null || true
+          else
+            for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
+              cp -L /usr/lib/*/lib${lib}.so* binaries/lib/ 2>/dev/null || true
+            done
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: neqo-binaries-${{ matrix.ref.name }}
+          path: binaries
+          retention-days: 1
 
   bench-profile:
     name: Profile ${{ matrix.bench.bench }} (${{ matrix.ref.name }})
@@ -145,7 +201,8 @@ jobs:
   perfcompare-profile:
     name: Profile ${{ matrix.combo.client }}-${{ matrix.combo.server }} (${{ matrix.ref.name }})
     runs-on: ubuntu-24.04
-    needs: [bench-matrix, build-quiche]
+    needs: [bench-matrix, build-others, build-neqo]
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -153,6 +210,8 @@ jobs:
           - { client: neqo, server: neqo }
           - { client: neqo, server: quiche }
           - { client: quiche, server: neqo }
+          - { client: neqo, server: s2n }
+          - { client: s2n, server: neqo }
         ref: ${{ fromJson(needs.bench-matrix.outputs.refs) }}
 
     steps:
@@ -166,29 +225,28 @@ jobs:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
-          sccache: true
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
-        with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build neqo
-        run: |
-          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
-          mkdir -p binaries
-          cp target/release/neqo-client target/release/neqo-server binaries/
-
-      - name: Download cloudflare/quiche
-        if: matrix.combo.client == 'quiche' || matrix.combo.server == 'quiche'
+      - name: Download neqo
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: quiche-binaries
+          name: neqo-binaries-${{ matrix.ref.name }}
           path: binaries
+
+      - name: Set library path
+        run: echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/binaries/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+
+      - name: Download external impl binaries
+        if: matrix.combo.client != 'neqo' || matrix.combo.server != 'neqo'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.run_id }}
+          CLIENT: ${{ matrix.combo.client }}
+          SERVER: ${{ matrix.combo.server }}
+        run: |
+          for impl in "$CLIENT" "$SERVER"; do
+            [ "$impl" = "neqo" ] && continue
+            gh run download "$RUN_ID" --name "$impl-binaries" --dir binaries
+          done
 
       - name: Fix binary permissions
         run: chmod +x binaries/*
