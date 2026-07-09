@@ -98,12 +98,6 @@ pub struct Args {
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
     ech: bool,
-
-    /// Print connection stats when a connection closes. Optionally give a
-    /// filename to append the stats to (as JSON), instead of logging them.
-    #[arg(name = "stats", long, require_equals = true)]
-    #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
-    stats: Option<Option<PathBuf>>,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -116,7 +110,6 @@ impl Default for Args {
             key: "key".to_string(),
             retry: false,
             ech: false,
-            stats: None,
         }
     }
 }
@@ -646,7 +639,7 @@ pub(super) mod test_support {
     pub(super) fn stats_args(stats: bool) -> Args {
         let mut args = Args::default();
         args.shared.alpn = "alpn".to_string(); // matches test_fixture::DEFAULT_ALPN
-        args.stats = stats.then_some(None); // Some(None): log, not a file
+        args.shared.stats = stats.then_some(None); // Some(None): log, not a file
         args
     }
 
@@ -746,17 +739,19 @@ mod tests {
     #[test]
     fn stats_flag_defaults_to_none() {
         let args = Args::parse_from(["neqo-server"]);
-        assert_eq!(args.stats, None);
+        assert_eq!(args.shared.stats, None);
     }
 
     #[test]
     fn stats_flag_parses_bare_and_with_filename() {
         assert_eq!(
-            Args::parse_from(["neqo-server", "--stats"]).stats,
+            Args::parse_from(["neqo-server", "--stats"]).shared.stats,
             Some(None)
         );
         assert_eq!(
-            Args::parse_from(["neqo-server", "--stats=out.json"]).stats,
+            Args::parse_from(["neqo-server", "--stats=out.json"])
+                .shared
+                .stats,
             Some(Some(PathBuf::from("out.json")))
         );
     }
