@@ -1368,12 +1368,10 @@ mod tests {
             )
             .unwrap();
             let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
-                &qpack::Settings {
-                    max_table_size_encoder: max_table_size,
-                    max_table_size_decoder: max_table_size,
-                    max_blocked_streams,
-                    max_tracked_streams: 4096,
-                },
+                &qpack::Settings::default()
+                    .max_table_size_encoder(max_table_size)
+                    .max_table_size_decoder(max_table_size)
+                    .max_blocked_streams(max_blocked_streams),
                 true,
             )));
             Self {
@@ -1391,12 +1389,10 @@ mod tests {
 
         pub fn new_with_conn(conn: Connection) -> Self {
             let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
-                &qpack::Settings {
-                    max_table_size_encoder: 128,
-                    max_table_size_decoder: 128,
-                    max_blocked_streams: 0,
-                    max_tracked_streams: 4096,
-                },
+                &qpack::Settings::default()
+                    .max_table_size_encoder(128)
+                    .max_table_size_decoder(128)
+                    .max_blocked_streams(0),
                 true,
             )));
             Self {
