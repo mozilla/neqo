@@ -124,6 +124,18 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         if header.value().iter().any(|b| matches!(b, 0 | 0x0a | 0x0d)) {
             return Err(Error::InvalidHeader); // illegal characters.
         }
+
+        // Connection-specific header fields make a message malformed (RFC 9114,
+        // Section 4.2). TE is the only one that may appear, and only with the
+        // value "trailers". Names are already lowercased above.
+        if !is_pseudo {
+            match header.name() {
+                "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding"
+                | "upgrade" => return Err(Error::InvalidHeader),
+                "te" if header.value() != b"trailers" => return Err(Error::InvalidHeader),
+                _ => {}
+            }
+        }
     }
     // Clear the regular header bit, since we only check pseudo headers below.
     pseudo_state.remove(PseudoHeaderState::Regular);
@@ -346,6 +358,47 @@ mod tests {
             Header::new(":path", b"/\r\nx".as_slice()),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn reject_connection_specific_header() {
+        // A message carrying a connection-specific header field is malformed
+        // (RFC 9114, Section 4.2), in either direction.
+        for name in [
+            "connection",
+            "keep-alive",
+            "proxy-connection",
+            "transfer-encoding",
+            "upgrade",
+        ] {
+            let response = vec![Header::new(":status", "200"), Header::new(name, "x")];
+            assert!(headers_valid(&response, MessageType::Response).is_err());
+
+            let request = vec![
+                Header::new(":method", "GET"),
+                Header::new(":scheme", "https"),
+                Header::new(":path", "/"),
+                Header::new(name, "x"),
+            ];
+            assert!(headers_valid(&request, MessageType::Request).is_err());
+        }
+
+        // TE is the sole exception, but only carrying the value "trailers".
+        let ok = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":path", "/"),
+            Header::new("te", "trailers"),
+        ];
+        assert!(headers_valid(&ok, MessageType::Request).is_ok());
+
+        let bad = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":path", "/"),
+            Header::new("te", "gzip"),
+        ];
+        assert!(headers_valid(&bad, MessageType::Request).is_err());
     }
 
     #[test]
