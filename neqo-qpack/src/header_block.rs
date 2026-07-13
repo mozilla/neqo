@@ -23,7 +23,7 @@ use crate::{
     },
     qpack_send_buf::Encoder as _,
     reader::{LiteralReader, ReceiverBufferWrapper, parse_utf8},
-    table::{ADDITIONAL_TABLE_ENTRY_SIZE, HeaderTable},
+    table::{ADDITIONAL_TABLE_ENTRY_SIZE, DynamicTableEntry, HeaderTable},
 };
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -316,12 +316,30 @@ impl<'a> HeaderDecoder<'a> {
         Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
+    // Resolve a dynamic-table reference from a field line representation. A reference
+    // whose absolute index is at or above the Required Insert Count is a decoding error
+    // per RFC 9204, Section 2.2.3, even when the entry is still present in the table
+    // because later insertions arrived. This also covers Section 2.2.1: such a reference
+    // means the declared Required Insert Count was smaller than the block actually needs.
+    fn dynamic_entry<'t>(
+        &self,
+        table: &'t HeaderTable,
+        index: u64,
+        post: bool,
+    ) -> Res<&'t DynamicTableEntry> {
+        let entry = table.get_dynamic(index, self.base, post)?;
+        if entry.index() >= self.req_insert_cnt {
+            return Err(Error::Decompression);
+        }
+        Ok(entry)
+    }
+
     fn read_indexed_dynamic(&mut self, table: &HeaderTable) -> Res<Header> {
         let index = self
             .buf
             .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC.len())?;
         qtrace!("[{self}] decoder dynamic indexed {index}");
-        let entry = table.get_dynamic(index, self.base, false)?;
+        let entry = self.dynamic_entry(table, index, false)?;
         Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
@@ -330,7 +348,7 @@ impl<'a> HeaderDecoder<'a> {
             .buf
             .read_prefixed_int(HEADER_FIELD_INDEX_DYNAMIC_POST.len())?;
         qtrace!("[{self}] decode post-based {index}");
-        let entry = table.get_dynamic(index, self.base, true)?;
+        let entry = self.dynamic_entry(table, index, true)?;
         Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
@@ -355,7 +373,7 @@ impl<'a> HeaderDecoder<'a> {
             .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC.len())?;
 
         Ok(Header::new(
-            parse_utf8(table.get_dynamic(index, self.base, false)?.name())?,
+            parse_utf8(self.dynamic_entry(table, index, false)?.name())?,
             self.buf.read_literal_from_buffer(0)?,
         ))
     }
@@ -368,7 +386,7 @@ impl<'a> HeaderDecoder<'a> {
             .read_prefixed_int(HEADER_FIELD_LITERAL_NAME_REF_DYNAMIC_POST.len())?;
 
         Ok(Header::new(
-            parse_utf8(table.get_dynamic(index, self.base, true)?.name())?,
+            parse_utf8(self.dynamic_entry(table, index, true)?.name())?,
             self.buf.read_literal_from_buffer(0)?,
         ))
     }
@@ -927,6 +945,38 @@ mod tests {
             Error::Decompression,
             decoder_h.decode_header_block(&table, 1000, 0).unwrap_err()
         );
+    }
+
+    /// RFC 9204 Section 2.2.3: a field line that references a dynamic table entry
+    /// whose absolute index is at or above the declared Required Insert Count is a
+    /// decoding error, even when a later insertion has left that entry in the table.
+    #[test]
+    fn reference_at_or_above_required_insert_count() {
+        let mut table = HeaderTable::new(false);
+        table.set_capacity(10000).unwrap();
+        table.insert(b"header0", b"0").unwrap(); // absolute index 0
+        table.insert(b"header1", b"1").unwrap(); // absolute index 1
+        assert_eq!(table.base(), 2);
+
+        // Required Insert Count = 1 (only absolute index 0 may be referenced), Base = 2,
+        // then an indexed dynamic reference that resolves to absolute index 1.
+        let mut decoder_h = HeaderDecoder::new(&[0x02, 0x01, 0x80]);
+        assert_eq!(
+            Error::Decompression,
+            decoder_h.decode_header_block(&table, 1000, 2).unwrap_err()
+        );
+
+        // The same reference decodes once the Required Insert Count admits it:
+        // Required Insert Count = 2, Base = 2, indexed dynamic reference to index 1.
+        let mut decoder_h = HeaderDecoder::new(&[0x03, 0x00, 0x80]);
+        if let HeaderDecoderResult::Headers(result) =
+            decoder_h.decode_header_block(&table, 1000, 2).unwrap()
+        {
+            assert_eq!(result.len(), 1);
+            assert_eq!(result[0].name(), "header1");
+        } else {
+            panic!("No headers");
+        }
     }
 
     /// RFC 9204 Section 4.5.1.1: a non-zero Encoded Insert Count that
