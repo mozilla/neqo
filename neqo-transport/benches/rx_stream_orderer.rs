@@ -28,7 +28,7 @@ fn inbound_in_order(c: &mut Criterion) {
             |mut rx| {
                 let mut drain = Vec::new();
                 for i in 0..FRAMES {
-                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD);
+                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD).unwrap();
                     rx.read_to_end(&mut drain);
                     drain.clear();
                 }
@@ -51,12 +51,12 @@ fn inbound_with_loss(c: &mut Criterion) {
                     if i % 50 == 0 {
                         missing.push_back(i); // "drop" this frame
                     } else {
-                        rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD);
+                        rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD).unwrap();
                     }
                     // Deliver a retransmission ~20 frames later.
                     if i % 20 == 19 {
                         if let Some(lost) = missing.pop_front() {
-                            rx.inbound_frame(lost * to_u64(CHUNK), &PAYLOAD);
+                            rx.inbound_frame(lost * to_u64(CHUNK), &PAYLOAD).unwrap();
                         }
                     }
                     rx.read_to_end(&mut drain);
@@ -64,7 +64,7 @@ fn inbound_with_loss(c: &mut Criterion) {
                 }
                 // Flush any remaining retransmits.
                 for lost in missing {
-                    rx.inbound_frame(lost * to_u64(CHUNK), &PAYLOAD);
+                    rx.inbound_frame(lost * to_u64(CHUNK), &PAYLOAD).unwrap();
                     rx.read_to_end(&mut drain);
                     drain.clear();
                 }
@@ -90,7 +90,7 @@ fn inbound_reordered(c: &mut Criterion) {
             |mut rx| {
                 let mut drain = Vec::new();
                 for &i in &order {
-                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD);
+                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD).unwrap();
                     rx.read_to_end(&mut drain);
                     drain.clear();
                 }
@@ -109,10 +109,10 @@ fn inbound_duplicates(c: &mut Criterion) {
             |mut rx| {
                 let mut drain = Vec::new();
                 for i in 0..FRAMES {
-                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD);
+                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD).unwrap();
                     if i % 20 == 0 && i > 0 {
                         // Duplicate of the previous frame.
-                        rx.inbound_frame((i - 1) * to_u64(CHUNK), &PAYLOAD);
+                        rx.inbound_frame((i - 1) * to_u64(CHUNK), &PAYLOAD).unwrap();
                     }
                     rx.read_to_end(&mut drain);
                     drain.clear();
