@@ -73,7 +73,7 @@ impl Length for usize {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "debug_assert roundtrip `v as u64 as usize` contains a u64→usize cast; \
-              const_assert_eq above ensures it is lossless on all supported targets"
+              const_assert above ensures it is lossless on all supported targets"
 )]
 #[inline]
 #[must_use]
