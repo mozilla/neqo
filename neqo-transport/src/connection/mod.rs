@@ -20,10 +20,11 @@ use std::{
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
+    expect_usize,
     hex::{Hex, HexSnipMiddle, HexWithLen},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
-    qtrace, qwarn, to_u64, expect_usize,
+    qtrace, qwarn, to_u64,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -2322,8 +2323,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len =
-            size_of::<packet::Number>() - expect_usize(u64::from(unacked_range.leading_zeros() / 8));
+        // The conversion is safe because the maximum value is 8.
+        let pn_len = size_of::<packet::Number>() - expect_usize(unacked_range.leading_zeros() / 8);
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3066,6 +3067,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
+            // We cap this transport parameter to usize::MAX on decode, so this is safe.
             let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
             path.borrow_mut()
                 .pmtud_mut()

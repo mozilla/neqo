@@ -208,7 +208,7 @@ impl AddressValidation {
             .zip(TOKEN_IDENTIFIER_RETRY.iter())
             .map(|(a, b)| (a ^ b).count_ones())
             .sum();
-        expect_usize(u64::from(difference)) < TOKEN_IDENTIFIER_RETRY.len()
+        expect_usize(difference) < TOKEN_IDENTIFIER_RETRY.len()
     }
 
     pub fn validate(

@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, to_u64, expect_usize};
+use neqo_common::{qdebug, to_u64};
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -264,7 +264,8 @@ impl Search {
         }
 
         let diff = prev_sent.saturating_sub(curr_delv);
-        let norm_diff = expect_usize(diff * u64::from(Self::SCALE) / prev_sent);
+        let norm_diff =
+            usize::try_from(diff * u64::from(Self::SCALE) / prev_sent).unwrap_or(usize::MAX);
 
         if norm_diff < Self::THRESH {
             qdebug!(

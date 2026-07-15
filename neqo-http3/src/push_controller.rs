@@ -165,6 +165,7 @@ impl Display for PushController {
 
 impl PushController {
     pub const fn new(max_concurent_push: u64, conn_events: Http3ClientEvents) -> Self {
+        assert!(max_concurent_push <= to_u64(usize::MAX));
         Self {
             max_concurent_push,
             current_max_push_id: PushId::new(0),

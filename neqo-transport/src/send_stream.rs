@@ -18,7 +18,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{Buffer, Encoder, Role, expect_usize, qdebug, qerror, qtrace, to_u64};
+use neqo_common::{Buffer, Encoder, Role, expect_usize, qdebug, qerror, qtrace, qwarn, to_u64};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
@@ -449,7 +449,8 @@ impl RangeTracker {
     /// Unmark all sent ranges.
     /// # Panics
     /// On 32-bit machines where far too much is sent before calling this.
-    /// Note that this should not be called for handshakes, which should never exceed that limit.
+    /// That should not happen because this is only be called for handshakes,
+    /// which should never exceed that limit.
     pub fn unmark_sent(&mut self) {
         self.unmark_range(0, expect_usize(self.highest_offset()));
     }
@@ -517,7 +518,10 @@ impl TxBuffer {
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = expect_usize(start - self.retired());
+        let Ok(buff_off) = usize::try_from(start - self.retired()) else {
+            qwarn!("far too much data buffered and transmitted");
+            return None;
+        };
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.
@@ -528,7 +532,7 @@ impl TxBuffer {
         };
 
         let len = maybe_len.map_or(slc.len(), |range_len| {
-            min(expect_usize(range_len), slc.len())
+            expect_usize(min(range_len, to_u64(slc.len())))
         });
 
         debug_assert!(len > 0);
@@ -551,6 +555,7 @@ impl TxBuffer {
         self.ranges.mark_acked(offset, len);
 
         // Any newly-retired bytes can be dropped from the buffer.
+        // No way this can fail because we have to hold this range in our buffer.
         let new_retirable = expect_usize(self.retired() - prev_retired);
         debug_assert!(new_retirable <= self.buffered());
         self.send_buf.drain(..new_retirable);

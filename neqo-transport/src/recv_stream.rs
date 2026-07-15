@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, to_u64, expect_usize};
+use neqo_common::{Buffer, Role, expect_usize, qdebug, qtrace, to_u64};
 use smallvec::SmallVec;
 use strum::Display;
 
@@ -223,7 +223,14 @@ impl RxStreamOrderer {
         }
 
         if new_start < self.retired {
-            new_data = &new_data[expect_usize(self.retired - new_start)..];
+            let Ok(delta) = usize::try_from(self.retired - new_start) else {
+                qdebug!(
+                    "dropping frame starting at {new_start} for being too far behind {}",
+                    self.retired
+                );
+                return;
+            };
+            new_data = &new_data[delta..];
             new_start = self.retired;
         }
 
@@ -273,6 +280,8 @@ impl RxStreamOrderer {
                 let overlap = prev_end.saturating_sub(new_start);
                 qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
+                // This conversion is guaranteed to work because the overlap cannot exceed
+                // the size of the new data, which has to fit in usize.
                 new_data = &new_data[expect_usize(overlap)..];
                 // If it is small enough, extend the previous buffer.
                 // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
@@ -328,6 +337,7 @@ impl RxStreamOrderer {
                     qtrace!(
                         "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
+                    // Expectation has to succeed because any overlap has to be held in a buffer.
                     let truncate_to = new_data.len() - expect_usize(overlap);
                     to_add = &new_data[..truncate_to];
                     break;
@@ -377,21 +387,22 @@ impl RxStreamOrderer {
             .map(|(start_offset, data)| {
                 // All ranges don't overlap but we could have partially
                 // retired some of the first entry's data.
-                let data_len = to_u64(data.len()) - self.retired.saturating_sub(*start_offset);
+                // The conversion here works because, by construction, we never hold a span of data
+                // that is entirely before self.retired, so the result is strictly less than data.len().
+                let data_len =
+                    data.len() - expect_usize(self.retired.saturating_sub(*start_offset));
                 (start_offset, data_len)
             })
             .take_while(|(start_offset, data_len)| {
                 if **start_offset <= prev_end {
-                    prev_end += data_len;
+                    prev_end += to_u64(*data_len);
                     true
                 } else {
                     false
                 }
             })
             // Accumulate, but saturate at usize::MAX.
-            .fold(0, |acc: usize, (_, data_len)| {
-                acc.saturating_add(expect_usize(data_len))
-            })
+            .fold(0, |acc: usize, (_, data_len)| acc.saturating_add(data_len))
     }
 
     /// Bytes read by the application.
@@ -420,8 +431,9 @@ impl RxStreamOrderer {
         self.data_ranges.split_off(&offset);
         // Truncate a range that straddles `offset`.
         if let Some(mut e) = self.data_ranges.last_entry() {
-            // Note: no underflow risk, all ranges that start at or after offset are gone.
             let start = *e.key();
+            // No underflow because all ranges that start at or after `offset` are gone.
+            // Conversion is safe because this cannot be more than what the entry holds.
             let keep = expect_usize(offset - start);
             let data = e.get_mut();
             data.truncate(keep);
@@ -451,7 +463,8 @@ impl RxStreamOrderer {
             let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
-                let copy_offset = expect_usize(max(range_start, self.retired) - range_start);
+                // Conversion OK because this is what is held in this buffer.
+                let copy_offset = expect_usize(self.retired.saturating_sub(range_start));
                 assert!(range_data.len() >= copy_offset);
                 let available = range_data.len() - copy_offset;
                 let space = buf.len() - copied;
@@ -1297,9 +1310,9 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{Encoder, event::Provider as _, qtrace, to_u64, expect_usize};
+    use neqo_common::{Encoder, event::Provider as _, expect_usize, qtrace, to_u64};
     use static_assertions::const_assert;
-use test_fixture::now;
+    use test_fixture::now;
 
     use super::{RecvStream, RecvStreamState};
     use crate::{
