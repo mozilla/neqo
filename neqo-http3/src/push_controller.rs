@@ -13,7 +13,7 @@ use std::{
     slice::SliceIndex,
 };
 
-use neqo_common::{Header, qerror, qinfo, qtrace, to_u64, expect_usize};
+use neqo_common::{Header, expect_usize, qerror, qinfo, qtrace, to_u64};
 use neqo_transport::{Connection, StreamId};
 
 use crate::{

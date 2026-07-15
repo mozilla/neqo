@@ -475,7 +475,10 @@ impl TxBuffer {
     ///
     /// See [`MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
     /// concrete value.
-    #[expect(clippy::cast_possible_truncation, reason = "the value is checked above")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the value is checked above"
+    )]
     pub const MAX_SIZE: usize = MAX_LOCAL_MAX_STREAM_DATA as usize;
 
     #[must_use]

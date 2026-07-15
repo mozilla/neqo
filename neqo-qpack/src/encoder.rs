@@ -1827,7 +1827,10 @@ mod tests {
 
         // Nothing ever blocks, but the tracked state is bounded by the cap.
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
-        assert_eq!(encoder.encoder.unacked_header_blocks.len(), expect_usize(CAP));
+        assert_eq!(
+            encoder.encoder.unacked_header_blocks.len(),
+            expect_usize(CAP)
+        );
     }
 
     /// A stream that is already tracked is not subject to the tracking cap.

@@ -388,7 +388,8 @@ impl RxStreamOrderer {
                 // All ranges don't overlap but we could have partially
                 // retired some of the first entry's data.
                 // The conversion here works because, by construction, we never hold a span of data
-                // that is entirely before self.retired, so the result is strictly less than data.len().
+                // that is entirely before self.retired, so the result is strictly less than
+                // data.len().
                 let data_len =
                     data.len() - expect_usize(self.retired.saturating_sub(*start_offset));
                 (start_offset, data_len)

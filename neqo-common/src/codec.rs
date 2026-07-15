@@ -9,7 +9,7 @@ use std::{
     io::{self, Cursor},
 };
 
-use crate::{Length, hex::HexWithLen, to_u64, expect_usize};
+use crate::{Length, expect_usize, hex::HexWithLen, to_u64};
 
 pub const MAX_VARINT: u64 = (1 << 62) - 1;
 

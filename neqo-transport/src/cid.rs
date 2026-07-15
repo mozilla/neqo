@@ -16,7 +16,9 @@ use std::{
 };
 
 use neqo_common::{
-    Buffer, Decoder, Encoder, expect_usize, hex::{Hex, HexWithLen}, qdebug, qinfo, to_u64,
+    Buffer, Decoder, Encoder, expect_usize,
+    hex::{Hex, HexWithLen},
+    qdebug, qinfo, to_u64,
 };
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};

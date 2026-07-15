@@ -10,7 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{Datagram, event::Provider as _, qtrace, expect_usize};
+use neqo_common::{Datagram, event::Provider as _, expect_usize, qtrace};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,

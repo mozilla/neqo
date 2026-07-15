@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Decoder, Encoder, Role, qinfo, qtrace, expect_usize};
+use neqo_common::{Buffer, Decoder, Encoder, Role, expect_usize, qinfo, qtrace};
 use nss::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
