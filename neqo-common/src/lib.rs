@@ -43,6 +43,10 @@ pub const fn const_max(a: usize, b: usize) -> usize {
 pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a > b) as usize]
 }
+#[must_use]
+pub const fn const_min_u64(a: u64, b: u64) -> u64 {
+    [a, b][(a > b) as usize]
+}
 
 // Both conversions below are safe on all targets where usize and u64 are the
 // same width (i.e., 64-bit targets). The assertion enforces this at compile time.
@@ -86,9 +90,8 @@ pub const fn to_u64(v: usize) -> u64 {
 )]
 #[inline]
 #[must_use]
-pub const fn to_usize(v: u64) -> usize {
-    debug_assert!(v as usize as u64 == v);
-    v as usize
+pub fn expect_usize(v: u64) -> usize {
+    usize::try_from(v).expect("usize should be large enough for this value")
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]

@@ -10,7 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{Datagram, event::Provider as _, qtrace, to_usize};
+use neqo_common::{Datagram, event::Provider as _, qtrace, expect_usize};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
@@ -285,7 +285,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     exchange_packets(&mut hconn_c, &mut hconn_s, false, None);
 
     // Expect the server's available send space to be back to the stream limit.
-    assert_eq!(request.available()?, to_usize(STREAM_LIMIT));
+    assert_eq!(request.available()?, expect_usize(STREAM_LIMIT));
 
     // Expect the server to emit a DataWritable event, even though it always had
     // at least 1 byte available to send, i.e. it never exhausted the entire

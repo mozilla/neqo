@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider as _, qdebug, to_usize};
+use neqo_common::{event::Provider as _, qdebug};
 use nss::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -215,7 +215,7 @@ fn zero_rtt_send_reject() {
 fn zero_rtt_update_flow_control() {
     const LOW: u64 = 3;
     const HIGH: u64 = 10;
-    const MESSAGE: &[u8] = &[0; to_usize(HIGH)];
+    const MESSAGE: &[u8] = &[0; HIGH as usize];
 
     let mut client = default_client();
     let mut server = new_server(

@@ -781,6 +781,7 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "sfv",
+ "static_assertions",
  "strum",
  "test-fixture 0.30.0",
  "thiserror",

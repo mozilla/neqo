@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, to_u64, to_usize};
+use neqo_common::{Buffer, Role, qtrace, to_u64, expect_usize};
 use smallvec::SmallVec;
 use strum::Display;
 
@@ -223,7 +223,7 @@ impl RxStreamOrderer {
         }
 
         if new_start < self.retired {
-            new_data = &new_data[to_usize(self.retired - new_start)..];
+            new_data = &new_data[expect_usize(self.retired - new_start)..];
             new_start = self.retired;
         }
 
@@ -273,7 +273,7 @@ impl RxStreamOrderer {
                 let overlap = prev_end.saturating_sub(new_start);
                 qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
-                new_data = &new_data[to_usize(overlap)..];
+                new_data = &new_data[expect_usize(overlap)..];
                 // If it is small enough, extend the previous buffer.
                 // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
                 // to one frame). This can't always extend, because otherwise the
@@ -328,7 +328,7 @@ impl RxStreamOrderer {
                     qtrace!(
                         "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
-                    let truncate_to = new_data.len() - to_usize(overlap);
+                    let truncate_to = new_data.len() - expect_usize(overlap);
                     to_add = &new_data[..truncate_to];
                     break;
                 }
@@ -390,7 +390,7 @@ impl RxStreamOrderer {
             })
             // Accumulate, but saturate at usize::MAX.
             .fold(0, |acc: usize, (_, data_len)| {
-                acc.saturating_add(to_usize(data_len))
+                acc.saturating_add(expect_usize(data_len))
             })
     }
 
@@ -422,7 +422,7 @@ impl RxStreamOrderer {
         if let Some(mut e) = self.data_ranges.last_entry() {
             // Note: no underflow risk, all ranges that start at or after offset are gone.
             let start = *e.key();
-            let keep = to_usize(offset - start);
+            let keep = expect_usize(offset - start);
             let data = e.get_mut();
             data.truncate(keep);
 
@@ -451,7 +451,7 @@ impl RxStreamOrderer {
             let mut keep = false;
             if self.retired >= range_start {
                 // Frame data has new contiguous bytes.
-                let copy_offset = to_usize(max(range_start, self.retired) - range_start);
+                let copy_offset = expect_usize(max(range_start, self.retired) - range_start);
                 assert!(range_data.len() >= copy_offset);
                 let available = range_data.len() - copy_offset;
                 let space = buf.len() - copied;
@@ -1297,8 +1297,9 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{Encoder, event::Provider as _, qtrace, to_u64, to_usize};
-    use test_fixture::now;
+    use neqo_common::{Encoder, event::Provider as _, qtrace, to_u64, expect_usize};
+    use static_assertions::const_assert;
+use test_fixture::now;
 
     use super::{RecvStream, RecvStreamState};
     use crate::{
@@ -1318,7 +1319,7 @@ mod tests {
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
-            let data = &ZEROES[..to_usize(r.end - r.start)];
+            let data = &ZEROES[..expect_usize(r.end - r.start)];
             s.inbound_frame(r.start, data);
         }
 
@@ -2168,13 +2169,14 @@ mod tests {
     #[expect(clippy::too_many_lines, reason = "This is test code.")]
     #[test]
     fn fc_state_recv_7() {
-        const CONNECTION_WINDOW: u64 = 1024;
-        const CONNECTION_WINDOW_US: usize = to_usize(CONNECTION_WINDOW);
+        const CONNECTION_WINDOW_US: usize = 1024;
+        const CONNECTION_WINDOW: u64 = to_u64(CONNECTION_WINDOW_US);
 
-        const STREAM_WINDOW: u64 = CONNECTION_WINDOW / 2;
-        const STREAM_WINDOW_US: usize = to_usize(STREAM_WINDOW);
+        const STREAM_WINDOW_US: usize = CONNECTION_WINDOW_US / 2;
+        const STREAM_WINDOW: u64 = to_u64(STREAM_WINDOW_US);
 
-        const WINDOW_UPDATE_FRACTION_US: usize = to_usize(WINDOW_UPDATE_FRACTION);
+        const_assert!(WINDOW_UPDATE_FRACTION <= to_u64(usize::MAX));
+        const WINDOW_UPDATE_FRACTION_US: usize = WINDOW_UPDATE_FRACTION as usize;
 
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),

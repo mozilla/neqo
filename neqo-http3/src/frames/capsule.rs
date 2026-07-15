@@ -4,16 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Bytes, Encoder, qdebug};
+use neqo_common::{Bytes, Encoder, qdebug, to_u64};
+use static_assertions::const_assert;
 
 use super::{hframe::HFrameType, reader::FrameDecoder};
 use crate::Res;
 
 pub const CAPSULE_TYPE_DATAGRAM: HFrameType = HFrameType(0x00);
 
+const_assert!(neqo_transport::MAX_DATAGRAM_FRAME_SIZE <= to_u64(usize::MAX));
 /// Limit on the declared length of a `DATAGRAM` capsule we'll buffer before decoding.
 pub const MAX_DATAGRAM_BYTES: usize =
-    neqo_common::to_usize(neqo_transport::MAX_DATAGRAM_FRAME_SIZE);
+    neqo_transport::MAX_DATAGRAM_FRAME_SIZE as usize;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Capsule {
@@ -66,7 +68,7 @@ impl FrameDecoder<Self> for Capsule {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::to_usize;
+    use neqo_common::expect_usize;
 
     use super::*;
 
@@ -148,7 +150,7 @@ mod tests {
         let mut decoder = neqo_common::Decoder::from(encoded);
         let type_int = decoder.decode_varint().unwrap();
         let len = decoder.decode_varint().unwrap();
-        let data = decoder.decode(to_usize(len)).unwrap();
+        let data = decoder.decode(expect_usize(len)).unwrap();
 
         let result = Capsule::decode(HFrameType(type_int), len, Some(data))
             .unwrap()
