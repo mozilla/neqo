@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, expect_usize, qdebug, qtrace, to_u64};
+use neqo_common::{Buffer, Role, expect_usize, qtrace, to_u64};
 use smallvec::SmallVec;
 use strum::Display;
 
@@ -223,14 +223,8 @@ impl RxStreamOrderer {
         }
 
         if new_start < self.retired {
-            let Ok(delta) = usize::try_from(self.retired - new_start) else {
-                qdebug!(
-                    "dropping frame starting at {new_start} for being too far behind {}",
-                    self.retired
-                );
-                return;
-            };
-            new_data = &new_data[delta..];
+            // Conversion is safe because this difference is bounded by new_data.len().
+            new_data = &new_data[expect_usize(self.retired - new_start)..];
             new_start = self.retired;
         }
 
