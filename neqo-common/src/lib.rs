@@ -21,7 +21,7 @@ pub mod qlog;
 pub mod tos;
 
 use enum_map::Enum;
-use static_assertions::const_assert_eq;
+use static_assertions::const_assert;
 use strum::Display;
 
 #[cfg(feature = "build-fuzzing-corpus")]
@@ -48,9 +48,8 @@ pub const fn const_min_u64(a: u64, b: u64) -> u64 {
     [a, b][(a > b) as usize]
 }
 
-// Both conversions below are safe on all targets where usize and u64 are the
-// same width (i.e., 64-bit targets). The assertion enforces this at compile time.
-const_assert_eq!(usize::BITS, u64::BITS);
+// The conversions below depend on this relationship.
+const_assert!(usize::BITS <= u64::BITS);
 
 /// A trait for values that represent a length or byte count, convertible
 /// to the wire domain (`u64`).
@@ -89,6 +88,7 @@ pub const fn to_u64(v: usize) -> u64 {
 /// Callers of this function should document why they think overflow is impossible.
 #[inline]
 #[must_use]
+#[track_caller]
 pub fn expect_usize<T>(v: T) -> usize
 where
     usize: TryFrom<T>,
