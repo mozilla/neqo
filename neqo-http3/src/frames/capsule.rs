@@ -14,6 +14,7 @@ pub const CAPSULE_TYPE_DATAGRAM: HFrameType = HFrameType(0x00);
 
 const_assert!(neqo_transport::MAX_DATAGRAM_FRAME_SIZE <= to_u64(usize::MAX));
 /// Limit on the declared length of a `DATAGRAM` capsule we'll buffer before decoding.
+#[expect(clippy::cast_possible_truncation, reason = "small value checked above")]
 pub const MAX_DATAGRAM_BYTES: usize = neqo_transport::MAX_DATAGRAM_FRAME_SIZE as usize;
 
 #[derive(PartialEq, Eq, Debug, Clone)]

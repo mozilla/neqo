@@ -84,6 +84,9 @@ pub const fn to_u64(v: usize) -> u64 {
 }
 
 /// Convert a numeric type to a `usize`.
+/// # Panics
+/// If we have an overflow on the conversion.
+/// Callers of this function should document why they think overflow is impossible.
 #[inline]
 #[must_use]
 pub fn expect_usize<T>(v: T) -> usize

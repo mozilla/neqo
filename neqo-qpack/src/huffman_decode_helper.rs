@@ -36,8 +36,8 @@ fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
 
         found = true;
         if iter.len == len + 1 {
-            // This is a leaf
-            let bit = expect_usize(u64::from(iter.val & 1));
+            // This is a leaf; safe conversion because the value is 0 or 1.
+            let bit = expect_usize(iter.val & 1);
             next[bit] = Some(Box::new(HuffmanDecoderNode {
                 next: [None, None],
                 #[expect(

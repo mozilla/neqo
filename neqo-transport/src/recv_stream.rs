@@ -337,7 +337,7 @@ impl RxStreamOrderer {
                     qtrace!(
                         "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
-                    // Expectation has to succeed because any overlap has to be held in a buffer.
+                    // Safe conversion because any overlap has to be held in a buffer.
                     let truncate_to = new_data.len() - expect_usize(overlap);
                     to_add = &new_data[..truncate_to];
                     break;
@@ -388,8 +388,7 @@ impl RxStreamOrderer {
                 // All ranges don't overlap but we could have partially
                 // retired some of the first entry's data.
                 // The conversion here works because, by construction, we never hold a span of data
-                // that is entirely before self.retired, so the result is strictly less than
-                // data.len().
+                // that is entirely before self.retired, so the result is less than data.len().
                 let data_len =
                     data.len() - expect_usize(self.retired.saturating_sub(*start_offset));
                 (start_offset, data_len)
@@ -2190,6 +2189,10 @@ mod tests {
         const STREAM_WINDOW: u64 = to_u64(STREAM_WINDOW_US);
 
         const_assert!(WINDOW_UPDATE_FRACTION <= to_u64(usize::MAX));
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "value is statically checked"
+        )]
         const WINDOW_UPDATE_FRACTION_US: usize = WINDOW_UPDATE_FRACTION as usize;
 
         let fc = Rc::new(RefCell::new(ReceiverFlowControl::new(

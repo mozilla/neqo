@@ -115,17 +115,14 @@ where
     }
 
     /// Consume flow control.
-    pub fn consume(&mut self, count: impl Length) {
+    pub fn consume<L: Length>(&mut self, count: L) {
         let amt = count.as_u64();
         debug_assert!(self.used + amt <= self.limit);
         self.used += amt;
     }
 
     /// Get available flow control.
-    #[cfg_attr(
-        target_pointer_width = "32",
-        expect(clippy::cast_possible_truncation, reason = "value is capped")
-    )]
+    #[expect(clippy::cast_possible_truncation, reason = "value is capped")]
     pub const fn available(&self) -> usize {
         const_min_u64(self.limit - self.used, to_u64(usize::MAX)) as usize
     }
