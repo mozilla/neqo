@@ -2079,3 +2079,66 @@ fn retry_scid_matching_initial_dcid() {
     drop(client.process(Some(datagram(retry)), now()));
     assert_eq!(client.stats().dropped_rx, 0);
 }
+
+/// RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an Initial
+/// to 0; a client that receives an Initial with a non-zero Token Length MUST discard
+/// it. A token-free server Initial is still processed.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn client_initial_with_token() {
+    use neqo_common::Encoder;
+
+    use crate::crypto::{CryptoDxDirection, CryptoDxState};
+
+    // A server Initial addressed to the client, encrypted with the Initial keys
+    // seeded by the client's original Destination CID, carrying `token` and a PING.
+    fn server_initial(client_initial: &[u8], token: &[u8]) -> Vec<u8> {
+        // Skip the first byte and 4-byte version, then read the length-prefixed
+        // original Destination CID (the Initial-key seed) and Source CID (which the
+        // client expects as the Destination CID of packets sent back to it).
+        let mut dec = Decoder::from(&client_initial[5..]);
+        let seed = dec.decode_vec(1).expect("client DCID").to_vec();
+        let dcid = dec.decode_vec(1).expect("client SCID").to_vec();
+
+        let version = Version::default();
+        let mut write =
+            CryptoDxState::new_initial(version, CryptoDxDirection::Write, "server in", &seed, 0)
+                .expect("initial keys");
+        let mut builder = crate::packet::Builder::long(
+            Encoder::default(),
+            crate::packet::Type::Initial,
+            version,
+            Some(dcid.as_slice()),
+            Some(&[0x33; 8][..]),
+            crate::packet::LIMIT,
+        );
+        builder.initial_token(token);
+        builder.pn(0, 1);
+        builder.encode([0x01_u8]); // PING, so the packet is ack-eliciting
+        builder.encode([0_u8; 20]); // PADDING, ample sample for header protection
+        builder.build(&mut write).expect("build").as_ref().to_vec()
+    }
+
+    // A token-free server Initial decrypts and is processed (also confirming the
+    // forged packet above is well-formed).
+    let mut client = default_client();
+    let ci = client
+        .process_output(now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec();
+    let dropped = client.stats().dropped_rx;
+    drop(client.process(Some(datagram(server_initial(&ci, &[]))), now()));
+    assert_eq!(client.stats().dropped_rx, dropped);
+
+    // The same Initial carrying a non-empty token is discarded.
+    let mut client = default_client();
+    let ci = client
+        .process_output(now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec();
+    let dropped = client.stats().dropped_rx;
+    drop(client.process(Some(datagram(server_initial(&ci, &[0x01]))), now()));
+    assert_eq!(client.stats().dropped_rx, dropped + 1);
+}
