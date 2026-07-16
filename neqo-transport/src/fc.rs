@@ -24,7 +24,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace, to_u64, to_usize};
+use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace, to_u64};
 
 use crate::{
     Error, Res,
@@ -122,8 +122,8 @@ where
     }
 
     /// Get available flow control.
-    pub const fn available(&self) -> usize {
-        to_usize(self.limit - self.used)
+    pub fn available(&self) -> usize {
+        usize::try_from(self.limit - self.used).unwrap_or(usize::MAX)
     }
 
     /// How much data has been written.
