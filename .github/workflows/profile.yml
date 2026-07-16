@@ -113,8 +113,6 @@ jobs:
       matrix:
         include:
           - { client: neqo, server: neqo }
-          - { client: neqo, server: msquic }
-          - { client: msquic, server: neqo }
           - { client: neqo, server: quiche }
           - { client: quiche, server: neqo }
 
@@ -143,13 +141,6 @@ jobs:
           cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
-
-      - name: Build msquic
-        if: matrix.client == 'msquic' || matrix.server == 'msquic'
-        uses: ./.github/actions/quic-build
-        with:
-          impl: msquic
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build cloudflare/quiche
         if: matrix.client == 'quiche' || matrix.server == 'quiche'

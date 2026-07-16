@@ -33,6 +33,9 @@ pub trait FrameDecoder<T> {
         Ok(())
     }
 
+    /// Upper bound on a known frame's declared length that we'll buffer before decoding.
+    fn max_frame_data(frame_type: HFrameType) -> usize;
+
     /// # Errors
     ///
     /// If a frame cannot be properly decoded.
@@ -282,10 +285,12 @@ impl FrameReader {
             }
             None => {
                 if T::is_known_type(self.frame_type) {
+                    let len = usize::try_from(len).or(Err(Error::HttpFrame))?;
+                    if len > T::max_frame_data(self.frame_type) {
+                        return Err(Error::HttpExcessiveLoad);
+                    }
                     self.state = FrameReaderState::GetData {
-                        decoder: IncrementalDecoderBuffer::new(
-                            usize::try_from(len).or(Err(Error::HttpFrame))?,
-                        ),
+                        decoder: IncrementalDecoderBuffer::new(len),
                     };
                 } else if self.frame_len == 0 {
                     self.reset();

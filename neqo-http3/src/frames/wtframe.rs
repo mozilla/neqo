@@ -27,6 +27,13 @@ impl WebTransportFrame {
     /// The value 1024 is used to limit the message size for security and interoperability.
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
+    /// Limit on the declared length of a `CLOSE_SESSION` frame.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CLOSE_MAX_MESSAGE_SIZE is 1024, well within usize on all targets"
+    )]
+    pub const MAX_CLOSE_SESSION_BYTES: usize = Self::CLOSE_MAX_MESSAGE_SIZE as usize + 4;
+
     pub fn encode(&self, enc: &mut Encoder) {
         #[cfg(feature = "build-fuzzing-corpus")]
         let start = enc.len();
@@ -69,6 +76,14 @@ impl FrameDecoder<Self> for WebTransportFrame {
     fn is_known_type(frame_type: HFrameType) -> bool {
         frame_type == HFrameType(Self::CLOSE_SESSION)
     }
+
+    fn max_frame_data(frame_type: HFrameType) -> usize {
+        if frame_type == HFrameType(Self::CLOSE_SESSION) {
+            Self::MAX_CLOSE_SESSION_BYTES
+        } else {
+            usize::MAX
+        }
+    }
 }
 
 #[cfg(test)]
@@ -84,6 +99,14 @@ mod tests {
         assert!(WebTransportFrame::is_known_type(HFrameType(
             WebTransportFrame::CLOSE_SESSION
         )));
+    }
+
+    #[test]
+    fn max_frame_data_unknown_type_is_unbounded() {
+        assert_eq!(
+            WebTransportFrame::max_frame_data(HFrameType(0x1230)),
+            usize::MAX
+        );
     }
 
     #[test]

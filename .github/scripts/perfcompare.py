@@ -3,7 +3,6 @@
 
 import argparse
 import json
-import math
 import os
 import re
 import shlex
@@ -13,8 +12,10 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from statistics import mean as avg, variance
+from statistics import NormalDist, median
 from typing import NamedTuple
+
+from scipy.stats import mannwhitneyu
 
 
 class ImplConfig(NamedTuple):
@@ -30,11 +31,6 @@ IMPLS = {
         "build-neqo/neqo/neqo-client _cc _pacing _disk _flags -Q 1 https://{host}:{port}/{size}",
         "build-neqo/neqo/neqo-server _cc _pacing _flags -Q 1 {host}:{port}",
         "--output-dir .", "",
-    ),
-    "msquic": ImplConfig(
-        "build-msquic/quicinterop -test:D -custom:{host} -port:{port} -urls:https://{host}:{port}/{size}",
-        "build-msquic/quicinteropserver -root:{tmp} -listen:{host} -port:{port} -file:{tmp}/cert -key:{tmp}/key -noexit",
-        "", "-a hq-interop",
     ),
     "google": ImplConfig(
         "build-google/quic_client --disable_certificate_verification https://{host}:{port}/{size}",
@@ -74,11 +70,25 @@ def _tag(cmd: str) -> str:
     return Path(cmd.split()[0]).name[:15]
 
 
-def is_significant(s1: list[float], s2: list[float]) -> bool:
-    """Welch's t-test with normal approximation. Valid for n >= 30."""
-    v1, v2, n1, n2 = variance(s1), variance(s2), len(s1), len(s2)
-    se = math.sqrt(v1 / n1 + v2 / n2)
-    return se > 0 and abs(avg(s1) - avg(s2)) / se > 1.96
+# Deltas smaller than this are treated as measurement noise regardless of
+# p-value (mirrors Criterion's noise_threshold).
+NOISE_FLOOR_PCT = 1.0
+
+
+def is_significant(s1: list[float], s2: list[float], pct: float) -> bool:
+    """Mann-Whitney U test with a practical-significance floor.
+
+    pct is the caller's already-computed percent change between the two
+    samples' medians.
+    """
+    if not s1 or not s2 or abs(pct) < NOISE_FLOOR_PCT:
+        return False
+    return bool(mannwhitneyu(s1, s2, alternative="two-sided").pvalue < 0.05)
+
+
+def mad(values: list[float], center: float) -> float:
+    """Median absolute deviation, scaled to be comparable to a stddev."""
+    return median(abs(v - center) for v in values) / NormalDist().inv_cdf(0.75)
 
 
 def sh(cmd, **kw):
@@ -92,7 +102,7 @@ def sh(cmd, **kw):
 def mangle(cmd, cc, pacing, flags, disk):
     """Replace placeholders, return (command, filename_extension)."""
     ext = f"-{cc}" if cc else ""
-    if not pacing:
+    if pacing is False:
         ext += "-nopacing"
     cmd = (
         cmd.replace("_cc", f"--cc {cc}" if cc else "")
@@ -224,7 +234,12 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
     if md:
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
     cmd.append(f"echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {ws}/{ccmd}")
-    sh(cmd, check=True)
+    result = sh(cmd, check=True, stderr=subprocess.PIPE, text=True)
+    # Surface hyperfine's own outlier warnings in the PR summary, not just the raw log.
+    if result.stderr:
+        print(result.stderr, end="")
+        if "outlier" in result.stderr.lower():
+            (out_dir / f"{name}.outliers").write_text(result.stderr, encoding="utf-8")
 
 
 def perf(cfg, scmd, ccmd, name):
@@ -257,55 +272,65 @@ def perf(cfg, scmd, ccmd, name):
         proc.wait(timeout=5)
 
 
+def _load_result(path):
+    """Load a hyperfine --export-json result, or None if the file is missing."""
+    if not path.exists():
+        return None
+    res = json.loads(path.read_text(encoding="utf-8"))["results"][0]
+    res.setdefault("median", median(res["times"]))
+    return res
+
+
 def process(cfg, name, bold):
     """Process benchmark results into a table row."""
-    rj = cfg.workspace / "hyperfine" / f"{name}.json"
-    rm = cfg.workspace / "hyperfine" / f"{name}.md"
-    bj = cfg.workspace / "hyperfine-baseline" / f"{name}.json"
-    if not rj.exists() or not rm.exists():
+    out_dir = cfg.workspace / "hyperfine"
+    res = _load_result(out_dir / f"{name}.json")
+    if res is None:
         return None
 
-    res = json.loads(rj.read_text(encoding="utf-8"))["results"][0]
-    mean, times = res["mean"], res["times"]
-    md = rm.read_text(encoding="utf-8")
-    match = next(
-        (
-            x
-            for x in md.splitlines()
-            if x.startswith("|") and "Command" not in x and ":--" not in x
-        ),
-        None,
-    )
-    if not match:
-        return None
+    mean, times, med = res["mean"], res["times"], res["median"]
+    md_dev = mad(times, med)
 
-    parts = match.replace("`", "").split("|")
-    b = "**" if bold else ""
-    row = f"| {b}{parts[1].strip()}{b} |{'|'.join(parts[2:5])}|"
-    m = re.search(r"± *(\S+)", md)
-    if not m:
-        raise ValueError(f"Could not parse standard deviation from {rm}")
-    rng = float(m.group(1))
-    row += f" {(cfg.size / 1048576) / mean:.1f} ± {(cfg.size / 1048576) / rng:.1f} "
-
-    if bj.exists():
-        base = json.loads(bj.read_text(encoding="utf-8"))["results"][0]
-        delta = (mean - base["mean"]) * 1000
-        pct = (mean - base["mean"]) / base["mean"] * 100
-        if is_significant(base["times"], times):
-            sym = ":broken_heart:" if delta > 0 else ":green_heart:"
-            print(
-                f"Performance {'regressed' if delta > 0 else 'improved'}: {base['mean']} -> {mean}"
+    outlier_flag = ""
+    if (out_dir / f"{name}.outliers").exists():
+        outliers = [t for t in times if abs(t - med) > 3 * md_dev]
+        if outliers:
+            detail = (
+                f"{len(outliers)} of {len(times)} runs exceeded 3×MAD from the median "
+                f"({med * 1000:.0f}ms); slowest was {max(times) * 1000:.0f}ms"
             )
-            row += f"| {sym} **{delta:.1f}** | **{pct:.1f}%** |\n"
+            outlier_flag = f' <span title="{detail}">⚠️</span>'
+    b = "**" if bold else ""
+    row = f"| {b}{name}{b}{outlier_flag} "
+    row += f"| {mean * 1000:.1f} ± {res['stddev'] * 1000:.1f} "
+    row += f"| {res['min'] * 1000:.1f} – {res['max'] * 1000:.1f} "
+    row += f"| {med * 1000:.1f} ± {md_dev * 1000:.1f} "
+    mibs = (cfg.size / 1048576) / mean
+    mibs_err = (cfg.size / 1048576) * res["stddev"] / mean**2
+    row += f"| {mibs:.1f} ± {mibs_err:.1f} "
+
+    if (base := _load_result(cfg.workspace / "hyperfine-baseline" / f"{name}.json")) is not None:
+        base_med = base["median"]
+        diff = med - base_med
+        delta = diff * 1000
+        pct = diff / base_med * 100
+        change = f"{base_med} -> {med} (median)"
+        if is_significant(base["times"], times, pct):
+            regressed = delta > 0
+            sym = ":broken_heart:" if regressed else ":green_heart:"
+            line = f"{name}: Performance has {'regressed' if regressed else 'improved'}. {change}"
+            print(line)
+            with (cfg.workspace / "results.txt").open("a", encoding="utf-8") as f:
+                f.write(f"{line}\n")
+            row += f"| {sym} **{delta:+.1f} ({pct:+.1f}%)** |\n"
         else:
-            print(f"No significant change: {base['mean']} -> {mean}")
-            row += f"|  {delta:.1f} | {pct:.1f}% |\n"
+            print(f"No significant change: {change}")
+            row += f"| {delta:+.1f} ({pct:+.1f}%) |\n"
     elif "neqo" in name:
         print("No cached baseline found.")
-        row += "| :question: | :question: |\n"
+        row += "| :question: |\n"
     else:
-        row += "| | |\n"
+        row += "| |\n"
     return row
 
 
@@ -344,7 +369,7 @@ def run(cfg, tmp):
             elif client == "neqo" or server == "neqo":
                 opts = [("cubic", True)]
             else:
-                opts = [("", False)]
+                opts = [("", None)]
 
             for cc, pacing in opts:
                 # When neqo is the server, apply the client's interop flags to it.
@@ -381,6 +406,7 @@ def run(cfg, tmp):
 
 
 def main():
+    """Parse arguments, run all comparisons, and write the results tables."""
     p = argparse.ArgumentParser(description="Compare QUIC implementations")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4433)
@@ -413,8 +439,8 @@ def main():
     header = (
         f"Transfer of {cfg.size} bytes over loopback, min. {cfg.runs} runs. "
         "All unit-less numbers are in milliseconds.\n\n"
-        "| Client vs. server (params) | Mean ± σ | Min | Max | MiB/s ± σ | Δ `baseline` | Δ `baseline` |\n"
-        "|:---|---:|---:|---:|---:|---:|---:|\n"
+        "| Client vs. server | Mean±σ | Min–Max | Median±MAD | MiB/s±σ | ΔMedian |\n"
+        "|:---|---:|---:|---:|---:|---:|\n"
     )
     sorted_steps = sorted(steps, key=lambda r: re.sub(r"^\| \*\*", "| ", r))
     (cfg.workspace / "comparison.md").write_text(

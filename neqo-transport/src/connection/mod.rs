@@ -23,7 +23,7 @@ use neqo_common::{
     hex::{Hex, HexSnipMiddle, HexWithLen},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
-    qtrace, qwarn, to_u64, to_usize,
+    qtrace, qwarn, to_u64,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -803,8 +803,8 @@ impl Connection {
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp =
-            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
+        let tp = TransportParameters::decode(Role::Client, &mut dec_tp)
+            .map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
@@ -1324,14 +1324,24 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
-        if !packet.is_valid_retry(
-            self.original_destination_cid
-                .as_ref()
-                .ok_or(Error::InvalidRetry)?,
-        ) {
+        let odcid = self
+            .original_destination_cid
+            .as_ref()
+            .ok_or(Error::InvalidRetry)?;
+        if !packet.is_valid_retry(odcid) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
+            return Ok(());
+        }
+        // RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet that
+        // carries a Source Connection ID identical to the Destination Connection ID
+        // of its Initial. The Retry integrity key is public, so this comparison is
+        // one of the few checks that constrains an off-path injected Retry.
+        if packet.scid() == *odcid {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry with SCID matching our Initial DCID");
             return Ok(());
         }
         // At this point, we should only have the connection ID that we generated.
@@ -2312,8 +2322,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len =
-            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
+        let pn_len = size_of::<packet::Number>()
+            - usize::try_from(unacked_range.leading_zeros() / 8).expect("u32 fits in usize");
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3056,11 +3066,12 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
-            path.borrow_mut()
-                .pmtud_mut()
-                .set_peer_max_udp_payload(max_udp_payload);
-            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+            if let Ok(max_udp_payload) = usize::try_from(remote.get_integer(MaxUdpPayloadSize)) {
+                path.borrow_mut()
+                    .pmtud_mut()
+                    .set_peer_max_udp_payload(max_udp_payload);
+                self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+            }
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
@@ -3407,8 +3418,18 @@ impl Connection {
                     stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
-                if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
-                    qinfo!("[{self}] received too many connection IDs");
+                let too_many = if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
+                    Some("received too many active connection IDs")
+                } else if self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE {
+                    // `MAX_RETIRE_QUEUE` is the actual allowed maximum.  A single call to
+                    // `retire_cids` above can add at most `ACTIVE_LIMIT` entries, so the
+                    // queue can only ever temporarily exceed the bound by that.
+                    Some("too many connection IDs pending retirement")
+                } else {
+                    None
+                };
+                if let Some(msg) = too_many {
+                    qinfo!("[{self}] {msg}");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }
             }

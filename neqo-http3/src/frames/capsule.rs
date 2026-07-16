@@ -11,6 +11,13 @@ use crate::Res;
 
 pub const CAPSULE_TYPE_DATAGRAM: HFrameType = HFrameType(0x00);
 
+/// Limit on the declared length of a `DATAGRAM` capsule we'll buffer before decoding.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "MAX_DATAGRAM_FRAME_SIZE is 65535, well within usize on all targets"
+)]
+pub const MAX_DATAGRAM_BYTES: usize = neqo_transport::MAX_DATAGRAM_FRAME_SIZE as usize;
+
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum Capsule {
     Datagram { payload: Bytes },
@@ -49,12 +56,19 @@ impl FrameDecoder<Self> for Capsule {
     fn is_known_type(frame_type: HFrameType) -> bool {
         frame_type == CAPSULE_TYPE_DATAGRAM
     }
+
+    fn max_frame_data(frame_type: HFrameType) -> usize {
+        if frame_type == CAPSULE_TYPE_DATAGRAM {
+            MAX_DATAGRAM_BYTES
+        } else {
+            usize::MAX
+        }
+    }
 }
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::to_usize;
 
     use super::*;
 
@@ -118,6 +132,11 @@ mod tests {
     }
 
     #[test]
+    fn max_frame_data_unknown_type_is_unbounded() {
+        assert_eq!(Capsule::max_frame_data(HFrameType(0x17)), usize::MAX);
+    }
+
+    #[test]
     fn encode_decode_roundtrip() {
         let payload = vec![0xde, 0xad, 0xbe, 0xef];
         let original = Capsule::Datagram {
@@ -131,7 +150,7 @@ mod tests {
         let mut decoder = neqo_common::Decoder::from(encoded);
         let type_int = decoder.decode_varint().unwrap();
         let len = decoder.decode_varint().unwrap();
-        let data = decoder.decode(to_usize(len)).unwrap();
+        let data = decoder.decode(usize::try_from(len).unwrap()).unwrap();
 
         let result = Capsule::decode(HFrameType(type_int), len, Some(data))
             .unwrap()
