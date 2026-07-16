@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Decoder, Encoder, to_usize};
+use neqo_common::{Decoder, Encoder};
 
 use super::hframe::HFrameType;
 use crate::{Error, Res, frames::reader::FrameDecoder};
@@ -28,7 +28,11 @@ impl WebTransportFrame {
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
     /// Limit on the declared length of a `CLOSE_SESSION` frame.
-    pub const MAX_CLOSE_SESSION_BYTES: usize = to_usize(Self::CLOSE_MAX_MESSAGE_SIZE) + 4;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "CLOSE_MAX_MESSAGE_SIZE is 1024, well within usize on all targets"
+    )]
+    pub const MAX_CLOSE_SESSION_BYTES: usize = Self::CLOSE_MAX_MESSAGE_SIZE as usize + 4;
 
     pub fn encode(&self, enc: &mut Encoder) {
         #[cfg(feature = "build-fuzzing-corpus")]
