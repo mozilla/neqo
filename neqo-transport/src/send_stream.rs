@@ -18,7 +18,7 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{Buffer, Encoder, Role, qdebug, qerror, qtrace, to_u64};
+use neqo_common::{Buffer, Encoder, Role, expect_usize, qdebug, qerror, qtrace, to_u64};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
@@ -449,12 +449,10 @@ impl RangeTracker {
     /// Unmark all sent ranges.
     /// # Panics
     /// On 32-bit machines where far too much is sent before calling this.
-    /// Note that this should not be called for handshakes, which should never exceed that limit.
+    /// That should not happen because this should only be called for handshakes,
+    /// which never exceed that limit.
     pub fn unmark_sent(&mut self) {
-        self.unmark_range(
-            0,
-            usize::try_from(self.highest_offset()).expect("u64 fits in usize"),
-        );
+        self.unmark_range(0, expect_usize(self.highest_offset()));
     }
 
     #[cfg(feature = "bench")]
@@ -470,14 +468,17 @@ pub struct TxBuffer {
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
 
-const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= usize::MAX as u64);
+const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
 
 impl TxBuffer {
     /// The maximum stream send buffer size.
     ///
     /// See [`MAX_LOCAL_MAX_STREAM_DATA`] for an explanation of this
     /// concrete value.
-    #[expect(clippy::cast_possible_truncation, reason = "Checked by const_assert!")]
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the value is checked above"
+    )]
     pub const MAX_SIZE: usize = MAX_LOCAL_MAX_STREAM_DATA as usize;
 
     #[must_use]
@@ -520,7 +521,8 @@ impl TxBuffer {
 
         // Convert from ranges-relative-to-zero to
         // ranges-relative-to-buffer-start
-        let buff_off = usize::try_from(start - self.retired()).ok()?;
+        // Conversion is safe because the delta is bounded by send_buf size.
+        let buff_off = expect_usize(start - self.retired());
 
         // Deque returns two slices. Create a subslice from whichever
         // one contains the first unmarked data.
@@ -531,7 +533,8 @@ impl TxBuffer {
         };
 
         let len = maybe_len.map_or(slc.len(), |range_len| {
-            min(usize::try_from(range_len).unwrap_or(usize::MAX), slc.len())
+            // Safe conversion because of a min over a usize value.
+            expect_usize(min(range_len, to_u64(slc.len())))
         });
 
         debug_assert!(len > 0);
@@ -554,8 +557,8 @@ impl TxBuffer {
         self.ranges.mark_acked(offset, len);
 
         // Any newly-retired bytes can be dropped from the buffer.
-        let new_retirable =
-            usize::try_from(self.retired() - prev_retired).expect("u64 fits in usize");
+        // No way this can fail because we have to hold this range in our buffer.
+        let new_retirable = expect_usize(self.retired() - prev_retired);
         debug_assert!(new_retirable <= self.buffered());
         self.send_buf.drain(..new_retirable);
     }
@@ -2422,7 +2425,9 @@ pub struct RecoveryToken {
 mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
-    use neqo_common::{Encoder, MAX_VARINT, event::Provider as _, hex::HexWithLen, qtrace, to_u64};
+    use neqo_common::{
+        Encoder, MAX_VARINT, event::Provider as _, expect_usize, hex::HexWithLen, qtrace, to_u64,
+    };
 
     use super::RecoveryToken;
     use crate::{
@@ -3289,7 +3294,7 @@ mod tests {
 
         // Mark almost all as sent. Get what's left
         let one_byte_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 1;
-        txb.mark_as_sent(0, usize::try_from(one_byte_from_end).unwrap());
+        txb.mark_as_sent(0, expect_usize(one_byte_from_end));
         assert!(matches!(txb.next_bytes(),
                          Some((start, x)) if x.len() == 1
                          && start == one_byte_from_end
@@ -3318,7 +3323,7 @@ mod tests {
         // Contig acked range at start means it can be removed from buffer
         // Impl of vecdeque should now result in a split buffer when more data
         // is sent
-        txb.mark_as_acked(0, usize::try_from(five_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, expect_usize(five_bytes_from_end));
         assert_eq!(txb.send(&[2; 30]), 30);
         // Just get 5 even though there is more
         assert!(matches!(txb.next_bytes(),
@@ -3351,7 +3356,7 @@ mod tests {
         // As above
         let forty_bytes_from_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) - 40;
 
-        txb.mark_as_acked(0, usize::try_from(forty_bytes_from_end).unwrap());
+        txb.mark_as_acked(0, expect_usize(forty_bytes_from_end));
         assert!(matches!(txb.next_bytes(),
                  Some((start, x)) if x.len() == 40
                  && start == forty_bytes_from_end
@@ -3379,7 +3384,7 @@ mod tests {
 
         // Ack entire first slice and into second slice
         let ten_bytes_past_end = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) + 10;
-        txb.mark_as_acked(0, usize::try_from(ten_bytes_past_end).unwrap());
+        txb.mark_as_acked(0, expect_usize(ten_bytes_past_end));
 
         // Get up to marked range A
         assert!(matches!(txb.next_bytes(),

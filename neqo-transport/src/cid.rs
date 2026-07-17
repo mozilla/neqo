@@ -16,9 +16,9 @@ use std::{
 };
 
 use neqo_common::{
-    Buffer, Decoder, Encoder,
+    Buffer, Decoder, Encoder, expect_usize,
     hex::{Hex, HexWithLen},
-    qdebug, qinfo,
+    qdebug, qinfo, to_u64,
 };
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
@@ -565,10 +565,8 @@ impl ConnectionIdManager {
 
     pub fn set_limit(&mut self, limit: u64) {
         debug_assert!(limit >= 2);
-        self.limit = min(
-            Self::ACTIVE_LIMIT,
-            usize::try_from(limit).unwrap_or(Self::ACTIVE_LIMIT),
-        );
+        // ACTIVE_LIMIT is usize and we use min, so this fits usize.
+        self.limit = expect_usize(min(to_u64(Self::ACTIVE_LIMIT), limit));
     }
 
     pub fn write_frames<B: Buffer>(

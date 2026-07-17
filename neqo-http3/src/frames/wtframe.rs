@@ -4,7 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Decoder, Encoder};
+use neqo_common::{Decoder, Encoder, to_u64};
+use static_assertions::const_assert;
 
 use super::hframe::HFrameType;
 use crate::{Error, Res, frames::reader::FrameDecoder};
@@ -15,6 +16,8 @@ pub type WebTransportFrameType = u64;
 pub enum WebTransportFrame {
     CloseSession { error: u32, message: String },
 }
+
+const_assert!(WebTransportFrame::CLOSE_MAX_MESSAGE_SIZE <= to_u64(usize::MAX) - 4);
 
 impl WebTransportFrame {
     /// The frame type for WebTransport `CLOSE_SESSION`, as defined in
@@ -28,10 +31,7 @@ impl WebTransportFrame {
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
     /// Limit on the declared length of a `CLOSE_SESSION` frame.
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "CLOSE_MAX_MESSAGE_SIZE is 1024, well within usize on all targets"
-    )]
+    #[expect(clippy::cast_possible_truncation, reason = "value is checked above")]
     pub const MAX_CLOSE_SESSION_BYTES: usize = Self::CLOSE_MAX_MESSAGE_SIZE as usize + 4;
 
     pub fn encode(&self, enc: &mut Encoder) {

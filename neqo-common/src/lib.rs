@@ -21,6 +21,7 @@ pub mod qlog;
 pub mod tos;
 
 use enum_map::Enum;
+use static_assertions::const_assert;
 use strum::Display;
 
 #[cfg(feature = "build-fuzzing-corpus")]
@@ -42,6 +43,13 @@ pub const fn const_max(a: usize, b: usize) -> usize {
 pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a > b) as usize]
 }
+#[must_use]
+pub const fn const_min_u64(a: u64, b: u64) -> u64 {
+    [a, b][(a > b) as usize]
+}
+
+// The conversions below depend on this relationship.
+const_assert!(usize::BITS <= u64::BITS);
 
 /// A trait for values that represent a length or byte count, convertible
 /// to the wire domain (`u64`).
@@ -65,13 +73,28 @@ impl Length for usize {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "debug_assert roundtrip `v as u64 as usize` contains a u64→usize cast; \
-              a usize is never wider than u64, so widening to u64 is always lossless"
+              const_assert above ensures it is lossless on all supported targets"
 )]
 #[inline]
 #[must_use]
 pub const fn to_u64(v: usize) -> u64 {
     debug_assert!(v as u64 as usize == v);
     v as u64
+}
+
+/// Convert a numeric type to a `usize`.
+/// # Panics
+/// If we have an overflow on the conversion.
+/// Callers of this function should document why they think overflow is impossible.
+#[inline]
+#[must_use]
+#[track_caller]
+pub fn expect_usize<T>(v: T) -> usize
+where
+    usize: TryFrom<T>,
+    <usize as TryFrom<T>>::Error: std::fmt::Debug,
+{
+    usize::try_from(v).expect("usize should be large enough for this value")
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]

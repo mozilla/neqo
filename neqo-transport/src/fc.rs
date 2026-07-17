@@ -24,7 +24,7 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, MAX_VARINT, Role, qdebug, qtrace, to_u64};
+use neqo_common::{Buffer, Length, MAX_VARINT, Role, const_min_u64, qdebug, qtrace, to_u64};
 
 use crate::{
     Error, Res,
@@ -115,15 +115,16 @@ where
     }
 
     /// Consume flow control.
-    pub fn consume(&mut self, count: usize) {
-        let amt = to_u64(count);
+    pub fn consume<L: Length>(&mut self, count: L) {
+        let amt = count.as_u64();
         debug_assert!(self.used + amt <= self.limit);
         self.used += amt;
     }
 
     /// Get available flow control.
-    pub fn available(&self) -> usize {
-        usize::try_from(self.limit - self.used).unwrap_or(usize::MAX)
+    #[expect(clippy::cast_possible_truncation, reason = "value is capped")]
+    pub const fn available(&self) -> usize {
+        const_min_u64(self.limit - self.used, to_u64(usize::MAX)) as usize
     }
 
     /// How much data has been written.
@@ -725,7 +726,7 @@ impl LocalStreamLimits {
         let fc = &mut self.limits[stream_type];
         if fc.available() > 0 {
             let new_stream = fc.used();
-            fc.consume(1);
+            fc.consume(1_u64);
             Some(StreamId::from(
                 (new_stream << 2) + stream_type as u64 + self.role_bit,
             ))
@@ -798,13 +799,13 @@ mod test {
     #[test]
     fn update_consume() {
         let mut fc = SenderFlowControl::new((), 10);
-        fc.consume(10);
+        fc.consume(10_u64);
         assert_eq!(fc.available(), 0);
         fc.update(5); // An update lower than the current limit does nothing.
         assert_eq!(fc.available(), 0);
         fc.update(15);
         assert_eq!(fc.available(), 5);
-        fc.consume(3);
+        fc.consume(3_u64);
         assert_eq!(fc.available(), 2);
     }
 
