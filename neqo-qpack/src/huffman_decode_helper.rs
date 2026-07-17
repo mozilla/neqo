@@ -6,6 +6,8 @@
 
 use std::sync::OnceLock;
 
+use neqo_common::expect_usize;
+
 use crate::huffman_table::HUFFMAN_TABLE;
 
 // Since we're encoding the table length as a u16, we need to ensure that it fits.
@@ -34,8 +36,8 @@ fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
 
         found = true;
         if iter.len == len + 1 {
-            // This is a leaf
-            let bit = usize::try_from(iter.val & 1).expect("u32 fits in usize");
+            // This is a leaf; safe conversion because the value is 0 or 1.
+            let bit = expect_usize(iter.val & 1);
             next[bit] = Some(Box::new(HuffmanDecoderNode {
                 next: [None, None],
                 #[expect(

@@ -581,6 +581,7 @@ fn map_stream_send_atomic_error(err: &TransportError) -> Error {
 mod tests {
     use std::time::Instant;
 
+    use neqo_common::expect_usize;
     use neqo_transport::{ConnectionParameters, StreamId, StreamType};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server, handshake,
@@ -1790,7 +1791,7 @@ mod tests {
 
         // The encoder is never allowed to block a stream, and tracks at most CAP streams.
         encoder.encoder.set_max_blocked_streams(0).unwrap();
-        encoder.encoder.max_tracked_streams = usize::try_from(CAP).unwrap();
+        encoder.encoder.max_tracked_streams = expect_usize(CAP);
         assert!(encoder.encoder.set_max_capacity(200).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
@@ -1828,7 +1829,7 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
         assert_eq!(
             encoder.encoder.unacked_header_blocks.len(),
-            usize::try_from(CAP).unwrap()
+            expect_usize(CAP)
         );
     }
 

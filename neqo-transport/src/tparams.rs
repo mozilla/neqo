@@ -8,13 +8,14 @@
 
 use std::{
     cell::RefCell,
+    cmp::min,
     fmt::{self, Debug, Display, Formatter},
     net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
     rc::Rc,
 };
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Buffer, Decoder, Encoder, Role, hex::Hex, qdebug, qinfo, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, Role, hex::Hex, qdebug, qinfo, qtrace, to_u64};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
     constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
@@ -349,7 +350,10 @@ impl TransportParameter {
                 _ => return Err(Error::StreamLimit),
             },
             TransportParameterId::MaxUdpPayloadSize => match d.decode_varint() {
-                Some(v) if v >= MIN_INITIAL_PACKET_SIZE.try_into()? => Self::Integer(v),
+                Some(v) if v >= MIN_INITIAL_PACKET_SIZE.try_into()? => {
+                    // QUIC doesn't cap this value, even to 2^16, but we need to.
+                    Self::Integer(min(to_u64(usize::MAX), v))
+                }
                 _ => return Err(Error::TransportParameter),
             },
             TransportParameterId::AckDelayExponent => match d.decode_varint() {
@@ -1538,6 +1542,13 @@ mod tests {
         let min = to_u64(crate::packet::MIN_INITIAL_PACKET_SIZE);
         assert!(decode_tp_integer(MaxUdpPayloadSize, min).is_ok());
         assert!(decode_tp_integer(MaxUdpPayloadSize, min - 1).is_err());
+        if cfg!(target_pointer_width = "32") {
+            assert_eq!(
+                decode_tp_integer(MaxUdpPayloadSize, to_u64(usize::MAX) + 1),
+                Ok(TransportParameter::Integer(to_u64(usize::MAX))),
+                "we should cap UDP payload size on 32-bit builds"
+            );
+        }
     }
 
     #[test]
