@@ -5596,6 +5596,27 @@ mod tests {
         assert_closed(&client, &Error::HttpId);
     }
 
+    // A PUSH_PROMISE whose Push ID exceeds the maximum is an H3_ID_ERROR even when
+    // its header block blocks the QPACK decoder. max_push_id is 4, so push_id 5 is
+    // out of range; the header block refers to the dynamic table, so the client
+    // cannot decode it until the (withheld) encoder instructions arrive.
+    #[test]
+    fn exceed_max_push_id_promise_while_blocked() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        setup_server_side_encoder(&mut client, &mut server);
+
+        // The encoder instructions are withheld, so this push promise stays blocked.
+        drop(send_push_promise_using_encoder(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            PushId::new(5),
+        ));
+
+        assert_closed(&client, &Error::HttpId);
+    }
+
     // Test that max_push_id is enforced when a push stream is received.
     #[test]
     fn exceed_max_push_id_push_stream() {
