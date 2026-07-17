@@ -181,6 +181,11 @@ pub enum Error {
     Peer(TransportError),
     #[error("stateless reset")]
     StatelessReset,
+    /// Too many consecutive PTOs went unacknowledged, so the path is assumed to be
+    /// a black hole. A distinct variant so the application can tell this apart, but
+    /// reported on the wire as `NO_VIABLE_PATH` (there is no dedicated code).
+    #[error("too many PTOs without acknowledgement; connection assumed broken")]
+    TooManyPtos,
     #[error("too much data")]
     TooMuchData,
     #[error("unexpected message")]
@@ -213,7 +218,7 @@ impl Error {
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::Application => ERROR_APPLICATION_CLOSE,
-            Self::NoAvailablePath => 16,
+            Self::NoAvailablePath | Self::TooManyPtos => 16,
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
             // As we have a special error code for ECH fallbacks, we lose the alert.
@@ -294,6 +299,7 @@ mod tests {
             (Error::EchRetry(vec![]), 0x179),
             (Error::VersionNegotiation, 0x53f8),
             (Error::Internal, 1),
+            (Error::TooManyPtos, 16),
         ] {
             assert_eq!(err.code(), code);
         }

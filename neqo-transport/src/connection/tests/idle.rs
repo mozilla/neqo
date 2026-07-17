@@ -4,19 +4,22 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::{Duration, Instant};
+use std::{
+    num::NonZeroUsize,
+    time::{Duration, Instant},
+};
 
 use neqo_common::{Encoder, qtrace, qwarn};
 use test_fixture::now;
 
 use super::{
     super::{Connection, ConnectionParameters, IdleTimeout, Output, State},
-    AT_LEAST_PTO, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
+    AT_LEAST_PTO, DEFAULT_RTT, DEFAULT_STREAM_DATA, connect, connect_force_idle, connect_rtt_idle,
     connect_with_rtt, default_client, default_server, maybe_authenticate, new_client, new_server,
     send_and_receive, send_something,
 };
 use crate::{
-    packet, recovery,
+    CloseReason, Error, packet, recovery,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -800,4 +803,120 @@ fn keep_alive_with_unresponsive_server() {
     }
     // Connection should be closed due to idle timeout.
     assert!(matches!(client.state(), State::Closed(_)));
+}
+
+/// A connection whose packets are all dropped (a black hole) is declared broken
+/// after `max_pto` consecutive PTOs, and crucially does so earlier than the idle
+/// timeout would have.
+#[test]
+fn declare_broken_after_max_pto() {
+    const MAX_PTO: usize = 7;
+    // For this test to prove anything, the whole PTO backoff ladder must fit inside
+    // the idle timeout; otherwise "closed before the idle timeout" is vacuously true.
+    assert!(DEFAULT_RTT * (1_u32 << (MAX_PTO - 1)) * 3 < default_timeout());
+
+    let mut client =
+        new_client(ConnectionParameters::default().max_pto(NonZeroUsize::new(MAX_PTO)));
+    let mut server = default_server();
+    let start = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // The client sends data that never reaches the server: a black hole.
+    let mut now = start;
+    drop(send_something(&mut client, now));
+
+    // Advance through PTOs, dropping every probe the client emits.
+    for _ in 0..=MAX_PTO {
+        let cb = loop {
+            match client.process_output(now) {
+                // Drop the PTO probe(s) without advancing time.
+                Output::Datagram(_) => {}
+                Output::Callback(t) => break t,
+                Output::None => break Duration::ZERO,
+            }
+        };
+        now += cb;
+    }
+
+    assert!(
+        matches!(
+            client.state(),
+            State::Closed(CloseReason::Transport(Error::TooManyPtos))
+        ),
+        "expected TooManyPtos, got {:?}",
+        client.state()
+    );
+    assert_eq!(client.loss_recovery.pto_count(), MAX_PTO);
+    // The whole point: we gave up well before the idle timeout would have fired.
+    assert!(
+        now - start < default_timeout(),
+        "closed after {:?}, which is not earlier than the {:?} idle timeout",
+        now - start,
+        default_timeout()
+    );
+}
+
+/// A received acknowledgement resets the consecutive-PTO counter, so a transient
+/// loss burst followed by recovery does not accumulate toward `max_pto`: a second,
+/// independent black hole counts fresh from zero rather than adding to the first
+/// (the property a fixed timer lacks). That a full fresh ladder then closes the
+/// connection is covered by `declare_broken_after_max_pto`.
+#[test]
+fn max_pto_counter_resets_on_ack() {
+    const MAX_PTO: usize = 7;
+    let mut client =
+        new_client(ConnectionParameters::default().max_pto(NonZeroUsize::new(MAX_PTO)));
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // Black-hole a flight and let a couple of PTOs fire, staying below MAX_PTO.
+    drop(send_something(&mut client, now));
+    while client.loss_recovery.pto_count() < 2 {
+        let cb = loop {
+            match client.process_output(now) {
+                // Drop the PTO probe(s) without advancing time.
+                Output::Datagram(_) => {}
+                Output::Callback(t) => break t,
+                Output::None => break Duration::ZERO,
+            }
+        };
+        now += cb;
+    }
+    assert!(!matches!(client.state(), State::Closed(_)));
+
+    // A fresh client packet reaches the server, whose ACK reaches the client and
+    // resets the counter. Flush any ACK the server delays behind its ack timer.
+    let d = send_something(&mut client, now);
+    let mut out = server.process(Some(d), now);
+    let ack = loop {
+        match out {
+            Output::Datagram(d) => break Some(d),
+            Output::Callback(t) => {
+                now += t;
+                out = server.process_output(now);
+            }
+            Output::None => break None,
+        }
+    };
+    drop(client.process(ack, now));
+
+    // The received ACK reset the counter, so the connection survives.
+    assert_eq!(client.loss_recovery.pto_count(), 0);
+    assert!(!matches!(client.state(), State::Closed(_)));
+
+    // A second, independent black hole counts fresh from zero: after two more
+    // PTOs the count is 2, not 2 + the earlier 2, so separate episodes do not
+    // accumulate toward the threshold and the connection stays open.
+    drop(send_something(&mut client, now));
+    while client.loss_recovery.pto_count() < 2 {
+        let cb = loop {
+            match client.process_output(now) {
+                Output::Datagram(_) => {}
+                Output::Callback(t) => break t,
+                Output::None => break Duration::ZERO,
+            }
+        };
+        now += cb;
+    }
+    assert_eq!(client.loss_recovery.pto_count(), 2);
+    assert!(!matches!(client.state(), State::Closed(_)));
 }
