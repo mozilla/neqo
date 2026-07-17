@@ -312,8 +312,7 @@ pub fn default_http3_client() -> Http3Client {
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
-            .max_blocked_streams(100)
-            .max_concurrent_push_streams(10),
+            .max_blocked_streams(100),
     )
 }
 
@@ -347,8 +346,7 @@ pub fn default_http3_server() -> Http3Server {
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
-            .max_blocked_streams(100)
-            .max_concurrent_push_streams(10),
+            .max_blocked_streams(100),
     )
 }
 

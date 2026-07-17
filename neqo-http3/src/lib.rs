@@ -149,8 +149,6 @@ pub mod frames;
 mod frames;
 mod headers_checks;
 mod priority;
-mod push_controller;
-mod push_id;
 mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
@@ -181,7 +179,6 @@ pub use neqo_transport::{
     streams::{SendGroupId, SendOrder},
 };
 pub use priority::Priority;
-pub use push_id::PushId;
 pub use server::Http3Server;
 pub use server_events::{Http3OrWebTransportStream, Http3ServerEvent};
 #[cfg(fuzzing)]
@@ -417,7 +414,6 @@ pub enum Http3StreamType {
     Encoder,
     NewStream,
     Http,
-    Push,
     ExtendedConnect,
     WebTransport(StreamId),
     Unknown,
