@@ -8,7 +8,6 @@ use neqo_common::qdebug;
 use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
 
-const MAX_PUSH_STREAM_DEFAULT: u64 = 0;
 const WEBTRANSPORT_DEFAULT: bool = false;
 /// Do not support HTTP Extended CONNECT by default.
 const CONNECT_DEFAULT: bool = false;
@@ -18,7 +17,6 @@ const HTTP3_DATAGRAM_DEFAULT: bool = true;
 pub struct Http3Parameters {
     conn_params: ConnectionParameters,
     qpack_settings: qpack::Settings,
-    max_concurrent_push_streams: u64,
     webtransport: bool,
     /// HTTP Extended CONNECT
     connect: bool,
@@ -30,7 +28,6 @@ impl Default for Http3Parameters {
         Self {
             conn_params: ConnectionParameters::default(),
             qpack_settings: qpack::Settings::default(),
-            max_concurrent_push_streams: MAX_PUSH_STREAM_DEFAULT,
             webtransport: WEBTRANSPORT_DEFAULT,
             connect: CONNECT_DEFAULT,
             http3_datagram: HTTP3_DATAGRAM_DEFAULT,
@@ -93,17 +90,6 @@ impl Http3Parameters {
     #[must_use]
     pub const fn get_qpack_settings(&self) -> &qpack::Settings {
         &self.qpack_settings
-    }
-
-    #[must_use]
-    pub const fn max_concurrent_push_streams(mut self, max_push_streams: u64) -> Self {
-        self.max_concurrent_push_streams = max_push_streams;
-        self
-    }
-
-    #[must_use]
-    pub const fn get_max_concurrent_push_streams(&self) -> u64 {
-        self.max_concurrent_push_streams
     }
 
     #[must_use]
