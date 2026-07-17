@@ -102,9 +102,6 @@ pub struct Args {
     #[arg(name = "header", short = 'H', long)]
     headers: Vec<Header>,
 
-    #[arg(name = "max-push", short = 'p', long, default_value = "10")]
-    max_concurrent_push_streams: u64,
-
     #[arg(name = "download-in-series", long)]
     /// Download resources in series using separate connections.
     download_in_series: bool,
@@ -197,7 +194,6 @@ impl Args {
                 "POST".into()
             },
             headers: vec![],
-            max_concurrent_push_streams: 10,
             download_in_series: false,
             concurrency: 100,
             output_read_data: false,

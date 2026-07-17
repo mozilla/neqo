@@ -11,7 +11,7 @@ use neqo_transport::{AppError, StreamId, StreamType};
 use nss::ResumptionToken;
 
 use crate::{
-    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, PushId, RecvStreamEvents, Res,
+    CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
     SendStreamEvents,
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
@@ -93,26 +93,6 @@ pub enum Http3ClientEvent {
         stream_id: StreamId,
         error: AppError,
     },
-    /// A new push promise.
-    PushPromise {
-        push_id: PushId,
-        request_stream_id: StreamId,
-        headers: Vec<Header>,
-    },
-    /// A push response headers are ready.
-    PushHeaderReady {
-        push_id: PushId,
-        headers: Vec<Header>,
-        interim: bool,
-        fin: bool,
-    },
-    /// New bytes are available on a push stream for reading.
-    PushDataReadable { push_id: PushId },
-    /// A push has been canceled.
-    PushCanceled { push_id: PushId },
-    /// A push stream was been reset due to a `HttpGeneralProtocol` error.
-    /// Most common case are malformed response headers.
-    PushReset { push_id: PushId, error: AppError },
     /// New stream can be created
     RequestsCreatable,
     /// Cert authentication needed
@@ -308,24 +288,6 @@ impl ExtendedConnectEvents for Http3ClientEvents {
 }
 
 impl Http3ClientEvents {
-    pub fn push_promise(&self, push_id: PushId, request_stream_id: StreamId, headers: Vec<Header>) {
-        self.insert(Http3ClientEvent::PushPromise {
-            push_id,
-            request_stream_id,
-            headers,
-        });
-    }
-
-    pub fn push_canceled(&self, push_id: PushId) {
-        self.remove_events_for_push_id(push_id);
-        self.insert(Http3ClientEvent::PushCanceled { push_id });
-    }
-
-    pub fn push_reset(&self, push_id: PushId, error: AppError) {
-        self.remove_events_for_push_id(push_id);
-        self.insert(Http3ClientEvent::PushReset { push_id, error });
-    }
-
     /// Add a new `RequestCreatable` event
     pub(crate) fn new_requests_creatable(&self, stream_type: StreamType) {
         if stream_type == StreamType::BiDi {
@@ -391,7 +353,6 @@ impl Http3ClientEvents {
             matches!(evt,
                 Http3ClientEvent::HeaderReady { stream_id: x, .. }
                 | Http3ClientEvent::DataReadable { stream_id: x }
-                | Http3ClientEvent::PushPromise { request_stream_id: x, .. }
                 | Http3ClientEvent::Reset { stream_id: x, .. } if *x == stream_id)
         });
     }
@@ -401,25 +362,6 @@ impl Http3ClientEvents {
             matches!(evt,
                 Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
-        });
-    }
-
-    pub fn has_push(&self, push_id: PushId) -> bool {
-        for iter in &*self.events.borrow() {
-            if matches!(iter, Http3ClientEvent::PushPromise{push_id:x, ..} if *x == push_id) {
-                return true;
-            }
-        }
-        false
-    }
-
-    pub fn remove_events_for_push_id(&self, push_id: PushId) {
-        self.remove(|evt| {
-            matches!(evt,
-                Http3ClientEvent::PushPromise{ push_id: x, .. }
-                | Http3ClientEvent::PushHeaderReady{ push_id: x, .. }
-                | Http3ClientEvent::PushDataReadable{ push_id: x, .. }
-                | Http3ClientEvent::PushCanceled{ push_id: x, .. } if *x == push_id)
         });
     }
 

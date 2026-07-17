@@ -6,17 +6,19 @@
 
 use std::{cmp::min, time::Instant};
 
-use neqo_common::{Decoder, IncrementalDecoderUint, Role, qtrace};
+use neqo_common::{Decoder, IncrementalDecoderUint, Role, qdebug, qtrace};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
 use neqo_transport::{Connection, StreamId, StreamType};
 
 use crate::{
-    CloseType, Error, Http3StreamType, PushId, ReceiveOutput, RecvStream, Res, Stream,
+    CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
     control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL,
     frames::{HFrame, hframe::HFrameType, reader::FrameDecoder},
 };
 
-pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
+/// Server push stream type. Server push is not supported, so a push stream is logged and treated
+/// as an unknown stream (aborted with `STOP_SENDING`).
+const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
 pub const WEBTRANSPORT_UNI_STREAM: u64 = 0x54;
 pub const WEBTRANSPORT_STREAM: u64 = 0x41;
 
@@ -25,21 +27,19 @@ pub enum NewStreamType {
     Control,
     Decoder,
     Encoder,
-    Push(PushId),
     WebTransportStream(u64),
     Http(u64),
     Unknown,
 }
 
 impl NewStreamType {
-    /// Get the final `NewStreamType` from a stream type. All streams, except Push stream,
-    /// are identified by the type only. This function will return None for the Push stream
-    /// because it needs the ID besides the type.
+    /// Get the final `NewStreamType` from a stream type. Most streams are identified by
+    /// the type only. This function returns None for `WebTransport` streams because they
+    /// need an ID besides the type.
     ///
     /// # Errors
     ///
-    /// Push streams received by the server are not allowed and this function will return
-    /// `HttpStreamCreation` error.
+    /// Returns `HttpStreamCreation` if a stream type is not allowed for the role.
     fn final_stream_type(
         stream_type: u64,
         trans_stream_type: StreamType,
@@ -49,9 +49,12 @@ impl NewStreamType {
             (HTTP3_UNI_STREAM_TYPE_CONTROL, StreamType::UniDi, _) => Ok(Some(Self::Control)),
             (QPACK_UNI_STREAM_TYPE_ENCODER, StreamType::UniDi, _) => Ok(Some(Self::Decoder)),
             (QPACK_UNI_STREAM_TYPE_DECODER, StreamType::UniDi, _) => Ok(Some(Self::Encoder)),
-            (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Client)
-            | (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
+            (WEBTRANSPORT_UNI_STREAM, StreamType::UniDi, _)
             | (WEBTRANSPORT_STREAM, StreamType::BiDi, _) => Ok(None),
+            (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, _) => {
+                qdebug!("Ignoring HTTP/3 server push stream (server push is not supported)");
+                Ok(Some(Self::Unknown))
+            }
             (_, StreamType::BiDi, Role::Server) => {
                 // The "stream_type" for a bidirectional stream is a frame type. We accept
                 // WEBTRANSPORT_STREAM (above), and HEADERS, and we have to ignore unknown types,
@@ -67,8 +70,7 @@ impl NewStreamType {
                     Ok(Some(Self::Http(stream_type)))
                 }
             }
-            (HTTP3_UNI_STREAM_TYPE_PUSH, StreamType::UniDi, Role::Server)
-            | (_, StreamType::BiDi, Role::Client) => Err(Error::HttpStreamCreation),
+            (_, StreamType::BiDi, Role::Client) => Err(Error::HttpStreamCreation),
             _ => Ok(Some(Self::Unknown)),
         }
     }
@@ -78,9 +80,10 @@ impl NewStreamType {
 /// There are 2 type of streams:
 ///  - streams identified by the single type (varint encoded). Most streams belong to this category.
 ///    The `NewStreamHeadReader` will switch from `ReadType`to `Done` state.
-///  - streams identified by the type and the ID (both varint encoded). For example, a push stream
-///    is identified by the type and `PushId`. After reading the type in the `ReadType` state,
-///    `NewStreamHeadReader` changes to `ReadId` state and from there to `Done` state
+///  - streams identified by the type and the ID (both varint encoded). For example, a
+///    `WebTransport` stream is identified by the type and a session ID. After reading the type in
+///    the `ReadType` state, `NewStreamHeadReader` changes to `ReadId` state and from there to
+///    `Done` state
 #[derive(Debug)]
 pub enum NewStreamHeadReader {
     ReadType {
@@ -89,7 +92,6 @@ pub enum NewStreamHeadReader {
         stream_id: StreamId,
     },
     ReadId {
-        stream_type: u64,
         reader: IncrementalDecoderUint,
         stream_id: StreamId,
     },
@@ -172,27 +174,21 @@ impl NewStreamHeadReader {
                             return final_type;
                         }
                         (Ok(None), false) => {
-                            // This is a push stream and it needs more data to be decoded.
+                            // This is a WebTransport stream and it needs more data to be decoded.
                             *self = Self::ReadId {
                                 reader: IncrementalDecoderUint::default(),
                                 stream_id: *stream_id,
-                                stream_type: output,
                             }
                         }
                     }
                 }
-                Self::ReadId { stream_type, .. } => {
-                    let is_push = *stream_type == HTTP3_UNI_STREAM_TYPE_PUSH;
+                Self::ReadId { .. } => {
                     *self = Self::Done;
-                    qtrace!("New Stream stream push_id={output}");
+                    qtrace!("New Stream stream session_id={output}");
                     if fin {
                         return Err(Error::HttpGeneralProtocol);
                     }
-                    return if is_push {
-                        Ok(Some(NewStreamType::Push(PushId::new(output))))
-                    } else {
-                        Ok(Some(NewStreamType::WebTransportStream(output)))
-                    };
+                    return Ok(Some(NewStreamType::WebTransportStream(output)));
                 }
                 Self::Done => {
                     unreachable!("Cannot be in state NewStreamHeadReader::Done");
@@ -209,8 +205,8 @@ impl NewStreamHeadReader {
             None => Err(Error::HttpStreamCreation),
             Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
-            Some(NewStreamType::Push(_) | NewStreamType::WebTransportStream(_)) => {
-                unreachable!("PushStream and WebTransport are mapped to None at this stage")
+            Some(NewStreamType::WebTransportStream(_)) => {
+                unreachable!("WebTransport streams are mapped to None at this stage")
             }
         }
     }
@@ -251,12 +247,9 @@ mod tests {
     use neqo_transport::{Connection, StreamId, StreamType};
     use test_fixture::{connect, now};
 
-    use super::{
-        HTTP3_UNI_STREAM_TYPE_PUSH, NewStreamHeadReader, WEBTRANSPORT_STREAM,
-        WEBTRANSPORT_UNI_STREAM,
-    };
+    use super::{NewStreamHeadReader, WEBTRANSPORT_STREAM, WEBTRANSPORT_UNI_STREAM};
     use crate::{
-        CloseType, Error, NewStreamType, PushId, ReceiveOutput, RecvStream as _, Res,
+        CloseType, Error, NewStreamType, ReceiveOutput, RecvStream as _, Res,
         control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::HFrameType,
     };
 
@@ -364,28 +357,6 @@ mod tests {
     }
 
     #[test]
-    fn decode_stream_push() {
-        let mut t = Test::new(StreamType::UniDi, Role::Client);
-        t.decode(
-            &[HTTP3_UNI_STREAM_TYPE_PUSH, 0xaaaa_aaaa],
-            false,
-            &Ok((
-                ReceiveOutput::NewStream(NewStreamType::Push(PushId::new(0xaaaa_aaaa))),
-                true,
-            )),
-            true,
-        );
-
-        let mut t = Test::new(StreamType::UniDi, Role::Server);
-        t.decode(
-            &[HTTP3_UNI_STREAM_TYPE_PUSH],
-            false,
-            &Err(Error::HttpStreamCreation),
-            true,
-        );
-    }
-
-    #[test]
     fn decode_stream_unknown() {
         let mut t = Test::new(StreamType::UniDi, Role::Client);
         t.decode(
@@ -409,13 +380,21 @@ mod tests {
             true,
         );
 
+        // A unidirectional stream type of 0x1 is unknown (it was formerly the push stream type)
+        // and is discarded regardless of the role.
         let mut t = Test::new(StreamType::UniDi, Role::Server);
         t.decode(
-            &[u64::from(HFrameType::HEADERS)], /* this is the same as a
-                                                * HTTP3_UNI_STREAM_TYPE_PUSH which
-                                                * is not aallowed on the server side. */
+            &[u64::from(HFrameType::HEADERS)],
             false,
-            &Err(Error::HttpStreamCreation),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
+            true,
+        );
+
+        let mut t = Test::new(StreamType::UniDi, Role::Client);
+        t.decode(
+            &[u64::from(HFrameType::HEADERS)],
+            false,
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
 
@@ -424,18 +403,6 @@ mod tests {
             &[u64::from(HFrameType::HEADERS)],
             false,
             &Err(Error::HttpStreamCreation),
-            true,
-        );
-
-        let mut t = Test::new(StreamType::UniDi, Role::Client);
-        t.decode(
-            &[u64::from(HFrameType::HEADERS), 0xaaaa_aaaa], /* this is the same as a
-                                                             * HTTP3_UNI_STREAM_TYPE_PUSH */
-            false,
-            &Ok((
-                ReceiveOutput::NewStream(NewStreamType::Push(PushId::new(0xaaaa_aaaa))),
-                true,
-            )),
             true,
         );
 
@@ -613,25 +580,6 @@ mod tests {
             &[HTTP3_UNI_STREAM_TYPE_CONTROL],
             true,
             &Err(Error::HttpClosedCriticalStream),
-            true,
-        );
-    }
-
-    #[test]
-    fn stream_fin_push() {
-        let mut t = Test::new(StreamType::UniDi, Role::Client);
-        t.decode(
-            &[HTTP3_UNI_STREAM_TYPE_PUSH, 0xaaaa_aaaa],
-            true,
-            &Err(Error::HttpGeneralProtocol),
-            true,
-        );
-
-        let mut t = Test::new(StreamType::UniDi, Role::Client);
-        t.decode(
-            &[HTTP3_UNI_STREAM_TYPE_PUSH],
-            true,
-            &Err(Error::HttpStreamCreation),
             true,
         );
     }
