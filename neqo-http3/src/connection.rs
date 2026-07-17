@@ -40,7 +40,6 @@ use crate::{
         },
     },
     frames::HFrame,
-    push_controller::PushController,
     qpack_decoder_receiver::DecoderRecvStream,
     qpack_encoder_receiver::EncoderRecvStream,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -137,7 +136,6 @@ impl Http3State {
 ///   is [`NewStreamHeadReader`].
 /// - [`Http3StreamType::Http`]: [`SendMessage`] and [`RecvMessage`] handlers are responsible for
 ///   this type of streams.
-/// - [`Http3StreamType::Push`]: [`RecvMessage`] is responsible for this type of streams.
 /// - [`Http3StreamType::ExtendedConnect`]: [`extended_connect::session::Session`] is responsible
 ///   sender and receiver handler.
 /// - [`Http3StreamType::WebTransport`]: [`WebTransportSendStream`] and [`WebTransportRecvStream`]
@@ -522,9 +520,8 @@ impl Http3Connection {
     /// This function handles reading from all streams, i.e. control, qpack, request/response
     /// stream and unidi stream that still do not have a type.
     /// The function cannot handle:
-    /// 1) a `Push(_)`, `Http` or `WebTransportStream(_)` stream
-    /// 2) frames `MaxPushId`, `PriorityUpdateRequest`, `PriorityUpdateRequestPush` or `Goaway` must
-    ///    be handled by `Http3Client`/`Server`.
+    /// 1) a `Http` or `WebTransportStream(_)` stream
+    /// 2) frames `PriorityUpdateRequest` or `Goaway` must be handled by `Http3Client`/`Server`.
     ///
     /// The function returns `ReceiveOutput`.
     pub(crate) fn handle_stream_readable(
@@ -554,9 +551,7 @@ impl Http3Connection {
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(
-                NewStreamType::Push(_)
-                | NewStreamType::Http(_)
-                | NewStreamType::WebTransportStream(_),
+                NewStreamType::Http(_) | NewStreamType::WebTransportStream(_),
             )
             | ReceiveOutput::NoOutput => Ok(output),
             ReceiveOutput::NewStream(_) => {
@@ -703,7 +698,7 @@ impl Http3Connection {
 
     /// If the new stream is a control or QPACK stream, this function creates a proper handler
     /// and perform a read.
-    /// if the new stream is a `Push(_)`, `Http` or `WebTransportStream(_)` stream, the function
+    /// if the new stream is a `Http` or `WebTransportStream(_)` stream, the function
     /// returns `ReceiveOutput::NewStream(_)` and the caller will handle it.
     /// If the stream is of a unknown type the stream will be closed.
     fn handle_new_stream(
@@ -720,9 +715,6 @@ impl Http3Connection {
                     .insert(stream_id, Box::new(ControlStreamRemote::new(stream_id)));
             }
 
-            NewStreamType::Push(push_id) => {
-                qinfo!("[{self}] A new push stream {stream_id} push_id:{push_id}");
-            }
             NewStreamType::Decoder => {
                 qdebug!("[{self}] A new remote qpack encoder stream {stream_id}");
                 self.check_stream_exists(Http3StreamType::Decoder)?;
@@ -774,9 +766,9 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id, now)
             }
-            NewStreamType::Push(_)
-            | NewStreamType::Http(_)
-            | NewStreamType::WebTransportStream(_) => Ok(ReceiveOutput::NewStream(stream_type)),
+            NewStreamType::Http(_) | NewStreamType::WebTransportStream(_) => {
+                Ok(ReceiveOutput::NewStream(stream_type))
+            }
             NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
         }
     }
@@ -895,7 +887,6 @@ impl Http3Connection {
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
-        push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
         now: Instant,
     ) -> Res<StreamId>
@@ -908,15 +899,7 @@ impl Http3Connection {
             request.target,
         );
         let id = self.create_bidi_transport_stream(conn)?;
-        self.request_with_stream(
-            id,
-            conn,
-            send_events,
-            recv_events,
-            push_handler,
-            request,
-            now,
-        )?;
+        self.request_with_stream(id, conn, send_events, recv_events, request, now)?;
         Ok(id)
     }
 
@@ -938,14 +921,12 @@ impl Http3Connection {
         Ok(id)
     }
 
-    #[expect(clippy::too_many_arguments, reason = "Yes, but they are needed.")]
     fn request_with_stream<T>(
         &mut self,
         stream_id: StreamId,
         conn: &mut Connection,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn HttpRecvStreamEvents>,
-        push_handler: Option<Rc<RefCell<PushController>>>,
         request: &RequestDescription<T>,
         now: Instant,
     ) -> Res<()>
@@ -985,8 +966,7 @@ impl Http3Connection {
                 },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,
-                push_handler,
-                PriorityHandler::new(false, request.priority),
+                PriorityHandler::new(request.priority),
             )),
         );
 
@@ -1165,9 +1145,7 @@ impl Http3Connection {
             (None, Some(s)) => {
                 if !matches!(
                     s.stream_type(),
-                    Http3StreamType::Http
-                        | Http3StreamType::Push
-                        | Http3StreamType::ExtendedConnect
+                    Http3StreamType::Http | Http3StreamType::ExtendedConnect
                 ) {
                     return Err(Error::InvalidStreamId);
                 }
@@ -1664,9 +1642,9 @@ impl Http3Connection {
             .send_datagram(conn, buf, id, now)
     }
 
-    /// If the control stream has received frames `MaxPushId`, `Goaway`, `PriorityUpdateRequest` or
-    /// `PriorityUpdateRequestPush` which handling is specific to the client and server, we must
-    /// give them to the specific client/server handler.
+    /// Frames whose handling is specific to the client and server (`Goaway`,
+    /// `PriorityUpdateRequest`, and the unsupported server-push control frames) are given to the
+    /// specific client/server handler.
     fn handle_control_frame(&mut self, conn: &Connection, f: HFrame) -> Res<Option<HFrame>> {
         qdebug!("[{self}] Handle a control frame {f:?}");
         if !matches!(f, HFrame::Settings { .. })
@@ -1683,10 +1661,10 @@ impl Http3Connection {
                 Ok(None)
             }
             HFrame::Goaway { .. }
-            | HFrame::MaxPushId { .. }
-            | HFrame::CancelPush { .. }
             | HFrame::PriorityUpdateRequest { .. }
-            | HFrame::PriorityUpdatePush { .. } => Ok(Some(f)),
+            | HFrame::CancelPush
+            | HFrame::MaxPushId
+            | HFrame::PriorityUpdatePush => Ok(Some(f)),
             _ => Err(Error::HttpFrameUnexpected),
         }
     }
@@ -1777,15 +1755,6 @@ impl Http3Connection {
             self.streams_with_pending_data.insert(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
-        self.recv_streams.insert(stream_id, recv_stream);
-    }
-
-    /// Add a new recv stream. This is used for push streams.
-    pub(crate) fn add_recv_stream(
-        &mut self,
-        stream_id: StreamId,
-        recv_stream: Box<dyn RecvStream>,
-    ) {
         self.recv_streams.insert(stream_id, recv_stream);
     }
 
