@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -515,7 +515,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.30.0",
+ "test-fixture 0.30.1",
 ]
 
 [[package]]
@@ -720,7 +720,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -742,14 +742,14 @@ dependencies = [
  "rustc-hash",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.30.0",
+ "test-fixture 0.30.1",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -760,14 +760,14 @@ dependencies = [
  "sha1",
  "static_assertions",
  "strum",
- "test-fixture 0.30.0",
+ "test-fixture 0.30.1",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -783,13 +783,13 @@ dependencies = [
  "sfv",
  "static_assertions",
  "strum",
- "test-fixture 0.30.0",
+ "test-fixture 0.30.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -797,13 +797,13 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.30.0",
+ "test-fixture 0.30.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -819,13 +819,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.30.0",
+ "test-fixture 0.30.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1245,7 +1245,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.30.0"
+version = "0.30.1"
 dependencies = [
  "log",
  "neqo-common",
