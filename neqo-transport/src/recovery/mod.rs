@@ -842,6 +842,12 @@ impl Loss {
         )
     }
 
+    /// The number of consecutive PTOs that have fired without being acknowledged.
+    /// The value is reset to `0` whenever an acknowledgement is received.
+    pub(crate) fn pto_count(&self) -> usize {
+        self.pto_state.as_ref().map_or(0, PtoState::count)
+    }
+
     // Calculate PTO time for the given space.
     fn pto_time(&self, rtt: &RttEstimate, pn_space: PacketNumberSpace) -> Option<Instant> {
         self.spaces
