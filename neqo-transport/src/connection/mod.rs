@@ -1096,6 +1096,27 @@ impl Connection {
             qlog::packets_lost(&mut self.qlog, &lost, now);
         }
 
+        // Declare the connection broken if too many consecutive PTOs have gone
+        // unacknowledged, i.e. the path is a black hole. This closes the connection
+        // sooner than, and with a distinct reason from, the idle timeout.
+        //
+        // We only do this once connected, i.e. after the handshake completes. A
+        // black hole during the handshake is the job of happy eyeballs, which races
+        // multiple connection attempts and does not need us to give up on any single
+        // one early. Requiring `connected()` also guarantees we have an RTT sample,
+        // so the PTO backoff we are counting is based on a real estimate.
+        if let Some(max_pto) = self.conn_params.get_max_pto()
+            && self.state.connected()
+            && self.loss_recovery.pto_count() >= max_pto.get()
+        {
+            qinfo!("[{self}] {max_pto} consecutive PTOs, declaring connection broken");
+            self.set_state(
+                State::Closed(CloseReason::Transport(Error::TooManyPtos)),
+                now,
+            );
+            return;
+        }
+
         if self.release_resumption_token_timer.is_some() {
             self.create_resumption_token(now);
         }
