@@ -268,7 +268,7 @@ impl PushController {
         )
     }
 
-    fn check_push_id(&self, push_id: PushId) -> Res<()> {
+    pub(crate) fn check_push_id(&self, push_id: PushId) -> Res<()> {
         // Check if push id is greater than what we allow.
         if push_id > self.current_max_push_id {
             qerror!("Push id is greater than current_max_push_id");

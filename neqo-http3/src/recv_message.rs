@@ -240,9 +240,16 @@ impl RecvMessage {
     }
 
     fn handle_push_promise(&mut self, push_id: PushId, header_block: Vec<u8>) -> Res<()> {
-        if self.push_handler.is_none() {
-            return Err(Error::HttpFrameUnexpected);
-        }
+        // Validate the Push ID before decoding or buffering. new_push_promise checks
+        // it too, but only after a successful decode; a header block that blocks the
+        // QPACK decoder defers that check indefinitely, so a Push ID above the maximum
+        // gets buffered instead of being the H3_ID_ERROR that RFC 9114, Section 7.2.5
+        // requires.
+        self.push_handler
+            .as_ref()
+            .ok_or(Error::HttpFrameUnexpected)?
+            .borrow()
+            .check_push_id(push_id)?;
 
         if !self.blocked_push_promise.is_empty() {
             self.blocked_push_promise.push_back(PushInfo {
