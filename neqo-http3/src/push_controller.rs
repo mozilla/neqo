@@ -269,9 +269,11 @@ impl PushController {
     }
 
     fn check_push_id(&self, push_id: PushId) -> Res<()> {
-        // Check if push id is greater than what we allow.
-        if push_id > self.current_max_push_id {
-            qerror!("Push id is greater than current_max_push_id");
+        // A client that does not enable push never sends a MAX_PUSH_ID frame, so
+        // its maximum push id is unset and no push id is allowed; the zero-valued
+        // `current_max_push_id` sentinel would otherwise admit push id 0.
+        if !self.can_receive_push() || push_id > self.current_max_push_id {
+            qerror!("Push id is not allowed");
             Err(Error::HttpId)
         } else {
             Ok(())

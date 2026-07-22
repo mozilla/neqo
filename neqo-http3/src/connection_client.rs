@@ -5630,6 +5630,80 @@ mod tests {
         assert_eq!(client.state(), Http3State::Connected);
     }
 
+    // A client that does not enable server push never sends a MAX_PUSH_ID frame,
+    // so its maximum Push ID stays unset and every Push ID is above it. The
+    // default connect helpers assume a MAX_PUSH_ID frame on the control stream,
+    // so drive the setup here and drain the control stream without that check.
+    fn connect_push_disabled_and_send_request() -> (Http3Client, TestServer, StreamId) {
+        fixture_init();
+        let mut client = Http3Client::new(
+            DEFAULT_SERVER_NAME,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            Http3Parameters::default()
+                .connection_parameters(
+                    ConnectionParameters::default()
+                        .versions(Version::default(), vec![Version::default()]),
+                )
+                .max_table_size_encoder(100)
+                .max_table_size_decoder(100)
+                .max_blocked_streams(100),
+            now(),
+        )
+        .expect("create a push-disabled client");
+        let mut server = TestServer::new();
+
+        connect_only_transport_with(&mut client, &mut server);
+
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let mut buf = [0_u8; 100];
+        while let Some(e) = server.conn.next_event() {
+            if let ConnectionEvent::RecvStreamReadable { stream_id } = e {
+                if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID {
+                    server.read_and_check_stream_data(stream_id, ENCODER_STREAM_DATA, false);
+                } else {
+                    _ = server.conn.stream_recv(stream_id, &mut buf).unwrap();
+                }
+            }
+        }
+
+        server.create_control_stream();
+        server.create_qpack_streams();
+        let out = server.conn.process(None::<Datagram>, now());
+        client.process_input(out.dgram().unwrap(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+
+        let request_stream_id = make_request_and_exchange_pkts(&mut client, &mut server, true);
+        (client, server, request_stream_id)
+    }
+
+    // A PUSH_PROMISE received when the maximum Push ID is unset is an H3_ID_ERROR.
+    #[test]
+    fn push_promise_when_push_disabled() {
+        let (mut client, mut server, request_stream_id) = connect_push_disabled_and_send_request();
+
+        send_push_promise_and_exchange_packets(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            PushId::new(0),
+        );
+
+        assert_closed(&client, &Error::HttpId);
+    }
+
+    // A CANCEL_PUSH received when the maximum Push ID is unset is an H3_ID_ERROR.
+    #[test]
+    fn cancel_push_when_push_disabled() {
+        let (mut client, mut server, _request_stream_id) = connect_push_disabled_and_send_request();
+
+        send_cancel_push_and_exchange_packets(&mut client, &mut server, PushId::new(0));
+
+        assert_closed(&client, &Error::HttpId);
+    }
+
     #[test]
     fn max_push_id_frame_update_is_sent() {
         // Max concurrent is 5, sent after >5/2 (3) pushes are closed.
