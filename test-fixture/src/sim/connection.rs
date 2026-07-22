@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
+use neqo_common::{Datagram, event::Provider as _, json, qdebug, qinfo, qtrace};
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
     StreamId, StreamType,
@@ -176,7 +176,7 @@ impl sim::Node for Node {
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!("{test_name}: {:?}", self.c.stats());
+        qinfo!("{test_name}: {}", json::compact(&self.c.stats()));
     }
 }
 

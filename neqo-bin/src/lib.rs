@@ -5,17 +5,19 @@
 // except according to those terms.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
-
 use std::{
+    fs::OpenOptions,
+    io::Write as _,
     net::{SocketAddr, ToSocketAddrs as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use clap::{Parser, builder::TypedValueParser as _};
+use neqo_common::{json, qinfo};
 use neqo_transport::{
-    CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, StreamType, Version,
-    tparams::PreferredAddress,
+    CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, Stats, StreamType,
+    Version, tparams::PreferredAddress,
 };
 use strum::VariantNames as _;
 use thiserror::Error;
@@ -65,6 +67,12 @@ pub struct SharedArgs {
 
     #[command(flatten)]
     quic_parameters: QuicParameters,
+
+    /// Print connection stats when a connection closes. Optionally give a
+    /// filename to append the stats to (as JSON), instead of logging them.
+    #[arg(name = "stats", long, require_equals = true)]
+    #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
+    stats: Option<Option<PathBuf>>,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -80,6 +88,7 @@ impl Default for SharedArgs {
             ciphers: vec![],
             qns_test: None,
             quic_parameters: QuicParameters::default(),
+            stats: None,
         }
     }
 }
@@ -289,6 +298,25 @@ pub enum Error {
 fn now() -> Instant {
     #![expect(clippy::disallowed_methods, reason = "This program uses the time")]
     Instant::now()
+}
+
+/// Report `stats` as compact JSON: appended to `path` if given, or logged
+/// via `qinfo!` otherwise.
+///
+/// # Errors
+///
+/// If `path` is given and the file can't be opened or written to.
+pub fn report_stats(stats: &Stats, path: Option<&Path>) -> std::io::Result<()> {
+    let json = json::compact(stats);
+    if let Some(path) = path {
+        writeln!(
+            OpenOptions::new().create(true).append(true).open(path)?,
+            "{json}"
+        )
+    } else {
+        qinfo!("{json}");
+        Ok(())
+    }
 }
 
 #[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
