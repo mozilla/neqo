@@ -39,6 +39,7 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
+    draining: bool,
 }
 
 impl Display for Session {
@@ -59,7 +60,12 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
+            draining: false,
         }
+    }
+
+    pub(crate) const fn set_draining(&mut self) -> bool {
+        !mem::replace(&mut self.draining, true)
     }
     /// Register a send group with a caller-provided ID for this session.
     ///
@@ -87,7 +93,7 @@ impl Protocol for Session {
         // > datagrams until they can be associated with an
         // > established session.
         //
-        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.5>
         #[expect(clippy::iter_over_hash_type, reason = "no defined order necessary")]
         for stream_id in self.pending_streams.drain() {
             events.extended_connect_new_stream(
@@ -127,31 +133,52 @@ impl Protocol for Session {
             )
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
         qtrace!("[{self}] Received frame: {f:?} fin={fin}");
-        if let Some(WebTransportFrame::CloseSession { error, message }) = f {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean { error, message },
-                None,
-            );
-            if fin {
-                Ok(Some(State::Done))
-            } else {
-                Ok(Some(State::FinPending))
+        match f {
+            Some(WebTransportFrame::CloseSession { error, message }) => {
+                events.session_end(
+                    ExtendedConnectType::WebTransport,
+                    self.id,
+                    CloseReason::Clean { error, message },
+                    None,
+                );
+                if fin {
+                    Ok(Some(State::Done))
+                } else {
+                    Ok(Some(State::FinPending))
+                }
             }
-        } else if fin {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean {
-                    error: 0,
-                    message: String::new(),
-                },
-                None,
-            );
-            Ok(Some(State::Done))
-        } else {
-            Ok(None)
+            Some(WebTransportFrame::DrainSession) => {
+                if self.set_draining() {
+                    events.session_draining(ExtendedConnectType::WebTransport, self.id);
+                }
+                if fin {
+                    events.session_end(
+                        ExtendedConnectType::WebTransport,
+                        self.id,
+                        CloseReason::Clean {
+                            error: 0,
+                            message: String::new(),
+                        },
+                        None,
+                    );
+                    Ok(Some(State::Done))
+                } else {
+                    Ok(None)
+                }
+            }
+            None if fin => {
+                events.session_end(
+                    ExtendedConnectType::WebTransport,
+                    self.id,
+                    CloseReason::Clean {
+                        error: 0,
+                        message: String::new(),
+                    },
+                    None,
+                );
+                Ok(Some(State::Done))
+            }
+            None => Ok(None),
         }
     }
 
@@ -188,7 +215,7 @@ impl Protocol for Session {
                 // > streams and datagrams until they can be associated with an
                 // > established session.
                 //
-                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.5>
                 self.pending_streams.insert(stream_id);
             }
             State::Active => {
