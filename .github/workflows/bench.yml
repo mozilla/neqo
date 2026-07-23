@@ -146,22 +146,31 @@ jobs:
               bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
             fi
           done
-          for BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
-            BIN_NAME=$(basename "$BENCH")
-            VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
-            if [ -n "$VARIANTS" ]; then
-              while IFS= read -r VARIANT; do
-                SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
+          profile_dir() {
+            local dir="$1" outdir
+            outdir=$(basename "$dir")
+            local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
+            mkdir -p "../profiles/$outdir"
+            for BENCH in "$dir"/!(neqo-client|neqo-server); do
+              BIN_NAME=$(basename "$BENCH")
+              VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+              if [ -n "$VARIANTS" ]; then
+                while IFS= read -r VARIANT; do
+                  SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
+                  # shellcheck disable=SC2086
+                  bench_exec perf -- $PERF_OPT -o "../profiles/$outdir/$SAFE_NAME.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
+                done <<< "$VARIANTS"
+              else
                 # shellcheck disable=SC2086
-                bench_exec perf -- $PERF_OPT -o "../$SAFE_NAME.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
-              done <<< "$VARIANTS"
-            else
-              # shellcheck disable=SC2086
-              bench_exec perf -- $PERF_OPT -o "../$BIN_NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
-            fi
-          done
+                bench_exec perf -- $PERF_OPT -o "../profiles/$outdir/$BIN_NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+              fi
+            done
+          }
+          profile_dir ../dist/neqo
+          # Also profile the baseline
+          profile_dir ../dist/neqo-baseline
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
-          sudo chown -R "$(id -u)" target/criterion ../*.perf
+          sudo chown -R "$(id -u)" target/criterion ../profiles
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
@@ -172,7 +181,7 @@ jobs:
 
       - name: Post-process perf data
         run: |
-          for f in *.perf; do
+          for f in profiles/*/*.perf; do
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
@@ -216,8 +225,8 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
-            *.samply.json.gz
-            *.syms.json
+            profiles/*/*.samply.json.gz
+            profiles/*/*.syms.json
             binaries
           compression-level: 9
 
@@ -227,7 +236,7 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
-            *.svg
+            profiles/*/*.svg
             *.txt
             *.md
             event.json
@@ -257,4 +266,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries dist comment-data || true
+          rm -r -- binaries dist profiles comment-data || true
