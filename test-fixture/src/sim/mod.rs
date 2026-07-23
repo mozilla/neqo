@@ -96,6 +96,10 @@ pub trait Node: Debug {
     }
     /// Print out a summary of the state of the node.
     fn print_summary(&self, _test_name: &str) {}
+    /// Maximum additional delay the simulator applies to timer callbacks for this node.
+    fn timer_jitter_bound(&self) -> Duration {
+        Duration::ZERO
+    }
 }
 
 /// The state of a single node.  Nodes will be activated if they are `Active`
@@ -151,6 +155,11 @@ pub enum GoalStatus {
     Done,
 }
 
+/// Linux default timer slack: the maximum delay the kernel may apply to coalesce
+/// `epoll_wait`, `poll`, and `nanosleep` wakeups for power saving.
+/// <https://man7.org/linux/man-pages/man2/PR_SET_TIMERSLACK.2const.html>
+pub(crate) const LINUX_TIMER_SLACK: Duration = Duration::from_micros(50);
+
 pub struct Simulator {
     name: String,
     nodes: Vec<NodeHolder>,
@@ -204,6 +213,21 @@ impl Simulator {
         self.rng = Rc::new(RefCell::new(Random::new(&seed)));
     }
 
+    /// Applies right-skewed OS timer delivery jitter to `delay`.
+    ///
+    /// Uses min(U, U) where U ~ Uniform(0, `bound`). Taking the minimum of
+    /// two independent uniform samples produces a right-skewed distribution.
+    fn os_timer_jitter(rng: &Rng, bound: Duration, delay: Duration) -> Duration {
+        if bound.is_zero() {
+            return delay;
+        }
+        let max_ns = u64::try_from(bound.as_nanos()).expect("jitter bound fits in u64");
+        let mut rng = rng.borrow_mut();
+        let a = rng.random_from(0..max_ns);
+        let b = rng.random_from(0..max_ns);
+        delay + Duration::from_nanos(a.min(b))
+    }
+
     fn next_time(&self, now: Instant) -> Instant {
         let mut next = None;
         for n in &self.nodes {
@@ -235,8 +259,10 @@ impl Simulator {
                     }
                     Output::Callback(delay) => {
                         qtrace!("[{}]  => callback {delay:?}", self.name);
-                        assert_ne!(delay, Duration::new(0, 0));
-                        Waiting(now + delay)
+                        assert_ne!(delay, Duration::ZERO);
+                        Waiting(
+                            now + Self::os_timer_jitter(&self.rng, n.timer_jitter_bound(), delay),
+                        )
                     }
                     Output::None => {
                         qtrace!("[{}]  => nothing", self.name);
@@ -332,5 +358,32 @@ impl ReadySimulator {
         );
         self.sim.print_summary();
         sim_time
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::{cell::RefCell, time::Duration};
+
+    use super::{LINUX_TIMER_SLACK, Node as _, Rng, Simulator, network::TailDrop, rng::Random};
+
+    #[test]
+    fn jitter_is_bounded() {
+        let rng = Rng::new(RefCell::new(Random::new(&[1u8; 32])));
+        let base = Duration::from_millis(50);
+        for _ in 0..10_000 {
+            let result = Simulator::os_timer_jitter(&rng, LINUX_TIMER_SLACK, base);
+            assert!(result >= base, "jitter must not reduce delay");
+            assert!(
+                result <= base + LINUX_TIMER_SLACK,
+                "jitter must not exceed bound"
+            );
+        }
+    }
+
+    #[test]
+    fn network_node_no_jitter() {
+        assert_eq!(TailDrop::dsl_uplink().timer_jitter_bound(), Duration::ZERO);
     }
 }
