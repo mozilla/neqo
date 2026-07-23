@@ -32,10 +32,10 @@ const MTU_SIZES_V6: &[usize] = &[
     1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
-const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
+pub const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
-const MAX_PROBES: usize = 3;
+pub const MAX_PROBES: usize = 3;
 const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -105,7 +105,7 @@ impl Pmtud {
     fn set_mtu(&mut self, idx: usize, stats: &mut Stats, now: Instant) {
         let old_mtu = self.plpmtu();
         self.mtu = self.search_table[idx];
-        stats.pmtud_pmtu = self.mtu;
+        stats.pmtud.pmtu = self.mtu;
         let new_mtu = self.plpmtu();
         if old_mtu != new_mtu {
             let done = !self.needs_probe();
@@ -164,7 +164,7 @@ impl Pmtud {
         builder.encode_frame(FrameType::Ping, |_| {});
         tokens.push(recovery::Token::PmtudProbe);
         stats.frame_tx.ping += 1;
-        stats.pmtud_tx += 1;
+        stats.pmtud.tx += 1;
         self.probe_count += 1;
         self.probe_state = Probe::Sent;
         qdebug!(
@@ -201,7 +201,7 @@ impl Pmtud {
         }
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
-        stats.pmtud_ack += acked;
+        stats.pmtud.ack += acked;
         let confirmed_idx = self.probe_index;
         qdebug!(
             "PMTUD probe of size {} succeeded",
@@ -237,7 +237,7 @@ impl Pmtud {
         if lost == 0 {
             return;
         }
-        stats.pmtud_lost += lost;
+        stats.pmtud.lost += lost;
 
         if self.probe_count >= MAX_PROBES {
             // We've sent MAX_PROBES probes and they were all lost. Stop probing at the
@@ -388,15 +388,15 @@ mod tests {
         let encoder = builder.build(prot).unwrap();
         assert_eq!(encoder.len(), pmtud.probe_size());
         assert!(!pmtud.needs_probe());
-        assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
+        assert_eq!(stats_before.pmtud.tx + 1, stats.pmtud.tx);
 
         let packet = make_pmtud_probe(pn, now, encoder.len());
         if encoder.len() + Pmtud::header_size(addr) <= mtu {
             pmtud.on_packets_acked(&[packet], now, stats);
-            assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
+            assert_eq!(stats_before.pmtud.ack + 1, stats.pmtud.ack);
         } else {
             pmtud.on_packets_lost(&[packet], stats, now);
-            assert_eq!(stats_before.pmtud_lost + 1, stats.pmtud_lost);
+            assert_eq!(stats_before.pmtud.lost + 1, stats.pmtud.lost);
         }
     }
 
@@ -544,9 +544,9 @@ mod tests {
             &mut stats,
         );
         assert_mtu(&pmtud, MTU);
-        let initial_lost = stats.pmtud_lost;
+        let initial_lost = stats.pmtud.lost;
 
-        // Lose various non-probe packets - should not change PMTUD state.
+        // Lose various non-probe packets - should not change PMTUD state or stats.
         pmtud.on_packets_lost(&[], &mut stats, now);
         assert_eq!(Probe::NotNeeded, pmtud.probe_state);
 
@@ -557,7 +557,7 @@ mod tests {
         assert_eq!(Probe::NotNeeded, pmtud.probe_state);
 
         // No probe losses should have been recorded.
-        assert_eq!(initial_lost, stats.pmtud_lost);
+        assert_eq!(initial_lost, stats.pmtud.lost);
     }
 
     /// Tests that PMTUD respects the peer's `max_udp_payload_size` transport parameter
@@ -664,9 +664,9 @@ mod tests {
         // With probe_count >= MAX_PROBES, it takes exactly MAX_PROBES losses per probe size
         // before giving up. The first (minimum) probe size always fails MAX_PROBES times.
         assert!(
-            stats.pmtud_lost >= MAX_PROBES,
+            stats.pmtud.lost >= MAX_PROBES,
             "must lose at least MAX_PROBES ({MAX_PROBES}) probes, got {}",
-            stats.pmtud_lost
+            stats.pmtud.lost
         );
     }
 
@@ -688,7 +688,7 @@ mod tests {
             &mut stats,
         );
         assert_mtu(&pmtud, MTU);
-        let initial_ack = stats.pmtud_ack;
+        let initial_ack = stats.pmtud.ack;
 
         // ACK various non-probe packets - should not change PMTUD state.
         pmtud.on_packets_acked(&[], now, &mut stats);
@@ -701,6 +701,6 @@ mod tests {
         assert_eq!(Probe::NotNeeded, pmtud.probe_state);
 
         // No probe ACKs should have been recorded.
-        assert_eq!(initial_ack, stats.pmtud_ack);
+        assert_eq!(initial_ack, stats.pmtud.ack);
     }
 }
