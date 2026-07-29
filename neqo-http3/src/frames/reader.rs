@@ -178,8 +178,10 @@ impl FrameReader {
     ///
     /// # Errors
     ///
-    /// May return `HttpFrame` if a frame cannot be decoded.
-    /// and `TransportStreamDoesNotExist` if `stream_recv` fails.
+    /// May return [`Error::HttpFrame`] if a frame cannot be decoded.
+    /// Can return [`Error::Transport`] with [`TransportError::InvalidStreamId`]
+    /// if the stream was closed as a side-effect of previous reads,
+    /// without invoking `process()` or `process_output()` to synchronize state.
     pub fn receive<T: FrameDecoder<T>>(
         &mut self,
         stream_reader: &mut dyn StreamReader,
@@ -197,7 +199,7 @@ impl FrameReader {
                     // A `RESET_STREAM` will cause the transport to report `NoMoreData`.
                     // Don't treat that as an error here, let the event handling deal with it.
                     Err(Error::Transport(TransportError::NoMoreData)) => break Ok((None, false)),
-                    Err(e) => return Err(Error::map_stream_recv_errors(&e)),
+                    Err(e) => return Err(e),
                 };
 
             if output.is_some() {
