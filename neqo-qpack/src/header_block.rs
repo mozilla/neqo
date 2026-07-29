@@ -316,11 +316,11 @@ impl<'a> HeaderDecoder<'a> {
         Ok(Header::new(parse_utf8(entry.name())?, entry.value()))
     }
 
-    // Resolve a dynamic-table reference from a field line representation. A reference
-    // whose absolute index is at or above the Required Insert Count is a decoding error
-    // per RFC 9204, Section 2.2.3, even when the entry is still present in the table
-    // because later insertions arrived. This also covers Section 2.2.1: such a reference
-    // means the declared Required Insert Count was smaller than the block actually needs.
+    /// Resolve a dynamic-table reference from a field line representation. A reference
+    /// whose absolute index is at or above the Required Insert Count is a decoding error
+    /// per RFC 9204, Section 2.2.3, even when the entry is still present in the table
+    /// because later insertions arrived. This also covers Section 2.2.1: such a reference
+    /// means the declared Required Insert Count was smaller than the block actually needs.
     fn dynamic_entry<'t>(
         &self,
         table: &'t HeaderTable,
