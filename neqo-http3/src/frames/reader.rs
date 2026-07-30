@@ -196,9 +196,12 @@ impl FrameReader {
                         qtrace!("FrameReader::receive: reading {amount} byte, fin={f}");
                         (self.consume::<T>(amount)?, true, f)
                     }
-                    // A `RESET_STREAM` will cause the transport to report `NoMoreData`.
-                    // Don't treat that as an error here, let the event handling deal with it.
-                    Err(Error::Transport(TransportError::NoMoreData)) => break Ok((None, false)),
+                    // A `RESET_STREAM` could cause the transport to report `NoMoreData` or
+                    // `InvalidStreamId`. Don't treat that as an error here, let
+                    // the event handling deal with it.
+                    Err(Error::Transport(
+                        TransportError::NoMoreData | TransportError::InvalidStreamId,
+                    )) => break Ok((None, false)),
                     Err(e) => return Err(e),
                 };
 
