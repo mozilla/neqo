@@ -1543,22 +1543,18 @@ impl Connection {
             return Ok(PreprocessResult::Next);
         }
 
-        // RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an
-        // Initial to 0, and a client that receives an Initial with a non-zero Token
-        // Length MUST discard the packet or close with PROTOCOL_VIOLATION. Discarding
-        // is preferred here: the token length sits in the unprotected header, so an
-        // off-path injection must not be able to tear down the connection.
-        if packet.packet_type() == packet::Type::Initial
-            && self.role == Role::Client
-            && !packet.token().is_empty()
-        {
-            self.stats
-                .borrow_mut()
-                .pkt_dropped("Client received an Initial with a token");
-            return Ok(PreprocessResult::Next);
-        }
-
         match (packet.packet_type(), &self.state, &self.role) {
+            // RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an
+            // Initial to 0, and a client that receives an Initial with a non-zero Token
+            // Length MUST discard the packet or close with PROTOCOL_VIOLATION. Discarding
+            // is preferred here: the token length sits in the unprotected header, so an
+            // off-path injection must not be able to tear down the connection.
+            (packet::Type::Initial, _, Role::Client) if !packet.token().is_empty() => {
+                self.stats
+                    .borrow_mut()
+                    .pkt_dropped("Client received an Initial with a token");
+                return Ok(PreprocessResult::Next);
+            }
             (packet::Type::Initial, State::Init, Role::Server) => {
                 let version = packet.version().ok_or(Error::ProtocolViolation)?;
                 if !packet.is_valid_initial()

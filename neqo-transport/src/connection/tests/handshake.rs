@@ -2109,7 +2109,7 @@ fn client_initial_with_token() {
             crate::packet::Type::Initial,
             version,
             Some(dcid.as_slice()),
-            Some(&[0x33; 8][..]),
+            Some(b"fakescid"),
             crate::packet::LIMIT,
         );
         builder.initial_token(token);
@@ -2128,7 +2128,7 @@ fn client_initial_with_token() {
         .expect("a datagram")
         .to_vec();
     let dropped = client.stats().dropped_rx;
-    drop(client.process(Some(datagram(server_initial(&ci, &[]))), now()));
+    client.process_input(datagram(server_initial(&ci, &[])), now());
     assert_eq!(client.stats().dropped_rx, dropped);
 
     // The same Initial carrying a non-empty token is discarded.
@@ -2139,6 +2139,6 @@ fn client_initial_with_token() {
         .expect("a datagram")
         .to_vec();
     let dropped = client.stats().dropped_rx;
-    drop(client.process(Some(datagram(server_initial(&ci, &[0x01]))), now()));
+    client.process_input(datagram(server_initial(&ci, &[0x01])), now());
     assert_eq!(client.stats().dropped_rx, dropped + 1);
 }
