@@ -140,6 +140,8 @@ impl Http3Parameters {
         if !self.webtransport {
             return false;
         }
+        // Enabling WebTransport always enables CONNECT.
+        debug_assert!(self.connect);
         // WebTransport over HTTP/3 requires HTTP/3 datagrams (carried in QUIC DATAGRAM frames)
         // and reliable stream reset (to deliver each stream's header even if the stream is
         // reset). Only enable it when all of those are configured locally.
