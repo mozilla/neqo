@@ -179,9 +179,9 @@ impl FrameReader {
     /// # Errors
     ///
     /// May return [`Error::HttpFrame`] if a frame cannot be decoded.
-    /// Can return [`Error::Transport`] with [`TransportError::InvalidStreamId`]
-    /// if the stream was closed as a side-effect of previous reads,
-    /// without invoking `process()` or `process_output()` to synchronize state.
+    /// Absorbs [`TransportError::NoMoreData`] and [`TransportError::InvalidStreamId`]
+    /// into a zero-length read if the stream was reset and the stream closed.
+    /// The reset is propagated through events.
     pub fn receive<T: FrameDecoder<T>>(
         &mut self,
         stream_reader: &mut dyn StreamReader,
