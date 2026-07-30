@@ -725,14 +725,9 @@ fn wt_transport_stats_populated() {
     );
     assert!(transport_stats.bytes_rx > 0, "Should have received bytes");
 
-    // RTT may or may not be measured yet in test environment
-    // Just verify the fields exist and have reasonable values
-    if transport_stats.rtt > std::time::Duration::ZERO {
-        assert!(
-            transport_stats.rttvar <= transport_stats.rtt,
-            "RTT variation should not exceed smoothed RTT"
-        );
-    }
+    // RTT may or may not be measured yet in test environment.
+    // rttvar can temporarily exceed the smoothed RTT after a spike (EWMA), so
+    // there's no meaningful upper-bound invariant to assert on it here.
     if transport_stats.min_rtt > std::time::Duration::ZERO {
         assert!(
             transport_stats.min_rtt <= transport_stats.rtt,

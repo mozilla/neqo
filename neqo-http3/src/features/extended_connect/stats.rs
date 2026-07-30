@@ -12,7 +12,7 @@
     clippy::module_name_repetitions,
     reason = "stats::SessionStats is clearer than stats::Session"
 )]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionStats {
     /// Payload bytes sent in WebTransport datagrams (excludes stream data).
     pub datagram_bytes_sent: u64,

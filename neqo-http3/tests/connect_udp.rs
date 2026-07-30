@@ -672,3 +672,16 @@ fn connect_udp_session_protocol_is_not_webtransport() {
         None
     );
 }
+
+/// `webtransport_session_stats` must not return stats for a connect-udp
+/// session just because it happens to share the extended-CONNECT session
+/// machinery with WebTransport.
+#[test]
+fn connect_udp_session_has_no_webtransport_stats() {
+    fixture_init();
+    let (client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_session_stats(session_id),
+        Err(Error::InvalidStreamId)
+    );
+}

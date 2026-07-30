@@ -471,8 +471,8 @@ impl Session {
     }
 
     #[must_use]
-    pub(crate) fn stats(&self) -> SessionStats {
-        self.stats.clone()
+    pub(crate) const fn stats(&self) -> SessionStats {
+        self.stats
     }
 
     fn has_data_to_send(&self) -> bool {
