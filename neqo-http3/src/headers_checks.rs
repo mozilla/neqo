@@ -128,13 +128,12 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         // Connection-specific header fields make a message malformed (RFC 9114,
         // Section 4.2). TE is the only one that may appear, and only with the
         // value "trailers". Names are already lowercased above.
-        if !is_pseudo {
-            match header.name() {
-                "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding"
-                | "upgrade" => return Err(Error::InvalidHeader),
-                "te" if header.value() != b"trailers" => return Err(Error::InvalidHeader),
-                _ => {}
+        match header.name() {
+            "connection" | "keep-alive" | "proxy-connection" | "transfer-encoding" | "upgrade" => {
+                return Err(Error::InvalidHeader);
             }
+            "te" if header.value() != b"trailers" => return Err(Error::InvalidHeader),
+            _ => {}
         }
     }
     // Clear the regular header bit, since we only check pseudo headers below.
@@ -370,6 +369,7 @@ mod tests {
             "proxy-connection",
             "transfer-encoding",
             "upgrade",
+            "te",
         ] {
             let response = vec![Header::new(":status", "200"), Header::new(name, "x")];
             assert!(headers_valid(&response, MessageType::Response).is_err());
@@ -391,14 +391,6 @@ mod tests {
             Header::new("te", "trailers"),
         ];
         assert!(headers_valid(&ok, MessageType::Request).is_ok());
-
-        let bad = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":path", "/"),
-            Header::new("te", "gzip"),
-        ];
-        assert!(headers_valid(&bad, MessageType::Request).is_err());
     }
 
     #[test]
