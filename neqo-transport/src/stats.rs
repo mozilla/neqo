@@ -398,11 +398,11 @@ pub struct Stats {
 
     pub cc: CongestionControlStats,
 
-    /// Total bytes received on wire.
+    /// Total UDP payload bytes received (excludes IP/UDP framing overhead).
     pub bytes_rx: usize,
-    /// Total bytes in packets declared lost.
+    /// Total UDP payload bytes in packets declared lost.
     pub bytes_lost: usize,
-    /// Total bytes in acknowledged packets.
+    /// Total UDP payload bytes in acknowledged packets.
     pub bytes_acked: usize,
 
     /// ECN path validation count, indexed by validation outcome.
@@ -637,7 +637,7 @@ fn debug() {
     rx:
     path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
     mark transitions:
-  dscp: 
+  dscp:\x20
   bytes: rx 0 lost 0 acked 0
   rtt: 0ns rttvar: 0ns
   min_rtt: 0ns\n"

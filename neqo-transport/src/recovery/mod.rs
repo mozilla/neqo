@@ -510,6 +510,12 @@ impl Loss {
         self.qlog = qlog;
     }
 
+    fn count_lost(&self, lost: &[sent::Packet]) {
+        let mut stats = self.stats.borrow_mut();
+        stats.lost += lost.len();
+        stats.bytes_lost += lost.iter().map(sent::Packet::len).sum::<usize>();
+    }
+
     /// Drop all 0rtt packets.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
         let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
@@ -673,11 +679,7 @@ impl Loss {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
-        {
-            let mut stats = self.stats.borrow_mut();
-            stats.lost += lost.len();
-            stats.bytes_lost += lost.iter().map(sent::Packet::len).sum::<usize>();
-        }
+        self.count_lost(&lost);
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
@@ -998,11 +1000,7 @@ impl Loss {
                 now,
             );
         }
-        {
-            let mut stats = self.stats.borrow_mut();
-            stats.lost += lost_packets.len();
-            stats.bytes_lost += lost_packets.iter().map(sent::Packet::len).sum::<usize>();
-        }
+        self.count_lost(&lost_packets);
 
         self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets
