@@ -98,6 +98,39 @@ fn pto_works_full_cwnd() {
     }
 }
 
+/// Basic coverage for the byte/RTT stats fields: they should reflect real
+/// values after a round-tripped transfer, not just their defaults.
+#[test]
+fn stats_populated_after_transfer() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let now = connect_with_rtt(&mut client, &mut server, now(), DEFAULT_RTT);
+
+    let ack = send_and_receive(&mut client, &mut server, now).expect("server should ack");
+    client.process_input(ack, now);
+
+    let client_stats = client.stats();
+    assert!(
+        client_stats.bytes_acked > 0,
+        "sender should have acked bytes"
+    );
+    assert!(cwnd(&client) > 0, "cwnd should be positive");
+    // min_rtt tracks the smallest observed sample, so it can never exceed the
+    // (EWMA-smoothed) rtt estimate.
+    assert!(
+        client_stats.min_rtt <= client_stats.rtt,
+        "min_rtt {:?} should not exceed rtt {:?}",
+        client_stats.min_rtt,
+        client_stats.rtt,
+    );
+
+    let server_stats = server.stats();
+    assert!(
+        server_stats.bytes_rx > 0,
+        "receiver should have counted received bytes"
+    );
+}
+
 #[test]
 fn pto_works_ping() {
     let mut client = default_client();

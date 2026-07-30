@@ -20,7 +20,6 @@ use crate::{
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
-        stats::SessionStats,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
@@ -40,8 +39,6 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
-    /// Session-level statistics.
-    stats: SessionStats,
 }
 
 impl Display for Session {
@@ -62,7 +59,6 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
-            stats: SessionStats::default(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -78,21 +74,6 @@ impl Session {
     /// Validate that a send group belongs to this session.
     pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.send_groups.contains(&group_id)
-    }
-
-    #[expect(dead_code, reason = "pending datagram stats update")]
-    pub(crate) const fn record_datagram_expired_outgoing(&mut self) {
-        self.stats.datagrams_expired_outgoing += 1;
-    }
-
-    #[expect(dead_code, reason = "pending datagram stats update")]
-    pub(crate) const fn record_datagram_lost_outgoing(&mut self) {
-        self.stats.datagrams_lost_outgoing += 1;
-    }
-
-    #[expect(dead_code, reason = "pending datagram stats update")]
-    pub(crate) const fn record_datagram_dropped_incoming(&mut self) {
-        self.stats.datagrams_dropped_incoming += 1;
     }
 }
 
