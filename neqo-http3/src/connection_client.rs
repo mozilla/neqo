@@ -6713,7 +6713,7 @@ mod tests {
         let (encoder_instructions, reset) =
             setup_for_recv_after_reset(&mut client, &mut server, request_stream_id);
 
-        // Encoder instructions ahead of the reset, in a single batch.
+        // Reset ahead of the encoder instructions, in a single batch.
         client.process_multiple_input([reset, encoder_instructions], now());
 
         assert_eq!(client.state(), Http3State::Connected);
