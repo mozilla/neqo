@@ -153,6 +153,8 @@ pub trait ClientSession {
 
     /// Close a `WebTransport` session cleanly.
     ///
+    /// Returns a snapshot of the session's statistics taken at close time.
+    ///
     /// # Errors
     ///
     /// `InvalidStreamId` if the stream does not exist,
@@ -474,7 +476,14 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        self.extended_connect_close_session(
+            conn,
+            session_id,
+            extended_connect::ExtendedConnectType::WebTransport,
+            error,
+            message,
+            now,
+        )
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
@@ -633,12 +642,19 @@ impl ServerSession {
             )
     }
 
+    /// Returns a snapshot of the session's statistics taken at close time.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// Also return an error if the stream was closed on the transport layer,
     /// but that information is not yet consumed on the http/3 layer.
-    pub fn close_session(&self, error: u32, message: &str, now: Instant) -> Res<()> {
+    pub fn close_session(
+        &self,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<extended_connect::stats::SessionStats> {
         self.stream_handler
             .handler
             .borrow_mut()
@@ -648,8 +664,7 @@ impl ServerSession {
                 error,
                 message,
                 now,
-            )?;
-        Ok(())
+            )
     }
 
     #[must_use]

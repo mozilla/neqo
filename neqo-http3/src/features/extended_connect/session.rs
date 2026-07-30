@@ -426,6 +426,8 @@ impl Session {
 
         if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
+            // Note this isn't updating stats currently, since it doesn't actually
+            // send yet (Err(Unavailable)).  If this changes it should update stats
             return self.protocol.write_datagram_capsule(
                 &mut self.control_stream_send,
                 conn,
@@ -471,8 +473,8 @@ impl Session {
     }
 
     #[must_use]
-    pub(crate) fn stats(&self) -> SessionStats {
-        self.stats.clone()
+    pub(crate) const fn stats(&self) -> SessionStats {
+        self.stats
     }
 
     fn has_data_to_send(&self) -> bool {
