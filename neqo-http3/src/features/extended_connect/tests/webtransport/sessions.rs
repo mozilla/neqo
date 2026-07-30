@@ -16,6 +16,7 @@ use crate::{
     Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
         CloseReason,
+        stats::SessionStats,
         tests::webtransport::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
@@ -1110,16 +1111,13 @@ fn wt_session_stats_initial() {
     let session_id = wt_session.stream_id();
 
     let stats = wt.client.webtransport_session_stats(session_id).unwrap();
-    assert_eq!(stats.datagram_bytes_sent, 0);
-    assert_eq!(stats.datagram_bytes_received, 0);
-    assert_eq!(stats.datagrams_sent, 0);
-    assert_eq!(stats.datagrams_received, 0);
-    assert_eq!(stats.streams_opened_local, 0);
-    assert_eq!(stats.streams_opened_remote, 0);
+    assert_eq!(stats, SessionStats::default());
 }
 
 #[test]
 fn wt_session_stats_streams() {
+    const BUF: &[u8] = &[0; 10];
+
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
@@ -1137,6 +1135,14 @@ fn wt_session_stats_streams() {
     let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.streams_opened_local, 2);
     assert_eq!(stats.streams_opened_remote, 0);
+
+    // A server-initiated stream increments the client's remote counter, not local.
+    let unidi_server = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&unidi_server, BUF);
+    wt.receive_data_client(unidi_server.stream_id(), true, BUF, false);
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.streams_opened_local, 2);
+    assert_eq!(stats.streams_opened_remote, 1);
 }
 #[test]
 fn wt_session_stats_datagrams() {
@@ -1151,7 +1157,27 @@ fn wt_session_stats_datagrams() {
 
     let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats.datagrams_sent, 1);
-    assert!(stats.datagram_bytes_sent >= DGRAM.len() as u64);
+    assert_eq!(stats.datagram_bytes_sent, DGRAM.len() as u64);
 
     wt.check_datagram_received_server(&wt_session, DGRAM);
+}
+
+#[test]
+fn wt_session_stats_datagrams_received() {
+    const DGRAM: &[u8] = &[0x12, 0x34, 0x56, 0x78];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    WtTest::send_datagram_server(&wt_session, DGRAM).unwrap();
+    wt.exchange_packets();
+    wt.check_datagram_received_client(session_id, DGRAM);
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.datagrams_received, 1);
+    assert_eq!(stats.datagram_bytes_received, DGRAM.len() as u64);
+    // The receive counters must not be inflated by anything the client sent.
+    assert_eq!(stats.datagrams_sent, 0);
+    assert_eq!(stats.datagram_bytes_sent, 0);
 }
