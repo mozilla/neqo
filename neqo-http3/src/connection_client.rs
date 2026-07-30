@@ -6708,6 +6708,11 @@ mod tests {
     /// The encoder instructions arriving after the reset means that the HTTP/3 code does not
     /// try to read, so this needs no special handling.
     #[test]
+    #[allow(
+        clippy::allow_attributes,
+        clippy::tuple_array_conversions,
+        reason = "this lint has inconsistent validation, so expect doesn't work"
+    )]
     fn recv_after_stream_removed_reordered() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         let (encoder_instructions, reset) =
