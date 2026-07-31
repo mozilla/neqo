@@ -1206,8 +1206,8 @@ impl Http3Client {
 
     /// Get statistics for a WebTransport session.
     ///
-    /// Returns session-level statistics including datagram payload bytes
-    /// sent/received, datagrams sent/received, and streams opened.
+    /// Returns the per-session datagram queue counters; see
+    /// [`SessionStats`](crate::features::extended_connect::stats::SessionStats).
     ///
     /// # Errors
     ///

@@ -5,8 +5,14 @@
 // except according to those terms.
 
 //! Per-session statistics exposed to the WebTransport API consumer.
-//! These are distinct from the connection-level stats in [`neqo_transport::Stats`],
-//! which are internal counters reported to Glean.
+//!
+//! Limited to the members of [`WebTransportDatagramStats`], which describe
+//! per-session datagram queue behaviour and so cannot be derived from the
+//! connection-level counters in [`neqo_transport::Stats`]. Everything else
+//! `getStats()` reports is scoped to the underlying connection, and is only
+//! exposed at all when that connection is dedicated to a single session.
+//!
+//! [`WebTransportDatagramStats`]: https://w3c.github.io/webtransport#dictdef-webtransportdatagramstats
 
 /// Statistics for a single `WebTransport` session.
 ///
@@ -18,18 +24,6 @@
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionStats {
-    /// Payload bytes sent in WebTransport datagrams (excludes stream data).
-    pub datagram_bytes_sent: u64,
-    /// Payload bytes received in WebTransport datagrams (excludes stream data).
-    pub datagram_bytes_received: u64,
-    /// Number of WebTransport datagrams sent.
-    pub datagrams_sent: u64,
-    /// Number of WebTransport datagrams received.
-    pub datagrams_received: u64,
-    /// Streams opened by the local endpoint on this session.
-    pub streams_opened_local: u64,
-    /// Streams opened by the remote endpoint on this session.
-    pub streams_opened_remote: u64,
     /// Outgoing datagrams that expired before being sent.
     ///
     /// Currently always zero; populated once datagram expiry is wired up.

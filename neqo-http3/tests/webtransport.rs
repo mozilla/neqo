@@ -706,6 +706,13 @@ fn wt_export_keying_material_transport_error() {
     ));
 }
 
+/// Covers the snapshot-before-teardown plumbing: `webtransport_close_session` must
+/// return the stats as they were before the session was dismantled.
+///
+/// The only counter in `SessionStats` so far is `datagrams_expired_outgoing`, and
+/// nothing expires datagrams yet, so both snapshots are currently the default. The
+/// datagram send below is scaffolding: once outgoing expiry is wired up it gives the
+/// comparison something non-zero to catch.
 #[test]
 fn wt_stats_at_session_close() {
     const DATAGRAM_DATA: &[u8] = &[1, 2, 3, 4, 5];
@@ -714,7 +721,6 @@ fn wt_stats_at_session_close() {
     let wt_session = create_wt_session(&mut client, &mut server);
     let session_id = wt_session.stream_id();
 
-    // Send a datagram to have some stats
     client
         .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
         .unwrap();
@@ -722,7 +728,6 @@ fn wt_stats_at_session_close() {
 
     // Get stats before close
     let stats_before = client.webtransport_session_stats(session_id).unwrap();
-    assert_eq!(stats_before.datagrams_sent, 1);
 
     // Close the session - webtransport_close_session returns stats at close time
     let close_stats = client

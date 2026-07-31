@@ -683,9 +683,7 @@ impl Http3Connection {
             return;
         };
 
-        stream
-            .borrow_mut()
-            .datagram(Bytes::new(datagram, varint_len));
+        stream.borrow().datagram(Bytes::new(datagram, varint_len));
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {

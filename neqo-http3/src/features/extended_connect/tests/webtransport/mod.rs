@@ -624,10 +624,6 @@ impl WtTest {
             .webtransport_send_datagram(stream_id, buf, None, now())
     }
 
-    fn send_datagram_server(session: &ServerSession, buf: &[u8]) -> Result<(), Error> {
-        session.send_datagram(buf, None, now())
-    }
-
     fn check_datagram_received_client(
         &mut self,
         expected_stream_id: StreamId,

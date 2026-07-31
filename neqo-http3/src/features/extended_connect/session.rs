@@ -61,7 +61,6 @@ pub(crate) struct Session {
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
     draining: bool,
-    role: Role,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -122,7 +121,6 @@ impl Session {
             events,
             protocol,
             draining: false,
-            role,
         }
     }
 
@@ -153,7 +151,6 @@ impl Session {
             events,
             protocol,
             draining: false,
-            role,
         })
     }
 
@@ -326,17 +323,7 @@ impl Session {
 
     pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         self.protocol
-            .add_stream(stream_id, &mut self.events, self.state)?;
-        if !self.state.closing_state()
-            && let Some(stats) = self.protocol.stats_mut()
-        {
-            if stream_id.is_self_initiated(self.role) {
-                stats.streams_opened_local += 1;
-            } else {
-                stats.streams_opened_remote += 1;
-            }
-        }
-        Ok(())
+            .add_stream(stream_id, &mut self.events, self.state)
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -439,15 +426,11 @@ impl Session {
         dgram_data.encode(buf);
 
         conn.send_datagram(dgram_data.into(), id)?;
-        if let Some(stats) = self.protocol.stats_mut() {
-            stats.datagrams_sent += 1;
-            stats.datagram_bytes_sent += buf.len() as u64;
-        }
         qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
 
-    pub(crate) fn datagram(&mut self, datagram: Bytes) {
+    pub(crate) fn datagram(&self, datagram: Bytes) {
         if self.state != State::Active {
             qdebug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -456,10 +439,6 @@ impl Session {
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
-                if let Some(stats) = self.protocol.stats_mut() {
-                    stats.datagrams_received += 1;
-                    stats.datagram_bytes_received += slice.len() as u64;
-                }
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
             }
@@ -650,10 +629,6 @@ pub(crate) trait Protocol: Debug + Display {
             false,
             "stats called for extended connect protocol not tracking stats"
         );
-        None
-    }
-
-    fn stats_mut(&mut self) -> Option<&mut SessionStats> {
         None
     }
 
