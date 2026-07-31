@@ -187,6 +187,13 @@ pub struct SearchResetStats {
 /// Congestion Control stats
 #[derive(Default, Clone, PartialEq)]
 pub struct CongestionControlStats {
+    /// Congestion window size, in bytes, on the primary path. Not updated continuously: this
+    /// is a snapshot taken only when stats are pulled from the connection (see
+    /// [`crate::Connection::stats`]).
+    pub cwnd: usize,
+    /// Bytes in flight (sent but not yet acked or declared lost) on the primary path. Like
+    /// `cwnd`, this is a snapshot taken only when stats are pulled from the connection.
+    pub bytes_in_flight: usize,
     /// Congestion event counters. Includes trigger type and other qualifier flags.
     pub congestion_events: CongestionEventStats,
     /// Statistics captured at the moment a connection exits slow start. Set once on exit and is
@@ -229,6 +236,29 @@ pub struct CongestionControlStats {
     /// occurred or Cubic is not in use. Recorded as a stat to approximate a connection's ideal
     /// congestion window in metrics.
     pub w_max: Option<f64>,
+}
+
+impl Debug for CongestionControlStats {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(
+            f,
+            "    cwnd {} in_flight {}",
+            self.cwnd, self.bytes_in_flight
+        )?;
+        writeln!(
+            f,
+            "    ce_loss {} ce_ecn {} ce_spurious {}",
+            self.congestion_events.loss,
+            self.congestion_events.ecn,
+            self.congestion_events.spurious,
+        )?;
+        writeln!(
+            f,
+            "    ss_exit_cwnd {:?} ss_exit_reason {:?}",
+            self.slow_start_exit.as_ref().map(|e| e.exit_cwnd),
+            self.slow_start_exit.as_ref().map(|e| &e.reason),
+        )
+    }
 }
 
 /// ECN counts by QUIC [`packet::Type`].
@@ -401,10 +431,6 @@ pub struct Stats {
     pub bytes_lost: usize,
     /// Total bytes in acknowledged packets.
     pub bytes_acked: usize,
-    /// Congestion window size.
-    pub cwnd: usize,
-    /// Bytes in flight (sent but not yet acked or declared lost).
-    pub bytes_in_flight: usize,
 
     /// ECN path validation count, indexed by validation outcome.
     pub ecn_path_validation: ecn::ValidationCount,
@@ -483,19 +509,7 @@ impl Debug for Stats {
             self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
         )?;
         writeln!(f, "  cc:")?;
-        writeln!(
-            f,
-            "    ce_loss {} ce_ecn {} ce_spurious {}",
-            self.cc.congestion_events.loss,
-            self.cc.congestion_events.ecn,
-            self.cc.congestion_events.spurious,
-        )?;
-        writeln!(
-            f,
-            "    ss_exit_cwnd {:?} ss_exit_reason {:?}",
-            self.cc.slow_start_exit.as_ref().map(|e| e.exit_cwnd),
-            self.cc.slow_start_exit.as_ref().map(|e| &e.reason),
-        )?;
+        self.cc.fmt(f)?;
         writeln!(
             f,
             "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
@@ -531,12 +545,7 @@ impl Debug for Stats {
             self.bytes_rx, self.bytes_lost, self.bytes_acked
         )?;
         writeln!(f, "  rtt: {:?} rttvar: {:?}", self.rtt, self.rttvar)?;
-        writeln!(f, "  min_rtt: {:?}", self.min_rtt)?;
-        writeln!(
-            f,
-            "  cwnd: {} bytes_in_flight: {}",
-            self.cwnd, self.bytes_in_flight
-        )
+        writeln!(f, "  min_rtt: {:?}", self.min_rtt)
     }
 }
 
@@ -614,6 +623,7 @@ fn debug() {
   rx: 0 drop 0 dup 0 saved 0
   tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
   cc:
+    cwnd 0 in_flight 0
     ce_loss 0 ce_ecn 0 ce_spurious 0
     ss_exit_cwnd None ss_exit_reason None
   pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
@@ -645,7 +655,6 @@ fn debug() {
   dscp: 
   bytes: rx 0 lost 0 acked 0
   rtt: 0ns rttvar: 0ns
-  min_rtt: 0ns
-  cwnd: 0 bytes_in_flight: 0\n"
+  min_rtt: 0ns\n"
     );
 }

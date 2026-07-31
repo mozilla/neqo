@@ -974,12 +974,7 @@ impl Connection {
         let mut v = self.stats.borrow().clone();
         v.version = self.version;
         if let Some(p) = self.paths.primary() {
-            let p = p.borrow();
-            v.rtt = p.rtt().estimate();
-            v.rttvar = p.rtt().rttvar();
-            v.min_rtt = p.rtt().minimum();
-            v.cwnd = p.sender().cwnd();
-            v.bytes_in_flight = p.sender().bytes_in_flight();
+            p.borrow().update_stats(&mut v);
         }
         v
     }
