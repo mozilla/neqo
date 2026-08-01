@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{Bytes, Header, event::Queue as EventQueue, header::HeadersExt as _};
-use neqo_transport::{AppError, StreamId};
+use neqo_transport::{AppError, StreamId, StreamType};
 
 use crate::{
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
@@ -223,6 +223,10 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
                 },
             ));
         }
+    }
+
+    fn session_stream_creatable(&self, _stream_type: StreamType) {
+        // The server API has no equivalent of `waitUntilAvailable`.
     }
 
     fn extended_connect_new_stream(
