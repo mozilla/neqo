@@ -800,6 +800,35 @@ impl ServerSession {
             )
     }
 
+    /// Send a `WT_MAX_STREAMS` capsule on this session's stream.
+    ///
+    /// Only used in tests to exercise the receive path, since we do not send these
+    /// capsules in production yet. Like [`Self::test_drain_session`], going through
+    /// the session guarantees the capsule reaches the owning connection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session does not exist or sending fails.
+    #[cfg(test)]
+    pub fn test_send_max_streams(
+        &self,
+        stream_type: StreamType,
+        maximum: u64,
+        now: Instant,
+    ) -> Res<()> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .test_webtransport_send_max_streams(
+                &mut self.stream_handler.conn.borrow_mut(),
+                session_id,
+                stream_type,
+                maximum,
+                now,
+            )
+    }
+
     #[must_use]
     pub fn state(&self) -> Http3State {
         self.stream_handler.handler.borrow().state()

@@ -22,7 +22,7 @@ mod tests;
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{Bytes, Header, Role};
-use neqo_transport::StreamId;
+use neqo_transport::{StreamId, StreamType};
 
 use crate::{
     Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
@@ -50,6 +50,9 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         headers: Option<Vec<Header>>,
     );
     fn session_draining(&self, connect_type: ExtendedConnectType, stream_id: StreamId);
+    /// The peer raised this session's stream limit, so a caller that was blocked
+    /// on it (e.g. `waitUntilAvailable`) can retry.
+    fn session_stream_creatable(&self, stream_type: StreamType);
     fn extended_connect_new_stream(
         &self,
         stream_info: Http3StreamInfo,
