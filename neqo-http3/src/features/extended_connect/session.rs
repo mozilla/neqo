@@ -682,6 +682,14 @@ impl Session {
         self.protocol.local_stream_count(stream_type)
     }
 
+    pub(crate) fn remote_stream_count(&self, stream_type: StreamType) -> u64 {
+        self.protocol.remote_stream_count(stream_type)
+    }
+
+    pub(crate) fn granted_max_streams(&self, stream_type: StreamType) -> Option<u64> {
+        self.protocol.granted_max_streams(stream_type)
+    }
+
     /// Session statistics, for protocols that track them (only `WebTransport`).
     #[must_use]
     pub(crate) fn stats(&self) -> Option<SessionStats> {
@@ -880,6 +888,14 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn local_stream_count(&self, _stream_type: StreamType) -> u64 {
         0
+    }
+
+    fn remote_stream_count(&self, _stream_type: StreamType) -> u64 {
+        0
+    }
+
+    fn granted_max_streams(&self, _stream_type: StreamType) -> Option<u64> {
+        None
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);

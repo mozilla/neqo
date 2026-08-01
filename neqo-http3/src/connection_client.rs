@@ -968,6 +968,7 @@ impl Http3Client {
             ReceiveOutput::NewStream(NewStreamType::Http(_)) => Err(Error::HttpStreamCreation),
             ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
                 self.base_handler.webtransport_create_stream_remote(
+                    &mut self.conn,
                     StreamId::from(session_id),
                     stream_id,
                     Box::new(self.events.clone()),

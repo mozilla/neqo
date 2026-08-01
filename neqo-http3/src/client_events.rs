@@ -271,6 +271,11 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         }
     }
 
+    fn session_stream_creatable(&self, stream_type: StreamType) {
+        self.events
+            .push(Http3ClientEvent::StreamCreatable { stream_type });
+    }
+
     fn extended_connect_new_stream(
         &self,
         stream_info: Http3StreamInfo,
