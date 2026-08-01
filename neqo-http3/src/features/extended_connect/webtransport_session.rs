@@ -25,6 +25,14 @@ use crate::{
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
 
+/// `WT_FLOW_CONTROL_ERROR` HTTP/3 error code (draft-15 §9.5), used to close a
+/// session whose peer violates the per-session stream limit.
+pub const WT_FLOW_CONTROL_ERROR: u64 = 0x045d_4487;
+
+/// Maximum permitted `WT_MAX_STREAMS` value (draft-15 §5.6.2): a larger value
+/// cannot be encoded as a stream ID and must be treated as `H3_DATAGRAM_ERROR`.
+const WT_MAX_STREAMS_LIMIT: u64 = 1 << 60;
+
 #[derive(Debug)]
 pub struct Session {
     frame_reader: FrameReader,
@@ -49,6 +57,17 @@ pub struct Session {
     /// Cumulative count of locally-initiated bidi streams over the session
     /// lifetime.
     cumulative_bidi_count: u64,
+    /// Cumulative count of remote-initiated uni streams, used to enforce the
+    /// limit we advertised to the peer (draft-15 §5.6.2). Like the local
+    /// counts, this never decreases.
+    remote_uni_count: u64,
+    /// Cumulative count of remote-initiated bidi streams.
+    remote_bidi_count: u64,
+    /// Highest `WT_MAX_STREAMS` value the peer has granted us per type, if
+    /// any. Raises the send limit above the peer's initial
+    /// `SETTINGS_WT_INITIAL_MAX_STREAMS_*`.
+    granted_max_streams_uni: Option<u64>,
+    granted_max_streams_bidi: Option<u64>,
 }
 
 impl Display for Session {
@@ -73,6 +92,10 @@ impl Session {
             draining: false,
             cumulative_uni_count: 0,
             cumulative_bidi_count: 0,
+            remote_uni_count: 0,
+            remote_bidi_count: 0,
+            granted_max_streams_uni: None,
+            granted_max_streams_bidi: None,
         }
     }
 
@@ -102,6 +125,30 @@ impl Session {
         match stream_type {
             StreamType::UniDi => self.cumulative_uni_count,
             StreamType::BiDi => self.cumulative_bidi_count,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn remote_stream_count(&self, stream_type: StreamType) -> u64 {
+        match stream_type {
+            StreamType::UniDi => self.remote_uni_count,
+            StreamType::BiDi => self.remote_bidi_count,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn granted_max_streams(&self, stream_type: StreamType) -> Option<u64> {
+        match stream_type {
+            StreamType::UniDi => self.granted_max_streams_uni,
+            StreamType::BiDi => self.granted_max_streams_bidi,
+        }
+    }
+
+    /// Record a `WT_MAX_STREAMS` value that passed validation, raising our send limit.
+    const fn set_granted_max_streams(&mut self, stream_type: StreamType, maximum: u64) {
+        match stream_type {
+            StreamType::UniDi => self.granted_max_streams_uni = Some(maximum),
+            StreamType::BiDi => self.granted_max_streams_bidi = Some(maximum),
         }
     }
 }
@@ -189,6 +236,47 @@ impl Protocol for Session {
                     Ok(None)
                 }
             }
+            Some(WebTransportFrame::MaxStreams {
+                stream_type,
+                maximum,
+            }) => {
+                // TODO(draft-15 §5.1-7): if flow control was not negotiated
+                // as enabled by both endpoints, this capsule should be
+                // ignored rather than processed. Not yet plumbed through to
+                // this session; harmless today since we do not send this
+                // capsule in production yet (test-only).
+                // draft-15 §5.6.2: raise our send limit. A value that cannot be
+                // encoded as a stream ID is an H3_DATAGRAM_ERROR connection error.
+                if maximum > WT_MAX_STREAMS_LIMIT {
+                    return Err(Error::HttpDatagram);
+                }
+                // A value below a previously received one is a flow-control
+                // violation; close the session. We compare only against prior
+                // WT_MAX_STREAMS capsules, not the peer's initial
+                // SETTINGS_WT_INITIAL_MAX_STREAMS_* value, which the session
+                // does not retain.
+                let previous = self.granted_max_streams(stream_type);
+                if matches!(previous, Some(prev) if maximum < prev) {
+                    drop(conn.stream_stop_sending(self.id, WT_FLOW_CONTROL_ERROR));
+                    drop(conn.stream_reset_send(self.id, WT_FLOW_CONTROL_ERROR));
+                    events.session_end(
+                        ExtendedConnectType::WebTransport,
+                        self.id,
+                        CloseReason::Error(WT_FLOW_CONTROL_ERROR),
+                        None,
+                    );
+                    Ok(Some(State::Done))
+                } else {
+                    self.set_granted_max_streams(stream_type, maximum);
+                    // Wake anything blocked on the session's stream limit (the signal
+                    // `waitUntilAvailable` listens for). Only on an actual increase:
+                    // a repeated capsule grants no new credit.
+                    if previous.is_none_or(|prev| maximum > prev) {
+                        events.session_stream_creatable(stream_type);
+                    }
+                    Ok(None)
+                }
+            }
             None if fin => {
                 events.session_end(
                     ExtendedConnectType::WebTransport,
@@ -221,12 +309,15 @@ impl Protocol for Session {
             self.recv_streams.insert(stream_id);
             if stream_id.is_self_initiated(self.role) {
                 self.cumulative_bidi_count += 1;
+            } else {
+                self.remote_bidi_count += 1;
             }
         } else if stream_id.is_self_initiated(self.role) {
             self.send_streams.insert(stream_id);
             self.cumulative_uni_count += 1;
         } else {
             self.recv_streams.insert(stream_id);
+            self.remote_uni_count += 1;
         }
 
         match state {
@@ -310,6 +401,14 @@ impl Protocol for Session {
         Self::local_stream_count(self, stream_type)
     }
 
+    fn remote_stream_count(&self, stream_type: StreamType) -> u64 {
+        Self::remote_stream_count(self, stream_type)
+    }
+
+    fn granted_max_streams(&self, stream_type: StreamType) -> Option<u64> {
+        Self::granted_max_streams(self, stream_type)
+    }
+
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
         // WebTransport does not add prefix (i.e. context ID).
     }
@@ -352,12 +451,12 @@ mod tests {
     use std::{cell::RefCell, cmp::min, rc::Rc, time::Instant};
 
     use neqo_common::{Bytes, Encoder, Header, Role};
-    use neqo_transport::{Connection, StreamId};
+    use neqo_transport::{Connection, StreamId, StreamType};
     use test_fixture::{default_client, now};
 
-    use super::{Protocol as _, Session, State};
+    use super::{Protocol as _, Session, State, WT_FLOW_CONTROL_ERROR, WT_MAX_STREAMS_LIMIT};
     use crate::{
-        CloseType, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
+        CloseType, Error, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
         features::extended_connect::{CloseReason, ExtendedConnectEvents, ExtendedConnectType},
         frames::WebTransportFrame,
     };
@@ -383,6 +482,7 @@ mod tests {
         fn session_draining(&self, _: ExtendedConnectType, stream_id: StreamId) {
             self.draining.borrow_mut().push(stream_id);
         }
+        fn session_stream_creatable(&self, _: StreamType) {}
         fn extended_connect_new_stream(&self, _: Http3StreamInfo, _: bool) -> Res<()> {
             Ok(())
         }
@@ -468,6 +568,85 @@ mod tests {
                 }
             )],
             "expected a clean SessionClosed with error 0"
+        );
+    }
+
+    fn deliver_max_streams(
+        session: &mut Session,
+        conn: &mut Connection,
+        events: &mut Box<dyn ExtendedConnectEvents>,
+        stream_type: StreamType,
+        maximum: u64,
+    ) -> Res<Option<State>> {
+        let mut enc = Encoder::default();
+        WebTransportFrame::MaxStreams {
+            stream_type,
+            maximum,
+        }
+        .encode(&mut enc);
+        let mut recv: Box<dyn RecvStream> = Box::new(FinWithFrameStream {
+            data: enc.into(),
+            offset: 0,
+        });
+        session.read_control_stream(conn, events, &mut recv, now())
+    }
+
+    /// draft-ietf-webtrans-http3-15 §5.6.2: a `WT_MAX_STREAMS` capsule with a value below one
+    /// previously granted is a flow-control violation and must close the session with
+    /// `WT_FLOW_CONTROL_ERROR`, even though the raising capsule that granted it did not itself
+    /// carry a FIN.
+    #[test]
+    fn max_streams_capsule_decreasing_closes_session() {
+        let session_id = StreamId::new(0);
+        let mut session = Session::new(session_id, Role::Client);
+        let recorder = RecordingEvents::default();
+        let mut events: Box<dyn ExtendedConnectEvents> = Box::new(recorder.clone());
+        let mut conn = default_client();
+
+        let state = deliver_max_streams(&mut session, &mut conn, &mut events, StreamType::UniDi, 5)
+            .unwrap();
+        assert_eq!(state, None, "raising the limit must not end the session");
+
+        let state = deliver_max_streams(&mut session, &mut conn, &mut events, StreamType::UniDi, 3)
+            .unwrap();
+        assert_eq!(
+            state,
+            Some(State::Done),
+            "a decreasing MAX_STREAMS value must end the session"
+        );
+        assert_eq!(
+            *recorder.ended.borrow(),
+            vec![(session_id, CloseReason::Error(WT_FLOW_CONTROL_ERROR))],
+            "expected SessionClosed with WT_FLOW_CONTROL_ERROR"
+        );
+    }
+
+    /// draft-ietf-webtrans-http3-15 §5.6.2: a `WT_MAX_STREAMS` value that cannot be encoded as a
+    /// stream ID (i.e. exceeds `1 << 60`) must be rejected as `H3_DATAGRAM_ERROR`, a connection
+    /// error, not merely a session-level close.
+    #[test]
+    fn max_streams_capsule_exceeding_limit_is_datagram_error() {
+        let session_id = StreamId::new(0);
+        let mut session = Session::new(session_id, Role::Client);
+        let recorder = RecordingEvents::default();
+        let mut events: Box<dyn ExtendedConnectEvents> = Box::new(recorder.clone());
+        let mut conn = default_client();
+
+        let result = deliver_max_streams(
+            &mut session,
+            &mut conn,
+            &mut events,
+            StreamType::UniDi,
+            WT_MAX_STREAMS_LIMIT + 1,
+        );
+
+        assert!(
+            matches!(result, Err(Error::HttpDatagram)),
+            "expected H3_DATAGRAM_ERROR for an unencodable MAX_STREAMS value, got {result:?}"
+        );
+        assert!(
+            recorder.ended.borrow().is_empty(),
+            "the session itself should not report a clean/graceful end for a connection error"
         );
     }
 }
