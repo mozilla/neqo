@@ -12,7 +12,7 @@ mod sessions;
 mod streams;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider as _, header::HeadersExt as _, to_u64};
+use neqo_common::{MAX_VARINT, event::Provider as _, header::HeadersExt as _, to_u64};
 use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType, recv_stream, send_stream};
 use nss::AuthenticationStatus;
 use test_fixture::{
@@ -39,6 +39,15 @@ pub fn wt_default_parameters() -> Http3Parameters {
     Http3Parameters::default()
         .webtransport(true)
         .connection_parameters(ConnectionParameters::default().datagram_size(DATAGRAM_SIZE))
+}
+
+/// Like [`wt_default_parameters`], but also declares intent to use draft-15 §5.1
+/// per-session flow control, by advertising `SETTINGS_WT_INITIAL_MAX_DATA` as
+/// effectively unlimited. Flow control only applies once *both* endpoints declare
+/// intent, so a test that checks one side's advertised stream limit must have the
+/// other side opt in with this, or the limit is never enforced.
+pub fn wt_flow_control_opt_in_parameters() -> Http3Parameters {
+    wt_default_parameters().wt_initial_max_data(Some(MAX_VARINT))
 }
 
 pub fn default_http3_client(client_params: Http3Parameters) -> Http3Client {
@@ -323,9 +332,17 @@ impl WtTest {
         wt_session_id: StreamId,
         stream_type: StreamType,
     ) -> StreamId {
+        self.try_create_wt_stream_client(wt_session_id, stream_type)
+            .unwrap()
+    }
+
+    fn try_create_wt_stream_client(
+        &mut self,
+        wt_session_id: StreamId,
+        stream_type: StreamType,
+    ) -> Result<StreamId, Error> {
         self.client
             .webtransport_create_stream(wt_session_id, stream_type)
-            .unwrap()
     }
 
     fn send_data_client(&mut self, wt_stream_id: StreamId, data: &[u8]) {

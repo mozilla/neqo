@@ -11,7 +11,7 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
-use neqo_transport::{Connection, StreamId, streams::SendGroupId};
+use neqo_transport::{Connection, StreamId, StreamType, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 use sfv::{BareItem, Item, Parser};
 
@@ -40,6 +40,13 @@ pub struct Session {
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
     draining: bool,
+    /// Cumulative count of locally-initiated uni streams over the session
+    /// lifetime. The per-session stream limit is cumulative (like QUIC's
+    /// `MAX_STREAMS`), so this never decreases when a stream closes.
+    cumulative_uni_count: u64,
+    /// Cumulative count of locally-initiated bidi streams over the session
+    /// lifetime.
+    cumulative_bidi_count: u64,
 }
 
 impl Display for Session {
@@ -61,6 +68,8 @@ impl Session {
             negotiated_protocol: None,
             send_groups: HashSet::default(),
             draining: false,
+            cumulative_uni_count: 0,
+            cumulative_bidi_count: 0,
         }
     }
 
@@ -83,6 +92,14 @@ impl Session {
     /// Validate that a send group belongs to this session.
     pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.send_groups.contains(&group_id)
+    }
+
+    #[must_use]
+    pub(crate) const fn local_stream_count(&self, stream_type: StreamType) -> u64 {
+        match stream_type {
+            StreamType::UniDi => self.cumulative_uni_count,
+            StreamType::BiDi => self.cumulative_bidi_count,
+        }
     }
 }
 
@@ -199,8 +216,12 @@ impl Protocol for Session {
         if stream_id.is_bidi() {
             self.send_streams.insert(stream_id);
             self.recv_streams.insert(stream_id);
+            if stream_id.is_self_initiated(self.role) {
+                self.cumulative_bidi_count += 1;
+            }
         } else if stream_id.is_self_initiated(self.role) {
             self.send_streams.insert(stream_id);
+            self.cumulative_uni_count += 1;
         } else {
             self.recv_streams.insert(stream_id);
         }
@@ -276,6 +297,10 @@ impl Protocol for Session {
 
     fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         Self::validate_send_group(self, group_id)
+    }
+
+    fn local_stream_count(&self, stream_type: StreamType) -> u64 {
+        Self::local_stream_count(self, stream_type)
     }
 
     fn write_datagram_prefix(&self, _encoder: &mut Encoder) {

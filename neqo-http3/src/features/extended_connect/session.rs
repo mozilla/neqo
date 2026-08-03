@@ -598,6 +598,10 @@ impl Session {
         self.protocol.validate_send_group(group_id)
     }
 
+    pub(crate) fn local_stream_count(&self, stream_type: StreamType) -> u64 {
+        self.protocol.local_stream_count(stream_type)
+    }
+
     #[must_use]
     pub(crate) const fn stats(&self) -> SessionStats {
         self.stats
@@ -772,6 +776,10 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
         false
+    }
+
+    fn local_stream_count(&self, _stream_type: StreamType) -> u64 {
+        0
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);
