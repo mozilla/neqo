@@ -1713,6 +1713,8 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    HSettingType::EnableWebTransport,
+                    HSettingType::EnableH3Datagram,
                 ] {
                     let zero_rtt_value = settings.get(*st);
                     let new_value = new_settings.get(*st);
