@@ -133,6 +133,9 @@ pub enum Http3ClientEvent {
     WebTransport(WebTransportEvent),
     /// `ConnectUdp` events
     ConnectUdp(ConnectUdpEvent),
+    /// The outgoing QUIC datagram queue has space again after having been full.
+    /// The application can resume sending HTTP/3 datagrams.
+    OutgoingDatagramSpaceAvailable,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -358,6 +361,13 @@ impl Http3ClientEvents {
     pub(crate) fn goaway_received(&self) {
         self.remove(|evt| matches!(evt, Http3ClientEvent::RequestsCreatable));
         self.insert(Http3ClientEvent::GoawayReceived);
+    }
+
+    /// Signal that the outgoing QUIC datagram queue has space again.
+    pub(crate) fn datagram_space_available(&self) {
+        // Only one such signal needs to be outstanding at a time.
+        self.remove(|evt| matches!(evt, Http3ClientEvent::OutgoingDatagramSpaceAvailable));
+        self.insert(Http3ClientEvent::OutgoingDatagramSpaceAvailable);
     }
 
     pub fn insert(&self, event: Http3ClientEvent) {

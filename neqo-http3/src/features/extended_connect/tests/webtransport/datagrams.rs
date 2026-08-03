@@ -65,8 +65,8 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
         Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
-    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
+    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(true));
+    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(true));
 
     wt.exchange_packets();
     wt.check_datagram_received_client(wt_session.stream_id(), DGRAM);
@@ -104,7 +104,7 @@ fn datagrams_server_only() {
         wt_session.send_datagram(DGRAM, None, now()),
         Err(Error::Transport(TransportError::TooMuchData))
     );
-    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
+    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(true));
 
     wt.exchange_packets();
     wt.check_datagram_received_server(&wt_session, DGRAM);
@@ -131,7 +131,7 @@ fn datagrams_client_only() {
         Err(Error::Transport(TransportError::NotAvailable))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
+    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(true));
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
         Err(Error::Transport(TransportError::TooMuchData))

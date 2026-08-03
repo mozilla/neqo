@@ -184,6 +184,12 @@ pub trait ClientSession {
 
     /// Send a `WebTransport` datagram.
     ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the datagram was queued and space remains, or `Ok(false)`
+    /// if it was queued but the outgoing QUIC datagram queue is now full and the
+    /// producer should stop sending until space frees (backpressure).
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -195,7 +201,7 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl ClientSession for Http3Client {
@@ -337,7 +343,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_send_datagram(session_id, conn, buf, id, now)
@@ -414,6 +420,10 @@ trait Handler {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats>;
 
+    /// Returns `Ok(true)` if the datagram was queued and space remains, or
+    /// `Ok(false)` if it was queued but the outgoing QUIC datagram queue is now
+    /// full and the producer should stop sending until space frees
+    /// (backpressure).
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -421,7 +431,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl Handler for Http3Connection {
@@ -502,7 +512,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -533,6 +543,10 @@ pub(crate) trait ServerHandler {
         stream_type: StreamType,
     ) -> Res<StreamId>;
 
+    /// Returns `Ok(true)` if the datagram was queued and space remains, or
+    /// `Ok(false)` if it was queued but the outgoing QUIC datagram queue is now
+    /// full and the producer should stop sending until space frees
+    /// (backpressure).
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -540,7 +554,7 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl ServerHandler for Http3ServerHandler {
@@ -595,7 +609,7 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .webtransport_send_datagram(session_id, conn, buf, id, now)
@@ -707,6 +721,12 @@ impl ServerSession {
 
     /// Send `WebTransport` datagram.
     ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the datagram was queued and space remains, or `Ok(false)`
+    /// if it was queued but the outgoing QUIC datagram queue is now full and the
+    /// producer should stop sending until space frees (backpressure).
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -717,7 +737,7 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
