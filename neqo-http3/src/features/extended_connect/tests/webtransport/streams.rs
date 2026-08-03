@@ -12,10 +12,115 @@ use crate::{
     Error, Http3Parameters,
     features::extended_connect::{
         CloseReason,
-        tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
+        tests::webtransport::{
+            DATAGRAM_SIZE, WtTest, wt_default_parameters, wt_flow_control_opt_in_parameters,
+        },
     },
     webtransport::ClientSession as _,
 };
+
+#[test]
+fn wt_client_stream_limit_not_enforced_without_flow_control_opt_in() {
+    // draft-ietf-webtrans-http3-15 §5.1: a limit the peer advertises only binds us
+    // once *both* endpoints opt in to flow control. Here the server advertises a
+    // limit of one uni stream but the client keeps the defaults and does not opt in
+    // (as in Firefox's default configuration), so the limit must not be enforced.
+    // The tests below all opt the client in via `wt_flow_control_opt_in_parameters`
+    // for exactly this reason.
+    let server_params = wt_default_parameters().wt_initial_max_streams_uni(Some(1));
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+
+    for _ in 0..3 {
+        assert!(
+            wt.try_create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi)
+                .is_ok(),
+            "an advertised limit must not be enforced when flow control was never negotiated"
+        );
+    }
+}
+
+#[test]
+fn wt_client_stream_uni_limit() {
+    // Server advertises a per-session limit of one client-initiated uni stream.
+    // The client must also opt in to flow control (draft-15 §5.1) for the
+    // server's advertised limit to be enforced.
+    let server_params = wt_default_parameters().wt_initial_max_streams_uni(Some(1));
+    let mut wt = WtTest::new_with_params(wt_flow_control_opt_in_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+
+    // The first uni stream is within the advertised limit.
+    _ = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    // The second exceeds it.
+    assert_eq!(
+        wt.try_create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi),
+        Err(Error::StreamLimit)
+    );
+}
+
+#[test]
+fn wt_client_stream_uni_limit_is_cumulative() {
+    // Per draft-ietf-webtrans-http3-15 (Section 5.6.2) the per-session stream limit is
+    // cumulative over the session lifetime, like QUIC's MAX_STREAMS, raised only by
+    // WT_MAX_STREAMS capsules. Closing the one allowed uni stream must not free a slot:
+    // a second uni stream must still be rejected.
+    const BUF: &[u8] = &[0; 10];
+
+    let server_params = wt_default_parameters().wt_initial_max_streams_uni(Some(1));
+    let mut wt = WtTest::new_with_params(wt_flow_control_opt_in_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+
+    let first = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(first, BUF);
+    drop(wt.receive_data_server(first, true, BUF, false));
+    wt.reset_stream_client(first);
+    wt.receive_reset_server(first, Error::HttpNone.code());
+
+    assert_eq!(
+        wt.try_create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi),
+        Err(Error::StreamLimit)
+    );
+}
+
+#[test]
+fn wt_client_stream_bidi_limit() {
+    // Server advertises a per-session limit of one client-initiated bidi stream.
+    // The client must also opt in to flow control (draft-15 §5.1) for the
+    // server's advertised limit to be enforced.
+    let server_params = wt_default_parameters().wt_initial_max_streams_bidi(Some(1));
+    let mut wt = WtTest::new_with_params(wt_flow_control_opt_in_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+
+    _ = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    assert_eq!(
+        wt.try_create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi),
+        Err(Error::StreamLimit)
+    );
+}
+
+#[test]
+fn wt_client_stream_bidi_limit_is_cumulative() {
+    // Per draft-ietf-webtrans-http3-15 (Section 5.6.2) the per-session stream limit is
+    // cumulative over the session lifetime, like QUIC's MAX_STREAMS, raised only by
+    // WT_MAX_STREAMS capsules. Closing the one allowed bidi stream must not free a slot:
+    // a second bidi stream must still be rejected.
+    const BUF: &[u8] = &[0; 10];
+
+    let server_params = wt_default_parameters().wt_initial_max_streams_bidi(Some(1));
+    let mut wt = WtTest::new_with_params(wt_flow_control_opt_in_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+
+    let first = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    wt.send_data_client(first, BUF);
+    let server_stream = wt.receive_data_server(first, true, BUF, false);
+    wt.reset_stream_client(first);
+    wt.receive_reset_server(server_stream.stream_id(), Error::HttpNone.code());
+
+    assert_eq!(
+        wt.try_create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi),
+        Err(Error::StreamLimit)
+    );
+}
 
 #[test]
 fn wt_client_stream_uni() {

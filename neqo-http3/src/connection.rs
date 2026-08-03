@@ -1610,6 +1610,34 @@ impl Http3Connection {
         )
     }
 
+    /// draft-15 §5.1: per-session flow control (the `WT_MAX_STREAMS`/
+    /// `WT_INITIAL_MAX_DATA` limits) only applies once *both* endpoints have
+    /// declared intent to use it by sending a non-zero value for at least one
+    /// of `SETTINGS_WT_INITIAL_MAX_STREAMS_UNI`, `_BIDI`, or
+    /// `SETTINGS_WT_INITIAL_MAX_DATA`. Absence of a setting, or sending it as
+    /// exactly `0`, does not count. Returns `None` while the peer's SETTINGS
+    /// are not yet known.
+    fn webtransport_flow_control_enabled(&self) -> Option<bool> {
+        const WT_FLOW_CONTROL_SETTINGS: &[HSettingType] = &[
+            HSettingType::WtInitialMaxStreamsUni,
+            HSettingType::WtInitialMaxStreamsBidi,
+            HSettingType::WtInitialMaxData,
+        ];
+        let local = [
+            self.local_params.get_wt_initial_max_streams_uni(),
+            self.local_params.get_wt_initial_max_streams_bidi(),
+            self.local_params.get_wt_initial_max_data(),
+        ]
+        .iter()
+        .any(|v| v.is_some_and(|v| v != 0));
+        let remote_settings = match &self.settings_state {
+            Http3RemoteSettingsState::Received(settings)
+            | Http3RemoteSettingsState::ZeroRtt(settings) => settings,
+            Http3RemoteSettingsState::NotReceived => return None,
+        };
+        Some(local && remote_settings.any_explicit_nonzero(WT_FLOW_CONTROL_SETTINGS))
+    }
+
     pub(crate) fn webtransport_create_stream_local_with_send_group(
         &mut self,
         conn: &mut Connection,
@@ -1624,11 +1652,36 @@ impl Http3Connection {
         );
 
         let wt = self.validate_extended_connect_session(session_id)?;
+        // `validate_extended_connect_session` accepts any active extended-connect
+        // session, so reject a non-WebTransport one (e.g. CONNECT-UDP) here rather
+        // than letting the stream-limit check below or the stream creation act on it.
+        if wt.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
 
         if let Some(group_id) = send_group
             && !self.webtransport_validate_send_group(session_id, group_id)?
         {
             return Err(Error::InvalidState);
+        }
+
+        // One-way enforcement: respect the peer's per-session stream limit (draft-15
+        // §5.6.2), but only once flow control has been negotiated as enabled (§5.1).
+        // TODO: WtInitialMaxData is decoded and advertised but not yet enforced here;
+        // per-session byte-limit enforcement is left for a follow-up.
+        // Use the same settings source as the flow-control check above, so a 0-RTT
+        // connection enforces the limits it remembered rather than none at all.
+        if self.webtransport_flow_control_enabled() == Some(true)
+            && let Http3RemoteSettingsState::Received(settings)
+            | Http3RemoteSettingsState::ZeroRtt(settings) = &self.settings_state
+        {
+            let max_streams = match stream_type {
+                StreamType::UniDi => settings.get(HSettingType::WtInitialMaxStreamsUni),
+                StreamType::BiDi => settings.get(HSettingType::WtInitialMaxStreamsBidi),
+            };
+            if wt.borrow().local_stream_count(stream_type) >= max_streams {
+                return Err(Error::StreamLimit);
+            }
         }
 
         let stream_id = conn
