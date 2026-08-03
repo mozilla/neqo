@@ -13,6 +13,11 @@ const WEBTRANSPORT_DEFAULT: bool = false;
 /// Do not support HTTP Extended CONNECT by default.
 const CONNECT_DEFAULT: bool = false;
 const HTTP3_DATAGRAM_DEFAULT: bool = true;
+/// Default per-session WebTransport flow control limits advertised in SETTINGS.
+/// `None` means "do not advertise this setting" (treat as unlimited by peer).
+const WT_INITIAL_MAX_DATA_DEFAULT: Option<u64> = None;
+const WT_INITIAL_MAX_STREAMS_UNI_DEFAULT: Option<u64> = None;
+const WT_INITIAL_MAX_STREAMS_BIDI_DEFAULT: Option<u64> = None;
 
 #[derive(Debug, Clone)]
 pub struct Http3Parameters {
@@ -20,6 +25,17 @@ pub struct Http3Parameters {
     qpack_settings: qpack::Settings,
     max_concurrent_push_streams: u64,
     webtransport: bool,
+    /// Per-session initial max data advertised to peer (draft-ietf-webtrans-http3-15).
+    /// `None` means do not advertise this setting (treat as unlimited by peer);
+    /// `Some(0)` explicitly advertises a limit of zero.
+    wt_initial_max_data: Option<u64>,
+    /// Per-session initial max unidirectional streams advertised to peer.
+    /// `None` means "do not advertise this setting" (peer applies the WebTransport spec default, currently 0).
+    wt_initial_max_streams_uni: Option<u64>,
+    /// Per-session initial max bidirectional streams advertised to peer.
+    /// `None` means do not advertise this setting; `Some(0)` explicitly
+    /// advertises a limit of zero.
+    wt_initial_max_streams_bidi: Option<u64>,
     /// HTTP Extended CONNECT
     connect: bool,
     http3_datagram: bool,
@@ -32,6 +48,9 @@ impl Default for Http3Parameters {
             qpack_settings: qpack::Settings::default(),
             max_concurrent_push_streams: MAX_PUSH_STREAM_DEFAULT,
             webtransport: WEBTRANSPORT_DEFAULT,
+            wt_initial_max_data: WT_INITIAL_MAX_DATA_DEFAULT,
+            wt_initial_max_streams_uni: WT_INITIAL_MAX_STREAMS_UNI_DEFAULT,
+            wt_initial_max_streams_bidi: WT_INITIAL_MAX_STREAMS_BIDI_DEFAULT,
             connect: CONNECT_DEFAULT,
             http3_datagram: HTTP3_DATAGRAM_DEFAULT,
         }
@@ -115,6 +134,48 @@ impl Http3Parameters {
     #[must_use]
     pub const fn get_webtransport(&self) -> bool {
         self.webtransport
+    }
+
+    /// Set the per-session initial max data advertised to the peer. Pass
+    /// `None` to not advertise this setting at all (peer treats it as
+    /// unlimited), or `Some(0)` to explicitly advertise a limit of zero.
+    #[must_use]
+    pub const fn wt_initial_max_data(mut self, max_data: Option<u64>) -> Self {
+        self.wt_initial_max_data = max_data;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_wt_initial_max_data(&self) -> Option<u64> {
+        self.wt_initial_max_data
+    }
+
+    /// Set the per-session initial max unidirectional streams advertised to
+    /// the peer. Pass `None` to not advertise this setting at all, or
+    /// `Some(0)` to explicitly advertise a limit of zero.
+    #[must_use]
+    pub const fn wt_initial_max_streams_uni(mut self, max_streams: Option<u64>) -> Self {
+        self.wt_initial_max_streams_uni = max_streams;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_wt_initial_max_streams_uni(&self) -> Option<u64> {
+        self.wt_initial_max_streams_uni
+    }
+
+    /// Set the per-session initial max bidirectional streams advertised to
+    /// the peer. Pass `None` to not advertise this setting at all, or
+    /// `Some(0)` to explicitly advertise a limit of zero.
+    #[must_use]
+    pub const fn wt_initial_max_streams_bidi(mut self, max_streams: Option<u64>) -> Self {
+        self.wt_initial_max_streams_bidi = max_streams;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_wt_initial_max_streams_bidi(&self) -> Option<u64> {
+        self.wt_initial_max_streams_bidi
     }
 
     /// Setter for HTTP Extended CONNECT support.
