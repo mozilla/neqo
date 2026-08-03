@@ -62,18 +62,26 @@ pub trait ClientSession {
 
     /// Send a connect-udp datagram.
     ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the datagram was queued with room to spare, or `Ok(false)`
+    /// if it was queued but the queue is now full and the sender should stop
+    /// until an [`OutgoingDatagramSpaceAvailable`] event (backpressure).
+    ///
     /// # Errors
     ///
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ClientEvent::OutgoingDatagramSpaceAvailable
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl ClientSession for Http3Client {
@@ -118,7 +126,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -153,6 +161,12 @@ trait Handler {
         now: Instant,
     ) -> Res<()>;
 
+    /// Returns `Ok(true)` if the datagram was queued with room to spare, or
+    /// `Ok(false)` if it was queued but the queue is now full and the sender
+    /// should stop until an [`OutgoingDatagramSpaceAvailable`] event
+    /// (backpressure).
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ClientEvent::OutgoingDatagramSpaceAvailable
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &self,
         conn: &mut Connection,
@@ -160,7 +174,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl Handler for Http3Connection {
@@ -232,7 +246,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -256,6 +270,12 @@ pub(crate) trait ServerHandler {
         now: Instant,
     ) -> Res<()>;
 
+    /// Returns `Ok(true)` if the datagram was queued with room to spare, or
+    /// `Ok(false)` if it was queued but the queue is now full and the sender
+    /// should stop until an [`OutgoingDatagramSpaceAvailable`] event
+    /// (backpressure).
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ServerEvent::OutgoingDatagramSpaceAvailable
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -263,7 +283,7 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl ServerHandler for Http3ServerHandler {
@@ -300,7 +320,7 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -391,7 +411,7 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
