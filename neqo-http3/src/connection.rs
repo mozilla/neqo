@@ -1930,6 +1930,9 @@ impl Http3Connection {
                         HSettingType::MaxHeaderListSize
                         | HSettingType::EnableWebTransportDraft07
                         | HSettingType::EnableWebTransportDraft15
+                        | HSettingType::WtInitialMaxData
+                        | HSettingType::WtInitialMaxStreamsUni
+                        | HSettingType::WtInitialMaxStreamsBidi
                         | HSettingType::EnableH3Datagram
                         | HSettingType::EnableConnect => (),
                     }
