@@ -73,7 +73,7 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)>;
 }
 
 impl ClientSession for Http3Client {
@@ -118,7 +118,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -160,7 +160,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)>;
 }
 
 impl Handler for Http3Connection {
@@ -232,7 +232,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<(bool, Option<extended_connect::DatagramOutcome>)> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -304,6 +304,7 @@ impl ServerHandler for Http3ServerHandler {
         self.mark_needs_processing();
         self.base_handler_mut()
             .connect_udp_send_datagram(conn, session_id, buf, id, now)
+            .map(|_| ())
     }
 }
 

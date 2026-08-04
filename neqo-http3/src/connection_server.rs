@@ -199,6 +199,10 @@ impl Http3ServerHandler {
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn, now);
             self.check_result(conn, now, &res);
+
+            // Process datagram queues to send any queued datagrams
+            self.base_handler
+                .process_all_datagram_queues(conn, now, |_, _| {});
         }
     }
 

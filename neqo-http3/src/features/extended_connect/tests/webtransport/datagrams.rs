@@ -4,16 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Encoder, to_u64};
+use std::time::Duration;
+
+use neqo_common::{Encoder, event::Provider as _, to_u64};
 use neqo_transport::{ConnectionParameters, Error as TransportError};
 use test_fixture::now;
 
 use crate::{
-    Error, Http3Parameters,
-    features::extended_connect::tests::webtransport::{
-        DATAGRAM_SIZE, WtTest, wt_default_parameters,
+    Error, Http3ClientEvent, Http3Parameters, WebTransportEvent,
+    features::extended_connect::{
+        DatagramOutcome,
+        datagram_queue::DEFAULT_HARD_LIMIT,
+        tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
     },
-    webtransport::ServerSession,
+    webtransport::{ClientSession as _, ServerSession},
 };
 
 const DGRAM: &[u8] = &[0, 100];
@@ -43,11 +47,11 @@ fn no_datagrams() {
 
     assert_eq!(
         wt_session.send_datagram(DGRAM, None, now()),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
 
     wt.exchange_packets();
@@ -102,7 +106,7 @@ fn datagrams_server_only() {
 
     assert_eq!(
         wt_session.send_datagram(DGRAM, None, now()),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
 
@@ -134,7 +138,7 @@ fn datagrams_client_only() {
     assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
     assert_eq!(
         wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::Transport(TransportError::TooMuchData))
+        Err(Error::Transport(TransportError::NotAvailable))
     );
 
     wt.exchange_packets();
@@ -174,4 +178,109 @@ fn max_datagram_size_smaller_than_session_prefix() {
 
     assert_eq!(wt_session.max_datagram_size(), Ok(0));
     assert_eq!(wt.max_datagram_size(wt_session.stream_id()), Ok(0));
+}
+
+#[test]
+fn datagram_high_water_mark_reported_via_send_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .webtransport_set_datagram_high_water_mark(session_id, 2.0)
+        .unwrap();
+
+    let (below1, dropped1) = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .unwrap();
+    let (below2, dropped2) = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .unwrap();
+    let (below3, dropped3) = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .unwrap();
+
+    assert!(below1);
+    assert!(!below2);
+    assert!(!below3);
+    assert_eq!((dropped1, dropped2, dropped3), (None, None, None));
+}
+
+#[test]
+fn datagram_hard_limit_overflow_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for id in 0..limit {
+        let (_, dropped) = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now())
+            .unwrap();
+        assert_eq!(dropped, None);
+    }
+
+    let (_, dropped) = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now())
+        .unwrap();
+    assert_eq!(dropped, Some(DatagramOutcome::Overflowed(0)));
+}
+
+#[test]
+fn datagram_sent_reports_client_event() {
+    // The `Sent` outcome is what tells the application its datagram actually
+    // reached the QUIC layer; it is only produced when the queue is drained
+    // during `process_output()`.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now())
+        .unwrap();
+    wt.exchange_packets();
+
+    let wt_sent_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Sent(9),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_sent_event));
+}
+
+#[test]
+fn datagram_max_age_expiry_reports_client_event() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0)
+        .unwrap();
+
+    let t1 = t0 + Duration::from_millis(200);
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, 100.0, t1)
+        .unwrap();
+
+    let wt_expired_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(7),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_expired_event));
 }
