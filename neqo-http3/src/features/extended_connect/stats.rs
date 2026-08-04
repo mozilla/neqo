@@ -8,6 +8,10 @@
 //! These are distinct from the connection-level stats in [`neqo_transport::Stats`],
 //! which are internal counters reported to Glean.
 
+/// Statistics for a single `WebTransport` session.
+///
+/// These are specific to `WebTransport`; the other extended CONNECT protocols
+/// have no use for them and do not track them.
 #[expect(
     clippy::module_name_repetitions,
     reason = "stats::SessionStats is clearer than stats::Session"

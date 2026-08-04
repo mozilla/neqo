@@ -1431,8 +1431,7 @@ impl Http3Connection {
         session_id: StreamId,
     ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
         let session = self.get_extended_connect_session(session_id)?;
-        let is_webtransport =
-            session.borrow().connect_type() == ExtendedConnectType::WebTransport;
+        let is_webtransport = session.borrow().connect_type() == ExtendedConnectType::WebTransport;
         if is_webtransport {
             Ok(session)
         } else {
@@ -1448,7 +1447,10 @@ impl Http3Connection {
         &self,
         session_id: StreamId,
     ) -> Res<extended_connect::stats::SessionStats> {
-        Ok(self.webtransport_session(session_id)?.borrow().stats())
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .stats()
+            .ok_or(Error::InvalidStreamId)
     }
 
     pub(crate) fn extended_connect_close_session(
@@ -1459,18 +1461,15 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<extended_connect::stats::SessionStats> {
-        // Snapshot the session's stats before it is torn down so the caller can read the
-        // final values. Non-WebTransport sessions (connect-udp) never record any, and the
-        // caller discards the value there.
-        let stats = {
-            let session = self.get_extended_connect_session(session_id)?;
-            let session = session.borrow();
-            if session.connect_type() != connect_type {
-                return Err(Error::InvalidStreamId);
-            }
-            session.stats()
-        };
+    ) -> Res<()> {
+        if self
+            .get_extended_connect_session(session_id)?
+            .borrow()
+            .connect_type()
+            != connect_type
+        {
+            return Err(Error::InvalidStreamId);
+        }
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1483,7 +1482,7 @@ impl Http3Connection {
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
         }
-        Ok(stats)
+        Ok(())
     }
 
     fn get_extended_connect_session(

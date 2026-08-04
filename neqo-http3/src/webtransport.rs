@@ -476,6 +476,9 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
+        // Snapshot the stats before tearing the session down, so the caller sees
+        // the final values. This also rejects non-WebTransport sessions.
+        let stats = self.webtransport_session_stats(session_id)?;
         self.extended_connect_close_session(
             conn,
             session_id,
@@ -483,7 +486,8 @@ impl Handler for Http3Connection {
             error,
             message,
             now,
-        )
+        )?;
+        Ok(stats)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
