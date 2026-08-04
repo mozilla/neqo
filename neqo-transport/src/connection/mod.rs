@@ -3820,6 +3820,20 @@ impl Connection {
         self.streams.stream_create(st)
     }
 
+    /// Raise the maximum number of concurrent incoming bidirectional streams.
+    ///
+    /// This is monotonic: if `max` is not greater than the current limit, it has no effect.
+    pub fn set_remote_max_streams_bidi(&mut self, max: u64) {
+        self.streams.set_remote_max_streams_bidi(max);
+    }
+
+    /// Raise the maximum number of concurrent incoming unidirectional streams.
+    ///
+    /// This is monotonic: if `max` is not greater than the current limit, it has no effect.
+    pub fn set_remote_max_streams_uni(&mut self, max: u64) {
+        self.streams.set_remote_max_streams_uni(max);
+    }
+
     /// Set the priority of a stream.
     ///
     /// # Errors
