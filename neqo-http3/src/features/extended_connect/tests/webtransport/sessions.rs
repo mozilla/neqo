@@ -6,7 +6,7 @@
 
 use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
-    StreamId, StreamType,
+    ConnectionParameters, StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
@@ -17,7 +17,8 @@ use crate::{
     features::extended_connect::{
         CloseReason,
         tests::webtransport::{
-            WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
+            DATAGRAM_SIZE, WtTest, assert_wt, default_http3_client, default_http3_server,
+            wt_default_parameters,
         },
     },
     frames::WebTransportFrame,
@@ -1212,4 +1213,34 @@ fn wt_session_stats_bytes_sent_overhead() {
     assert_eq!(stats.datagram_bytes_sent, 2 * DGRAM.len() as u64);
     assert_eq!(stats.bytes_sent_overhead, 2 * expected_overhead);
     assert_eq!(stats.datagrams_sent, 2);
+}
+
+/// A `CLOSE_WEBTRANSPORT_SESSION` capsule that does not fit in the control stream's
+/// current flow-control window must be buffered and sent once credit arrives, not
+/// discarded. Dropping it closes the session with a bare FIN, losing the
+/// application's error code and message.
+#[test]
+fn wt_close_session_capsule_survives_a_full_stream_window() {
+    // Big enough for the CONNECT exchange, too small for the close message below.
+    const STREAM_WINDOW: u64 = 1024;
+    let message = "x".repeat(1000);
+
+    let server_params = wt_default_parameters().connection_parameters(
+        ConnectionParameters::default()
+            .datagram_size(DATAGRAM_SIZE)
+            .max_stream_data(StreamType::BiDi, true, STREAM_WINDOW),
+    );
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+
+    wt.client
+        .webtransport_close_session(wt_session.stream_id(), 42, &message, now())
+        .unwrap();
+
+    // Repeatedly drain so the peer can extend the window until everything is out.
+    for _ in 0..10 {
+        wt.exchange_packets();
+    }
+
+    wt.check_session_closed_event_server(&wt_session, &CloseReason::Clean { error: 42, message });
 }

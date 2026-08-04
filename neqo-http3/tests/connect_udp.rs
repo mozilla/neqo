@@ -737,3 +737,18 @@ fn connect_udp_session_rejected_by_webtransport_set_datagram_max_age() {
         Err(Error::InvalidStreamId)
     );
 }
+
+/// `webtransport_send_stream_flow_control_info` must not accept a connect-udp
+/// session's control-stream id just because it happens to be a valid send
+/// stream id on the connection.
+#[test]
+fn connect_udp_session_rejected_by_webtransport_send_stream_flow_control_info() {
+    fixture_init();
+    let (client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client
+            .webtransport_send_stream_flow_control_info(session_id)
+            .unwrap_err(),
+        Error::InvalidStreamId
+    );
+}

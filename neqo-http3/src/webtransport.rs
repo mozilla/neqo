@@ -20,7 +20,8 @@ use neqo_transport::{
 
 use crate::{
     Error, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3ServerEvent, Http3State,
-    Http3StreamInfo, Http3StreamType, Res, SendGroupId, SessionAcceptAction, WebTransportEvent,
+    Http3StreamInfo, Http3StreamType, Res, SendGroupId, SendStreamFlowControl, SessionAcceptAction,
+    WebTransportEvent,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
@@ -127,6 +128,29 @@ pub trait ClientSession {
     ///
     /// `InvalidStreamId` if the stream does not exist.
     fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<send_stream::Stats>;
+
+    /// Returns available send window and buffered bytes for a WebTransport send stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist.
+    fn webtransport_send_stream_flow_control_info(
+        &self,
+        stream_id: StreamId,
+    ) -> Res<SendStreamFlowControl>;
+
+    /// Send data atomically on a WebTransport send stream.
+    /// Returns true if all data was sent, false if it couldn't fit.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream does not exist or other stream errors.
+    fn webtransport_send_stream_atomic(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool>;
 
     /// Returns the current `recv_stream::Stats` of a `WebTransportRecvStream`.
     ///
@@ -334,6 +358,24 @@ impl ClientSession for Http3Client {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(conn)
+    }
+
+    fn webtransport_send_stream_flow_control_info(
+        &self,
+        stream_id: StreamId,
+    ) -> Res<SendStreamFlowControl> {
+        self.handler()
+            .webtransport_send_stream_flow_control_info(self.connection(), stream_id)
+    }
+
+    fn webtransport_send_stream_atomic(
+        &mut self,
+        stream_id: StreamId,
+        data: &[u8],
+        now: Instant,
+    ) -> Res<bool> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_send_stream_atomic(conn, stream_id, data, now)
     }
 
     fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<recv_stream::Stats> {
