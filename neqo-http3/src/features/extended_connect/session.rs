@@ -62,7 +62,6 @@ pub(crate) struct Session {
     protocol: Box<dyn Protocol>,
     draining: bool,
     role: Role,
-    stats: SessionStats,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -124,7 +123,6 @@ impl Session {
             protocol,
             draining: false,
             role,
-            stats: SessionStats::default(),
         }
     }
 
@@ -156,7 +154,6 @@ impl Session {
             protocol,
             draining: false,
             role,
-            stats: SessionStats::default(),
         })
     }
 
@@ -330,11 +327,13 @@ impl Session {
     pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         self.protocol
             .add_stream(stream_id, &mut self.events, self.state)?;
-        if !self.state.closing_state() {
+        if !self.state.closing_state()
+            && let Some(stats) = self.protocol.stats_mut()
+        {
             if stream_id.is_self_initiated(self.role) {
-                self.stats.streams_opened_local += 1;
+                stats.streams_opened_local += 1;
             } else {
-                self.stats.streams_opened_remote += 1;
+                stats.streams_opened_remote += 1;
             }
         }
         Ok(())
@@ -440,8 +439,10 @@ impl Session {
         dgram_data.encode(buf);
 
         conn.send_datagram(dgram_data.into(), id)?;
-        self.stats.datagrams_sent += 1;
-        self.stats.datagram_bytes_sent += buf.len() as u64;
+        if let Some(stats) = self.protocol.stats_mut() {
+            stats.datagrams_sent += 1;
+            stats.datagram_bytes_sent += buf.len() as u64;
+        }
         qtrace!("[{self}] sent datagram via QUIC datagram");
         Ok(())
     }
@@ -455,8 +456,10 @@ impl Session {
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
             Ok(slice) => {
-                self.stats.datagrams_received += 1;
-                self.stats.datagram_bytes_received += slice.len() as u64;
+                if let Some(stats) = self.protocol.stats_mut() {
+                    stats.datagrams_received += 1;
+                    stats.datagram_bytes_received += slice.len() as u64;
+                }
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
             }
@@ -470,9 +473,10 @@ impl Session {
         self.protocol.validate_send_group(group_id)
     }
 
+    /// Session statistics, for protocols that track them (only `WebTransport`).
     #[must_use]
-    pub(crate) const fn stats(&self) -> SessionStats {
-        self.stats
+    pub(crate) fn stats(&self) -> Option<SessionStats> {
+        self.protocol.stats().copied()
     }
 
     fn has_data_to_send(&self) -> bool {
@@ -633,6 +637,25 @@ pub(crate) trait Protocol: Debug + Display {
     }
 
     fn process_response_headers(&mut self, _headers: &[Header]) {}
+
+    /// Per-session statistics, for protocols that expose them.
+    ///
+    /// Only `WebTransport` surfaces session statistics to the API consumer, so
+    /// every other protocol leaves this at `None` and the counters above are
+    /// simply not recorded.
+    /// Callers reach this only after checking the session is `WebTransport`, so
+    /// a protocol without stats never gets here.
+    fn stats(&self) -> Option<&SessionStats> {
+        debug_assert!(
+            false,
+            "stats called for extended connect protocol not tracking stats"
+        );
+        None
+    }
+
+    fn stats_mut(&mut self) -> Option<&mut SessionStats> {
+        None
+    }
 
     fn protocol(&self) -> Option<&str> {
         None

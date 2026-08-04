@@ -476,6 +476,14 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
+        // Snapshot the stats before tearing the session down, so the caller sees
+        // the final values. This also rejects non-WebTransport sessions.
+        //
+        // `extended_connect_close_session` then checks the type again. That is
+        // deliberate: it is shared with connect-udp, which needs the check for its own
+        // close path, so it cannot rely on this one having happened. Two lookups once
+        // per session close is not worth a validation-skipping variant.
+        let stats = self.webtransport_session_stats(session_id)?;
         self.extended_connect_close_session(
             conn,
             session_id,
@@ -483,7 +491,8 @@ impl Handler for Http3Connection {
             error,
             message,
             now,
-        )
+        )?;
+        Ok(stats)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(

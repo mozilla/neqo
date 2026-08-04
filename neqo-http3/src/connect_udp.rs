@@ -215,7 +215,6 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<()> {
         qtrace!("Close ConnectUdp session {session_id:?}");
-        // connect-udp doesn't expose session stats, so discard the snapshot.
         self.extended_connect_close_session(
             conn,
             session_id,
@@ -224,7 +223,6 @@ impl Handler for Http3Connection {
             message,
             now,
         )
-        .map(|_| ())
     }
 
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
