@@ -15,18 +15,24 @@ pub type WebTransportFrameType = u64;
 #[derive(PartialEq, Eq, Debug)]
 pub enum WebTransportFrame {
     CloseSession { error: u32, message: String },
+    DrainSession,
 }
 
 const_assert!(WebTransportFrame::CLOSE_MAX_MESSAGE_SIZE <= to_u64(usize::MAX) - 4);
 
 impl WebTransportFrame {
     /// The frame type for WebTransport `CLOSE_SESSION`, as defined in
-    /// [WebTransport over HTTP/3 (RFC 9297, Section 4.6)](https://datatracker.ietf.org/doc/html/rfc9297#section-4.6).
+    /// [WebTransport over HTTP/3 (draft-ietf-webtrans-http3-14, Section 4.6)](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.6).
     /// The value 0x2843 is assigned for `CLOSE_SESSION`.
     const CLOSE_SESSION: WebTransportFrameType = 0x2843;
 
+    /// The frame type for WebTransport `WT_DRAIN_SESSION`, as defined in
+    /// [WebTransport over HTTP/3 (draft-ietf-webtrans-http3-14, Section 4.7)](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7).
+    /// The value 0x78ae is assigned for `WT_DRAIN_SESSION`.
+    const WT_DRAIN_SESSION: WebTransportFrameType = 0x78ae;
+
     /// The maximum allowed message size for `CLOSE_SESSION` messages, as recommended
-    /// in [WebTransport over HTTP/3 (RFC 9297, Section 4.6)](https://datatracker.ietf.org/doc/html/rfc9297#section-4.6).
+    /// in [WebTransport over HTTP/3 (draft-ietf-webtrans-http3-14, Section 4.6)](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.6).
     /// The value 1024 is used to limit the message size for security and interoperability.
     const CLOSE_MAX_MESSAGE_SIZE: u64 = 1024;
 
@@ -38,11 +44,18 @@ impl WebTransportFrame {
         #[cfg(feature = "build-fuzzing-corpus")]
         let start = enc.len();
 
-        enc.encode_varint(Self::CLOSE_SESSION);
-        let Self::CloseSession { error, message } = &self;
-        enc.encode_len(4 + message.len());
-        enc.encode_uint(4, *error);
-        enc.encode(message.as_bytes());
+        match self {
+            Self::CloseSession { error, message } => {
+                enc.encode_varint(Self::CLOSE_SESSION);
+                enc.encode_len(4 + message.len());
+                enc.encode_uint(4, *error);
+                enc.encode(message.as_bytes());
+            }
+            Self::DrainSession => {
+                enc.encode_varint(Self::WT_DRAIN_SESSION);
+                enc.encode_varint(0u64);
+            }
+        }
 
         #[cfg(feature = "build-fuzzing-corpus")]
         neqo_common::write_item_to_fuzzing_corpus("wtframe", &enc.as_ref()[start..]);
@@ -54,34 +67,42 @@ impl FrameDecoder<Self> for WebTransportFrame {
     const FUZZING_CORPUS: Option<&'static str> = Some("wtframe");
 
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
-        if let Some(payload) = data {
-            let mut dec = Decoder::from(payload);
-            if frame_type == HFrameType(Self::CLOSE_SESSION) {
+        match frame_type {
+            HFrameType(Self::CLOSE_SESSION) => {
+                let Some(payload) = data else {
+                    return Ok(None);
+                };
                 if frame_len > Self::CLOSE_MAX_MESSAGE_SIZE + 4 {
                     return Err(Error::HttpMessage);
                 }
+                let mut dec = Decoder::from(payload);
                 let error = dec.decode_uint().ok_or(Error::HttpMessage)?;
                 let Ok(message) = String::from_utf8(dec.decode_remainder().to_vec()) else {
                     return Err(Error::HttpMessage);
                 };
                 Ok(Some(Self::CloseSession { error, message }))
-            } else {
-                Ok(None)
             }
-        } else {
-            Ok(None)
+            HFrameType(Self::WT_DRAIN_SESSION) => {
+                if frame_len != 0 {
+                    return Err(Error::HttpMessage);
+                }
+                Ok(Some(Self::DrainSession))
+            }
+            _ => Ok(None),
         }
     }
 
     fn is_known_type(frame_type: HFrameType) -> bool {
         frame_type == HFrameType(Self::CLOSE_SESSION)
+            || frame_type == HFrameType(Self::WT_DRAIN_SESSION)
     }
 
     fn max_frame_data(frame_type: HFrameType) -> usize {
-        if frame_type == HFrameType(Self::CLOSE_SESSION) {
-            Self::MAX_CLOSE_SESSION_BYTES
-        } else {
-            usize::MAX
+        match frame_type {
+            HFrameType(Self::CLOSE_SESSION) => Self::MAX_CLOSE_SESSION_BYTES,
+            // WT_DRAIN_SESSION carries no payload, so reject any declared length.
+            HFrameType(Self::WT_DRAIN_SESSION) => 0,
+            _ => usize::MAX,
         }
     }
 }
@@ -145,5 +166,43 @@ mod tests {
             Some(&payload),
         );
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn is_known_type_drain_session() {
+        assert!(WebTransportFrame::is_known_type(HFrameType(
+            WebTransportFrame::WT_DRAIN_SESSION
+        )));
+    }
+
+    #[test]
+    fn encode_drain_session() {
+        use neqo_common::Encoder;
+        let mut enc = Encoder::default();
+        WebTransportFrame::DrainSession.encode(&mut enc);
+        // 0x78ae (30894) as a 4-byte QUIC varint: [0x80, 0x00, 0x78, 0xae],
+        // followed by a 1-byte varint length of 0: [0x00].
+        assert_eq!(enc.as_ref(), &[0x80, 0x00, 0x78, 0xae, 0x00]);
+    }
+
+    #[test]
+    fn decode_drain_session_valid() {
+        let result = WebTransportFrame::decode(
+            HFrameType(WebTransportFrame::WT_DRAIN_SESSION),
+            0,
+            Some(&[]),
+        );
+        assert_eq!(result.unwrap(), Some(WebTransportFrame::DrainSession));
+    }
+
+    #[test]
+    fn decode_drain_session_nonzero_len() {
+        // WT_DRAIN_SESSION must have a zero-length body; non-zero is a protocol error.
+        let result = WebTransportFrame::decode(
+            HFrameType(WebTransportFrame::WT_DRAIN_SESSION),
+            1,
+            Some(&[0x00]),
+        );
+        assert!(result.is_err());
     }
 }
