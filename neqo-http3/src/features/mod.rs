@@ -16,6 +16,27 @@ use crate::{
 
 pub mod extended_connect;
 
+/// The WebTransport protocol version negotiated with the peer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebTransportVersion {
+    /// draft-ietf-webtrans-http3-07 (`:protocol: webtransport`)
+    Draft07,
+    /// draft-ietf-webtrans-http3-15 (`:protocol: webtransport-h3`)
+    Draft15,
+}
+
+impl WebTransportVersion {
+    /// The `:protocol` pseudo-header value to send for a negotiated version.
+    /// Defaults to the current draft when nothing has been negotiated yet.
+    #[must_use]
+    pub const fn protocol_token(version: Option<Self>) -> &'static str {
+        match version {
+            Some(Self::Draft07) => "webtransport",
+            Some(Self::Draft15) | None => "webtransport-h3",
+        }
+    }
+}
+
 /// States:
 /// - `Disable` - it is not turned on for this connection.
 /// - `Negotiating` - the feature is enabled locally, but settings from the peer have not been
@@ -54,28 +75,30 @@ impl NegotiationState {
     }
 
     pub fn handle_settings(&mut self, settings: &HSettings) {
+        let Self::Negotiating { feature_type, .. } = self else {
+            return;
+        };
+        let feature_type = *feature_type;
+        let enabled = settings.get(feature_type) == 1;
+        qtrace!("set_negotiated {feature_type:?} to {enabled}");
+        self.handle_settings_with_enabled(feature_type, enabled);
+    }
+
+    /// Transition using a pre-computed `enabled` value rather than querying settings.
+    /// Used by `ExtendedConnectFeature` when checking multiple setting types (e.g. WebTransport).
+    pub fn handle_settings_with_enabled(&mut self, feature_type: HSettingType, enabled: bool) {
         if !self.locally_enabled() {
             return;
         }
-
-        if let Self::Negotiating {
-            feature_type,
-            listener,
-        } = self
-        {
-            qtrace!(
-                "set_negotiated {feature_type:?} to {}",
-                settings.get(*feature_type)
-            );
+        if let Self::Negotiating { listener, .. } = self {
             let cb = mem::take(listener);
-            let ft = *feature_type;
-            *self = if settings.get(ft) == 1 {
+            *self = if enabled {
                 Self::Negotiated
             } else {
                 Self::Failed
             };
             if let Some(l) = cb {
-                l.negotiation_done(ft, self.enabled());
+                l.negotiation_done(feature_type, enabled);
             }
         }
     }
@@ -98,7 +121,11 @@ pub(crate) enum ConnectType {
     /// <https://datatracker.ietf.org/doc/html/rfc9114#name-the-connect-method>.
     Classic,
     /// Extended CONNECT see <https://www.rfc-editor.org/rfc/rfc9220>.
-    Extended(ExtendedConnectType),
+    ///
+    /// The optional second field overrides the `:protocol` header value, which
+    /// otherwise comes from the type's [`Display`]. `WebTransport` needs the
+    /// override because the token depends on the negotiated draft version.
+    Extended(ExtendedConnectType, Option<&'static str>),
 }
 
 #[cfg(test)]
@@ -108,13 +135,33 @@ mod tests {
 
     #[test]
     fn negotiation_state_locally_enabled() {
-        let disabled = NegotiationState::new(false, HSettingType::EnableWebTransport);
+        let disabled = NegotiationState::new(false, HSettingType::EnableWebTransportDraft15);
         assert!(!disabled.locally_enabled());
 
-        let negotiating = NegotiationState::new(true, HSettingType::EnableWebTransport);
+        let negotiating = NegotiationState::new(true, HSettingType::EnableWebTransportDraft15);
         assert!(negotiating.locally_enabled());
 
         assert!(NegotiationState::Negotiated.locally_enabled());
         assert!(NegotiationState::Failed.locally_enabled());
+    }
+
+    #[test]
+    fn handle_settings_with_enabled_transitions() {
+        // A disabled feature stays disabled regardless of the peer.
+        let mut disabled = NegotiationState::new(false, HSettingType::EnableWebTransportDraft15);
+        disabled.handle_settings_with_enabled(HSettingType::EnableWebTransportDraft15, true);
+        assert!(!disabled.locally_enabled());
+        assert!(!disabled.enabled());
+
+        // Negotiating + peer enabled => Negotiated.
+        let mut negotiated = NegotiationState::new(true, HSettingType::EnableWebTransportDraft15);
+        negotiated.handle_settings_with_enabled(HSettingType::EnableWebTransportDraft15, true);
+        assert!(negotiated.enabled());
+
+        // Negotiating + peer not enabled => Failed.
+        let mut failed = NegotiationState::new(true, HSettingType::EnableWebTransportDraft15);
+        failed.handle_settings_with_enabled(HSettingType::EnableWebTransportDraft15, false);
+        assert!(failed.locally_enabled());
+        assert!(!failed.enabled());
     }
 }

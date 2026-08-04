@@ -1030,6 +1030,7 @@ impl Http3Client {
             ReceiveOutput::NewStream(NewStreamType::Http(_)) => Err(Error::HttpStreamCreation),
             ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
                 self.base_handler.webtransport_create_stream_remote(
+                    &mut self.conn,
                     StreamId::from(session_id),
                     stream_id,
                     Box::new(self.events.clone()),
@@ -1655,7 +1656,7 @@ mod tests {
             assert_eq!(
                 dec.decode_vvec().unwrap(),
                 &[
-                    1, 0x40, 0x64, 7, 0x40, 0x64, 0xab, 0x60, 0x37, 0x42, 0x00, 0x80, 0xff, 0xd2,
+                    1, 0x40, 0x64, 7, 0x40, 0x64, 0xac, 0x7c, 0xf0, 0x00, 0x00, 0x80, 0xff, 0xd2,
                     0x77, 0x01, 0x33, 0x01
                 ]
             );

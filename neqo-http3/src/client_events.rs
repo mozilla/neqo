@@ -280,6 +280,10 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         }
     }
 
+    fn session_stream_creatable(&self, stream_type: StreamType) {
+        self.insert(Http3ClientEvent::StreamCreatable { stream_type });
+    }
+
     fn extended_connect_new_stream(
         &self,
         stream_info: Http3StreamInfo,
@@ -441,7 +445,7 @@ impl Http3ClientEvents {
 
     pub fn negotiation_done(&self, feature_type: HSettingType, succeeded: bool) {
         match feature_type {
-            HSettingType::EnableWebTransport => {
+            HSettingType::EnableWebTransportDraft15 | HSettingType::EnableWebTransportDraft07 => {
                 self.insert(Http3ClientEvent::WebTransport(
                     WebTransportEvent::Negotiated(succeeded),
                 ));

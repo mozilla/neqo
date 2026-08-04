@@ -234,6 +234,26 @@ impl Http3ServerHandler {
         Ok(())
     }
 
+    /// Write a `WT_MAX_STREAMS` capsule to a session's send stream (test-only injection).
+    #[cfg(test)]
+    pub fn test_webtransport_send_max_streams(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: neqo_transport::StreamType,
+        maximum: u64,
+        now: Instant,
+    ) -> Res<()> {
+        self.needs_processing = true;
+        self.base_handler.test_webtransport_send_max_streams(
+            conn,
+            session_id,
+            stream_type,
+            maximum,
+            now,
+        )
+    }
+
     /// Whether this connection has events to process or data to send.
     pub(crate) fn should_be_processed(&mut self) -> bool {
         if self.needs_processing {
@@ -360,6 +380,7 @@ impl Http3ServerHandler {
             }
             ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
                 self.base_handler.webtransport_create_stream_remote(
+                    conn,
                     StreamId::from(session_id),
                     stream_id,
                     Box::new(self.events.clone()),

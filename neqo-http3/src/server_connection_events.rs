@@ -7,7 +7,7 @@
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use neqo_common::{Bytes, Header, header::HeadersExt as _};
-use neqo_transport::{AppError, StreamId};
+use neqo_transport::{AppError, StreamId, StreamType};
 
 use crate::{
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
@@ -151,7 +151,7 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
 
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         match headers.find_header(":protocol").map(Header::value) {
-            Some(b"webtransport") => {
+            Some(p) if p == b"webtransport" || p == b"webtransport-h3" => {
                 self.insert(Http3ServerConnEvent::WebTransport(
                     WebTransportEvent::Session { stream_id, headers },
                 ));
@@ -216,6 +216,10 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
                 },
             ));
         }
+    }
+
+    fn session_stream_creatable(&self, _stream_type: StreamType) {
+        // The server API has no equivalent of `waitUntilAvailable`.
     }
 
     fn extended_connect_new_stream(

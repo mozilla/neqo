@@ -31,10 +31,11 @@ use crate::{
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
     features::{
-        ConnectType,
+        ConnectType, WebTransportVersion,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
             send_group::Generator as SendGroupGenerator,
+            webtransport_session::WT_FLOW_CONTROL_ERROR,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -874,15 +875,17 @@ impl Http3Connection {
                     Header::new(":authority", request.target.authority()),
                 ]
             }
-            Some(ConnectType::Extended(protocol)) => {
+            Some(ConnectType::Extended(connect_type, protocol_str)) => {
+                let protocol_str =
+                    protocol_str.map_or_else(|| connect_type.to_string(), ToOwned::to_owned);
                 let mut h = vec![
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
                     Header::new(":path", request.target.path()),
-                    Header::new(":protocol", protocol.to_string()),
+                    Header::new(":protocol", protocol_str),
                 ];
-                if protocol == ExtendedConnectType::ConnectUdp {
+                if connect_type == ExtendedConnectType::ConnectUdp {
                     h.push(Header::new("capsule-protocol", "?1"));
                 }
                 h
@@ -1219,6 +1222,12 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// The `:protocol` pseudo-header value for a new WebTransport session, which depends on
+    /// the negotiated draft version (`webtransport` for draft-07, `webtransport-h3` otherwise).
+    pub(crate) const fn webtransport_protocol_str(&self) -> &'static str {
+        WebTransportVersion::protocol_token(self.webtransport.version())
+    }
+
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
@@ -1226,6 +1235,7 @@ impl Http3Connection {
         target: T,
         headers: &[Header],
         connect_type: ExtendedConnectType,
+        protocol_str: Option<&'static str>,
     ) -> Res<StreamId>
     where
         T: RequestTarget,
@@ -1250,7 +1260,7 @@ impl Http3Connection {
             method: "CONNECT",
             target,
             headers,
-            connect_type: Some(ConnectType::Extended(connect_type)),
+            connect_type: Some(ConnectType::Extended(connect_type, protocol_str)),
             priority: Priority::default(),
         })?;
         extended_conn
@@ -1392,6 +1402,36 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)?;
         let mut enc = Encoder::default();
         crate::frames::WebTransportFrame::DrainSession.encode(&mut enc);
+        let bytes: Vec<u8> = enc.into();
+        send_stream.send_data(conn, &bytes, now)?;
+        self.streams_with_pending_data.insert(session_id);
+        Ok(())
+    }
+
+    /// Write a `WT_MAX_STREAMS` capsule to the given session's send stream.
+    ///
+    /// Only used in tests to exercise the receive path, since we do not yet
+    /// send these capsules in production.
+    #[cfg(test)]
+    pub(crate) fn test_webtransport_send_max_streams(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+        maximum: u64,
+        now: Instant,
+    ) -> Res<()> {
+        use neqo_common::Encoder;
+        let send_stream = self
+            .send_streams
+            .get_mut(&session_id)
+            .ok_or(Error::InvalidStreamId)?;
+        let mut enc = Encoder::default();
+        crate::frames::WebTransportFrame::MaxStreams {
+            stream_type,
+            maximum,
+        }
+        .encode(&mut enc);
         let bytes: Vec<u8> = enc.into();
         send_stream.send_data(conn, &bytes, now)?;
         self.streams_with_pending_data.insert(session_id);
@@ -1593,6 +1633,34 @@ impl Http3Connection {
         )
     }
 
+    /// draft-15 §5.1: per-session flow control (the `WT_MAX_STREAMS`/
+    /// `WT_INITIAL_MAX_DATA` limits) only applies once *both* endpoints have
+    /// declared intent to use it by sending a non-zero value for at least one
+    /// of `SETTINGS_WT_INITIAL_MAX_STREAMS_UNI`, `_BIDI`, or
+    /// `SETTINGS_WT_INITIAL_MAX_DATA`. Absence of a setting, or sending it as
+    /// exactly `0`, does not count. Returns `None` while the peer's SETTINGS
+    /// are not yet known.
+    fn webtransport_flow_control_enabled(&self) -> Option<bool> {
+        const WT_FLOW_CONTROL_SETTINGS: &[HSettingType] = &[
+            HSettingType::WtInitialMaxStreamsUni,
+            HSettingType::WtInitialMaxStreamsBidi,
+            HSettingType::WtInitialMaxData,
+        ];
+        let local = [
+            self.local_params.get_wt_initial_max_streams_uni(),
+            self.local_params.get_wt_initial_max_streams_bidi(),
+            self.local_params.get_wt_initial_max_data(),
+        ]
+        .iter()
+        .any(|v| v.is_some_and(|v| v != 0));
+        let remote_settings = match &self.settings_state {
+            Http3RemoteSettingsState::Received(settings)
+            | Http3RemoteSettingsState::ZeroRtt(settings) => settings,
+            Http3RemoteSettingsState::NotReceived => return None,
+        };
+        Some(local && remote_settings.any_explicit_nonzero(WT_FLOW_CONTROL_SETTINGS))
+    }
+
     pub(crate) fn webtransport_create_stream_local_with_send_group(
         &mut self,
         conn: &mut Connection,
@@ -1607,11 +1675,42 @@ impl Http3Connection {
         );
 
         let wt = self.validate_extended_connect_session(session_id)?;
+        // `validate_extended_connect_session` accepts any active extended-connect
+        // session, so reject a non-WebTransport one (e.g. CONNECT-UDP) here rather
+        // than letting the stream-limit check below or the stream creation act on it.
+        if wt.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
 
         if let Some(group_id) = send_group
             && !self.webtransport_validate_send_group(session_id, group_id)?
         {
             return Err(Error::InvalidState);
+        }
+
+        // One-way enforcement: respect the peer's per-session stream limit (draft-15
+        // §5.6.2), once flow control has been negotiated as enabled (§5.1). The
+        // limit starts at the peer's SETTINGS_WT_INITIAL_MAX_STREAMS_* and is
+        // raised by any WT_MAX_STREAMS capsule it has since sent.
+        // TODO: WtInitialMaxData is decoded and advertised but not yet enforced here;
+        // per-session byte-limit enforcement is left for a follow-up.
+        // Use the same settings source as the flow-control check above, so a 0-RTT
+        // connection enforces the limits it remembered rather than none at all.
+        if self.webtransport_flow_control_enabled() == Some(true)
+            && let Http3RemoteSettingsState::Received(settings)
+            | Http3RemoteSettingsState::ZeroRtt(settings) = &self.settings_state
+        {
+            let baseline = match stream_type {
+                StreamType::UniDi => settings.get(HSettingType::WtInitialMaxStreamsUni),
+                StreamType::BiDi => settings.get(HSettingType::WtInitialMaxStreamsBidi),
+            };
+            let max_streams = wt
+                .borrow()
+                .granted_max_streams(stream_type)
+                .map_or(baseline, |granted| granted.max(baseline));
+            if wt.borrow().local_stream_count(stream_type) >= max_streams {
+                return Err(Error::StreamLimit);
+            }
         }
 
         let stream_id = conn
@@ -1638,6 +1737,7 @@ impl Http3Connection {
 
     pub(crate) fn webtransport_create_stream_remote(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
@@ -1646,6 +1746,29 @@ impl Http3Connection {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
         let wt = self.get_extended_connect_session(session_id)?;
+
+        // Receiver-side enforcement (draft-15 §5.6.2), once flow control has
+        // been negotiated as enabled (§5.1): if the peer opens more streams
+        // than the limit we advertised in SETTINGS_WT_INITIAL_MAX_STREAMS_*,
+        // close the session with WT_FLOW_CONTROL_ERROR.
+        let stream_type = stream_id.stream_type();
+        let our_limit = match stream_type {
+            StreamType::UniDi => self.local_params.get_wt_initial_max_streams_uni(),
+            StreamType::BiDi => self.local_params.get_wt_initial_max_streams_bidi(),
+        };
+        if self.webtransport_flow_control_enabled() == Some(true)
+            && our_limit.is_some_and(|limit| wt.borrow().remote_stream_count(stream_type) >= limit)
+        {
+            drop(conn.stream_stop_sending(stream_id, WT_FLOW_CONTROL_ERROR));
+            if stream_id.is_bidi() {
+                // We never registered this stream with the session, so closing the
+                // session below will not tear down our send side. Reset it here, or
+                // the peer keeps waiting for us to close the other direction.
+                drop(conn.stream_reset_send(stream_id, WT_FLOW_CONTROL_ERROR));
+            }
+            self.webtransport_close_session_with_error(conn, session_id, WT_FLOW_CONTROL_ERROR);
+            return Ok(());
+        }
 
         self.webtransport_create_stream_internal(
             wt,
@@ -1656,6 +1779,20 @@ impl Http3Connection {
             None,
         )?;
         Ok(())
+    }
+
+    /// Close a WebTransport session locally with an HTTP/3 error code
+    /// (draft-15 §5.6.2): tear down its sub-streams, notify the application,
+    /// and reset the CONNECT stream so the peer learns.
+    fn webtransport_close_session_with_error(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        error: AppError,
+    ) {
+        drop(self.close_recv(session_id, CloseType::LocalError(error), conn));
+        drop(conn.stream_reset_send(session_id, error));
+        drop(conn.stream_stop_sending(session_id, error));
     }
 
     pub(crate) fn webtransport_send_stream_atomic(
@@ -1916,7 +2053,11 @@ impl Http3Connection {
                         }
                         HSettingType::BlockedStreams => qpack_changed = true,
                         HSettingType::MaxHeaderListSize
-                        | HSettingType::EnableWebTransport
+                        | HSettingType::EnableWebTransportDraft07
+                        | HSettingType::EnableWebTransportDraft15
+                        | HSettingType::WtInitialMaxData
+                        | HSettingType::WtInitialMaxStreamsUni
+                        | HSettingType::WtInitialMaxStreamsBidi
                         | HSettingType::EnableH3Datagram
                         | HSettingType::EnableConnect => (),
                     }
@@ -2140,13 +2281,125 @@ impl Http3Connection {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
     use http::Uri;
+    use neqo_common::{Bytes, Header, MAX_VARINT, Role, event::Provider as _};
+    use neqo_transport::{Connection, ConnectionEvent, StreamId, StreamType};
+    use test_fixture::{connect, now};
 
     use crate::{
-        Error, Priority,
-        connection::{Http3Connection, RequestDescription},
-        features::ConnectType,
+        Error, Http3Parameters, Http3StreamInfo, Priority, RecvStreamEvents, Res, SendStreamEvents,
+        connection::{Http3Connection, Http3RemoteSettingsState, RequestDescription},
+        features::{
+            ConnectType,
+            extended_connect::{
+                ExtendedConnectEvents, ExtendedConnectType, session::CloseReason, session::Session,
+                webtransport_session::WT_FLOW_CONTROL_ERROR,
+            },
+        },
+        settings::{HSetting, HSettingType, HSettings},
     };
+
+    /// No-op stream/session event sinks: the rejection path returns before any of
+    /// these fire, they just have to type-check.
+    #[derive(Debug)]
+    struct NoEvents;
+
+    impl RecvStreamEvents for NoEvents {}
+    impl SendStreamEvents for NoEvents {}
+
+    impl ExtendedConnectEvents for NoEvents {
+        fn session_start(&self, _: ExtendedConnectType, _: StreamId, _: u16, _: Vec<Header>) {}
+        fn session_end(
+            &self,
+            _: ExtendedConnectType,
+            _: StreamId,
+            _: CloseReason,
+            _: Option<Vec<Header>>,
+        ) {
+        }
+        fn session_draining(&self, _: ExtendedConnectType, _: StreamId) {}
+        fn session_stream_creatable(&self, _: StreamType) {}
+        fn extended_connect_new_stream(&self, _: Http3StreamInfo, _: bool) -> Res<()> {
+            Ok(())
+        }
+        fn new_datagram(&self, _: StreamId, _: Bytes, _: ExtendedConnectType) {}
+    }
+
+    fn exchange(from: &mut Connection, to: &mut Connection) {
+        while let Some(d) = from.process_output(now()).dgram() {
+            to.process_input(d, now());
+        }
+    }
+
+    /// A remote-initiated bidirectional stream rejected for exceeding the per-session
+    /// limit is never registered with the session, so closing the session does not tear
+    /// it down. Both directions must be closed explicitly, or our send side stays open
+    /// for the life of the connection and the peer keeps waiting on it.
+    ///
+    /// This has to be checked at the transport layer: the `Http3Server` event API
+    /// synthesises stream teardown locally when a session closes, so it reports the
+    /// same events whether or not we actually send `RESET_STREAM`.
+    #[test]
+    fn over_limit_remote_bidi_stream_send_side_is_reset() {
+        let (mut client, mut server) = connect();
+
+        // Open a server-initiated bidi stream so the client's transport connection has
+        // both directions of it.
+        let remote_bidi = server.stream_create(StreamType::BiDi).unwrap();
+        server.stream_send(remote_bidi, b"x").unwrap();
+        exchange(&mut server, &mut client);
+
+        // Advertise a bidi limit of zero while opting in to flow control with a
+        // non-zero WT_INITIAL_MAX_DATA, so the first remote bidi stream is over limit.
+        let mut http3 = Http3Connection::new(
+            Http3Parameters::default()
+                .webtransport(true)
+                .wt_initial_max_data(Some(MAX_VARINT))
+                .wt_initial_max_streams_bidi(Some(0)),
+            Role::Client,
+        );
+        // The peer opts in too, which §5.1 requires before limits apply.
+        http3.settings_state = Http3RemoteSettingsState::Received(HSettings::new(&[HSetting::new(
+            HSettingType::WtInitialMaxData,
+            1,
+        )]));
+
+        let session_id = StreamId::new(0);
+        http3.recv_streams.insert(
+            session_id,
+            Box::new(Rc::new(RefCell::new(Session::new(
+                session_id,
+                Box::new(NoEvents),
+                Role::Client,
+                Rc::clone(&http3.qpack_encoder),
+                Rc::clone(&http3.qpack_decoder),
+                ExtendedConnectType::WebTransport,
+            )))),
+        );
+
+        http3
+            .webtransport_create_stream_remote(
+                &mut client,
+                session_id,
+                remote_bidi,
+                Box::new(NoEvents),
+                Box::new(NoEvents),
+            )
+            .unwrap();
+
+        // The reset has to reach the peer, which sees it on its receive side.
+        exchange(&mut client, &mut server);
+        assert!(
+            server.events().any(|e| matches!(
+                e,
+                ConnectionEvent::RecvStreamReset { stream_id, app_error }
+                    if stream_id == remote_bidi && app_error == WT_FLOW_CONTROL_ERROR
+            )),
+            "the rejected bidi stream's send side must be reset, not just stopped"
+        );
+    }
 
     #[test]
     fn create_request_headers_connect_without_connect_type() {
