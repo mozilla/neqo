@@ -220,12 +220,20 @@ fn spurious_loss_is_taken_back() {
     assert_eq!(client.stats().late_ack, 0);
 
     // pkt0 arrives after all, and the acknowledgment comes back.
+    let acked_before = client.stats().bytes_acked;
     let srv = server.process(Some(pkt0), now).dgram();
     client.process_input(srv.unwrap(), now);
 
     assert_eq!(client.stats().late_ack, 1);
     assert_eq!(client.stats().lost, 0, "packet was not really lost");
     assert_eq!(client.stats().bytes_lost, 0, "bytes were not really lost");
+    // The bytes moved from the loss counter into the acked counter. Without the
+    // decrement above they would have been counted as both lost and acknowledged.
+    assert_eq!(
+        client.stats().bytes_acked - acked_before,
+        pkt0_len,
+        "late-acked bytes should be counted exactly once"
+    );
 }
 
 #[test]
