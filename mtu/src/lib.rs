@@ -52,7 +52,7 @@ use std::{
     net::IpAddr,
 };
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(supported_unix)]
 macro_rules! asserted_const_with_type {
     ($name:ident, $t1:ty, $e:expr, $t2:ty) => {
         #[allow(
@@ -75,7 +75,7 @@ mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(supported_unix)]
 mod routesocket;
 
 #[cfg(any(target_os = "macos", bsd))]
@@ -91,14 +91,14 @@ fn default_err() -> Error {
 }
 
 /// Prepare an error for cases that "should never happen".
-#[cfg(not(target_os = "windows"))]
+#[cfg(supported_unix)]
 fn unlikely_err(msg: String) -> Error {
     debug_assert!(false, "{msg}");
     Error::other(msg)
 }
 
 /// Align `size` to the next multiple of `align` (which needs to be a power of two).
-#[cfg(not(target_os = "windows"))]
+#[cfg(supported_unix)]
 const fn aligned_by(size: usize, align: usize) -> usize {
     if size == 0 {
         align
@@ -116,8 +116,8 @@ const fn aligned_by(size: usize, align: usize) -> usize {
     target_os = "visionos",
     target_os = "redox"
 ))]
-pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
-    return Err(default_err());
+fn interface_and_mtu_impl(_remote: IpAddr) -> Result<(String, usize)> {
+    Err(default_err())
 }
 
 /// Return the name and maximum transmission unit (MTU) of the outgoing network interface towards a
@@ -203,7 +203,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(supported_unix)]
     fn aligned_by() {
         for (size, align, expected) in [
             (0, 8, 8),
@@ -253,7 +253,7 @@ mod test {
 
     #[test]
     #[should_panic(expected = "test error")]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(supported_unix)]
     #[cfg(debug_assertions)]
     fn unlikely_error_panics() {
         crate::unlikely_err("test error".to_string());

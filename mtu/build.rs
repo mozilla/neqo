@@ -13,6 +13,14 @@ fn main() {
                 target_os = "netbsd",
                 target_os = "solaris"
             )
+        },
+        supported_unix: {
+            any(
+                target_os = "macos",
+                bsd,
+                target_os = "linux",
+                target_os = "android"
+            )
         }
     }
 }
