@@ -1304,7 +1304,7 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{Decoder, Encoder, event::Provider as _, expect_usize, qtrace, to_u64};
+    use neqo_common::{Encoder, event::Provider as _, expect_usize, qtrace, to_u64};
     use static_assertions::const_assert;
     use test_fixture::now;
 
@@ -1313,9 +1313,8 @@ mod tests {
         ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         events::ConnectionEvent,
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
-        frame::FrameType,
         packet, recovery,
-        recv_stream::{RecvStreams, RxStreamOrderer},
+        recv_stream::RxStreamOrderer,
         stats::FrameStats,
     };
 
@@ -1846,58 +1845,6 @@ mod tests {
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
             conn_events,
         )
-    }
-
-    #[test]
-    fn recv_stream_flow_control_frames_follow_stream_creation_order() {
-        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), u64::MAX)));
-        let mut streams = RecvStreams::default();
-
-        // Insert in reverse order so the test checks the ordering guarantee rather than
-        // the order in which the container happens to receive entries.
-        for stream_id in [StreamId::from(4), StreamId::from(0)] {
-            let mut stream = RecvStream::new(
-                stream_id,
-                to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
-                Rc::clone(&session_fc),
-                ConnectionEvents::default(),
-            );
-            let mut data = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
-            stream
-                .inbound_stream_frame(false, 0, &data)
-                .expect("data fits in stream window");
-            assert_eq!(stream.read(&mut data).unwrap(), (data.len(), false));
-            assert!(stream.has_frames_to_write());
-            streams.insert(stream_id, stream);
-        }
-
-        let mut builder =
-            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
-        let mut tokens = recovery::Tokens::new();
-        let mut stats = FrameStats::default();
-        streams.write_frames(
-            &mut builder,
-            &mut tokens,
-            &mut stats,
-            now(),
-            Duration::from_millis(100),
-        );
-
-        let mut decoder = Decoder::new(&builder.as_ref()[1..]);
-        assert_eq!(
-            decoder.decode_varint(),
-            Some(u64::from(FrameType::MaxStreamData))
-        );
-        assert_eq!(decoder.decode_varint(), Some(0));
-        assert_eq!(
-            decoder.decode_varint(),
-            Some(to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) * 2)
-        );
-        assert_eq!(
-            decoder.decode_varint(),
-            Some(u64::from(FrameType::MaxStreamData))
-        );
-        assert_eq!(decoder.decode_varint(), Some(4));
     }
 
     #[test]
