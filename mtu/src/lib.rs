@@ -52,7 +52,7 @@ use std::{
     net::IpAddr,
 };
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(unsupported)))]
 macro_rules! asserted_const_with_type {
     ($name:ident, $t1:ty, $e:expr, $t2:ty) => {
         #[allow(
@@ -75,7 +75,7 @@ mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(unsupported)))]
 mod routesocket;
 
 #[cfg(any(target_os = "macos", bsd))]
@@ -91,14 +91,14 @@ fn default_err() -> Error {
 }
 
 /// Prepare an error for cases that "should never happen".
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(unsupported)))]
 fn unlikely_err(msg: String) -> Error {
     debug_assert!(false, "{msg}");
     Error::other(msg)
 }
 
 /// Align `size` to the next multiple of `align` (which needs to be a power of two).
-#[cfg(not(target_os = "windows"))]
+#[cfg(all(not(target_os = "windows"), not(unsupported)))]
 const fn aligned_by(size: usize, align: usize) -> usize {
     if size == 0 {
         align
@@ -110,14 +110,9 @@ const fn aligned_by(size: usize, align: usize) -> usize {
 // Platforms currently not supported.
 //
 // See <https://github.com/mozilla/mtu/issues/82>.
-#[cfg(any(
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "visionos",
-    target_os = "redox"
-))]
-pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
-    return Err(default_err());
+#[cfg(unsupported)]
+fn interface_and_mtu_impl(_remote: IpAddr) -> Result<(String, usize)> {
+    Err(default_err())
 }
 
 /// Return the name and maximum transmission unit (MTU) of the outgoing network interface towards a
@@ -135,7 +130,7 @@ pub fn interface_and_mtu(remote: IpAddr) -> Result<(String, usize)> {
     interface_and_mtu_impl(remote)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(unsupported)))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};

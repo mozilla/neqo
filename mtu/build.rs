@@ -13,6 +13,16 @@ fn main() {
                 target_os = "netbsd",
                 target_os = "solaris"
             )
+        },
+        // Platforms that have no `interface_and_mtu_impl` and fall back to the
+        // stub in `lib.rs`. They need none of the supporting machinery.
+        unsupported: {
+            any(
+                target_os = "ios",
+                target_os = "tvos",
+                target_os = "visionos",
+                target_os = "redox"
+            )
         }
     }
 }
