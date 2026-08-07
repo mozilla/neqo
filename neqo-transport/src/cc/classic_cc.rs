@@ -2145,11 +2145,11 @@ mod tests {
         assert_eq!(cc_stats.cwnd, Some(cc.cwnd_min()));
     }
 
-    #[test]
     // There was a bug in the stat logic that it never got initialized if a connection never made it
     // past the point of being app-limited, i.e. it returned `0` if a connection never grew the
     // congestion window. This test asserts that it is getting initialized to the initial window
     // size on the first ack, even if the congestion window doesn't grow.
+    #[test]
     fn cwnd_stat_app_limited() {
         let mut cc = make_cc_cubic();
         let now = now();

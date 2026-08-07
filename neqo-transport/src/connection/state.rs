@@ -16,8 +16,8 @@ use crate::{
     recovery,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// The state of the Connection.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum State {
     /// A newly created connection.
     Init,

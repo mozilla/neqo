@@ -80,22 +80,22 @@ pub struct Args {
     #[arg(default_value = "[::]:4433")]
     hosts: Vec<String>,
 
-    #[arg(short = 'd', long)]
     /// NSS database directory [default: `$TEST_FIXTURE_DB` or the bundled NSS test DB].
+    #[arg(short = 'd', long)]
     db: Option<PathBuf>,
 
-    #[arg(short = 'k', long, default_value = "key")]
     /// Name of key from NSS database.
+    #[arg(short = 'k', long, default_value = "key")]
     key: String,
 
-    #[arg(name = "retry", long)]
     /// Force a retry
+    #[arg(name = "retry", long)]
     retry: bool,
 
-    #[arg(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
     /// This generates a new set of ECH keys when it is invoked.
     /// The resulting configuration is printed to stdout in hexadecimal format.
+    #[arg(name = "ech", long)]
     ech: bool,
 }
 

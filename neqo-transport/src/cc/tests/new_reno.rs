@@ -162,8 +162,8 @@ fn issue_876() {
     assert_eq!(cc.bytes_in_flight(), 4 * cc.max_datagram_size());
 }
 
-#[test]
 // https://github.com/mozilla/neqo/pull/1465
+#[test]
 fn issue_1465() {
     let mut cc = make_cc_newreno();
     let mut cc_stats = CongestionControlStats::default();

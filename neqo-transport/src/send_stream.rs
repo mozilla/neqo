@@ -3584,8 +3584,8 @@ mod tests {
         }
     }
 
-    #[test]
     // Verify lost frames handle fin properly
+    #[test]
     fn send_stream_get_frame_data() {
         let conn_fc = connection_fc(100);
         let conn_events = ConnectionEvents::default();
@@ -3724,8 +3724,8 @@ mod tests {
         );
     }
 
-    #[test]
     // Verify lost frames handle fin properly with zero length fin
+    #[test]
     fn send_stream_get_frame_zerolength_fin() {
         let conn_fc = connection_fc(100);
         let conn_events = ConnectionEvents::default();

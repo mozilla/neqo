@@ -22,8 +22,8 @@ use crate::{
     stream_id::StreamType,
 };
 
-#[test]
 /// Verify initial CWND is honored.
+#[test]
 fn cc_slow_start() {
     let mut client = default_client();
     let mut server = default_server();
@@ -126,8 +126,8 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
     assert!(cwnd(&client) < cwnd_before_cong);
 }
 
-#[test]
 /// Verify that CC moves to cong avoidance when a packet is marked lost.
+#[test]
 fn cc_slow_start_to_cong_avoidance_recovery_period_due_to_packet_loss() {
     cc_slow_start_to_cong_avoidance_recovery_period(CongestionSignal::PacketLoss);
 }
@@ -138,9 +138,9 @@ fn cc_slow_start_to_cong_avoidance_recovery_period_due_to_ecn_ce() {
     cc_slow_start_to_cong_avoidance_recovery_period(CongestionSignal::EcnCe);
 }
 
-#[test]
 /// Verify that CC stays in recovery period when packet sent before start of
 /// recovery period is acked.
+#[test]
 fn cc_cong_avoidance_recovery_period_unchanged() {
     let mut client = default_client();
     let mut server = default_server();
@@ -177,9 +177,9 @@ fn cc_cong_avoidance_recovery_period_unchanged() {
     assert_eq!(cwnd1, cwnd2);
 }
 
-#[test]
 /// Ensure that a single packet is sent after entering recovery, even
 /// when that exceeds the available congestion window.
+#[test]
 fn single_packet_on_recovery() {
     let mut client = default_client();
     let mut server = default_server();
@@ -280,8 +280,8 @@ fn cc_cong_avoidance_recovery_period_to_cong_avoidance_cubic() {
     cc_cong_avoidance_recovery_period_to_cong_avoidance(CongestionControl::Cubic);
 }
 
-#[test]
 /// Verify transition to persistent congestion state if conditions are met.
+#[test]
 fn cc_slow_start_to_persistent_congestion_no_acks() {
     let mut client = default_client();
     let mut server = default_server();
@@ -301,8 +301,8 @@ fn cc_slow_start_to_persistent_congestion_no_acks() {
     induce_persistent_congestion(&mut client, &mut server, stream, now);
 }
 
-#[test]
 /// Verify transition to persistent congestion state if conditions are met.
+#[test]
 fn cc_slow_start_to_persistent_congestion_some_acks() {
     let mut client = default_client();
     let mut server = default_server();
@@ -329,9 +329,9 @@ fn cc_slow_start_to_persistent_congestion_some_acks() {
     induce_persistent_congestion(&mut client, &mut server, stream, now);
 }
 
-#[test]
 /// Verify persistent congestion moves to slow start after recovery period
 /// ends.
+#[test]
 fn cc_persistent_congestion_to_slow_start() {
     let mut client = default_client();
     let mut server = default_server();

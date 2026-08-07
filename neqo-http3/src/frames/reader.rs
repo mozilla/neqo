@@ -315,11 +315,11 @@ impl FrameReader {
         Ok(res)
     }
 
-    #[cfg(feature = "build-fuzzing-corpus")]
     /// Write `HFrame` data to indicated fuzzing corpus.
     ///
     /// The output consists of the varint-encoded frame type and length, followed by the optional
     /// payload data.
+    #[cfg(feature = "build-fuzzing-corpus")]
     fn write_item_to_fuzzing_corpus(&self, corpus: &str, data: Option<&[u8]>) {
         // We need to include the frame type and length varints before the data
         // to create a complete frame that the fuzzer can process.

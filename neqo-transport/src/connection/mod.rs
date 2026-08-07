@@ -97,9 +97,9 @@ pub enum ZeroRttState {
     Rejected,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
 /// Type returned from `process()` and `process_output()`. Users are required to
 /// call these repeatedly until `Callback` or `None` is returned.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Output {
     /// Connection requires no action.
     None,

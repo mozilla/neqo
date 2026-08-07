@@ -55,8 +55,8 @@ fn stream_create() {
     assert_eq!(server.stream_create(StreamType::BiDi).unwrap(), 5);
 }
 
-#[test]
 // tests stream send/recv after connection is established.
+#[test]
 fn transfer() {
     let mut client = default_client();
     let mut server = default_server();
@@ -308,8 +308,8 @@ fn ordergroup_7() {
     fairness_test(source, 5, 3, &result);
 }
 
-#[test]
 // Send fin even if a peer closes a remote bidi send stream before sending any data.
+#[test]
 fn report_fin_when_stream_closed_wo_data() {
     // Note that the two servers in this test will get different anti-replay filters.
     // That's OK because we aren't testing anti-replay.
@@ -487,8 +487,8 @@ fn exceed_max_data() {
     assert_error(&server, &CloseReason::Transport(Error::FlowControl));
 }
 
-#[test]
 // If we send a stop_sending to the peer, we should not accept more data from the peer.
+#[test]
 fn do_not_accept_data_after_stop_sending() {
     // Note that the two servers in this test will get different anti-replay filters.
     // That's OK because we aren't testing anti-replay.
@@ -535,9 +535,9 @@ impl crate::connection::test_internal::FrameWriter for Writer {
     }
 }
 
-#[test]
 /// Server sends a number of stream-related frames for a client-initiated stream that is not yet
 /// created. This should cause the client to close the connection.
+#[test]
 fn illegal_stream_related_frames() {
     fn test_with_illegal_frame(frame: &[u64]) {
         let mut client = default_client();
@@ -564,10 +564,10 @@ fn illegal_stream_related_frames() {
     }
 }
 
-#[test]
 /// Server sends a stream-related frame for the wrong half of an existing
 /// unidirectional stream. This should cause the client to close the connection
 /// with `STREAM_STATE_ERROR`.
+#[test]
 fn wrong_directional_stream_frames() {
     // The directional check only fires once the targeted half exists, so the
     // creating role makes the stream before the offending frame is injected.
@@ -606,8 +606,8 @@ fn wrong_directional_stream_frames() {
     }
 }
 
-#[test]
 /// Regression <https://github.com/mozilla/neqo/pull/2358>.
+#[test]
 fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
     const REQUEST: &[u8] = b"ping";
     let mut client = default_client();
@@ -652,8 +652,8 @@ fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
     );
 }
 
-#[test]
 // Server sends stop_sending, the client simultaneous sends reset.
+#[test]
 fn simultaneous_stop_sending_and_reset() {
     let mut client = default_client();
     let mut server = default_server();
@@ -695,8 +695,8 @@ fn simultaneous_stop_sending_and_reset() {
     );
 }
 
-#[test]
 /// Make a stream data or control frame arrive after the stream has been used and cleared.
+#[test]
 fn late_stream_related_frames() {
     fn late_stream_related_frame(frame_type: FrameType) {
         let mut client = default_client();

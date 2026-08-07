@@ -35,14 +35,14 @@ pub struct SharedArgs {
     #[command(flatten)]
     verbose: Option<clap_verbosity_flag::Verbosity>,
 
-    #[arg(short = 'a', long, default_value = "h3")]
     /// ALPN labels to negotiate.
     ///
     /// This client still only does HTTP/3 no matter what the ALPN says.
+    #[arg(short = 'a', long, default_value = "h3")]
     alpn: String,
 
-    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
     /// Enable QLOG logging and QLOG traces to this directory
+    #[arg(name = "qlog-dir", long, value_parser=clap::value_parser!(PathBuf))]
     qlog_dir: Option<PathBuf>,
 
     #[arg(name = "encoder-table-size", long, default_value = "16384")]
@@ -54,13 +54,13 @@ pub struct SharedArgs {
     #[arg(name = "max-blocked-streams", short = 'b', long, default_value = "10")]
     max_blocked_streams: u16,
 
-    #[arg(short = 'c', long, number_of_values = 1)]
     /// The set of TLS cipher suites to enable.
     /// From: `TLS_AES_128_GCM_SHA256`, `TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`.
+    #[arg(short = 'c', long, number_of_values = 1)]
     ciphers: Vec<String>,
 
-    #[arg(name = "qns-test", long)]
     /// Enable special behavior for use with QUIC Network Simulator
+    #[arg(name = "qns-test", long)]
     qns_test: Option<String>,
 
     #[command(flatten)]
@@ -93,6 +93,11 @@ impl SharedArgs {
 
 #[derive(Clone, Debug, Parser)]
 pub struct QuicParameters {
+    /// A list of versions to support, in hex.
+    /// The first is the version to attempt.
+    /// Adding multiple values adds versions in order of preference.
+    /// If the first listed version appears in the list twice, the position
+    /// of the second entry determines the preference order of that version.
     #[arg(
         short = 'Q',
         long,
@@ -100,59 +105,54 @@ pub struct QuicParameters {
         value_delimiter = ' ',
         number_of_values = 1,
         value_parser = from_str)]
-    /// A list of versions to support, in hex.
-    /// The first is the version to attempt.
-    /// Adding multiple values adds versions in order of preference.
-    /// If the first listed version appears in the list twice, the position
-    /// of the second entry determines the preference order of that version.
     pub quic_version: Vec<Version>,
 
-    #[arg(long, default_value = "16")]
     /// Set the `MAX_STREAMS_BIDI` limit.
+    #[arg(long, default_value = "16")]
     pub max_streams_bidi: u64,
 
-    #[arg(long, default_value = "16")]
     /// Set the `MAX_STREAMS_UNI` limit.
+    #[arg(long, default_value = "16")]
     pub max_streams_uni: u64,
 
-    #[arg(long = "idle", default_value = "30")]
     /// The idle timeout for connections, in seconds.
+    #[arg(long = "idle", default_value = "30")]
     pub idle_timeout: u64,
 
-    #[arg(long = "init_rtt", default_value_t = DEFAULT_INITIAL_RTT.as_millis() as u64)]
     /// The initial round-trip time, in milliseconds.
+    #[arg(long = "init_rtt", default_value_t = DEFAULT_INITIAL_RTT.as_millis() as u64)]
     pub initial_rtt_ms: u64,
 
+    /// The congestion control algorithm to use.
     #[arg(long = "cc", default_value = "cubic",
         value_parser = clap::builder::PossibleValuesParser::new(CongestionControl::VARIANTS)
             .map(|s| s.parse::<CongestionControl>().unwrap()))]
-    /// The congestion control algorithm to use.
     pub congestion_control: CongestionControl,
 
+    /// The slow start algorithm to use.
     #[arg(long = "ss", default_value = "classic",
         value_parser = clap::builder::PossibleValuesParser::new(SlowStart::VARIANTS)
             .map(|s| s.parse::<SlowStart>().unwrap()))]
-    /// The slow start algorithm to use.
     pub slow_start: SlowStart,
 
-    #[arg(long = "no-pacing")]
     /// Whether to disable pacing.
+    #[arg(long = "no-pacing")]
     pub no_pacing: bool,
 
-    #[arg(long)]
     /// Whether to disable path MTU discovery.
+    #[arg(long)]
     pub no_pmtud: bool,
 
-    #[arg(long)]
     /// Whether to slice the SNI.
+    #[arg(long)]
     pub no_sni_slicing: bool,
 
-    #[arg(name = "preferred-address-v4", long)]
     /// An IPv4 address for the server preferred address.
+    #[arg(name = "preferred-address-v4", long)]
     pub preferred_address_v4: Option<String>,
 
-    #[arg(name = "preferred-address-v6", long)]
     /// An IPv6 address for the server preferred address.
+    #[arg(name = "preferred-address-v6", long)]
     pub preferred_address_v6: Option<String>,
 }
 

@@ -94,8 +94,8 @@ pub fn connect(client: &mut Connection, server: &mut Server) -> ConnectionRef {
     connected_server(server)
 }
 
-#[cfg(test)]
 /// Scrub through client events to find a resumption token.
+#[cfg(test)]
 pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
     client
         .events()
@@ -109,8 +109,8 @@ pub fn find_ticket(client: &mut Connection) -> ResumptionToken {
         .unwrap()
 }
 
-#[cfg(test)]
 /// Connect to the server and have it generate a ticket.
+#[cfg(test)]
 pub fn generate_ticket(server: &mut Server) -> ResumptionToken {
     let mut client = default_client();
     let server_conn = connect(&mut client, server);

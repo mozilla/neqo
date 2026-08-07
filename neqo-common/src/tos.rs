@@ -15,8 +15,8 @@ use strum::{EnumIter, FromRepr};
 #[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, EnumIter)]
 #[repr(u8)]
 pub enum Ecn {
-    #[default]
     /// Not-ECT, Not ECN-Capable Transport, RFC3168
+    #[default]
     NotEct = 0b00,
     /// ECT(1), ECN-Capable Transport(1), RFC8311 and RFC9331
     Ect1 = 0b01,
@@ -63,8 +63,8 @@ impl Ecn {
 #[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr)]
 #[repr(u8)]
 pub enum Dscp {
-    #[default]
     /// Class Selector 0, RFC2474
+    #[default]
     Cs0 = 0b0000_0000,
     /// Lower-Effort, RFC8622
     Le = 0b0000_0100,

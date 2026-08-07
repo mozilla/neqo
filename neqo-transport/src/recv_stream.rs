@@ -500,8 +500,8 @@ impl RxStreamOrderer {
 }
 
 /// QUIC receiving states, based on -transport 3.2.
-#[derive(Debug, Display)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
+#[derive(Debug, Display)]
 enum RecvStreamState {
     Recv {
         fc: ReceiverFlowControl<StreamId>,

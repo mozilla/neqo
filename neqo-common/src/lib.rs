@@ -97,8 +97,8 @@ where
     usize::try_from(v).expect("usize should be large enough for this value")
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]
 /// Client or Server.
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]
 pub enum Role {
     Client,
     Server,
