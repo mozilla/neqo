@@ -393,7 +393,7 @@ fn initial_handshake_pto_padding() {
     while let Some(dgram) = client.process_output(now).dgram() {
         pto_dgrams.push(dgram);
     }
-    assert!(!pto_dgrams.is_empty());
+    assert_ne!(pto_dgrams, []);
 
     // Iterate over all datagrams to find one with coalesced Initial+Handshake.
     // Any datagram containing an Initial packet must be properly padded.
