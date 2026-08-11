@@ -813,6 +813,8 @@ fn declare_broken_after_max_pto() {
     const MAX_PTO: usize = 7;
     // For this test to prove anything, the whole PTO backoff ladder must fit inside
     // the idle timeout; otherwise "closed before the idle timeout" is vacuously true.
+    // This checks the *last* PTO interval (a conservative sufficient condition, since
+    // the 3*RTT factor overestimates the actual PTO in a zero-jitter test).
     assert!(DEFAULT_RTT * (1_u32 << (MAX_PTO - 1)) * 3 < default_timeout());
 
     let mut client =
