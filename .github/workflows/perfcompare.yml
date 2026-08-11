@@ -294,7 +294,7 @@ jobs:
           for tag in neqo-server quic_server quiche-server s2n-quic-qns; do
             sudo pkill -9 "$tag" 2>/dev/null || true
           done
-          sudo fuser -k 4433/udp 4433/tcp 2>/dev/null || true
+          sudo fuser -k 4433/udp 4433/tcp || true
           rm -- * || true
           rm -r -- binaries build-neqo build-google build-quiche build-s2n \
             comment-data hyperfine hyperfine-baseline || true
