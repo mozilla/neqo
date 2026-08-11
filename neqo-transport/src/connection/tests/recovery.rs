@@ -985,7 +985,7 @@ fn pto_handshake_space_when_server_flight_lost() {
     while let Some(dgram) = server.process_output(now).dgram() {
         server_dgrams.push(dgram);
     }
-    assert_ne!(server_dgrams, [] as [neqo_common::Datagram; 0]);
+    assert!(!server_dgrams.is_empty());
 
     // Send all Initial packets to the client, but drop all Handshake packets.
     now += RTT / 2;

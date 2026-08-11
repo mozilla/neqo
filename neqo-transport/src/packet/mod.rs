@@ -894,7 +894,7 @@ impl<'a> Public<'a> {
         } else {
             HP_MASK_LONG
         };
-        assert_ne!(self.data, [] as [u8; 0]);
+        assert!(!self.data.is_empty());
         let first_byte = self.data[0] ^ (mask[0] & bits);
 
         let mut hdrbytes = 0..self.header_len + 4;
@@ -1217,7 +1217,7 @@ mod tests {
         assert_eq!(packet.packet_type(), Type::Initial);
         assert_eq!(&packet.dcid()[..], &[] as &[u8]);
         assert_eq!(&packet.scid()[..], SERVER_CID);
-        assert_eq!(packet.token(), [] as [u8; 0]);
+        assert!(packet.token().is_empty());
         assert_eq!(remainder, EXTRA);
 
         let decrypted = packet
@@ -1306,7 +1306,7 @@ mod tests {
         let mut sample_short = packet.to_vec();
         let (packet, remainder) = Public::decode(&mut sample_short, &cid_mgr()).unwrap();
         assert_eq!(packet.packet_type(), Type::Short);
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         let decrypted = packet
             .decrypt(&mut CryptoStates::test_default(), now())
             .unwrap();
@@ -1330,7 +1330,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(packet.packet_type(), Type::Short);
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         assert!(
             packet
                 .decrypt(&mut CryptoStates::test_default(), now())
@@ -1647,7 +1647,7 @@ mod tests {
 
         let (packet, remainder) = Public::decode(&mut retry, &cid_mgr()).unwrap();
         assert!(packet.is_valid_retry(&ConnectionId::from(CLIENT_CID)));
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
 
         // The builder adds randomness, which makes expectations hard.
         // So only do a full check when that randomness matches up.
@@ -1697,7 +1697,7 @@ mod tests {
         assert!(packet.dcid().is_empty());
         assert_eq!(&packet.scid()[..], SERVER_CID);
         assert_eq!(packet.token(), RETRY_TOKEN);
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
     }
 
     #[test]
@@ -1729,19 +1729,19 @@ mod tests {
 
         let mut sample_retry_v1 = SAMPLE_RETRY_V1.to_vec();
         let (packet, remainder) = Public::decode(&mut sample_retry_v1, &cid_mgr).unwrap();
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         assert!(packet.is_valid_retry(&odcid));
 
         let mut damaged_retry = SAMPLE_RETRY_V1.to_vec();
         let last = damaged_retry.len() - 1;
         damaged_retry[last] ^= 0b100_0010; // 66
         let (packet, remainder) = Public::decode(&mut damaged_retry, &cid_mgr).unwrap();
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
 
         damaged_retry.truncate(last);
         let (packet, remainder) = Public::decode(&mut damaged_retry, &cid_mgr).unwrap();
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         assert!(!packet.is_valid_retry(&odcid));
 
         // An invalid token should be rejected sooner.
@@ -1784,7 +1784,7 @@ mod tests {
         let mut sample_vn = SAMPLE_VN.to_vec();
         let (packet, remainder) =
             Public::decode(&mut sample_vn, &EmptyConnectionIdGenerator::default()).unwrap();
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], SERVER_CID);
         assert!(packet.scid.is_some());
         assert_eq!(&packet.scid.unwrap()[..], CLIENT_CID);
@@ -1805,7 +1805,7 @@ mod tests {
 
         let (packet, remainder) =
             Public::decode(enc.as_mut(), &EmptyConnectionIdGenerator::default()).unwrap();
-        assert_eq!(remainder, [] as [u8; 0]);
+        assert!(remainder.is_empty());
         assert_eq!(&packet.dcid[..], BIG_DCID);
         assert!(packet.scid.is_some());
         assert_eq!(&packet.scid.unwrap()[..], BIG_SCID);
@@ -1842,7 +1842,7 @@ mod tests {
         let mut packet = PACKET.to_vec();
         let (packet, slice) =
             Public::decode(&mut packet, &EmptyConnectionIdGenerator::default()).unwrap();
-        assert_eq!(slice, [] as [u8; 0]);
+        assert!(slice.is_empty());
         let decrypted = packet
             .decrypt(&mut CryptoStates::test_chacha(), now())
             .unwrap();

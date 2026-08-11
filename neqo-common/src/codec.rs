@@ -753,7 +753,7 @@ mod tests {
         assert!(dec.decode(2).is_none());
 
         let mut dec = Decoder::from(&[]);
-        assert_eq!(dec.decode_remainder(), [] as [u8; 0]);
+        assert!(dec.decode_remainder().is_empty());
     }
 
     #[test]

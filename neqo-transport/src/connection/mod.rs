@@ -2729,7 +2729,7 @@ impl Connection {
                 }
                 SendOption::No(paced) => {
                     if num_datagrams == 0 {
-                        debug_assert_eq!(send_buffer, [] as [u8; 0]);
+                        debug_assert!(send_buffer.is_empty());
                         return Ok(SendOptionBatch::No(paced));
                     }
                     break;
@@ -2737,7 +2737,7 @@ impl Connection {
             }
         }
 
-        debug_assert_ne!(send_buffer, [] as [u8; 0]);
+        debug_assert!(!send_buffer.is_empty());
         let batch = path.borrow_mut().datagram_batch(
             send_buffer,
             packet_tos,
