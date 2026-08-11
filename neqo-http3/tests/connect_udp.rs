@@ -666,9 +666,14 @@ fn session_lifecycle_with_http_datagram_capsule() {
 #[test]
 fn connect_udp_session_protocol_is_not_webtransport() {
     fixture_init();
-    let (client, _proxy, session_id, _proxy_session) = establish_new_session();
+    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
     assert_eq!(
         client.webtransport_session_protocol(session_id).unwrap(),
-        None
+        None,
+    );
+    assert_eq!(
+        client.stream_commit(session_id, now()),
+        Err(Error::Unavailable),
+        "commit() not implemented for CONNECT-UDP"
     );
 }

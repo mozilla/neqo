@@ -282,6 +282,8 @@ pub fn handshake(client: &mut Connection, server: &mut Connection) {
         _ = maybe_authenticate(a);
         let d = a.process(datagram, now());
         datagram = d.dgram();
+        #[allow(clippy::allow_attributes, // TODO: Switch to expect once MSRV>=1.99.
+                clippy::mut_mut, reason = "Correct here.")]
         mem::swap(&mut a, &mut b);
     }
 }

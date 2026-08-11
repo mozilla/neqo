@@ -240,6 +240,8 @@ where
         input = output.and_then(&mut modifier);
         qtrace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
+        #[allow(clippy::allow_attributes, // TODO: Switch to expect once MSRV>=1.99.
+                clippy::mut_mut, reason = "Correct here.")]
         mem::swap(&mut a, &mut b);
     }
     if let Some(d) = input {

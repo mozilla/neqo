@@ -20,10 +20,11 @@ use std::{
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
+    expect_usize,
     hex::{Hex, HexSnipMiddle, HexWithLen},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
-    qtrace, qwarn, to_u64, to_usize,
+    qtrace, qwarn, to_u64,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
@@ -1095,6 +1096,27 @@ impl Connection {
             qlog::packets_lost(&mut self.qlog, &lost, now);
         }
 
+        // Declare the connection broken if too many consecutive PTOs have gone
+        // unacknowledged, i.e. the path is a black hole. This closes the connection
+        // sooner than, and with a distinct reason from, the idle timeout.
+        //
+        // We only do this once connected, i.e. after the handshake completes. A
+        // black hole during the handshake is the job of happy eyeballs, which races
+        // multiple connection attempts and does not need us to give up on any single
+        // one early. Requiring `connected()` also guarantees we have an RTT sample,
+        // so the PTO backoff we are counting is based on a real estimate.
+        if let Some(max_pto) = self.conn_params.get_max_pto()
+            && self.state.connected()
+            && self.loss_recovery.pto_count() >= max_pto.get()
+        {
+            qinfo!("[{self}] {max_pto} consecutive PTOs, declaring connection broken");
+            self.set_state(
+                State::Closed(CloseReason::Transport(Error::TooManyPtos)),
+                now,
+            );
+            return;
+        }
+
         if self.release_resumption_token_timer.is_some() {
             self.create_resumption_token(now);
         }
@@ -1544,6 +1566,17 @@ impl Connection {
         }
 
         match (packet.packet_type(), &self.state, &self.role) {
+            // RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an
+            // Initial to 0, and a client that receives an Initial with a non-zero Token
+            // Length MUST discard the packet or close with PROTOCOL_VIOLATION. Discarding
+            // is preferred here: the token length sits in the unprotected header, so an
+            // off-path injection must not be able to tear down the connection.
+            (packet::Type::Initial, _, Role::Client) if !packet.token().is_empty() => {
+                self.stats
+                    .borrow_mut()
+                    .pkt_dropped("Client received an Initial with a token");
+                return Ok(PreprocessResult::Next);
+            }
             (packet::Type::Initial, State::Init, Role::Server) => {
                 let version = packet.version().ok_or(Error::ProtocolViolation)?;
                 if !packet.is_valid_initial()
@@ -2322,8 +2355,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len =
-            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
+        // The conversion is safe because the maximum value is 8.
+        let pn_len = size_of::<packet::Number>() - expect_usize(unacked_range.leading_zeros() / 8);
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -3066,7 +3099,8 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
+            // We cap this transport parameter to usize::MAX on decode, so this is safe.
+            let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
             path.borrow_mut()
                 .pmtud_mut()
                 .set_peer_max_udp_payload(max_udp_payload);

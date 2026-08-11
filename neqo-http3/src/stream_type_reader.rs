@@ -128,9 +128,8 @@ impl NewStreamHeadReader {
                     }
                 }
             }
-        } else {
-            Ok((None, false))
         }
+        Ok((None, false))
     }
 
     pub fn get_type(&mut self, conn: &mut Connection) -> Res<Option<NewStreamType>> {
