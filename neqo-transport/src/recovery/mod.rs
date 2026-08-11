@@ -270,10 +270,13 @@ impl LossRecoverySpace {
             if p.lost() {
                 // A packet declared lost that is subsequently acknowledged was never
                 // really lost, so take it back out of the loss counters. Every packet
-                // marked lost was counted by `count_lost`, so this cannot underflow.
+                // marked lost was counted by `count_lost`, so the counters stay
+                // balanced; saturate defensively so a future accounting change cannot
+                // wrap these `usize` counters in release builds.
                 stats.late_ack += 1;
-                stats.lost -= 1;
-                stats.bytes_lost -= p.len();
+                debug_assert!(stats.lost >= 1 && stats.bytes_lost >= p.len());
+                stats.lost = stats.lost.saturating_sub(1);
+                stats.bytes_lost = stats.bytes_lost.saturating_sub(p.len());
             }
             if p.pto_fired() {
                 stats.pto_ack += 1;
