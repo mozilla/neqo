@@ -63,7 +63,7 @@ runs:
         cd ../ && rm -r linuxquic
       shell: bash
 
-    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       # FIXME: Turning caching on causes this error:
       # `Failed to save: <h2>Our services aren't available right now</h2><p>We're working to restore all services as soon as possible. Please check back soon.</p>`
       # Since this happens for *each* parallel QNS run, it's simply too noisy.
