@@ -70,6 +70,7 @@ nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
+assert_is_empty = "allow" # We prefer using is_empty() in asserts.
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
 create_dir = "warn"
