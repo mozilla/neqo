@@ -162,7 +162,6 @@ jobs:
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build-neqo/lib:$LD_LIBRARY_PATH"
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
-            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/build-neqo/test-fixture/db" # TODO: Remove once baseline uses nss-rs >= 0.11.0
           } >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
