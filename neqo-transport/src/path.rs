@@ -993,6 +993,15 @@ impl Path {
         &self.sender
     }
 
+    /// Take a snapshot of this path's RTT and congestion-control stats into `stats`.
+    pub fn update_stats(&self, stats: &mut Stats) {
+        stats.rtt = self.rtt.estimate();
+        stats.rttvar = self.rtt.rttvar();
+        stats.min_rtt = self.rtt.minimum();
+        stats.cc.cwnd = self.sender.cwnd();
+        stats.cc.bytes_in_flight = self.sender.bytes_in_flight();
+    }
+
     /// Pass on RTT configuration: the maximum acknowledgment delay of the peer,
     /// and maybe the minimum delay.
     pub fn set_ack_delay(

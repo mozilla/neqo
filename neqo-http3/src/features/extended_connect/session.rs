@@ -20,7 +20,7 @@ use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers, stats::SessionStats,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -452,6 +452,12 @@ impl Session {
         self.protocol.validate_send_group(group_id)
     }
 
+    /// Session statistics, for protocols that track them (only `WebTransport`).
+    #[must_use]
+    pub(crate) fn stats(&self) -> Option<SessionStats> {
+        self.protocol.stats().copied()
+    }
+
     fn has_data_to_send(&self) -> bool {
         self.control_stream_send.has_data_to_send()
     }
@@ -610,6 +616,21 @@ pub(crate) trait Protocol: Debug + Display {
     }
 
     fn process_response_headers(&mut self, _headers: &[Header]) {}
+
+    /// Per-session statistics, for protocols that expose them.
+    ///
+    /// Only `WebTransport` surfaces session statistics to the API consumer, so
+    /// every other protocol leaves this at `None` and the counters above are
+    /// simply not recorded.
+    /// Callers reach this only after checking the session is `WebTransport`, so
+    /// a protocol without stats never gets here.
+    fn stats(&self) -> Option<&SessionStats> {
+        debug_assert!(
+            false,
+            "stats called for extended connect protocol not tracking stats"
+        );
+        None
+    }
 
     fn protocol(&self) -> Option<&str> {
         None

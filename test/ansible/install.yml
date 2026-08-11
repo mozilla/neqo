@@ -24,6 +24,23 @@
             bench_group: "{{ 'runnerx' if is_gcp else 'bench' }}"
             ansible_common_remote_group: "{{ 'google-sudoers' if is_gcp else 'sudo' }}"
 
+    - name: Disable apt daily update/upgrade timers
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        enabled: false
+        state: stopped
+      loop:
+        - apt-daily.timer
+        - apt-daily-upgrade.timer
+
+    - name: Disable the apt periodic cron script
+      ansible.builtin.copy:
+        src: "etc/apt.conf.d/99-disable-periodic"
+        dest: /etc/apt/apt.conf.d/99-disable-periodic
+        owner: root
+        group: root
+        mode: "0644"
+
     - name: Install required dependencies for bazel apt repo
       ansible.builtin.apt:
         install_recommends: false
@@ -37,16 +54,19 @@
       block:
         - name: Get bazel repo key
           ansible.builtin.get_url:
-            url: https://bazel.build/bazel-release.pub.gpg
+            url: https://releases.bazel.build/bazel-release.pub.gpg
             dest: /etc/apt/keyrings/bazel-archive-keyring.asc
             mode: "0644"
             force: true
         - name: Add bazel repo into sources list
-          ansible.builtin.apt_repository:
-            repo: "deb [arch=amd64
-              signed-by=/etc/apt/keyrings/bazel-archive-keyring.asc]
-              https://storage.googleapis.com/bazel-apt stable jdk1.8"
-            state: present
+          ansible.builtin.deb822_repository:
+            name: bazel
+            types: [deb]
+            uris: ["https://storage.googleapis.com/bazel-apt"]
+            suites: [stable]
+            components: [jdk1.8]
+            architectures: [amd64]
+            signed_by: /etc/apt/keyrings/bazel-archive-keyring.asc
 
     - name: Upgrade all installed apt packages
       ansible.builtin.apt:
@@ -108,6 +128,23 @@
         value: "0"
         state: present
 
+    - name: Create journald drop-in directory
+      ansible.builtin.file:
+        dest: /etc/systemd/journald.conf.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Cap journald disk usage
+      ansible.builtin.copy:
+        src: "etc/journald.conf.d/99-neqo.conf"
+        dest: /etc/systemd/journald.conf.d/99-neqo.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Restart journald
+
     - name: Reboot the machine
       when: not is_gcp and (apt_upgrade.changed or apt_install.changed)
       ansible.builtin.reboot:
@@ -161,6 +198,19 @@
         groups: "{{ ansible_common_remote_group }}"
         append: true
 
+    - name: Disable the perf build-id cache
+      ansible.builtin.copy:
+        src: "etc/perfconfig"
+        dest: "{{ item.dest }}"
+        owner: "{{ item.owner }}"
+        group: "{{ item.owner }}"
+        mode: "0644"
+      loop:
+        - dest: /root/.perfconfig
+          owner: root
+        - dest: "/home/{{ bench_user }}/.perfconfig"
+          owner: "{{ bench_user }}"
+
     - name: Check if cargo is installed
       become: true
       register: cargo
@@ -191,6 +241,9 @@
             line: GRUB_DEFAULT="Advanced options for Ubuntu>Ubuntu, with Linux {{ '6.11.0-1017-gcp' if is_gcp else '6.11.0-28-generic' }}"
         - name: Update GRUB
           ansible.builtin.command: update-grub
+
+    - name: Flush handlers before potential end_play
+      ansible.builtin.meta: flush_handlers
 
     - name: Exit on GCP
       ansible.builtin.meta: end_play
@@ -278,3 +331,9 @@
 
     - name: Reboot the machine
       ansible.builtin.reboot:
+
+  handlers:
+    - name: Restart journald
+      ansible.builtin.systemd_service:
+        name: systemd-journald
+        state: restarted
