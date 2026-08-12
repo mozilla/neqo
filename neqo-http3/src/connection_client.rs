@@ -4627,6 +4627,67 @@ mod tests {
     }
 
     #[test]
+    fn zero_rtt_new_server_setting_h3_datagram_smaller() {
+        // The server advertised SETTINGS_H3_DATAGRAM=1 before, and now withholds it.
+        zero_rtt_change_settings(
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+                HSetting::new(HSettingType::EnableH3Datagram, 1),
+            ],
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+            ],
+            &Http3State::Closing(CloseReason::Application(265)),
+            ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+        );
+    }
+
+    #[test]
+    fn zero_rtt_new_server_setting_h3_datagram_bigger() {
+        // Turning SETTINGS_H3_DATAGRAM on for the resumed connection is allowed.
+        zero_rtt_change_settings(
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+            ],
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+                HSetting::new(HSettingType::EnableH3Datagram, 1),
+            ],
+            &Http3State::Connected,
+            ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+        );
+    }
+
+    #[test]
+    fn zero_rtt_new_server_setting_webtransport_smaller() {
+        // The server advertised SETTINGS_ENABLE_WEBTRANSPORT=1 before, and now sends 0.
+        zero_rtt_change_settings(
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+                HSetting::new(HSettingType::EnableWebTransport, 1),
+            ],
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+                HSetting::new(HSettingType::EnableWebTransport, 0),
+            ],
+            &Http3State::Closing(CloseReason::Application(265)),
+            ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+        );
+    }
+
+    #[test]
     fn zero_rtt_max_table_size_first_omitted() {
         // send server original settings without MaxTableCapacity
         // send new server setting with MaxTableCapacity
