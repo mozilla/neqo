@@ -523,7 +523,7 @@ impl Session {
 
     /// Drain the per-session datagram queue and hand datagrams to the QUIC layer.
     ///
-    /// Only as many datagrams as the QUIC layer can currently accept are handed
+    /// Only as many datagrams as the QUIC layer can currently hold are handed
     /// over; the rest stay queued for a later call, so that a burst is paced
     /// against what the connection can send instead of overflowing the QUIC
     /// layer's fixed-size queue. See [`DatagramQueue::drain`].
