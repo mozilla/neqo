@@ -273,7 +273,7 @@ fn datagram_max_age_expiry_reports_client_event() {
 
     let t1 = t0 + Duration::from_millis(200);
     wt.client
-        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), t1)
+        .webtransport_set_datagram_max_age(session_id, Some(Duration::from_millis(100)), t1)
         .unwrap();
 
     let wt_expired_event = |e| {
@@ -391,7 +391,9 @@ fn server_datagram_sent_and_max_age_expiry_report_server_event() {
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    wt_session.send_datagram(DGRAM, Some(1u64), now(), 0, 0).unwrap();
+    wt_session
+        .send_datagram(DGRAM, Some(1u64), now(), 0, 0)
+        .unwrap();
     wt.exchange_packets();
 
     let sent_event = |e| {
@@ -406,10 +408,12 @@ fn server_datagram_sent_and_max_age_expiry_report_server_event() {
     assert!(wt.server.events().any(sent_event));
 
     let t0 = now();
-    wt_session.send_datagram(DGRAM, Some(2u64), t0, 0, 0).unwrap();
+    wt_session
+        .send_datagram(DGRAM, Some(2u64), t0, 0, 0)
+        .unwrap();
     let t1 = t0 + Duration::from_millis(200);
     wt_session
-        .set_datagram_max_age(Duration::from_millis(100), t1)
+        .set_datagram_max_age(Some(Duration::from_millis(100)), t1)
         .unwrap();
     // `set_datagram_max_age` only pushes the expiry onto the per-connection
     // handler's event queue; a `process_*` call is what drains that into the
@@ -441,7 +445,7 @@ fn server_datagram_expires_on_an_otherwise_idle_connection() {
     let session_id = wt_session.stream_id();
 
     wt_session
-        .set_datagram_max_age(Duration::from_millis(30), now())
+        .set_datagram_max_age(Some(Duration::from_millis(30)), now())
         .unwrap();
 
     // Enough filler datagrams to exhaust the transport's 10-slot queue on
@@ -451,7 +455,9 @@ fn server_datagram_expires_on_an_otherwise_idle_connection() {
     for _ in 0..15 {
         wt_session.send_datagram(DGRAM, None, now(), 0, 0).unwrap();
     }
-    wt_session.send_datagram(DGRAM, Some(77u64), now(), 0, 0).unwrap();
+    wt_session
+        .send_datagram(DGRAM, Some(77u64), now(), 0, 0)
+        .unwrap();
 
     let t0 = now();
     wt.server.process_output(t0);
@@ -486,7 +492,7 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     let session_id = wt_session.stream_id();
 
     wt_session
-        .set_datagram_max_age(Duration::from_secs(10), now())
+        .set_datagram_max_age(Some(Duration::from_secs(10)), now())
         .unwrap();
 
     // Enough filler datagrams to exhaust the transport's 10-slot queue on
@@ -504,7 +510,7 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     // Shorten the deadline well inside the original one; the datagram is
     // not yet stale at `t0`, so nothing expires synchronously here.
     wt_session
-        .set_datagram_max_age(Duration::from_millis(30), t0)
+        .set_datagram_max_age(Some(Duration::from_millis(30)), t0)
         .unwrap();
 
     // Otherwise idle: only the datagram-expiry check in `should_be_processed`
@@ -521,4 +527,35 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
         )
     };
     assert!(wt.server.events().any(expired_event));
+}
+
+/// `drain()` reports every expired datagram, but that's only exercised via an
+/// explicit `set_datagram_max_age` call elsewhere. A datagram must also expire
+/// as a side effect of an ordinary `process_output` drain, using the default
+/// max-age, with no explicit call setting it.
+#[test]
+fn datagram_expires_during_a_normal_process_output_drain() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(13u64), t0, 0, 0)
+        .unwrap();
+
+    // Comfortably past the default max-age, so this expires on the very
+    // first drain rather than getting sent.
+    wt.client.process_output(t0 + Duration::from_secs(1));
+
+    let wt_expired_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(13),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_expired_event));
 }

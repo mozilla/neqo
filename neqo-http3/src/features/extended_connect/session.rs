@@ -21,7 +21,9 @@ use crate::{
     SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
-        datagram_queue::{DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome},
+        datagram_queue::{
+            DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome, default_max_age,
+        },
         stats::SessionStats,
     },
     frames::HFrame,
@@ -542,9 +544,11 @@ impl Session {
             return;
         }
 
-        let (expired, to_send) = self
-            .datagram_queue
-            .drain(now, conn.remaining_datagram_queue_capacity());
+        let (expired, to_send) = self.datagram_queue.drain(
+            now,
+            conn.remaining_datagram_queue_capacity(),
+            default_max_age(conn.stats().min_rtt),
+        );
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
@@ -585,15 +589,23 @@ impl Session {
     /// The instant at which this session's datagram queue next needs
     /// [`Self::process_datagram_queue`] called to expire a stale datagram.
     /// See [`DatagramQueue::next_expiry`].
-    pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
-        self.datagram_queue.next_expiry()
+    pub(crate) fn next_datagram_expiry(&self, conn: &Connection) -> Option<Instant> {
+        self.datagram_queue
+            .next_expiry(default_max_age(conn.stats().min_rtt))
     }
     pub(crate) fn set_datagram_high_water_mark(&mut self, mark: Option<usize>) {
         self.datagram_queue.set_high_water_mark(mark);
     }
 
-    pub(crate) fn set_datagram_max_age(&mut self, max_age: Duration, now: Instant) {
-        let expired = self.datagram_queue.set_max_age(max_age, now);
+    pub(crate) fn set_datagram_max_age(
+        &mut self,
+        max_age: Option<Duration>,
+        now: Instant,
+        default_max_age: Duration,
+    ) {
+        let expired = self
+            .datagram_queue
+            .set_max_age(max_age, now, default_max_age);
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
