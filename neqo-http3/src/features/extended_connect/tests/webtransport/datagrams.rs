@@ -176,6 +176,64 @@ fn datagram_hard_limit_overflow_counts_untracked_drops() {
     );
 }
 
+/// A burst far larger than the QUIC layer's outgoing datagram queue
+/// (`MAX_QUEUED_DATAGRAMS_DEFAULT`) must still be delivered in full. `drain()`
+/// hands over only what that queue can hold and keeps the remainder, so the
+/// backlog goes out over successive drains as the queue empties. Draining the
+/// whole session queue at once instead let the QUIC layer head-drop everything
+/// but the last few, and because the highest `send_order` is drained first, the
+/// survivors were the *lowest*-priority datagrams of the burst.
+#[test]
+fn datagram_burst_larger_than_quic_queue_is_fully_delivered() {
+    // Comfortably more than the QUIC layer's queue, so the burst can only get
+    // through if the leftovers are picked up by later drains.
+    const BURST: u8 = 100;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    for i in 0..BURST {
+        wt.client
+            .webtransport_send_datagram(session_id, &[0, i], Some(u64::from(i)), now(), 0, 0)
+            .unwrap();
+    }
+
+    wt.exchange_packets();
+
+    let mut received: Vec<u8> = wt
+        .server
+        .events()
+        .filter_map(|e| match e {
+            Http3ServerEvent::WebTransport(ServerEvent::Datagram { session, datagram })
+                if session.stream_id() == session_id =>
+            {
+                Some(datagram.as_ref()[1])
+            }
+            _ => None,
+        })
+        .collect();
+    received.sort_unstable();
+
+    assert_eq!(
+        received,
+        (0..BURST).collect::<Vec<_>>(),
+        "every datagram of the burst must arrive exactly once"
+    );
+
+    // Nothing may be reported as dropped either.
+    let bad_outcome = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                outcome: DatagramOutcome::Dropped(_),
+                ..
+            })
+        )
+    };
+    assert!(!wt.client.events().any(bad_outcome));
+}
+
 #[test]
 fn datagram_sent_reports_client_event() {
     // The `Sent` outcome is what tells the application its datagram actually
