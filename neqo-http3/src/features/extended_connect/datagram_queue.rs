@@ -5,14 +5,55 @@
 // except according to those terms.
 
 use std::{
+    cmp::max,
     collections::{BTreeMap, VecDeque},
     time::{Duration, Instant},
 };
 
 use neqo_common::{qdebug, qtrace};
+use neqo_transport::DEFAULT_INITIAL_RTT;
 
 pub const DEFAULT_HARD_LIMIT: usize = 1000;
-const DEFAULT_MAX_AGE: Duration = Duration::MAX;
+
+/// Multiplier applied to the path's minimum RTT by [`default_max_age`].
+const DEFAULT_MAX_AGE_RTT_MULTIPLIER: u32 = 2;
+
+/// Lower bound for [`default_max_age`], so that a very low RTT (loopback, LAN)
+/// does not expire datagrams faster than the send path can plausibly drain
+/// them.
+const DEFAULT_MAX_AGE_FLOOR: Duration = Duration::from_millis(6);
+
+/// The "[implementation-defined] value" that [`sendDatagrams`] step 4
+/// substitutes when the application leaves `outgoingMaxAge` unset.
+///
+/// This is a latency bound, not a delivery guarantee. A datagram still queued
+/// after a couple of round trips has been overtaken by whatever the application
+/// sent after it, and on a link too slow to drain the queue, holding it only
+/// adds delay to everything behind it. Datagrams are best-effort, so the queue
+/// sheds it rather than growing without bound.
+///
+/// Scaling with the path RTT instead of using a fixed constant keeps the bound
+/// meaningful across very different links. Chromium does the same but tighter:
+/// QUICHE's `QuicDatagramQueue::GetMaxTimeInQueue()` uses
+/// `max(1.25 * min_rtt, 4ms)`. The values here are deliberately more generous,
+/// so that a burst which inherently spans several round trips - a video key
+/// frame, say - is not shed before it has had a chance to go out.
+///
+/// [implementation-defined]: https://infra.spec.whatwg.org/#implementation-defined
+/// [`sendDatagrams`]: https://w3c.github.io/webtransport/#senddatagrams
+#[must_use]
+pub fn default_max_age(min_rtt: Duration) -> Duration {
+    // A zero `min_rtt` means the connection has no RTT sample yet, not that the
+    // path is instantaneous. Scaling that would collapse the bound onto the
+    // floor and shed datagrams sent in the first round trip, so stand in the
+    // same initial estimate the transport itself starts from.
+    let rtt = if min_rtt.is_zero() {
+        DEFAULT_INITIAL_RTT
+    } else {
+        min_rtt
+    };
+    max(rtt * DEFAULT_MAX_AGE_RTT_MULTIPLIER, DEFAULT_MAX_AGE_FLOOR)
+}
 
 /// Caller-supplied identifier used to report the fate of a tracked datagram.
 pub type DatagramId = u64;
@@ -225,7 +266,11 @@ pub struct DatagramQueue {
     total_count: usize,
     hard_limit: usize,
     high_water_mark: Option<usize>,
-    max_age: Duration,
+    /// The application's `outgoingMaxAge`, or `None` if it never set one, in
+    /// which case [`default_max_age`] applies. Which of the two is in force is
+    /// not observable from script: the attribute reports the application's
+    /// value, so it stays null.
+    max_age: Option<Duration>,
 }
 
 impl DatagramQueue {
@@ -237,7 +282,7 @@ impl DatagramQueue {
             total_count: 0,
             hard_limit: DEFAULT_HARD_LIMIT,
             high_water_mark: None,
-            max_age: DEFAULT_MAX_AGE,
+            max_age: None,
         }
     }
 
@@ -251,19 +296,28 @@ impl DatagramQueue {
         self.high_water_mark = clamped;
     }
 
+    /// `None` means the application has not set `outgoingMaxAge`, in which case
+    /// [`DEFAULT_MAX_AGE`] applies. The distinction is not observable from
+    /// script: the attribute reports the application's value, which stays null.
+    ///
     /// Returns one entry per expired datagram, `Some(id)` for tracked ones.
     /// The caller reports outcomes for the tracked ones and counts them all.
-    pub fn set_max_age(&mut self, max_age: Duration, now: Instant) -> Vec<Option<DatagramId>> {
+    pub fn set_max_age(
+        &mut self,
+        max_age: Option<Duration>,
+        now: Instant,
+        default_max_age: Duration,
+    ) -> Vec<Option<DatagramId>> {
         qtrace!("Setting max age to {max_age:?}");
         self.max_age = max_age;
-        self.expire(now)
+        self.expire(now, default_max_age)
     }
 
     /// Remove and return every datagram older than `max_age`, oldest first
     /// within each send-group. Returns one entry per expired datagram,
     /// `Some(id)` for tracked ones.
-    pub fn expire(&mut self, now: Instant) -> Vec<Option<DatagramId>> {
-        let max_age = self.max_age;
+    pub fn expire(&mut self, now: Instant, default_max_age: Duration) -> Vec<Option<DatagramId>> {
+        let max_age = self.max_age.unwrap_or(default_max_age);
         let mut all_expired = Vec::new();
         self.groups.retain(|_, group| {
             all_expired.extend(group.expire_old(now, max_age));
@@ -419,11 +473,12 @@ impl DatagramQueue {
         &mut self,
         now: Instant,
         budget: usize,
+        default_max_age: Duration,
     ) -> (Vec<Option<DatagramId>>, Vec<QueuedDatagram>) {
         // Expiry runs once, up front: after this every remaining datagram is fresh.
         // It is not gated on `budget`, since expiry is not a send: otherwise stale
         // datagrams would pile up while the QUIC layer's queue is full.
-        let expired = self.expire(now);
+        let expired = self.expire(now, default_max_age);
         let count = budget.min(self.total_count);
         let mut to_send = Vec::with_capacity(count);
 
@@ -486,15 +541,15 @@ impl DatagramQueue {
     /// so the next datagram to expire is always whichever one has been
     /// queued the longest - not necessarily the next one `drain` would send,
     /// since scheduling is priority-, not age-, ordered. `None` if the queue
-    /// is empty, or if `max_age` is `DEFAULT_MAX_AGE` (no expiry has ever
-    /// been requested).
+    /// is empty.
     #[must_use]
-    pub fn next_expiry(&self) -> Option<Instant> {
+    pub fn next_expiry(&self, default_max_age: Duration) -> Option<Instant> {
+        let max_age = self.max_age.unwrap_or(default_max_age);
         self.groups
             .values()
             .filter_map(GroupQueue::oldest_timestamp)
             .min()?
-            .checked_add(self.max_age)
+            .checked_add(max_age)
     }
     #[cfg(test)]
     #[must_use]
@@ -521,8 +576,12 @@ mod tests {
 
     use super::*;
 
+    /// Tests that set an explicit max age are unaffected by the default, so
+    /// they pass one that never expires anything.
+    const NO_DEFAULT: Duration = Duration::MAX;
+
     fn drain_ids(q: &mut DatagramQueue) -> Vec<u64> {
-        let (_, to_send) = q.drain(now(), usize::MAX);
+        let (_, to_send) = q.drain(now(), usize::MAX, NO_DEFAULT);
         to_send
             .into_iter()
             .map(|d| d.id.expect("test datagrams are tracked"))
@@ -586,7 +645,7 @@ mod tests {
         q.enqueue(vec![0, 1], Some(1), t, 0, 0);
         q.enqueue(vec![0, 2], Some(2), t, 0, 0);
 
-        let (expired, to_send) = q.drain(now(), usize::MAX);
+        let (expired, to_send) = q.drain(now(), usize::MAX, NO_DEFAULT);
         assert!(expired.is_empty());
         assert_eq!(to_send.len(), 2);
         assert_eq!(to_send[0].id, Some(1));
@@ -632,13 +691,13 @@ mod tests {
     fn max_age_expiration() {
         let mut queue = DatagramQueue::new();
         let t0 = now();
-        queue.set_max_age(Duration::from_millis(100), t0);
+        queue.set_max_age(Some(Duration::from_millis(100)), t0, NO_DEFAULT);
         queue.enqueue(vec![1], Some(1), t0, 0, 0);
 
         // Advance time by 150 ms without sleeping.
         let t1 = t0 + Duration::from_millis(150);
 
-        let expired = queue.expire(t1);
+        let expired = queue.expire(t1, NO_DEFAULT);
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0], Some(1));
         assert!(queue.is_empty());
@@ -648,12 +707,12 @@ mod tests {
     fn max_age_expiration_untracked_datagram_reports_nothing() {
         let mut queue = DatagramQueue::new();
         let t0 = now();
-        queue.set_max_age(Duration::from_millis(100), t0);
+        queue.set_max_age(Some(Duration::from_millis(100)), t0, NO_DEFAULT);
 
         queue.enqueue(vec![1], None, t0, 0, 0);
 
         let t1 = t0 + Duration::from_millis(150);
-        let expired = queue.expire(t1);
+        let expired = queue.expire(t1, NO_DEFAULT);
         assert_eq!(expired, vec![None]);
         assert!(queue.is_empty());
     }
@@ -661,7 +720,7 @@ mod tests {
     #[test]
     fn next_expiry_is_none_when_empty() {
         let queue = DatagramQueue::new();
-        assert_eq!(queue.next_expiry(), None);
+        assert_eq!(queue.next_expiry(NO_DEFAULT), None);
     }
 
     #[test]
@@ -669,14 +728,14 @@ mod tests {
         let mut queue = DatagramQueue::new();
         let t = now();
         queue.enqueue(vec![1], Some(1), t, 0, 0);
-        assert_eq!(queue.next_expiry(), None);
+        assert_eq!(queue.next_expiry(NO_DEFAULT), None);
     }
 
     #[test]
     fn next_expiry_tracks_the_oldest_datagram_across_groups() {
         let mut queue = DatagramQueue::new();
         let t0 = now();
-        queue.set_max_age(Duration::from_millis(50), t0);
+        queue.set_max_age(Some(Duration::from_millis(50)), t0, NO_DEFAULT);
 
         queue.enqueue(vec![1], Some(1), t0, 0, 0);
         let t1 = t0 + Duration::from_millis(10);
@@ -684,22 +743,40 @@ mod tests {
         // oldest one: `next_expiry` looks across every group, not just one.
         queue.enqueue(vec![2], Some(2), t1, 1, 0);
 
-        assert_eq!(queue.next_expiry(), Some(t0 + Duration::from_millis(50)));
+        assert_eq!(
+            queue.next_expiry(NO_DEFAULT),
+            Some(t0 + Duration::from_millis(50))
+        );
     }
 
     #[test]
     fn next_expiry_advances_once_the_oldest_datagram_is_gone() {
         let mut queue = DatagramQueue::new();
         let t0 = now();
-        queue.set_max_age(Duration::from_millis(50), t0);
+        queue.set_max_age(Some(Duration::from_millis(50)), t0, NO_DEFAULT);
 
         queue.enqueue(vec![1], Some(1), t0, 0, 0);
         let t1 = t0 + Duration::from_millis(10);
         queue.enqueue(vec![2], Some(2), t1, 0, 0);
 
-        let (_, to_send) = queue.drain(t1, 1);
+        let (_, to_send) = queue.drain(t1, 1, NO_DEFAULT);
         assert_eq!(to_send.len(), 1);
-        assert_eq!(queue.next_expiry(), Some(t1 + Duration::from_millis(50)));
+        assert_eq!(
+            queue.next_expiry(NO_DEFAULT),
+            Some(t1 + Duration::from_millis(50))
+        );
+    }
+
+    #[test]
+    fn next_expiry_uses_the_default_when_no_explicit_max_age_is_set() {
+        let mut queue = DatagramQueue::new();
+        let t0 = now();
+        queue.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        assert_eq!(
+            queue.next_expiry(Duration::from_millis(30)),
+            Some(t0 + Duration::from_millis(30))
+        );
     }
 
     #[test]
@@ -710,7 +787,7 @@ mod tests {
         queue.enqueue(vec![0, 1], Some(1), t, 0, 0);
         queue.enqueue(vec![0, 2], None, t, 0, 0);
 
-        let (expired, to_send) = queue.drain(t, usize::MAX);
+        let (expired, to_send) = queue.drain(t, usize::MAX, NO_DEFAULT);
 
         assert!(expired.is_empty());
         assert_eq!(to_send.len(), 2);
@@ -725,12 +802,12 @@ mod tests {
         // able to count them, so `drain` reports one entry per expired datagram.
         let mut q = DatagramQueue::new();
         let t0 = now();
-        q.set_max_age(Duration::from_millis(50), t0);
+        q.set_max_age(Some(Duration::from_millis(50)), t0, NO_DEFAULT);
 
         q.enqueue(vec![1], Some(1), t0, 0, 0);
         q.enqueue(vec![2], None, t0, 0, 0);
 
-        let (expired, to_send) = q.drain(t0 + Duration::from_millis(80), usize::MAX);
+        let (expired, to_send) = q.drain(t0 + Duration::from_millis(80), usize::MAX, NO_DEFAULT);
         assert_eq!(expired, vec![Some(1), None]);
         assert!(to_send.is_empty());
     }
@@ -750,7 +827,7 @@ mod tests {
             (DatagramQueueOutcome::AboveWatermark, None)
         );
 
-        drop(q.drain(t, usize::MAX));
+        drop(q.drain(t, usize::MAX, NO_DEFAULT));
 
         assert_eq!(
             q.enqueue(vec![3], Some(3), t, 0, 0),
@@ -846,6 +923,80 @@ mod tests {
         assert_eq!(drain_ids(&mut q), vec![1, 2, 3]);
     }
 
+    // ── Default max age ────────────────────────────────────────────────────────
+
+    #[test]
+    fn default_max_age_falls_back_before_the_first_rtt_sample() {
+        // min_rtt is zero until the connection measures one; that must not
+        // collapse onto the floor.
+        assert_eq!(
+            default_max_age(Duration::ZERO),
+            DEFAULT_INITIAL_RTT * DEFAULT_MAX_AGE_RTT_MULTIPLIER
+        );
+    }
+
+    #[test]
+    fn default_max_age_scales_with_rtt() {
+        assert_eq!(
+            default_max_age(Duration::from_millis(50)),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            default_max_age(Duration::from_millis(3)),
+            Duration::from_millis(6)
+        );
+    }
+
+    #[test]
+    fn unset_max_age_uses_the_default() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        // Never call set_max_age: the application left outgoingMaxAge null.
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let default = Duration::from_millis(20);
+        let (expired, to_send) = q.drain(t0 + Duration::from_millis(50), 10, default);
+        assert_eq!(
+            expired,
+            vec![Some(1)],
+            "the default bounds an unset max age"
+        );
+        assert!(to_send.is_empty());
+    }
+
+    #[test]
+    fn explicit_max_age_overrides_the_default() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        // A longer explicit value must win over a shorter default.
+        q.set_max_age(
+            Some(Duration::from_millis(100)),
+            t0,
+            Duration::from_millis(5),
+        );
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let (expired, to_send) =
+            q.drain(t0 + Duration::from_millis(50), 10, Duration::from_millis(5));
+        assert!(expired.is_empty());
+        assert_eq!(to_send.len(), 1);
+    }
+
+    #[test]
+    fn clearing_max_age_restores_the_default() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        let default = Duration::from_millis(20);
+
+        q.set_max_age(Some(Duration::from_millis(100)), t0, default);
+        // outgoingMaxAge = null (or 0, which the setter maps to null).
+        q.set_max_age(None, t0, default);
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let (expired, _) = q.drain(t0 + Duration::from_millis(50), 10, default);
+        assert_eq!(expired, vec![Some(1)], "the default is back in force");
+    }
+
     // ── Budgeted drain ─────────────────────────────────────────────────────────
 
     #[test]
@@ -856,7 +1007,7 @@ mod tests {
             q.enqueue(vec![0, i], Some(u64::from(i)), t, 0, 0);
         }
 
-        let (_, to_send) = q.drain(t, 2);
+        let (_, to_send) = q.drain(t, 2, NO_DEFAULT);
         assert_eq!(
             to_send.iter().map(|d| d.id).collect::<Vec<_>>(),
             vec![Some(1), Some(2)]
@@ -870,7 +1021,7 @@ mod tests {
         let t = now();
         q.enqueue(vec![1], Some(1), t, 0, 0);
 
-        let (expired, to_send) = q.drain(t, 0);
+        let (expired, to_send) = q.drain(t, 0, NO_DEFAULT);
         assert!(expired.is_empty());
         assert!(to_send.is_empty());
         assert_eq!(q.len(), 1);
@@ -882,10 +1033,10 @@ mod tests {
         // having room; otherwise stale datagrams pile up while it is full.
         let mut q = DatagramQueue::new();
         let t0 = now();
-        q.set_max_age(Duration::from_millis(50), t0);
+        q.set_max_age(Some(Duration::from_millis(50)), t0, NO_DEFAULT);
         q.enqueue(vec![1], Some(1), t0, 0, 0);
 
-        let (expired, to_send) = q.drain(t0 + Duration::from_millis(80), 0);
+        let (expired, to_send) = q.drain(t0 + Duration::from_millis(80), 0, NO_DEFAULT);
         assert_eq!(expired, vec![Some(1)]);
         assert!(to_send.is_empty());
         assert!(q.is_empty());
@@ -901,7 +1052,7 @@ mod tests {
         q.enqueue(vec![0, 2], Some(2), t, 0, 100);
         q.enqueue(vec![0, 3], Some(3), t, 0, 50);
 
-        let (_, to_send) = q.drain(t, 1);
+        let (_, to_send) = q.drain(t, 1, NO_DEFAULT);
         assert_eq!(
             to_send.iter().map(|d| d.id).collect::<Vec<_>>(),
             vec![Some(2)]
@@ -920,7 +1071,7 @@ mod tests {
 
         let mut served = Vec::new();
         for _ in 0..3 {
-            let (_, to_send) = q.drain(t, 1);
+            let (_, to_send) = q.drain(t, 1, NO_DEFAULT);
             served.extend(to_send.into_iter().filter_map(|d| d.id));
         }
 
@@ -942,7 +1093,7 @@ mod tests {
         // Budget of one per call: alternate groups, wrapping back to group 0.
         let mut served = Vec::new();
         for _ in 0..4 {
-            let (_, to_send) = q.drain(t, 1);
+            let (_, to_send) = q.drain(t, 1, NO_DEFAULT);
             served.extend(to_send.into_iter().filter_map(|d| d.id));
         }
 
@@ -1058,13 +1209,13 @@ mod tests {
     fn max_age_expiry_during_drain() {
         let mut q = DatagramQueue::new();
         let t = now();
-        q.set_max_age(Duration::from_millis(50), t);
+        q.set_max_age(Some(Duration::from_millis(50)), t, NO_DEFAULT);
 
         q.enqueue(vec![0, 1], Some(1), t, 0, 0);
         let t1 = t + Duration::from_millis(80);
         q.enqueue(vec![0, 2], Some(2), t1, 0, 0);
 
-        let (expired, to_send) = q.drain(t1, usize::MAX);
+        let (expired, to_send) = q.drain(t1, usize::MAX, NO_DEFAULT);
         let sent_ids: Vec<_> = to_send.iter().map(|d| d.id).collect();
         assert_eq!(expired, vec![Some(1)]);
         assert_eq!(sent_ids, vec![Some(2)]);
@@ -1075,13 +1226,13 @@ mod tests {
     fn max_age_expiry_high_priority_bucket() {
         let mut q = DatagramQueue::new();
         let t = now();
-        q.set_max_age(Duration::from_millis(50), t);
+        q.set_max_age(Some(Duration::from_millis(50)), t, NO_DEFAULT);
 
         q.enqueue(vec![0, 1], Some(1), t, 0, 100); // high priority, will expire
         let t1 = t + Duration::from_millis(80);
         q.enqueue(vec![0, 2], Some(2), t1, 0, 1); // low priority, fresh
 
-        let (_, to_send) = q.drain(t1, usize::MAX);
+        let (_, to_send) = q.drain(t1, usize::MAX, NO_DEFAULT);
         let sent_ids: Vec<_> = to_send.iter().map(|d| d.id).collect();
         assert_eq!(
             sent_ids,
@@ -1100,7 +1251,7 @@ mod tests {
 
         let mut served = Vec::new();
         for _ in 0..3 {
-            let (_, to_send) = q.drain(t, 1);
+            let (_, to_send) = q.drain(t, 1, NO_DEFAULT);
             served.extend(to_send.into_iter().filter_map(|d| d.id));
         }
 
@@ -1125,7 +1276,7 @@ mod tests {
 
         let mut served = Vec::new();
         for _ in 0..3 {
-            let (_, to_send) = q.drain(t, 2);
+            let (_, to_send) = q.drain(t, 2, NO_DEFAULT);
             served.extend(to_send.into_iter().filter_map(|d| d.id));
         }
 

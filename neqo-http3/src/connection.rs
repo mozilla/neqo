@@ -1685,12 +1685,13 @@ impl Http3Connection {
     pub fn webtransport_set_datagram_max_age(
         &self,
         session_id: StreamId,
-        max_age: Duration,
+        max_age: Option<Duration>,
         now: Instant,
+        default_max_age: Duration,
     ) -> Res<()> {
         self.webtransport_session(session_id)?
             .borrow_mut()
-            .set_datagram_max_age(max_age, now);
+            .set_datagram_max_age(max_age, now, default_max_age);
         Ok(())
     }
 
@@ -1723,7 +1724,7 @@ impl Http3Connection {
             .filter_map(|s| s.extended_connect_session())
             .filter_map(|session| {
                 session.borrow_mut().process_datagram_queue(conn, now);
-                session.borrow().next_datagram_expiry()
+                session.borrow().next_datagram_expiry(conn)
             })
             .min();
     }
@@ -1733,6 +1734,8 @@ impl Http3Connection {
     /// stale datagram, even if nothing else - no packets to send or receive,
     /// no other timer - would otherwise trigger it. `None` if no session has
     /// a datagram queued with an expiry pending.
+    /// Applies to every extended-CONNECT protocol, not just `WebTransport`,
+    /// same as [`Self::process_all_datagram_queues`].
     ///
     /// Reads the cache [`Self::process_all_datagram_queues`] refreshes,
     /// instead of walking `recv_streams` a second time.
