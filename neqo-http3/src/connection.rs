@@ -1713,6 +1713,12 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
+                    // requires a client that stored SETTINGS_H3_DATAGRAM with its
+                    // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR
+                    // if the server's new value is smaller than the stored one.
+                    // [draft-ietf-webtrans-http3, Section 3.2](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3#section-3.2)
+                    // states the same rule for the WebTransport setting.
                     HSettingType::EnableWebTransport,
                     HSettingType::EnableH3Datagram,
                 ] {
