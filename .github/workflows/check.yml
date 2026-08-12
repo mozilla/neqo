@@ -121,6 +121,32 @@ jobs:
           # shellcheck disable=SC2086
           cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default
 
+      - name: Check test isolation
+        # `cargo test` runs a whole test binary in one process, so a test that
+        # depends on global state another test set up (e.g. NSS initialization)
+        # can pass there while failing when run alone. Catch that by running
+        # every test in its own process.
+        run: |
+          # shellcheck disable=SC2086
+          cargo test $BUILD_TYPE --locked --workspace --all-targets --no-run --message-format=json |
+            jq -r 'select(.profile.test == true and .executable != null) | .executable' |
+            while read -r bin; do
+              "$bin" --list --format terse | sed -n 's/: test$//p' |
+                while read -r name; do printf '%s %s\n' "$bin" "$name"; done
+            done > cases.txt
+          echo "Running $(wc -l < cases.txt) tests, one process each"
+          nproc="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")"
+          run_one() {
+            local out
+            if ! out=$("$1" --exact "$2" 2>&1); then
+              printf '=== FAIL %s (%s)\n%s\n' "$2" "${1##*/}" "$out"
+              return 1
+            fi
+          }
+          export -f run_one
+          # shellcheck disable=SC2016
+          xargs -P "$nproc" -n 2 bash -c 'run_one "$0" "$1"' < cases.txt
+
       - name: Run client/server transfer
         run: |
           # shellcheck disable=SC2086
