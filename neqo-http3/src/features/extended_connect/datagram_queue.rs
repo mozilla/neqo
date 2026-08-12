@@ -389,16 +389,18 @@ impl DatagramQueue {
     ///
     /// `budget` is how many datagrams the QUIC layer can currently accept, i.e.
     /// [`Connection::remaining_datagram_queue_capacity`][neqo_transport::Connection::remaining_datagram_queue_capacity].
-    /// Whatever exceeds it stays queued here, subject to this queue's own
-    /// max-age/hard-limit policy, rather than being handed to the QUIC layer's
-    /// fixed-size queue only to be head-dropped there with no signal back to
-    /// the application.
+    /// Whatever exceeds it stays queued here, where eviction honours
+    /// `send_order` and `max_age`, rather than being handed to the QUIC layer's
+    /// fixed-size FIFO only to be head-dropped there — which would discard the
+    /// *highest*-priority datagrams of a burst, since they are drained first.
+    /// Later drains pick the remainder up as that queue empties, which paces
+    /// the handover to what the connection can actually send.
     ///
     /// **Scheduling:** groups are served round-robin; within each group the
-    /// highest `send_order` is sent first; equal-order datagrams are FIFO. If
-    /// `budget` cuts a round short, [`Self::rr_next`] is advanced to the group
-    /// that would have gone next, so a later call resumes fairly instead of
-    /// always starting at the same group.
+    /// highest `send_order` is sent first; equal-order datagrams are FIFO. The
+    /// round-robin cursor persists across calls (see [`Self::rr_next`]), so a
+    /// drain cut short by its budget resumes at the next group instead of
+    /// always starting at the same one.
     ///
     /// Returns `(expired, datagrams_to_send)`, where `expired` has one entry per
     /// expired datagram (`Some(id)` for tracked ones). The caller is responsible
@@ -844,6 +846,110 @@ mod tests {
         assert_eq!(drain_ids(&mut q), vec![1, 2, 3]);
     }
 
+    // ── Budgeted drain ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn drain_stops_at_budget() {
+        let mut q = DatagramQueue::new();
+        let t = now();
+        for i in 1..=5 {
+            q.enqueue(vec![0, i], Some(u64::from(i)), t, 0, 0);
+        }
+
+        let (_, to_send) = q.drain(t, 2);
+        assert_eq!(
+            to_send.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![Some(1), Some(2)]
+        );
+        assert_eq!(q.len(), 3, "the rest stays queued");
+    }
+
+    #[test]
+    fn drain_budget_zero_keeps_everything() {
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.enqueue(vec![1], Some(1), t, 0, 0);
+
+        let (expired, to_send) = q.drain(t, 0);
+        assert!(expired.is_empty());
+        assert!(to_send.is_empty());
+        assert_eq!(q.len(), 1);
+    }
+
+    #[test]
+    fn budgeted_drain_expires_even_with_no_budget() {
+        // Expiry is not a send, so it must not be gated on the QUIC layer
+        // having room; otherwise stale datagrams pile up while it is full.
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        q.set_max_age(Duration::from_millis(50), t0);
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let (expired, to_send) = q.drain(t0 + Duration::from_millis(80), 0);
+        assert_eq!(expired, vec![Some(1)]);
+        assert!(to_send.is_empty());
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn budgeted_drain_sends_highest_priority_first() {
+        // The whole point of budgeting: when only part of a burst fits, the
+        // part that goes out is the high-priority part.
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.enqueue(vec![0, 1], Some(1), t, 0, 1);
+        q.enqueue(vec![0, 2], Some(2), t, 0, 100);
+        q.enqueue(vec![0, 3], Some(3), t, 0, 50);
+
+        let (_, to_send) = q.drain(t, 1);
+        assert_eq!(
+            to_send.iter().map(|d| d.id).collect::<Vec<_>>(),
+            vec![Some(2)]
+        );
+    }
+
+    #[test]
+    fn partial_drain_resumes_round_robin_across_calls() {
+        // One datagram per group, three groups, one datagram of budget per
+        // call: each group must get a turn instead of group 0 taking every one.
+        let mut q = DatagramQueue::new();
+        let t = now();
+        for g in 0..3_u64 {
+            q.enqueue(vec![0, 1], Some(g), t, g, 0);
+        }
+
+        let mut served = Vec::new();
+        for _ in 0..3 {
+            let (_, to_send) = q.drain(t, 1);
+            served.extend(to_send.into_iter().filter_map(|d| d.id));
+        }
+
+        assert_eq!(served, vec![0, 1, 2]);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn round_robin_cursor_wraps() {
+        let mut q = DatagramQueue::new();
+        let t = now();
+        // Two datagrams in each of two groups.
+        for g in 0..2_u64 {
+            for i in 0..2_u64 {
+                q.enqueue(vec![0, 1], Some(g * 10 + i), t, g, 0);
+            }
+        }
+
+        // Budget of one per call: alternate groups, wrapping back to group 0.
+        let mut served = Vec::new();
+        for _ in 0..4 {
+            let (_, to_send) = q.drain(t, 1);
+            served.extend(to_send.into_iter().filter_map(|d| d.id));
+        }
+
+        assert_eq!(served, vec![0, 10, 1, 11]);
+        assert!(q.is_empty());
+    }
+
     // ── Hard-limit eviction ────────────────────────────────────────────────────
 
     #[test]
@@ -982,51 +1088,6 @@ mod tests {
             vec![Some(2)],
             "lower-priority-but-fresh datagram is sent"
         );
-    }
-
-    // ── Budgeted drain ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn drain_stops_at_budget() {
-        let mut q = DatagramQueue::new();
-        let t = now();
-        for i in 1..=5 {
-            q.enqueue(vec![0, i], Some(u64::from(i)), t, 0, 0);
-        }
-
-        let (_, to_send) = q.drain(t, 2);
-        assert_eq!(
-            to_send.iter().map(|d| d.id).collect::<Vec<_>>(),
-            vec![Some(1), Some(2)]
-        );
-        assert_eq!(q.len(), 3, "the rest stays queued");
-    }
-
-    #[test]
-    fn drain_budget_zero_keeps_everything() {
-        let mut q = DatagramQueue::new();
-        let t = now();
-        q.enqueue(vec![1], Some(1), t, 0, 0);
-
-        let (expired, to_send) = q.drain(t, 0);
-        assert!(expired.is_empty());
-        assert!(to_send.is_empty());
-        assert_eq!(q.len(), 1);
-    }
-
-    #[test]
-    fn budgeted_drain_expires_even_with_no_budget() {
-        // Expiry is not a send, so it must not be gated on the QUIC layer
-        // having room; otherwise stale datagrams pile up while it is full.
-        let mut q = DatagramQueue::new();
-        let t0 = now();
-        q.set_max_age(Duration::from_millis(50), t0);
-        q.enqueue(vec![1], Some(1), t0, 0, 0);
-
-        let (expired, to_send) = q.drain(t0 + Duration::from_millis(80), 0);
-        assert_eq!(expired, vec![Some(1)]);
-        assert!(to_send.is_empty());
-        assert!(q.is_empty());
     }
 
     #[test]
