@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        uses: mozilla/actions/toolchains@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
 
   check:
     name: Run checks
@@ -79,20 +79,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
         with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests and determine coverage
@@ -188,7 +183,7 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/crap@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           lcov-path: lcov.info
           threshold: "30"
@@ -206,7 +201,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: stable
           tools: cargo-hack
@@ -225,14 +220,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
         with:
-          directory: .
+          target: ${{ matrix.target }}
+          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:

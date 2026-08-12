@@ -40,15 +40,12 @@ jobs:
           submodules: "recursive"
           persist-credentials: false
 
-      - id: nss-version
-        uses: ./neqo/.github/actions/minimum-version
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: bench-build
           benches: "true"
           baseline-ref: origin/${{ env.BASE_REF }}
-          nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
   bench:
     name: cargo bench
@@ -84,7 +81,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: inferno, samply

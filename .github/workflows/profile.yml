@@ -80,19 +80,14 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
           sccache: true
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
         with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build neqo
@@ -135,20 +130,15 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
           sccache: true
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
         with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build benchmark
@@ -220,7 +210,7 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
         with:
           version: stable
           tools: samply
