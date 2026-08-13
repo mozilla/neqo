@@ -13,4 +13,4 @@ permissions:
 
 jobs:
   machete:
-    uses: mozilla/actions/.github/workflows/machete.yml@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
+    uses: mozilla/actions/.github/workflows/machete.yml@fdbc149234005e066f838be6bb654dfb0b570cee # TEST mozilla/actions#127 - DO NOT MERGE
