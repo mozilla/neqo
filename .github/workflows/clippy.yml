@@ -2,6 +2,8 @@ name: Clippy
 on:
   pull_request:
   merge_group:
+  push:
+    branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 concurrency:
@@ -17,13 +19,20 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
+      cacheable: ${{ steps.cacheable.outputs.toolchains }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
+        uses: mozilla/actions/toolchains@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+
+      # Nightly never uses a cache, so main runs have no reason to build it.
+      - id: cacheable
+        env:
+          TOOLCHAINS: ${{ steps.toolchains.outputs.toolchains }}
+        run: echo "toolchains=$(jq -c 'map(select(. != "nightly"))' <<<"$TOOLCHAINS")" >> "$GITHUB_OUTPUT"
 
   clippy:
     name: cargo clippy
@@ -32,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
-        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -43,14 +52,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy
           tools: cargo-hack
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
+      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 

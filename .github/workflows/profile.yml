@@ -80,13 +80,12 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           version: stable
           token: ${{ secrets.GITHUB_TOKEN }}
-          sccache: true
 
-      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
+      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -130,14 +129,13 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           version: stable
           tools: samply
           token: ${{ secrets.GITHUB_TOKEN }}
-          sccache: true
 
-      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
+      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -210,7 +208,7 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           version: stable
           tools: samply
