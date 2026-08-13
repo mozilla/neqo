@@ -365,26 +365,6 @@ impl Error {
         }
     }
 
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_recv_errors(err: &Self) -> Self {
-        match err {
-            Self::Transport(TransportError::NoMoreData) => {
-                debug_assert!(
-                    false,
-                    "Do not call stream_recv if FIN has been previously read"
-                );
-            }
-            Self::Transport(TransportError::InvalidStreamId) => {}
-            _ => {
-                debug_assert!(false, "Unexpected error");
-            }
-        }
-        Self::TransportStreamDoesNotExist
-    }
-
     /// # Errors
     ///
     /// Any error is mapped to the indicated type.
@@ -640,7 +620,8 @@ trait SendStream: Stream {
         Err(Error::InvalidStreamId)
     }
 
-    /// This function is only implemented by `WebTransportSendStream`.
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
     fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
         Err(Error::Unavailable)
     }
@@ -782,11 +763,6 @@ mod tests {
         assert!(matches!(
             Error::map_stream_create_errors(&Te::StreamLimit),
             StreamLimit
-        ));
-        // Note: map_stream_recv_errors with NoMoreData has debug_assert, skip in debug builds.
-        assert!(matches!(
-            Error::map_stream_recv_errors(&Transport(Te::InvalidStreamId)),
-            TransportStreamDoesNotExist
         ));
     }
 }

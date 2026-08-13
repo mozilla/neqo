@@ -1,4 +1,4 @@
-FROM lukemathwalker/cargo-chef@sha256:3a1dd6010466c1cf591607a75c6e144ba9f099e7f3790d595c6a611a9c78f387 AS chef
+FROM lukemathwalker/cargo-chef@sha256:7341ca3ca2726f3249fb227b510ce195fb80d6e584ff8894b68ffa97f1512e62 AS chef
 
 WORKDIR /app
 
@@ -6,6 +6,13 @@ FROM chef AS planner
 
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
+
+# Emit the NSS version and release tarball checksum pinned by nss-rs.
+RUN apt-get update && apt-get install -y --no-install-recommends jq \
+    && apt-get clean -y && rm -rf /var/lib/apt/lists/* \
+    && cargo metadata --format-version=1 -q \
+        | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss \
+                 | "NSS_VERSION=" + .["min-version"], "NSS_SHA256=" + .sha256' > nss.env
 
 FROM chef AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -16,30 +23,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # We unfortunately need to build NSS from source, because the Debian package is
 # not compiled with support for SSLKEYLOGFILE.
 # See https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=842292
-# Versions sourced from mozilla/actions/nss/nss-versions.env.
+# Version and checksum sourced from the nss-rs dependency's [package.metadata.nss].
 ENV NSS_DIR=/nss \
     NSS_TARGET=Release \
     NSS_PREBUILT=1 \
     NSPR_DIR=/nspr \
     LD_LIBRARY_PATH=/dist/Release/lib
 
-ARG MOZILLA_ACTIONS_REF=v1
-RUN --mount=type=secret,id=github_token,required=false \
-    TOKEN=$(cat /run/secrets/github_token 2>/dev/null || true); \
-    curl -sLf ${TOKEN:+-H "Authorization: Bearer ${TOKEN}"} \
-        "https://raw.githubusercontent.com/mozilla/actions/${MOZILLA_ACTIONS_REF}/nss/nss-versions.env" \
-        -o /tmp/nss-versions.env
+COPY --from=planner /app/nss.env /tmp/nss.env
 RUN set -eux; \
-    . /tmp/nss-versions.env; \
-    mkdir -p "$NSPR_DIR" "$NSS_DIR"; \
-    curl -L -o /tmp/nspr.tar.gz "https://ftp.mozilla.org/pub/nspr/releases/v$NSPR_VERSION/src/nspr-$NSPR_VERSION.tar.gz"; \
-    echo "$NSPR_SHA256  /tmp/nspr.tar.gz" | sha256sum -c; \
-    tar xzf /tmp/nspr.tar.gz --strip-components=2 -C "$NSPR_DIR"; \
-    rm /tmp/nspr.tar.gz; \
+    . /tmp/nss.env; \
     NSS_TAG=$(echo "$NSS_VERSION" | tr '.' '_'); \
-    curl -L -o /tmp/nss.tar.gz "https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src/nss-${NSS_VERSION}.tar.gz"; \
+    RELEASE_DIR="https://ftp.mozilla.org/pub/security/nss/releases/NSS_${NSS_TAG}_RTM/src"; \
+    FILENAME=$(curl -fsSL "$RELEASE_DIR/SHA256SUMS" | grep -F "$NSS_SHA256 " | awk '{print $2}' | sed 's/^\*//'); \
+    case "$FILENAME" in \
+      nss-*-with-nspr-*.tar.gz) ;; \
+      *) echo "No with-nspr artifact in NSS_${NSS_TAG}_RTM matches sha256 $NSS_SHA256" >&2; exit 1 ;; \
+    esac; \
+    curl -fL -o /tmp/nss.tar.gz "$RELEASE_DIR/$FILENAME"; \
     echo "$NSS_SHA256  /tmp/nss.tar.gz" | sha256sum -c; \
-    tar xzf /tmp/nss.tar.gz --strip-components=2 -C "$NSS_DIR"; \
+    tar xzf /tmp/nss.tar.gz --strip-components=1 -C /; \
     rm /tmp/nss.tar.gz;
 RUN "$NSS_DIR"/build.sh --static -Ddisable_tests=1 -Ddisable_dbm=1 -Ddisable_libpkix=1 -Ddisable_ckbi=1 -Ddisable_fips=1 -o
 

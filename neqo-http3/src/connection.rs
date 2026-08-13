@@ -683,9 +683,7 @@ impl Http3Connection {
             return;
         };
 
-        stream
-            .borrow_mut()
-            .datagram(Bytes::new(datagram, varint_len));
+        stream.borrow().datagram(Bytes::new(datagram, varint_len));
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
@@ -1420,14 +1418,56 @@ impl Http3Connection {
             .ok_or(Error::InvalidStreamId)
     }
 
+    /// Look up a `WebTransport` session by its CONNECT stream ID.
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session doesn't exist or is not a `WebTransport`
+    /// session. Extended CONNECT sessions of other protocols (connect-udp) share the same
+    /// stream tables, so every `webtransport_*` entry point must filter on the type.
+    pub(crate) fn webtransport_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let session = self.get_extended_connect_session(session_id)?;
+        let is_webtransport = session.borrow().connect_type() == ExtendedConnectType::WebTransport;
+        if is_webtransport {
+            Ok(session)
+        } else {
+            Err(Error::InvalidStreamId)
+        }
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::SessionStats> {
+        self.webtransport_session(session_id)?
+            .borrow()
+            .stats()
+            .ok_or(Error::InvalidStreamId)
+    }
+
     pub(crate) fn extended_connect_close_session(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
+        connect_type: ExtendedConnectType,
         error: u32,
         message: &str,
         now: Instant,
     ) -> Res<()> {
+        if self
+            .get_extended_connect_session(session_id)?
+            .borrow()
+            .connect_type()
+            != connect_type
+        {
+            return Err(Error::InvalidStreamId);
+        }
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1557,6 +1597,9 @@ impl Http3Connection {
         local: bool,
         send_group: Option<SendGroupId>,
     ) -> Res<()> {
+        if webtransport_session.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
         let (send_events, recv_events) = events;
         webtransport_session.borrow_mut().add_stream(stream_id)?;
         if stream_id.stream_type() == StreamType::UniDi {
@@ -1670,6 +1713,14 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
+                    // requires a client that stored SETTINGS_H3_DATAGRAM with its
+                    // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR
+                    // if the server's new value is smaller than the stored one.
+                    // [draft-ietf-webtrans-http3, Section 3.2](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3#section-3.2)
+                    // states the same rule for the WebTransport setting.
+                    HSettingType::EnableWebTransport,
+                    HSettingType::EnableH3Datagram,
                 ] {
                     let zero_rtt_value = settings.get(*st);
                     let new_value = new_settings.get(*st);

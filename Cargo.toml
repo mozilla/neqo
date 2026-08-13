@@ -29,14 +29,14 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.90.0"
 
 [workspace.dependencies]
-cfg_aliases = { version = "0.2", default-features = false }
+cfg_aliases = { version = "0.2.2", default-features = false }
 enum-map = { version = "2.7", default-features = false }
 enumset = { version = "1.1", default-features = false }
 hex = { version = "0.4", default-features = false }
 http = { version = "1", default-features = false, features = ["std"] }
 libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
-nss = { version = "0.13", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
+nss = { version = "0.14", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
 nss-test-fixture = { version = "0.1", package = "test-fixture", git = "https://github.com/mozilla/nss-rs" }
 qlog = { version = "0.16.0", default-features = false }
 quinn-udp = { version = "0.6", default-features = false, features = ["log", "fast-apple-datapath"] }
@@ -70,6 +70,7 @@ nursery = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
+assert_is_empty = "allow" # We prefer using is_empty() in asserts.
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
 create_dir = "warn"

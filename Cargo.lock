@@ -130,9 +130,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfg_aliases"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "ciborium"
@@ -859,8 +859,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.13.4"
-source = "git+https://github.com/mozilla/nss-rs#da11b438d142cdcb71a2b152a9c5d13efe59d8b6"
+version = "0.14.1"
+source = "git+https://github.com/mozilla/nss-rs#ca0a48e5731d8ef4ca749fdb6e9b031f1916782f"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -1237,7 +1237,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs#da11b438d142cdcb71a2b152a9c5d13efe59d8b6"
+source = "git+https://github.com/mozilla/nss-rs#ca0a48e5731d8ef4ca749fdb6e9b031f1916782f"
 dependencies = [
  "log",
  "nss-rs",

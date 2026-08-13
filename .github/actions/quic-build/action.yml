@@ -30,7 +30,7 @@ runs:
       shell: bash
       run: |
         {
-          echo "CACHE_VERSION=v3"
+          echo "CACHE_VERSION=v4"
           echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
           echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
           echo "S2N_QUIC_VERSION=v1.82.0"
@@ -38,7 +38,7 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
       with:
         version: stable
         token: ${{ inputs.token }}
@@ -73,7 +73,7 @@ runs:
       id: cache-restore
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: binaries
+        path: .quic-build/${{ inputs.impl }}
         key: ${{ steps.cache-key.outputs.key }}
 
     - name: Build
@@ -82,7 +82,7 @@ runs:
       shell: bash
       env:
         IMPL: ${{ inputs.impl }}
-        OUTPUT_PATH: binaries
+        OUTPUT_PATH: .quic-build/${{ inputs.impl }}
         GOOGLE_QUICHE_REF: ${{ env.GOOGLE_QUICHE_REF }}
         CLOUDFLARE_QUICHE_VERSION: ${{ env.CLOUDFLARE_QUICHE_VERSION }}
         S2N_QUIC_VERSION: ${{ env.S2N_QUIC_VERSION }}
@@ -170,7 +170,7 @@ runs:
       if: steps.cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: binaries
+        path: .quic-build/${{ inputs.impl }}
         key: ${{ steps.cache-key.outputs.key }}
 
     - name: Upload artifact
@@ -178,5 +178,13 @@ runs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: ${{ inputs.artifact-name }}
-        path: binaries
+        path: .quic-build/${{ inputs.impl }}
         retention-days: 1
+
+    - name: Copy binaries to shared dir
+      shell: bash
+      env:
+        IMPL: ${{ inputs.impl }}
+      run: |
+        mkdir -p binaries
+        cp -f ".quic-build/$IMPL"/* binaries/

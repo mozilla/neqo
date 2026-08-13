@@ -422,9 +422,8 @@ impl RecvStream for RecvMessage {
                     ref mut remaining_data_len,
                 } => {
                     let to_read = min(*remaining_data_len, buf.len() - written);
-                    let (amount, fin) = conn
-                        .stream_recv(self.stream_id, &mut buf[written..written + to_read])
-                        .map_err(|e| Error::map_stream_recv_errors(&Error::from(e)))?;
+                    let (amount, fin) =
+                        conn.stream_recv(self.stream_id, &mut buf[written..written + to_read])?;
                     qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount, now);
 
                     debug_assert!(amount <= to_read);

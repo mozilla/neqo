@@ -9,9 +9,7 @@ env:
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
-  SCCACHE_CACHE_SIZE: 128G
-  SCCACHE_DIRECT: true
+  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
@@ -34,7 +32,7 @@ jobs:
 
     steps:
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: mozilla/neqo
           path: neqo
@@ -42,20 +40,17 @@ jobs:
           persist-credentials: false
           clean: false
 
-      - id: nss-version
-        uses: ./neqo/.github/actions/minimum-version
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
-          nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
   build-google:
     name: Build google/quiche
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions
           persist-credentials: false
@@ -70,7 +65,7 @@ jobs:
     name: Build cloudflare/quiche
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions
           persist-credentials: false
@@ -85,7 +80,7 @@ jobs:
     name: Build s2n-quic
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: .github/actions
           persist-credentials: false
@@ -105,8 +100,17 @@ jobs:
         shell: bash
 
     steps:
+      - name: Check free disk space
+        run: |
+          df -h /
+          AVAIL=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
+          if [ "$AVAIL" -lt 25 ]; then
+            echo "::error::Only ${AVAIL}G free on $(hostname); need 25G. Runner needs cleanup."
+            exit 1
+          fi
+
       - name: Checkout mozilla/neqo
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: mozilla/neqo
           path: neqo
@@ -121,12 +125,12 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, inferno, samply
           token: ${{ secrets.GITHUB_TOKEN }}
-          sccache: true
+          rust-cache: false
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -155,7 +159,6 @@ jobs:
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/build-neqo/lib:$LD_LIBRARY_PATH"
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
-            echo "NSS_DB_PATH=$GITHUB_WORKSPACE/build-neqo/test-fixture/db" # TODO: Remove once baseline uses nss-rs >= 0.11.0
           } >> "$GITHUB_ENV"
 
       # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
@@ -288,7 +291,7 @@ jobs:
           for tag in neqo-server quic_server quiche-server s2n-quic-qns; do
             sudo pkill -9 "$tag" 2>/dev/null || true
           done
-          sudo fuser -k 4433/udp 4433/tcp 2>/dev/null || true
+          sudo fuser -k 4433/udp 4433/tcp || true
           rm -- * || true
           rm -r -- binaries build-neqo build-google build-quiche build-s2n \
             comment-data hyperfine hyperfine-baseline || true

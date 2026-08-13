@@ -17,9 +17,6 @@ inputs:
     # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
     # However, NSS requires an API >= 23 for a few symbols.
     default: "23"
-  minimum-nss-version:
-    description: "If NSS is required, the minimum version required."
-    default: ""
   github-token:
     description: "A Github PAT"
     required: true
@@ -27,7 +24,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+    - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
       with:
         distribution: zulu
         java-version: 23
@@ -43,18 +40,11 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+    - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
-        token: ${{ inputs.github-token }}
-
-    - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-      if: ${{ inputs.minimum-nss-version != '' }}
-      with:
-        minimum-version: ${{ inputs.minimum-nss-version }}
-        target: ${{ inputs.target }}
         token: ${{ inputs.github-token }}
 
     - shell: bash
@@ -90,7 +80,7 @@ runs:
           adb push "$test" "$TMP/"
           adb shell chmod +x "$TMP/$(basename "$test")"
           # See https://unix.stackexchange.com/a/451140/409256
-          adb shell "CARGO_TERM_COLOR=always RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib NSS_DB_PATH=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
+          adb shell "CARGO_TERM_COLOR=always RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib TEST_FIXTURE_DB=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
           grep _FAIL_ output > /dev/null && any_failures=1
         done
         exit $any_failures
