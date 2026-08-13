@@ -52,11 +52,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          # GITHUB_TOKEN is used to avoid GitHub rate limits when fetching
-          # nss-versions.env from mozilla/actions. It is safe to pass here
-          # because PR runs require manual approval before any untrusted code
-          # executes.
-          secrets: github_token=${{ secrets.GITHUB_TOKEN }}
           platforms: linux/amd64
           outputs: type=docker,dest=/tmp/${{ matrix.name }}.tar
           cache-from: type=gha
