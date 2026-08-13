@@ -16,7 +16,7 @@ permissions:
 
 jobs:
   actionlint:
-    uses: mozilla/actions/.github/workflows/actionlint.yml@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+    uses: mozilla/actions/.github/workflows/actionlint.yml@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
     permissions:
       contents: read
       security-events: write # Required for zizmor to upload SARIF results.

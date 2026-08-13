@@ -50,7 +50,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: stable
           tools: cargo-codspeed
@@ -68,7 +68,7 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@88472375d0a4572cf70a9f1fe3a4e0ab8da1b924 # v5.0.1
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run

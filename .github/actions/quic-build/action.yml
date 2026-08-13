@@ -38,7 +38,7 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+      uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
       with:
         version: stable
         token: ${{ inputs.token }}

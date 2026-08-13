@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+        uses: mozilla/actions/toolchains@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
 
   check:
     name: Run checks
@@ -79,7 +79,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -183,13 +183,13 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+      - uses: mozilla/actions/crap@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           lcov-path: lcov.info
           threshold: "30"
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           sarif_file: crap.sarif
           category: cargo-crap
@@ -201,7 +201,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@bf3fb2950385cdbf80d0248db988d39096963755 # v2.0.0
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: stable
           tools: cargo-hack
