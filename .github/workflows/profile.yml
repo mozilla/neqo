@@ -328,37 +328,29 @@ jobs:
         run: |
           gh api --paginate --slurp "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" |
             jq '[.[].artifacts[]]' > artifacts.json
-          links() {
-            jq -r --arg prefix "$1" '
-              map(select(.name | startswith($prefix)))
+          section() {
+            jq -r --arg prefix "$1" --arg title "$2" '
+              [.[] | select(.name | startswith($prefix))]
               | group_by(.name | sub("-(pr|base)$"; ""))
-              | .[]
-              | . as $g
-              | ($g[0].name | sub("-(pr|base)$"; "") | sub("^(bench|perfcompare)-"; "")) as $name
-              | ["pr", "base"]
-                | map(. as $ref
-                      | ($g[] | select(.name | endswith("-" + $ref)))
-                      | "[\($ref)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))")
-                | "- \($name): \(join(" · "))"
+              | select(length > 0)
+              | "<details><summary>\($title) (\(length))</summary>\n",
+                (.[]
+                 | . as $g
+                 | ($g[0].name | sub("-(pr|base)$"; "") | sub("^(bench|perfcompare)-"; "")) as $name
+                 | ["pr", "base"]
+                   | map(. as $ref
+                         | ($g[] | select(.name | endswith("-" + $ref)))
+                         | "[\($ref)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))")
+                   | "- \($name): \(join(" · "))"),
+                "\n</details>\n"
             ' artifacts.json
           }
-          section() {
-            [ -n "$2" ] || return 0
-            echo "<details><summary>$1 ($(printf '%s\n' "$2" | grep -c ''))</summary>"
-            echo
-            echo "$2"
-            echo
-            echo "</details>"
-            echo
-          }
-          BENCHES=$(links bench-)
-          COMPARISONS=$(links perfcompare-)
           {
             echo "### Performance profiles for [profiler.firefox.com](https://profiler.firefox.com/)"
             echo
-            if [ -n "$BENCHES$COMPARISONS" ]; then
-              section "Benchmarks" "$BENCHES"
-              section "Comparisons" "$COMPARISONS"
+            if jq -e 'any(.[]; .name | endswith("-pr"))' artifacts.json > /dev/null; then
+              section bench- "Benchmarks"
+              section perfcompare- "Comparisons"
             else
               echo "No performance profiles were generated."
             fi
