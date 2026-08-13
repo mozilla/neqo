@@ -50,19 +50,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: stable
           tools: cargo-codspeed
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@d2e26ed08c7e72a8704da4a638b087503d8a9420 # 0.14.4
         with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build bench
@@ -73,7 +68,7 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@88472375d0a4572cf70a9f1fe3a4e0ab8da1b924 # v5.0.1
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run

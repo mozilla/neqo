@@ -58,7 +58,6 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           file: qns/Dockerfile
           build-args: RUST_VERSION=stable
-          secrets: github_token=${{ secrets.GITHUB_TOKEN }}
           platforms: linux/amd64, linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=min

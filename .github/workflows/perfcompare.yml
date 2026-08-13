@@ -40,14 +40,11 @@ jobs:
           persist-credentials: false
           clean: false
 
-      - id: nss-version
-        uses: ./neqo/.github/actions/minimum-version
       - uses: ./neqo/.github/actions/build-neqo
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
-          nss-minimum-version: ${{ steps.nss-version.outputs.minimum }}
 
   build-google:
     name: Build google/quiche
@@ -128,7 +125,7 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        uses: mozilla/actions/rust@96ce92daf6ecffbe02728649f25f32a15eba543e # v2.0.2
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, inferno, samply
