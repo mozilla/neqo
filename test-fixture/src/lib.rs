@@ -9,7 +9,6 @@
 
 use std::{
     cell::{OnceCell, RefCell},
-    cmp::max,
     fmt::{self, Display, Formatter},
     io::{self, Cursor, Result, Write},
     mem,
@@ -119,8 +118,26 @@ const fn addr_v4() -> SocketAddr {
     SocketAddr::new(v4ip, DEFAULT_ADDR.port())
 }
 
+/// The bytes of a connection ID for [`CountingConnectionIdGenerator`].
+///
+/// A length byte, 4 counter bytes, then random padding.  The length is fixed, so that a
+/// connection ID contributes the same number of bytes to every short header; a varying
+/// length makes tests and benchmarks that count bytes irreproducible.  8 bytes is also
+/// long enough to pass for an original destination connection ID.
+///
+/// `neqo_transport`'s own unit tests need a second [`ConnectionIdGenerator`], because the
+/// trait there comes from a different build of that crate.  They share this function, so
+/// that the two cannot disagree.
+#[must_use]
+pub fn counting_cid(counter: u32) -> Vec<u8> {
+    const LEN: u8 = 8;
+    let mut cid = random::<{ LEN as usize }>().to_vec();
+    cid[0] = LEN;
+    cid[1..5].copy_from_slice(&counter.to_be_bytes());
+    cid
+}
+
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
-/// It produces a connection ID with a length byte, 4 counter bytes and random padding.
 #[derive(Debug, Default)]
 pub struct CountingConnectionIdGenerator {
     counter: u32,
@@ -135,16 +152,9 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let mut r = random::<20>();
-        // Randomize length, but ensure that the connection ID is long
-        // enough to pass for an original destination connection ID.
-        r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
-        r[1] = u8::try_from(self.counter >> 24).ok()?;
-        r[2] = u8::try_from((self.counter >> 16) & 0xff).ok()?;
-        r[3] = u8::try_from((self.counter >> 8) & 0xff).ok()?;
-        r[4] = u8::try_from(self.counter & 0xff).ok()?;
+        let cid = counting_cid(self.counter);
         self.counter += 1;
-        Some(ConnectionId::from(&r[..usize::from(r[0])]))
+        Some(ConnectionId::from(&cid))
     }
 
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder {

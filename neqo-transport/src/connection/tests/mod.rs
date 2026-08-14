@@ -16,7 +16,7 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Datagram, Decoder, Role, event::Provider as _, qdebug, qtrace};
-use nss::{AllowZeroRtt, AuthenticationStatus, ResumptionToken, random};
+use nss::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
 use test_fixture::{DEFAULT_ADDR, fixture_init, new_neqo_qlog, now};
 
 use super::{CloseReason, Connection, ConnectionId, Output, State, test_internal};
@@ -62,12 +62,10 @@ const DEFAULT_STREAM_DATA: &[u8] = b"message";
 const CLIENT_HANDSHAKE_1RTT_PACKETS: usize = 1;
 
 /// WARNING!  In this module, this version of the generator needs to be used.
-/// This copies the implementation from
-/// `test_fixture::CountingConnectionIdGenerator`, but it uses the different
-/// types that are exposed to this module.  See also `default_client`.
-///
-/// This version doesn't randomize the length; as the congestion control tests
-/// count the amount of data sent precisely.
+/// `test_fixture::CountingConnectionIdGenerator` implements the traits from a
+/// different build of this crate, so it cannot be used here.  See also
+/// `default_client`.  The connection IDs themselves come from
+/// `test_fixture::counting_cid`, so that the two cannot disagree.
 #[derive(Debug, Default)]
 pub struct CountingConnectionIdGenerator {
     counter: u32,
@@ -82,14 +80,9 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let mut r = random::<20>();
-        r[0] = 8;
-        r[1] = u8::try_from(self.counter >> 24).ok()?;
-        r[2] = u8::try_from((self.counter >> 16) & 0xff).ok()?;
-        r[3] = u8::try_from((self.counter >> 8) & 0xff).ok()?;
-        r[4] = u8::try_from(self.counter & 0xff).ok()?;
+        let cid = test_fixture::counting_cid(self.counter);
         self.counter += 1;
-        Some(ConnectionId::from(&r[..8]))
+        Some(ConnectionId::from(&cid))
     }
 
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
