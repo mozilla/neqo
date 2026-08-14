@@ -38,7 +38,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
         with:
           version: nightly
           components: rust-src
