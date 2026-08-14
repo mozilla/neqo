@@ -817,8 +817,8 @@ fn corrupted_initial() {
     assert_eq!(server.stats().dropped_rx, 2);
 }
 
-#[test]
 // Absent path PTU discovery, max v6 packet size should be PATH_MTU_V6.
+#[test]
 fn verify_pkt_honors_mtu() {
     let mut client = default_client();
     let mut server = default_server();

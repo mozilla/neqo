@@ -51,10 +51,10 @@ use crate::{
 #[cfg(target_os = "macos")]
 const ALIGN: usize = size_of::<libc::c_int>();
 
-#[cfg(bsd)]
 // See https://github.com/freebsd/freebsd-src/blob/524a425d30fce3d5e47614db796046830b1f6a83/sys/net/route.h#L362-L371
 // See https://github.com/NetBSD/src/blob/4b50954e98313db58d189dd87b4541929efccb09/sys/net/route.h#L329-L331
 // See https://github.com/Arquivotheca/Solaris-8/blob/2ad1d32f9eeed787c5adb07eb32544276e2e2444/osnet_volume/usr/src/cmd/cmd-inet/usr.sbin/route.c#L238-L239
+#[cfg(bsd)]
 const ALIGN: usize = size_of::<libc::c_long>();
 
 #[cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd"))]

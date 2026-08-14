@@ -6,8 +6,8 @@
 
 // Tracking of some useful statistics.
 
-#[derive(Default, Debug, Clone)]
 /// `QPack` statistics
+#[derive(Default, Debug, Clone)]
 pub struct Stats {
     pub dynamic_table_inserts: usize,
     // This is the number of header blocks that reference the dynamic table.

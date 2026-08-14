@@ -105,51 +105,51 @@ pub struct Args {
     #[arg(name = "max-push", short = 'p', long, default_value = "10")]
     max_concurrent_push_streams: u64,
 
-    #[arg(name = "download-in-series", long)]
     /// Download resources in series using separate connections.
+    #[arg(name = "download-in-series", long)]
     download_in_series: bool,
 
-    #[arg(name = "concurrency", long, default_value = "100")]
     /// The maximum number of requests to have outstanding at one time.
+    #[arg(name = "concurrency", long, default_value = "100")]
     concurrency: usize,
 
-    #[arg(name = "output-read-data", long)]
     /// Output received data to stdout
+    #[arg(name = "output-read-data", long)]
     output_read_data: bool,
 
-    #[arg(name = "output-dir", long)]
     /// Save contents of fetched URLs to a directory
+    #[arg(name = "output-dir", long)]
     output_dir: Option<PathBuf>,
 
-    #[arg(short = 'r', long, hide = true)]
     /// Client attempts to resume by making multiple connections to servers.
     /// Requires that 2 or more URLs are listed for each server.
     /// Use this for 0-RTT: the stack always attempts 0-RTT on resumption.
+    #[arg(short = 'r', long, hide = true)]
     resume: bool,
 
-    #[arg(long)]
     /// Save the resumption token to a file after connecting.
+    #[arg(long)]
     save_token: Option<PathBuf>,
 
-    #[arg(long)]
     /// Load a resumption token from a file and attempt 0-RTT.
+    #[arg(long)]
     load_token: Option<PathBuf>,
 
-    #[arg(name = "key-update", long, hide = true)]
     /// Attempt to initiate a key update immediately after confirming the connection.
+    #[arg(name = "key-update", long, hide = true)]
     key_update: bool,
 
-    #[arg(name = "ech", long)]
     /// Enable encrypted client hello (ECH).
     /// This takes an encoded ECH configuration in hexadecimal format.
+    #[arg(name = "ech", long)]
     ech: Option<EchConfig>,
 
-    #[arg(name = "ipv4-only", short = '4', long)]
     /// Connect only over IPv4
+    #[arg(name = "ipv4-only", short = '4', long)]
     ipv4_only: bool,
 
-    #[arg(name = "ipv6-only", short = '6', long)]
     /// Connect only over IPv6
+    #[arg(name = "ipv6-only", short = '6', long)]
     ipv6_only: bool,
 
     /// The test that this client will run. Currently, we only support "upload".

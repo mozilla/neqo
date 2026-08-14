@@ -84,8 +84,8 @@ impl Default for Random {
         Self::new(&nss::random::<32>())
     }
 
-    #[cfg(feature = "disable-random")]
     // Use a fixed seed for a deterministic sequence of numbers.
+    #[cfg(feature = "disable-random")]
     fn default() -> Self {
         Self::new(&[1; 32])
     }

@@ -13,20 +13,20 @@ use neqo_common::qtrace;
 
 use crate::recovery;
 
-#[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
 /// -transport 10.2 ("Idle Timeout").
+#[derive(Debug, Clone)]
 enum IdleTimeoutState {
     Init,
     PacketReceived(Instant),
     AckElicitingPacketSent(Instant),
 }
 
-#[derive(Debug, Clone)]
 /// There's a little bit of different behavior for resetting idle timeout. See
 /// -transport 10.1 ("Idle Timeout").
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9000#section-10.1>
+#[derive(Debug, Clone)]
 pub struct IdleTimeout {
     timeout: Duration,
     state: IdleTimeoutState,

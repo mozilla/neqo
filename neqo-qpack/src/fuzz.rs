@@ -9,8 +9,8 @@
 #[cfg(feature = "build-fuzzing-corpus")]
 pub use write_corpus::write_item_to_fuzzing_corpus;
 
-#[cfg(feature = "build-fuzzing-corpus")]
 /// Helpers to write data to the fuzzing corpus.
+#[cfg(feature = "build-fuzzing-corpus")]
 mod write_corpus {
     use neqo_transport::StreamId;
 
@@ -23,8 +23,8 @@ mod write_corpus {
     }
 }
 
-#[cfg(fuzzing)]
 /// Helpers to support fuzzing.
+#[cfg(fuzzing)]
 mod fuzzing {
     use crate::{
         Decoder, Error, Res,

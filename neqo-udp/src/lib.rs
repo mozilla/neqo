@@ -44,8 +44,8 @@ const RECV_BUF_SIZE: usize = u16::MAX as usize;
 /// - Apple: no segmentation offloading available, use multiple buffers
 #[cfg(not(apple))]
 const NUM_BUFS: usize = 1;
-#[cfg(apple)]
 // Value approximated based on neqo-bin "Download" benchmark only.
+#[cfg(apple)]
 const NUM_BUFS: usize = 16;
 
 /// A UDP receive buffer.

@@ -471,9 +471,9 @@ fn zerortt() {
     process_client_events(&mut hconn_c);
 }
 
-#[test]
 /// When a client has an outstanding fetch, it will send keepalives.
 /// Test that it will successfully run until the connection times out.
+#[test]
 fn fetch_noresponse_will_idletimeout() {
     let mut hconn_c = default_http3_client();
     let mut hconn_s = default_http3_server();
