@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+        uses: mozilla/actions/toolchains@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -88,7 +88,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -193,7 +193,7 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: mozilla/actions/crap@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
         with:
           lcov-path: lcov.info
           threshold: "30"
@@ -212,7 +212,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
         with:
           version: stable
           tools: cargo-hack
