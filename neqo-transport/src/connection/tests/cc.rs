@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{Datagram, Ecn, qdebug, qinfo};
+use neqo_common::{Datagram, Ecn, qdebug, qinfo, to_u64};
 
 use super::{
     super::Output, CLIENT_HANDSHAKE_1RTT_PACKETS, DEFAULT_RTT, POST_HANDSHAKE_CWND, ack_bytes,
@@ -97,7 +97,7 @@ fn cc_slow_start_to_cong_avoidance_recovery_period(congestion_signal: Congestion
     // Client: send more
     let (mut c_tx_dgrams, mut now) = fill_cwnd(&mut client, stream_id, now);
     assert_full_cwnd(&c_tx_dgrams, POST_HANDSHAKE_CWND * 2, client.plpmtu());
-    let flight2_largest = flight1_largest + u64::try_from(c_tx_dgrams.len()).unwrap();
+    let flight2_largest = flight1_largest + to_u64(c_tx_dgrams.len());
 
     // Server: Receive and generate ack again, but this time add congestion
     // signal first.

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::Encoder;
+use neqo_common::{Encoder, to_u64};
 use neqo_transport::{ConnectionParameters, Error as TransportError};
 use test_fixture::now;
 
@@ -58,13 +58,11 @@ fn no_datagrams() {
 fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
     assert_eq!(
         wt_session.max_datagram_size(),
-        Ok(DATAGRAM_SIZE
-            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap())
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
-        Ok(DATAGRAM_SIZE
-            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap())
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
     assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
@@ -99,8 +97,7 @@ fn datagrams_server_only() {
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),
-        Ok(DATAGRAM_SIZE
-            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap())
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
     assert_eq!(
@@ -127,8 +124,7 @@ fn datagrams_client_only() {
 
     assert_eq!(
         wt_session.max_datagram_size(),
-        Ok(DATAGRAM_SIZE
-            - u64::try_from(Encoder::varint_len(wt_session.stream_id().as_u64())).unwrap())
+        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
     assert_eq!(
         wt.max_datagram_size(wt_session.stream_id()),

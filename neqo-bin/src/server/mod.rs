@@ -33,7 +33,7 @@ use futures::{
     FutureExt as _,
     future::{Either, select, select_all},
 };
-use neqo_common::{Datagram, hex, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::Http3Server;
 use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress};
 use neqo_udp::{DatagramIter, RecvBuf};
@@ -269,7 +269,7 @@ pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
     if args.ech {
         let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
         server.enable_ech(random::<1>()[0], "public.example", &sk, &pk);
-        qinfo!("ECHConfigList: {}", hex(server.ech_config()));
+        qinfo!("ECHConfigList: {}", Hex::new(server.ech_config()));
     }
 }
 

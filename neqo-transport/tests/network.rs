@@ -12,7 +12,7 @@ use test_fixture::{
     sim::{
         Simulator,
         connection::{Node, ReachState, ReceiveData, SendData},
-        network::{Drop, RandomDelay, TailDrop},
+        network::{Aqm, Drop, RandomDelay, TailDrop},
     },
     simulate,
 };
@@ -25,7 +25,7 @@ const DELAY_RANGE: Range<Duration> = DELAY..Duration::from_millis(55);
 const JITTER: Duration = Duration::from_millis(10);
 
 const fn weeks(m: u32) -> Duration {
-    Duration::from_secs((m as u64) * 60 * 60 * 24 * 7)
+    Duration::from_secs(m as u64 * 60 * 60 * 24 * 7)
 }
 
 simulate!(
@@ -186,9 +186,9 @@ simulate!(
     transfer_taildrop_ecn,
     [
         Node::default_client(boxed![SendData::new(TRANSFER_AMOUNT)]),
-        TailDrop::new(1_000_000, 65_536, true, Duration::from_millis(50)),
+        TailDrop::new(1_000_000, 65_536, Aqm::codel(), Duration::from_millis(50)),
         Node::default_server(boxed![ReceiveData::new(TRANSFER_AMOUNT)]),
-        TailDrop::new(200_000, 16_384, true, Duration::from_millis(50))
+        TailDrop::new(200_000, 16_384, Aqm::codel(), Duration::from_millis(50))
     ],
 );
 

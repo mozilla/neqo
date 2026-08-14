@@ -20,6 +20,10 @@ impl FrameDecoder<Self> for Frame {
     fn is_known_type(_frame_type: HFrameType) -> bool {
         false
     }
+
+    fn max_frame_data(_frame_type: HFrameType) -> usize {
+        unreachable!("is_known_type is false, so frame_length_decoded never calls this")
+    }
 }
 
 #[cfg(test)]

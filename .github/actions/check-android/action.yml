@@ -17,9 +17,6 @@ inputs:
     # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
     # However, NSS requires an API >= 23 for a few symbols.
     default: "23"
-  minimum-nss-version:
-    description: "If NSS is required, the minimum version required."
-    default: ""
   github-token:
     description: "A Github PAT"
     required: true
@@ -27,7 +24,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+    - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
       with:
         distribution: zulu
         java-version: 23
@@ -43,18 +40,11 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+    - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
       with:
         version: stable
         targets: ${{ inputs.target }}
         tools: cargo-ndk@^4
-        token: ${{ inputs.github-token }}
-
-    - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
-      if: ${{ inputs.minimum-nss-version != '' }}
-      with:
-        minimum-version: ${{ inputs.minimum-nss-version }}
-        target: ${{ inputs.target }}
         token: ${{ inputs.github-token }}
 
     - shell: bash
@@ -90,14 +80,14 @@ runs:
           adb push "$test" "$TMP/"
           adb shell chmod +x "$TMP/$(basename "$test")"
           # See https://unix.stackexchange.com/a/451140/409256
-          adb shell "CARGO_TERM_COLOR=always RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib NSS_DB_PATH=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
+          adb shell "CARGO_TERM_COLOR=always RUST_BACKTRACE=1 LD_LIBRARY_PATH=$TMP/lib TEST_FIXTURE_DB=$TMP/db API_LEVEL=$API_LEVEL $TMP/$(basename "$test") || echo _FAIL_" 2>&1 | tee output
           grep _FAIL_ output > /dev/null && any_failures=1
         done
         exit $any_failures
         EOF
         chmod a+x /tmp/rust-android-run-tests-on-emulator.sh
 
-    - uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
+    - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
       if: ${{ !startsWith(inputs.target, 'aarch64') }}
       with:
         api-level: ${{ inputs.api-level }}

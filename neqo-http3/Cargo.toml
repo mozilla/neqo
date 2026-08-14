@@ -29,11 +29,12 @@ nss = { workspace = true }
 qlog = { workspace = true }
 rustc-hash = { workspace = true }
 sfv = { version = "0.14", default-features = false, features = ["parsed-types"] }
+static_assertions = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "4", package = "codspeed-criterion-compat", default-features = false }
+criterion = { version = "5", package = "codspeed-criterion-compat", default-features = false }
 neqo-http3 = { path = ".", default-features = false, features = ["draft-29"] }
 test-fixture = { path = "../test-fixture" }
 

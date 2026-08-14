@@ -3,10 +3,10 @@ description: Generate server and client commands for QUIC performance comparison
 
 inputs:
   client:
-    description: Client implementation (neqo, msquic, google, quiche, s2n)
+    description: Client implementation (neqo, google, quiche, s2n)
     required: true
   server:
-    description: Server implementation (neqo, msquic, google, quiche, s2n)
+    description: Server implementation (neqo, google, quiche, s2n)
     required: true
   size:
     description: Transfer size in bytes
@@ -19,9 +19,6 @@ inputs:
     default: "true"
   neqo-path:
     description: Path to neqo binaries
-    default: "binaries"
-  msquic-path:
-    description: Path to msquic binaries
     default: "binaries"
   google-path:
     description: Path to google/quiche binaries
@@ -64,7 +61,6 @@ runs:
         CUBIC: ${{ inputs.cubic }}
         PACING: ${{ inputs.pacing }}
         NEQO: ${{ inputs.neqo-path }}
-        MSQUIC: ${{ inputs.msquic-path }}
         GOOGLE: ${{ inputs.google-path }}
         QUICHE: ${{ inputs.quiche-path }}
         S2N: ${{ inputs.s2n-path }}
@@ -79,9 +75,9 @@ runs:
           NEQO_ARGS="$NEQO_ARGS --no-pacing"
         fi
 
-        # Add interop flag when communicating with s2n or msquic
+        # Add interop flag when communicating with s2n
         INTEROP=""
-        if [[ "$CLIENT" == "s2n" || "$SERVER" == "s2n" || "$CLIENT" == "msquic" || "$SERVER" == "msquic" ]]; then
+        if [[ "$CLIENT" == "s2n" || "$SERVER" == "s2n" ]]; then
           INTEROP="-a hq-interop"
         fi
 
@@ -94,7 +90,6 @@ runs:
         # Server command
         case "$SERVER" in
           neqo)   SERVER_CMD="$NEQO/neqo-server $NEQO_ARGS $INTEROP $HOST:$PORT" ;;
-          msquic) SERVER_CMD="$MSQUIC/quicinteropserver -root:$TESTDATA -listen:$HOST -port:$PORT -file:$TESTDATA/cert -key:$TESTDATA/key -noexit" ;;
           google) SERVER_CMD="$GOOGLE/quic_server --generate_dynamic_responses --port $PORT --certificate_file $TESTDATA/cert --key_file $TESTDATA/key" ;;
           quiche) SERVER_CMD="$QUICHE/quiche-server --root $TESTDATA --listen $HOST:$PORT --cert $TESTDATA/cert --key $TESTDATA/key" ;;
           s2n)    SERVER_CMD="$S2N/s2n-quic-qns interop server --www-dir $TESTDATA --certificate $TESTDATA/cert --private-key $TESTDATA/key --ip $HOST --port $PORT" ;;
@@ -107,10 +102,6 @@ runs:
             BASE="$NEQO/neqo-client $NEQO_ARGS $INTEROP"; URL="https://$HOST:$PORT/$SIZE"
             CLIENT_CMD="$BASE $URL"
             CLIENT_CMD_SAVE="$BASE --output-dir . $URL"
-            ;;
-          msquic)
-            CLIENT_CMD="$MSQUIC/quicinterop -test:D -custom:$HOST -port:$PORT -urls:https://$HOST:$PORT/$SIZE"
-            CLIENT_CMD_SAVE="$CLIENT_CMD"
             ;;
           google)
             BASE="$GOOGLE/quic_client --disable_certificate_verification https://$HOST:$PORT/$SIZE"

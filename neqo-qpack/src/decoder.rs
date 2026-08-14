@@ -216,16 +216,16 @@ impl Decoder {
 
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {
             Ok(HeaderDecoderResult::Blocked(req_insert_cnt)) => {
-                if self.blocked_streams.len() > self.max_blocked_streams {
+                let found = self
+                    .blocked_streams
+                    .iter()
+                    .any(|(id, _req)| *id == stream_id);
+                if found {
+                    Ok(None)
+                } else if self.blocked_streams.len() >= self.max_blocked_streams {
                     Err(Error::Decompression)
                 } else {
-                    let found = self
-                        .blocked_streams
-                        .iter()
-                        .any(|(id, _req)| *id == stream_id);
-                    if !found {
-                        self.blocked_streams.push((stream_id, req_insert_cnt));
-                    }
+                    self.blocked_streams.push((stream_id, req_insert_cnt));
                     Ok(None)
                 }
             }
@@ -279,7 +279,7 @@ fn map_error(err: &Error) -> Error {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Header;
+    use neqo_common::{Header, to_u64};
     use neqo_transport::{StreamId, StreamType};
     use test_fixture::now;
 
@@ -308,6 +308,7 @@ mod tests {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
             max_blocked_streams: 100,
+            max_tracked_streams: 4096,
         });
         decoder.add_send_stream(send_stream_id);
 
@@ -681,7 +682,7 @@ mod tests {
                 &mut decoder,
                 t.header_block,
                 &t.headers,
-                StreamId::from(u64::try_from(i).unwrap()),
+                StreamId::from(to_u64(i)),
             );
         }
 
@@ -760,7 +761,7 @@ mod tests {
                 &mut decoder,
                 t.header_block,
                 &t.headers,
-                StreamId::from(u64::try_from(i).unwrap()),
+                StreamId::from(to_u64(i)),
             );
         }
 
@@ -825,5 +826,48 @@ mod tests {
         recv_instruction(&mut decoder, ENCODER_INST, &Ok(()));
 
         decode_headers(&mut decoder, HEADER_BLOCK, &headers, STREAM_0);
+    }
+
+    #[test]
+    fn blocked_stream_limit_enforced() {
+        // A header block whose Required Insert Count refers to a dynamic table
+        // entry that has not been inserted yet leaves the stream blocked. RFC 9204
+        // Section 2.1.2 allows no more blocked streams than the advertised
+        // SETTINGS_QPACK_BLOCKED_STREAMS value; exceeding it is a connection error
+        // of type QPACK_DECOMPRESSION_FAILED (Error::Decompression here).
+        const BLOCKING_HEADER_BLOCK: &[u8] = &[0x02, 0x80, 0x10];
+
+        let mut decoder = Decoder::new(&Settings {
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 1,
+            max_tracked_streams: 4096,
+        });
+        // One blocked stream is within the advertised limit.
+        assert!(
+            decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(0))
+                .unwrap()
+                .is_none()
+        );
+        // A second, distinct stream is one more than advertised.
+        assert!(
+            decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(4))
+                .is_err()
+        );
+
+        // A limit of zero leaves no room for any blocked stream.
+        let mut decoder = Decoder::new(&Settings {
+            max_table_size_encoder: 0,
+            max_table_size_decoder: 300,
+            max_blocked_streams: 0,
+            max_tracked_streams: 4096,
+        });
+        assert!(
+            decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(0))
+                .is_err()
+        );
     }
 }

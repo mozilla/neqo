@@ -18,7 +18,7 @@ use neqo_common::{
 use neqo_qpack as qpack;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
-    streams::SendOrder,
+    streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
@@ -34,6 +34,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
+            send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
     },
@@ -299,6 +300,7 @@ pub struct Http3Connection {
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
+    send_group_generator: SendGroupGenerator,
 }
 
 impl Display for Http3Connection {
@@ -333,6 +335,7 @@ impl Http3Connection {
             streams_with_pending_data: HashSet::default(),
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
+            send_group_generator: SendGroupGenerator::default(),
             role,
         }
     }
@@ -680,9 +683,7 @@ impl Http3Connection {
             return;
         };
 
-        stream
-            .borrow_mut()
-            .datagram(Bytes::new(datagram, varint_len));
+        stream.borrow().datagram(Bytes::new(datagram, varint_len));
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
@@ -1027,7 +1028,7 @@ impl Http3Connection {
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        qinfo!("[{self}] Reset sending side of stream {stream_id} error={error}");
+        qdebug!("[{self}] Reset sending side of stream {stream_id} error={error}");
 
         if self.send_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
@@ -1038,13 +1039,35 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Commit to reliably delivering the stream data buffered so far. If the stream is
+    /// subsequently reset, that prefix is delivered using `RESET_STREAM_AT`, if possible.
+    /// See [`neqo_transport::Connection::stream_commit`].
+    ///
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist, or a transport error when the commitment
+    /// is rejected (e.g. the peer did not enable reliable reset).
+    pub fn stream_commit(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        now: Instant,
+    ) -> Res<()> {
+        qtrace!("[{self}] Commit reliable size on stream {stream_id}");
+        // The request is routed through the send stream so that any data still buffered in the
+        // HTTP/3 layer is flushed to the transport before the commitment is made.
+        self.send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?
+            .commit(conn, now)
+    }
+
     pub fn stream_stop_sending(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        qinfo!("[{self}] Send stop sending for stream {stream_id} error={error}");
+        qdebug!("[{self}] Send stop sending for stream {stream_id} error={error}");
         if self.recv_stream_is_critical(stream_id) {
             return Err(Error::InvalidStreamId);
         }
@@ -1068,6 +1091,35 @@ impl Http3Connection {
     ) -> Res<()> {
         conn.stream_sendorder(stream_id, sendorder)
             .map_err(|_| Error::InvalidStreamId)
+    }
+
+    /// Set the stream [`SendGroupId`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidStreamId`] if the stream id doesn't exist,
+    /// [`Error::Unavailable`] if the stream doesn't support send groups, or
+    /// [`Error::InvalidState`] if the group is not registered with the session.
+    pub fn stream_set_sendgroup(&mut self, stream_id: StreamId, sendgroup: SendGroupId) -> Res<()> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        send_stream.set_send_group(sendgroup)
+    }
+
+    /// Clear the stream [`SendGroupId`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidStreamId`] if the stream id doesn't exist, or
+    /// [`Error::Unavailable`] if the stream doesn't support send groups.
+    pub fn stream_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        let send_stream = self
+            .send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        send_stream.clear_send_group()
     }
 
     /// Set the stream Fairness.   Fair streams will share bandwidth with other
@@ -1333,14 +1385,89 @@ impl Http3Connection {
         Ok(stream.session_protocol())
     }
 
+    /// Mint a connection-unique send-group ID and register it with a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_create_send_group(
+        &mut self,
+        session_id: StreamId,
+    ) -> Res<SendGroupId> {
+        let group_id = self.send_group_generator.next_id();
+        self.recv_streams
+            .get_mut(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .ok_or(Error::InvalidStreamId)?
+            .register_send_group(group_id)?;
+        Ok(group_id)
+    }
+
+    /// Validate that a send group belongs to the specified WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_validate_send_group(
+        &self,
+        session_id: StreamId,
+        group_id: SendGroupId,
+    ) -> Res<bool> {
+        self.recv_streams
+            .get(&session_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .map(|s| s.validate_send_group(group_id))
+            .ok_or(Error::InvalidStreamId)
+    }
+
+    /// Look up a `WebTransport` session by its CONNECT stream ID.
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session doesn't exist or is not a `WebTransport`
+    /// session. Extended CONNECT sessions of other protocols (connect-udp) share the same
+    /// stream tables, so every `webtransport_*` entry point must filter on the type.
+    pub(crate) fn webtransport_session(
+        &self,
+        session_id: StreamId,
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let session = self.get_extended_connect_session(session_id)?;
+        let is_webtransport = session.borrow().connect_type() == ExtendedConnectType::WebTransport;
+        if is_webtransport {
+            Ok(session)
+        } else {
+            Err(Error::InvalidStreamId)
+        }
+    }
+
+    /// Get statistics for a WebTransport session.
+    ///
+    /// # Errors
+    /// Returns error if session doesn't exist or is not a WebTransport session.
+    pub(crate) fn webtransport_session_stats(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::stats::SessionStats> {
+        self.webtransport_session(session_id)?
+            .borrow()
+            .stats()
+            .ok_or(Error::InvalidStreamId)
+    }
+
     pub(crate) fn extended_connect_close_session(
         &mut self,
         conn: &mut Connection,
         session_id: StreamId,
+        connect_type: ExtendedConnectType,
         error: u32,
         message: &str,
         now: Instant,
     ) -> Res<()> {
+        if self
+            .get_extended_connect_session(session_id)?
+            .borrow()
+            .connect_type()
+            != connect_type
+        {
+            return Err(Error::InvalidStreamId);
+        }
         let send_stream = self
             .send_streams
             .get_mut(&session_id)
@@ -1386,23 +1513,55 @@ impl Http3Connection {
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
     ) -> Res<StreamId> {
-        qtrace!("Create new WebTransport stream session={session_id} type={stream_type:?}");
+        self.webtransport_create_stream_local_with_send_group(
+            conn,
+            session_id,
+            stream_type,
+            send_events,
+            recv_events,
+            None,
+        )
+    }
+
+    pub(crate) fn webtransport_create_stream_local_with_send_group(
+        &mut self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+        send_events: Box<dyn SendStreamEvents>,
+        recv_events: Box<dyn RecvStreamEvents>,
+        send_group: Option<SendGroupId>,
+    ) -> Res<StreamId> {
+        qtrace!(
+            "Create new WebTransport stream session={session_id} type={stream_type:?} send_group={send_group:?}"
+        );
 
         let wt = self.validate_extended_connect_session(session_id)?;
+
+        if let Some(group_id) = send_group
+            && !self.webtransport_validate_send_group(session_id, group_id)?
+        {
+            return Err(Error::InvalidState);
+        }
 
         let stream_id = conn
             .stream_create(stream_type)
             .map_err(|e| Error::map_stream_create_errors(&e))?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
         conn.stream_fairness(stream_id, true)?;
+        // Register the stream with its send group in the transport scheduler so that
+        // sendOrder is evaluated per-group and groups get fair bandwidth allocation.
+        if let Some(group_id) = send_group {
+            conn.stream_sendgroup(stream_id, Some(group_id))?;
+        }
 
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
             session_id,
-            send_events,
-            recv_events,
+            (send_events, recv_events),
             true,
+            send_group,
         )?;
         Ok(stream_id)
     }
@@ -1422,9 +1581,9 @@ impl Http3Connection {
             wt,
             stream_id,
             session_id,
-            send_events,
-            recv_events,
+            (send_events, recv_events),
             false,
+            None,
         )?;
         Ok(())
     }
@@ -1434,10 +1593,14 @@ impl Http3Connection {
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
         session_id: StreamId,
-        send_events: Box<dyn SendStreamEvents>,
-        recv_events: Box<dyn RecvStreamEvents>,
+        events: (Box<dyn SendStreamEvents>, Box<dyn RecvStreamEvents>),
         local: bool,
+        send_group: Option<SendGroupId>,
     ) -> Res<()> {
+        if webtransport_session.borrow().connect_type() != ExtendedConnectType::WebTransport {
+            return Err(Error::InvalidStreamId);
+        }
+        let (send_events, recv_events) = events;
         webtransport_session.borrow_mut().add_stream(stream_id)?;
         if stream_id.stream_type() == StreamType::UniDi {
             if local {
@@ -1449,6 +1612,7 @@ impl Http3Connection {
                         send_events,
                         webtransport_session,
                         true,
+                        send_group,
                     )),
                 );
             } else {
@@ -1471,6 +1635,7 @@ impl Http3Connection {
                     send_events,
                     Rc::clone(&webtransport_session),
                     local,
+                    send_group,
                 )),
                 Box::new(WebTransportRecvStream::new(
                     stream_id,
@@ -1548,6 +1713,14 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
+                    // requires a client that stored SETTINGS_H3_DATAGRAM with its
+                    // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR
+                    // if the server's new value is smaller than the stored one.
+                    // [draft-ietf-webtrans-http3, Section 3.2](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3#section-3.2)
+                    // states the same rule for the WebTransport setting.
+                    HSettingType::EnableWebTransport,
+                    HSettingType::EnableH3Datagram,
                 ] {
                     let zero_rtt_value = settings.get(*st);
                     let new_value = new_settings.get(*st);

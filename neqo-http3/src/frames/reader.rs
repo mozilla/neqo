@@ -8,9 +8,10 @@ use std::{cmp::min, fmt::Debug, time::Instant};
 
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
-    hex_snip_middle, hex_with_len, qtrace,
+    hex::{HexSnipMiddle, HexWithLen},
+    qtrace,
 };
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, Error as TransportError, StreamId};
 
 use super::hframe::HFrameType;
 use crate::{Error, RecvStream, Res};
@@ -31,6 +32,9 @@ pub trait FrameDecoder<T> {
     fn frame_type_allowed(_frame_type: HFrameType) -> Res<()> {
         Ok(())
     }
+
+    /// Upper bound on a known frame's declared length that we'll buffer before decoding.
+    fn max_frame_data(frame_type: HFrameType) -> usize;
 
     /// # Errors
     ///
@@ -116,7 +120,7 @@ impl Debug for FrameReader {
         f.debug_struct("FrameReader")
             .field("state", &self.state)
             .field("frame_type", &self.frame_type)
-            .field("frame", &hex_snip_middle(&self.buffer[..frame_len]))
+            .field("frame", &HexSnipMiddle::new(&self.buffer[..frame_len]))
             .finish()
     }
 }
@@ -174,8 +178,10 @@ impl FrameReader {
     ///
     /// # Errors
     ///
-    /// May return `HttpFrame` if a frame cannot be decoded.
-    /// and `TransportStreamDoesNotExist` if `stream_recv` fails.
+    /// May return [`Error::HttpFrame`] if a frame cannot be decoded.
+    /// Absorbs [`TransportError::NoMoreData`] and [`TransportError::InvalidStreamId`]
+    /// into a zero-length read if the stream was reset and the stream closed.
+    /// The reset is propagated through events.
     pub fn receive<T: FrameDecoder<T>>(
         &mut self,
         stream_reader: &mut dyn StreamReader,
@@ -183,16 +189,21 @@ impl FrameReader {
     ) -> Res<(Option<T>, bool)> {
         loop {
             let to_read = min(self.min_remaining(), self.buffer.len());
-            let (output, read, fin) = match stream_reader
-                .read_data(&mut self.buffer[..to_read], now)
-                .map_err(|e| Error::map_stream_recv_errors(&e))?
-            {
-                (0, f) => (None, false, f),
-                (amount, f) => {
-                    qtrace!("FrameReader::receive: reading {amount} byte, fin={f}");
-                    (self.consume::<T>(amount)?, true, f)
-                }
-            };
+            let (output, read, fin) =
+                match stream_reader.read_data(&mut self.buffer[..to_read], now) {
+                    Ok((0, f)) => (None, false, f),
+                    Ok((amount, f)) => {
+                        qtrace!("FrameReader::receive: reading {amount} byte, fin={f}");
+                        (self.consume::<T>(amount)?, true, f)
+                    }
+                    // A `RESET_STREAM` could cause the transport to report `NoMoreData` or
+                    // `InvalidStreamId`. Don't treat that as an error here, let
+                    // the event handling deal with it.
+                    Err(Error::Transport(
+                        TransportError::NoMoreData | TransportError::InvalidStreamId,
+                    )) => break Ok((None, false)),
+                    Err(e) => return Err(e),
+                };
 
             if output.is_some() {
                 break Ok((output, fin));
@@ -238,7 +249,7 @@ impl FrameReader {
                     qtrace!(
                         "received frame {:?}: {}",
                         self.frame_type,
-                        hex_with_len(&data[..])
+                        HexWithLen::new(&data[..])
                     );
                     return self.frame_data_decoded::<T>(&data);
                 }
@@ -279,10 +290,12 @@ impl FrameReader {
             }
             None => {
                 if T::is_known_type(self.frame_type) {
+                    let len = usize::try_from(len).or(Err(Error::HttpFrame))?;
+                    if len > T::max_frame_data(self.frame_type) {
+                        return Err(Error::HttpExcessiveLoad);
+                    }
                     self.state = FrameReaderState::GetData {
-                        decoder: IncrementalDecoderBuffer::new(
-                            usize::try_from(len).or(Err(Error::HttpFrame))?,
-                        ),
+                        decoder: IncrementalDecoderBuffer::new(len),
                     };
                 } else if self.frame_len == 0 {
                     self.reset();

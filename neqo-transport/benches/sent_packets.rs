@@ -83,22 +83,11 @@ fn track(c: &mut Criterion) {
     });
 }
 
-/// Measure periodic expiry of the oldest in-flight packets (loss-detection
-/// housekeeping).  The common case is that the first packet is not yet expired
-/// and the function returns immediately; measure both that and the bulk-expiry
-/// case.
+/// Measure bulk expiry of the oldest in-flight packets (loss-detection
+/// housekeeping): first half expired, second half not.
 fn remove_expired(c: &mut Criterion) {
     let now = Instant::now();
     let cd = Duration::from_millis(300);
-
-    c.bench_function("sent::Packets::remove_expired none-expired", |b| {
-        // All packets lost at `now`: loss_info is populated but not yet expired — fast exit.
-        b.iter_batched_ref(
-            || collect_packets((0..PACKETS).map(|i| make_lost_packet(i, now))),
-            |pkts| black_box(pkts.remove_expired(now + cd / 2, cd)),
-            BatchSize::SmallInput,
-        );
-    });
 
     c.bench_function("sent::Packets::remove_expired half-expired", |b| {
         b.iter_batched_ref(

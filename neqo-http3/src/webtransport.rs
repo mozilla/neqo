@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace};
+use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
 use neqo_transport::{
     Connection, DatagramTracking, Error as TransportError, StreamId, StreamType, recv_stream,
     send_stream, server::ConnectionRef, streams::SendOrder,
@@ -20,7 +20,7 @@ use neqo_transport::{
 
 use crate::{
     Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
-    Http3StreamType, Res, SessionAcceptAction,
+    Http3StreamType, Res, SendGroupId, SessionAcceptAction,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
@@ -72,6 +72,26 @@ pub trait ClientSession {
         stream_id: StreamId,
         sendorder: Option<SendOrder>,
     ) -> Res<()>;
+
+    /// Sets the [`SendGroupId`] for a given WebTransport stream.
+    ///
+    /// # Errors
+    ///
+    /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore,
+    /// or [`Error::Unavailable`] if the stream is not a WebTransport send stream.
+    fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()>;
+
+    /// Clears the [`SendGroupId`] for a given WebTransport stream.
+    ///
+    /// # Errors
+    ///
+    /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore,
+    /// or [`Error::Unavailable`] if the stream is not a WebTransport send stream.
+    fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()>;
 
     /// Sets the `Fairness` for a given stream
     ///
@@ -133,6 +153,8 @@ pub trait ClientSession {
 
     /// Close a `WebTransport` session cleanly.
     ///
+    /// Returns a snapshot of the session's statistics taken at close time.
+    ///
     /// # Errors
     ///
     /// `InvalidStreamId` if the stream does not exist,
@@ -146,7 +168,7 @@ pub trait ClientSession {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::stats::SessionStats>;
 
     /// Create a `WebTransport` stream.
     ///
@@ -190,7 +212,7 @@ impl ClientSession for Http3Client {
         Ok(self
             .connection()
             .max_datagram_size()?
-            .saturating_sub(u64::try_from(qsid_len).map_err(|_| Error::Internal)?))
+            .saturating_sub(to_u64(qsid_len)))
     }
 
     fn webtransport_set_sendorder(
@@ -199,6 +221,31 @@ impl ClientSession for Http3Client {
         sendorder: Option<SendOrder>,
     ) -> Res<()> {
         Http3Connection::stream_set_sendorder(self.connection_mut(), stream_id, sendorder)
+    }
+
+    fn webtransport_set_sendgroup(
+        &mut self,
+        stream_id: StreamId,
+        sendgroup: SendGroupId,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        // Update the HTTP3 layer first: it owns the group-registration check, so a
+        // rejection here must not leave the transport scheduler already mutated (that
+        // would persistently diverge the layers — sendOrder would route through the
+        // grouped transport path the HTTP3 layer rejected). If the subsequent
+        // transport update fails (e.g. the stream was closed), that is self-healing:
+        // stream teardown clears both layers.
+        handler.stream_set_sendgroup(stream_id, sendgroup)?;
+        conn.stream_sendgroup(stream_id, Some(sendgroup))
+            .map_err(|_| Error::InvalidStreamId)
+    }
+
+    fn webtransport_clear_sendgroup(&mut self, stream_id: StreamId) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        // See comment in webtransport_set_sendgroup for ordering rationale.
+        handler.stream_clear_sendgroup(stream_id)?;
+        conn.stream_sendgroup(stream_id, None)
+            .map_err(|_| Error::InvalidStreamId)
     }
 
     fn webtransport_set_fairness(&mut self, stream_id: StreamId, fairness: bool) -> Res<()> {
@@ -262,7 +309,7 @@ impl ClientSession for Http3Client {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_close_session(conn, session_id, error, message, now)
     }
@@ -365,7 +412,7 @@ trait Handler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::stats::SessionStats>;
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &self,
@@ -427,9 +474,25 @@ impl Handler for Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        // Snapshot the stats before tearing the session down, so the caller sees
+        // the final values. This also rejects non-WebTransport sessions.
+        //
+        // `extended_connect_close_session` then checks the type again. That is
+        // deliberate: it is shared with connect-udp, which needs the check for its own
+        // close path, so it cannot rely on this one having happened. Two lookups once
+        // per session close is not worth a validation-skipping variant.
+        let stats = self.webtransport_session_stats(session_id)?;
+        self.extended_connect_close_session(
+            conn,
+            session_id,
+            extended_connect::ExtendedConnectType::WebTransport,
+            error,
+            message,
+            now,
+        )?;
+        Ok(stats)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
@@ -461,7 +524,7 @@ pub(crate) trait ServerHandler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::stats::SessionStats>;
 
     fn webtransport_create_stream(
         &mut self,
@@ -501,7 +564,7 @@ impl ServerHandler for Http3ServerHandler {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::stats::SessionStats> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .webtransport_close_session(conn, session_id, error, message, now)
@@ -588,12 +651,19 @@ impl ServerSession {
             )
     }
 
+    /// Returns a snapshot of the session's statistics taken at close time.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// Also return an error if the stream was closed on the transport layer,
     /// but that information is not yet consumed on the http/3 layer.
-    pub fn close_session(&self, error: u32, message: &str, now: Instant) -> Res<()> {
+    pub fn close_session(
+        &self,
+        error: u32,
+        message: &str,
+        now: Instant,
+    ) -> Res<extended_connect::stats::SessionStats> {
         self.stream_handler
             .handler
             .borrow_mut()
@@ -685,7 +755,7 @@ impl ServerSession {
             .conn
             .borrow()
             .max_datagram_size()?
-            .saturating_sub(u64::try_from(qsid_len).map_err(|_| Error::Internal)?))
+            .saturating_sub(to_u64(qsid_len)))
     }
 
     /// Export keying material for this WebTransport session

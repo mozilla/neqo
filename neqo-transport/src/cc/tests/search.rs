@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use neqo_common::to_u64;
 use test_fixture::now;
 
 use crate::{
@@ -68,8 +69,8 @@ fn init_search(initial_rtt: Duration) -> (Search, Duration, Instant) {
 
     assert_eq!(search.bin_duration(), bin_duration);
     assert_eq!(search.bin_end(), Some(now + bin_duration));
-    assert_eq!(search.acked_bin(0), MIN_INITIAL_PACKET_SIZE);
-    assert_eq!(search.sent_bin(0), MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(search.acked_bin(0), to_u64(MIN_INITIAL_PACKET_SIZE));
+    assert_eq!(search.sent_bin(0), to_u64(MIN_INITIAL_PACKET_SIZE));
     assert_eq!(search.curr_idx(), Some(0));
 
     (search, bin_duration, now)
@@ -152,8 +153,8 @@ fn update_bins_after_bin_end_passed() {
         Some(now + bin_duration),
         "Should've advanced bin_end to the next bin"
     );
-    assert_eq!(search.acked_bin(1), 3 * MIN_INITIAL_PACKET_SIZE);
-    assert_eq!(search.sent_bin(1), 3 * MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(search.acked_bin(1), to_u64(3 * MIN_INITIAL_PACKET_SIZE));
+    assert_eq!(search.sent_bin(1), to_u64(3 * MIN_INITIAL_PACKET_SIZE));
 }
 
 #[test]
@@ -188,8 +189,8 @@ fn update_bins_skipped_bins_propagate_prev_value() {
         prev_sent,
         "bin 1 should be propagated from the previous value"
     );
-    assert_eq!(search.acked_bin(2), 2 * MIN_INITIAL_PACKET_SIZE);
-    assert_eq!(search.sent_bin(2), 2 * MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(search.acked_bin(2), to_u64(2 * MIN_INITIAL_PACKET_SIZE));
+    assert_eq!(search.sent_bin(2), to_u64(2 * MIN_INITIAL_PACKET_SIZE));
 }
 
 #[test]
@@ -324,8 +325,8 @@ fn sent_and_acked_bytes_accumulate() {
     // Assert that the bins got updated and that the bytes from all sent and acked packets are
     // accounted for (1 each from init_search and 3 each from the code above)
     assert_eq!(search.curr_idx(), Some(1));
-    assert_eq!(search.acked_bin(1), 4 * MIN_INITIAL_PACKET_SIZE);
-    assert_eq!(search.sent_bin(1), 4 * MIN_INITIAL_PACKET_SIZE);
+    assert_eq!(search.acked_bin(1), to_u64(4 * MIN_INITIAL_PACKET_SIZE));
+    assert_eq!(search.sent_bin(1), to_u64(4 * MIN_INITIAL_PACKET_SIZE));
 }
 
 #[test]

@@ -2,6 +2,8 @@ name: CI
 on:
   pull_request:
   merge_group:
+  push:
+    branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 env:
@@ -30,13 +32,20 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
+      cacheable: ${{ steps.cacheable.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+        uses: mozilla/actions/toolchains@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+
+      # Nightly never uses a cache, so main runs have no reason to build it.
+      - id: cacheable
+        env:
+          TOOLCHAINS: ${{ steps.toolchains.outputs.toolchains }}
+        run: echo "toolchains=$(jq -c 'map(select(. != "nightly"))' <<<"$TOOLCHAINS")" >> "$GITHUB_OUTPUT"
 
   check:
     name: Run checks
@@ -47,7 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
-        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
@@ -75,24 +84,20 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          cache-key: ${{ matrix.type }} # Debug and release are different.
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
         with:
-          directory: .
-      - uses: mozilla/actions/nss@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests and determine coverage
@@ -146,7 +151,7 @@ jobs:
           touch C:/msys64/home/runneradmin/.gitconfig
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug'
+        if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
         with:
           name: lcov-coverage
           path: lcov.info
@@ -161,10 +166,10 @@ jobs:
           flags: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || startsWith(matrix.os, 'macos') && 'macos' || 'windows' }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable' && github.event_name != 'push'
 
       - name: Save simulation seeds artifact
-        if: ${{ always() }}
+        if: ${{ always() && github.event_name != 'push' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
@@ -174,13 +179,13 @@ jobs:
   crap:
     name: CRAP analysis
     needs: check
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       security-events: write # for uploading SARIF to code scanning
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -188,25 +193,26 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/crap@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           lcov-path: lcov.info
           threshold: "30"
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+      - uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
         with:
           sarif_file: crap.sarif
           category: cargo-crap
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@7cca521fd0ace71bc6ee830c4a98297023e3402b # v1.1.18
+      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
         with:
           version: stable
           tools: cargo-hack
@@ -217,26 +223,27 @@ jobs:
 
   check-android:
     name: Check Android
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: ["x86_64-linux-android", "aarch64-linux-android"]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
+      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
         with:
-          directory: .
+          target: ${{ matrix.target }}
+          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
@@ -249,7 +256,7 @@ jobs:
         # TODO: NSS package on 'solaris' is too old (3.110).
         os: [freebsd, netbsd, openbsd]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm

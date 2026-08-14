@@ -7,6 +7,7 @@
 use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize::SmallInput, Criterion, Throughput};
+use neqo_common::to_u64;
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
@@ -65,7 +66,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
 
     let mut group = c.benchmark_group("transfer");
     group.noise_threshold(0.03);
-    group.throughput(Throughput::Bytes(TRANSFER_AMOUNT as u64));
+    group.throughput(Throughput::Bytes(to_u64(TRANSFER_AMOUNT)));
     for (label, seed) in configs {
         for pacing in [false, true] {
             group.bench_function(&format!("{name_prefix}/pacing-{pacing}/{label}"), |b| {

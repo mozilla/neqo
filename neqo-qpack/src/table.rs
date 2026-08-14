@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-use neqo_common::qtrace;
+use neqo_common::{qtrace, to_u64};
 
 use crate::{
     Error, Res,
@@ -194,11 +194,16 @@ impl HeaderTable {
             .add_ref();
     }
 
-    /// Look for a header pair.
-    /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
-    /// and `value_matches` (if the header value matches as well not only header name)
-    pub fn lookup(&mut self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
-        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
+    /// Look for a header pair in the static table only.
+    ///
+    /// Unlike [`Self::lookup`], this does not consult the dynamic table, so it borrows
+    /// nothing and can never return a dynamic entry (which would need a reference to be
+    /// held against eviction). The encoder uses this when it must not create a new
+    /// dynamic-table reference for the stream.
+    ///
+    /// The function returns `LookupResult`: `index`, `static_table` (always `true` here)
+    /// and `value_matches` (if the header value matches as well, not only the header name).
+    pub fn static_lookup(name: &[u8], value: &[u8]) -> Option<LookupResult> {
         let mut name_match = None;
         for iter in HEADER_STATIC_TABLE {
             if iter.name() == name {
@@ -217,8 +222,23 @@ impl HeaderTable {
                 });
             }
         }
+        name_match
+    }
 
-        for iter in &mut self.dynamic {
+    /// Look for a header pair in the static and dynamic tables.
+    /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
+    /// and `value_matches` (if the header value matches as well not only header name)
+    pub fn lookup(&self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
+        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
+        // A static value match wins outright; otherwise a static name-only match is kept
+        // as a fallback that a dynamic name-only match must not displace.
+        let static_match = Self::static_lookup(name, value);
+        if static_match.as_ref().is_some_and(|r| r.value_matches) {
+            return static_match;
+        }
+
+        let mut name_match = static_match;
+        for iter in &self.dynamic {
             if !can_block && iter.index() >= self.acked_inserts_cnt {
                 continue;
             }
@@ -253,7 +273,7 @@ impl HeaderTable {
             if !e.can_reduce(self.acked_inserts_cnt) {
                 return false;
             }
-            self.used -= u64::try_from(e.size()).expect("usize fits in u64");
+            self.used -= to_u64(e.size());
             self.dynamic.pop_back();
         }
         true
@@ -268,11 +288,11 @@ impl HeaderTable {
             .map(DynamicTableEntry::size)
             .sum();
 
-        self.used - u64::try_from(evictable_size).expect("usize fits in u64") <= reduce
+        self.used - to_u64(evictable_size) <= reduce
     }
 
     pub fn insert_possible(&self, size: usize) -> bool {
-        let size = u64::try_from(size).expect("usize fits in u64");
+        let size = to_u64(size);
         size <= self.capacity && self.can_evict_to(self.capacity - size)
     }
 
@@ -290,14 +310,13 @@ impl HeaderTable {
             base: self.base,
             refs: 0,
         };
-        if u64::try_from(entry.size()).map_err(|_| Error::Internal)? > self.capacity
-            || !self
-                .evict_to(self.capacity - u64::try_from(entry.size()).map_err(|_| Error::Internal)?)
+        if to_u64(entry.size()) > self.capacity
+            || !self.evict_to(self.capacity - to_u64(entry.size()))
         {
             return Err(Error::DynamicTableFull);
         }
         self.base += 1;
-        self.used += u64::try_from(entry.size()).map_err(|_| Error::Internal)?;
+        self.used += to_u64(entry.size());
         let index = entry.index();
         self.dynamic.push_front(entry);
         Ok(index)
@@ -423,7 +442,7 @@ mod tests {
 
             table.increment_acked(1).unwrap();
 
-            let first_entry_size = table.get_dynamic_with_abs_index(0).unwrap().size() as u64;
+            let first_entry_size = to_u64(table.get_dynamic_with_abs_index(0).unwrap().size());
 
             assert!(table.can_evict_to(first_entry_size));
             assert!(!table.can_evict_to(0));

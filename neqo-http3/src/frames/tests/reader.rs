@@ -4,18 +4,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(clippy::missing_asserts_for_indexing, reason = "OK in tests")]
+#![allow(
+    clippy::missing_asserts_for_indexing,
+    clippy::unwrap_in_result,
+    reason = "OK in tests"
+)]
 
 use std::{cmp::min, fmt::Debug};
 
-use neqo_common::Encoder;
+use neqo_common::{Encoder, to_u64};
 use neqo_transport::{Connection, StreamId, StreamType};
 use test_fixture::{connect, now};
 
 use crate::{
-    Error, PushId,
+    Error, PushId, Res,
     frames::{
-        FrameReader, HFrame, StreamReaderConnectionWrapper, WebTransportFrame, reader::FrameDecoder,
+        FrameReader, HFrame, HFrameType, StreamReaderConnectionWrapper, WebTransportFrame,
+        capsule::{Capsule, MAX_DATAGRAM_BYTES},
+        hframe::{MAX_BUFFERED_FRAME_BYTES, MAX_HEADER_BYTES, MAX_SINGLE_VARINT_FRAME_BYTES},
+        reader::FrameDecoder,
     },
     settings::{HSetting, HSettingType, HSettings},
 };
@@ -53,6 +60,24 @@ impl FrameReaderTest {
         assert!(!fin);
         frame
     }
+
+    fn try_process<T: FrameDecoder<T>>(&mut self, v: &[u8]) -> Res<(Option<T>, bool)> {
+        self.conn_s.stream_send(self.stream_id, v).unwrap();
+        let out = self.conn_s.process_output(now());
+        _ = self.conn_c.process(out.dgram(), now());
+        self.fr.receive::<T>(
+            &mut StreamReaderConnectionWrapper::new(&mut self.conn_c, self.stream_id),
+            now(),
+        )
+    }
+}
+
+// Builds just the type + length varints of a frame header, no payload.
+fn encode_frame_header(frame_type: HFrameType, len: usize) -> Vec<u8> {
+    let mut enc = Encoder::default();
+    enc.encode_varint(frame_type.0);
+    enc.encode_len(len);
+    enc.into()
 }
 
 // Test receiving byte by byte for a SETTINGS frame.
@@ -129,6 +154,67 @@ fn frame_reading_with_stream_push_promise() {
     }
 }
 
+/// Assert that a declared length one byte over `cap` is rejected before buffering,
+/// while exactly `cap` is accepted (i.e. the check is `>`, not `>=`).
+fn assert_cap_boundary<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFrameType, cap: usize) {
+    let mut fr = FrameReaderTest::new();
+    let over = encode_frame_header(frame_type, cap + 1);
+    assert_eq!(Err(Error::HttpExcessiveLoad), fr.try_process::<T>(&over));
+
+    let mut fr = FrameReaderTest::new();
+    let at = encode_frame_header(frame_type, cap);
+    assert_eq!(Ok((None, false)), fr.try_process::<T>(&at));
+}
+
+/// Each buffered `HFrame` type paired with the cap that applies to it.
+const HFRAME_CAPS: &[(usize, &[HFrameType])] = &[
+    (
+        MAX_HEADER_BYTES,
+        &[HFrameType::HEADERS, HFrameType::PUSH_PROMISE],
+    ),
+    (
+        MAX_SINGLE_VARINT_FRAME_BYTES,
+        &[
+            HFrameType::CANCEL_PUSH,
+            HFrameType::GOAWAY,
+            HFrameType::MAX_PUSH_ID,
+        ],
+    ),
+    (
+        MAX_BUFFERED_FRAME_BYTES,
+        &[
+            HFrameType::SETTINGS,
+            HFrameType::PRIORITY_UPDATE_REQUEST,
+            HFrameType::PRIORITY_UPDATE_PUSH,
+        ],
+    ),
+];
+
+#[test]
+fn hframe_length_cap_boundary() {
+    for &(cap, frame_types) in HFRAME_CAPS {
+        for &frame_type in frame_types {
+            assert_cap_boundary::<HFrame>(frame_type, cap);
+        }
+    }
+}
+
+#[test]
+fn wt_close_session_length_cap_boundary() {
+    assert_cap_boundary::<WebTransportFrame>(
+        HFrameType(0x2843), // WebTransportFrame::CLOSE_SESSION
+        WebTransportFrame::MAX_CLOSE_SESSION_BYTES,
+    );
+}
+
+#[test]
+fn capsule_datagram_length_cap_boundary() {
+    assert_cap_boundary::<Capsule>(
+        HFrameType(0x00), // capsule::CAPSULE_TYPE_DATAGRAM
+        MAX_DATAGRAM_BYTES,
+    );
+}
+
 // Test DATA
 #[test]
 fn frame_reading_with_stream_data() {
@@ -155,7 +241,7 @@ fn unknown_frame() {
 
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<HFrame>(&buf).is_none());
@@ -199,7 +285,7 @@ fn unknown_wt_frame() {
 
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<WebTransportFrame>(&buf).is_none());
@@ -283,7 +369,7 @@ fn complete_and_incomplete_unknown_frame() {
     const UNKNOWN_FRAME_LEN: usize = 832;
     let mut enc = Encoder::with_capacity(UNKNOWN_FRAME_LEN + 4);
     enc.encode_varint(1028_u64); // Arbitrary type.
-    enc.encode_varint(UNKNOWN_FRAME_LEN as u64);
+    enc.encode_len(UNKNOWN_FRAME_LEN);
     let mut buf: Vec<_> = enc.into();
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
 
@@ -400,7 +486,7 @@ fn complete_and_incomplete_frames() {
 
     // HFrameType::DATA len=FRAME_LEN
     let f = HFrame::Data {
-        len: FRAME_LEN as u64,
+        len: to_u64(FRAME_LEN),
     };
     let mut enc = Encoder::with_capacity(2);
     f.encode(&mut enc);

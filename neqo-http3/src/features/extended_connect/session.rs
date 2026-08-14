@@ -13,14 +13,14 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
-use neqo_transport::{AppError, Connection, DatagramTracking, StreamId};
+use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 
 use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers, stats::SessionStats,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -448,6 +448,16 @@ impl Session {
         }
     }
 
+    pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.protocol.validate_send_group(group_id)
+    }
+
+    /// Session statistics, for protocols that track them (only `WebTransport`).
+    #[must_use]
+    pub(crate) fn stats(&self) -> Option<SessionStats> {
+        self.protocol.stats().copied()
+    }
+
     fn has_data_to_send(&self) -> bool {
         self.control_stream_send.has_data_to_send()
     }
@@ -464,6 +474,14 @@ impl Stream for Rc<RefCell<Session>> {
 
     fn session_protocol(&self) -> Option<String> {
         self.borrow().protocol.protocol().map(ToString::to_string)
+    }
+
+    fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
+        self.borrow_mut().protocol.register_send_group(id)
+    }
+
+    fn validate_send_group(&self, group_id: SendGroupId) -> bool {
+        self.borrow().protocol.validate_send_group(group_id)
     }
 }
 
@@ -599,8 +617,31 @@ pub(crate) trait Protocol: Debug + Display {
 
     fn process_response_headers(&mut self, _headers: &[Header]) {}
 
+    /// Per-session statistics, for protocols that expose them.
+    ///
+    /// Only `WebTransport` surfaces session statistics to the API consumer, so
+    /// every other protocol leaves this at `None` and the counters above are
+    /// simply not recorded.
+    /// Callers reach this only after checking the session is `WebTransport`, so
+    /// a protocol without stats never gets here.
+    fn stats(&self) -> Option<&SessionStats> {
+        debug_assert!(
+            false,
+            "stats called for extended connect protocol not tracking stats"
+        );
+        None
+    }
+
     fn protocol(&self) -> Option<&str> {
         None
+    }
+
+    fn register_send_group(&mut self, _id: SendGroupId) -> Res<()> {
+        Err(Error::InvalidStreamId)
+    }
+
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        false
     }
 
     fn write_datagram_prefix(&self, encoder: &mut Encoder);

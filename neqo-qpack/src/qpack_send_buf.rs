@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use neqo_common::to_u64;
+
 use crate::{huffman, prefix::Prefix};
 
 /// Extension trait providing QPACK-specific encoding methods for `Encoder`.
@@ -68,16 +70,10 @@ where
 
         if use_huffman {
             let encoded = huffman::encode(value);
-            self.encode_prefixed_encoded_int(
-                real_prefix,
-                u64::try_from(encoded.len()).expect("usize fits in u64"),
-            );
+            self.encode_prefixed_encoded_int(real_prefix, to_u64(encoded.len()));
             self.encode(&encoded);
         } else {
-            self.encode_prefixed_encoded_int(
-                real_prefix,
-                u64::try_from(value.len()).expect("usize fits in u64"),
-            );
+            self.encode_prefixed_encoded_int(real_prefix, to_u64(value.len()));
             self.encode(value);
         }
     }

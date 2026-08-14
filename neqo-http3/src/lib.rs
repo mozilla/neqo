@@ -176,7 +176,10 @@ pub use neqo_common::Header;
 use neqo_common::MessageType;
 use neqo_qpack::Error as QpackError;
 use neqo_transport::{AppError, Connection, Error as TransportError, recv_stream, send_stream};
-pub use neqo_transport::{Output, StreamId, streams::SendOrder};
+pub use neqo_transport::{
+    Output, StreamId,
+    streams::{SendGroupId, SendOrder},
+};
 pub use priority::Priority;
 pub use push_id::PushId;
 pub use server::Http3Server;
@@ -242,6 +245,8 @@ pub enum Error {
     AlreadyInitialized,
     #[error("Fatal error")]
     Fatal,
+    #[error("Flow control limit reached")]
+    FlowControlLimit,
     #[error("HTTP GOAWAY received")]
     HttpGoaway,
     #[error("Internal error")]
@@ -258,8 +263,6 @@ pub enum Error {
     InvalidState,
     #[error("Invalid stream ID")]
     InvalidStreamId,
-    #[error("No more data")]
-    NoMoreData,
     #[error("Not enough data")]
     NotEnoughData,
     #[error("Stream limit reached")]
@@ -362,26 +365,6 @@ impl Error {
         }
     }
 
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_recv_errors(err: &Self) -> Self {
-        match err {
-            Self::Transport(TransportError::NoMoreData) => {
-                debug_assert!(
-                    false,
-                    "Do not call stream_recv if FIN has been previously read"
-                );
-            }
-            Self::Transport(TransportError::InvalidStreamId) => {}
-            _ => {
-                debug_assert!(false, "Unexpected error");
-            }
-        }
-        Self::TransportStreamDoesNotExist
-    }
-
     /// # Errors
     ///
     /// Any error is mapped to the indicated type.
@@ -437,6 +420,24 @@ trait Stream: Debug {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn session_protocol(&self) -> Option<String> {
         None
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn register_send_group(&mut self, _id: SendGroupId) -> Res<()> {
+        debug_assert!(
+            false,
+            "register_send_group called on a stream that does not support send groups"
+        );
+        Err(Error::InvalidStreamId)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn validate_send_group(&self, _group_id: SendGroupId) -> bool {
+        debug_assert!(
+            false,
+            "validate_send_group called on a stream that does not support send groups"
+        );
+        false
     }
 }
 
@@ -569,6 +570,19 @@ trait SendStream: Stream {
     fn stream_writable(&self);
     fn done(&self) -> bool;
 
+    /// Commit to reliably delivering the data buffered so far, so that it is still delivered
+    /// (via `RESET_STREAM_AT`) even if the stream is later reset. Implementations of this are
+    /// expected to send all data they have buffered so the commitment covers everything written so
+    /// far. The default implementation fails immediately.
+    ///
+    /// # Errors
+    /// Transport errors (e.g. the peer did not enable reliable reset),
+    /// or [`Error::FlowControlLimit`] if the buffered data could not be fully flushed.
+    /// The latter should be rare as most cases of buffering should include a couple of bytes.
+    fn commit(&mut self, _conn: &mut Connection, _now: Instant) -> Res<()> {
+        Err(Error::Unavailable)
+    }
+
     /// # Errors
     ///
     /// Error may occur during sending data, e.g. protocol error, etc.
@@ -606,8 +620,22 @@ trait SendStream: Stream {
         Err(Error::InvalidStreamId)
     }
 
-    /// This function is only implemented by `WebTransportSendStream`.
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
     fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
+        Err(Error::Unavailable)
+    }
+
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn set_send_group(&mut self, _send_group: SendGroupId) -> Res<()> {
+        Err(Error::Unavailable)
+    }
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn clear_send_group(&mut self) -> Res<()> {
         Err(Error::Unavailable)
     }
 }
@@ -735,11 +763,6 @@ mod tests {
         assert!(matches!(
             Error::map_stream_create_errors(&Te::StreamLimit),
             StreamLimit
-        ));
-        // Note: map_stream_recv_errors with NoMoreData has debug_assert, skip in debug builds.
-        assert!(matches!(
-            Error::map_stream_recv_errors(&Transport(Te::InvalidStreamId)),
-            TransportStreamDoesNotExist
         ));
     }
 }

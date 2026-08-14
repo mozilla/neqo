@@ -8,7 +8,7 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::{Buffer, qtrace};
+use neqo_common::{Buffer, qtrace, to_u64};
 
 use crate::{
     connection::params::ConnectionParameters,
@@ -49,7 +49,7 @@ impl AckRate {
         builder.write_varint_frame(&[
             u64::from(FrameType::AckFrequency),
             seqno,
-            u64::try_from(self.packets + 1).expect("usize fits in u64"),
+            to_u64(self.packets + 1),
             u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),
             0,
         ])

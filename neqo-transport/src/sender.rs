@@ -139,6 +139,11 @@ impl PacketSender {
         self.cc.cwnd_avail()
     }
 
+    #[must_use]
+    pub fn bytes_in_flight(&self) -> usize {
+        self.cc.bytes_in_flight()
+    }
+
     #[cfg(test)]
     #[must_use]
     pub fn cwnd_min(&self) -> usize {
@@ -223,10 +228,9 @@ impl PacketSender {
     }
 
     pub fn on_packet_sent(&mut self, pkt: &sent::Packet, rtt: Duration, now: Instant) {
-        let pacing_limited = self
-            .pacer
+        self.pacer
             .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
-        self.cc.on_packet_sent(pkt, now, pacing_limited);
+        self.cc.on_packet_sent(pkt, now);
     }
 
     #[must_use]
@@ -248,6 +252,7 @@ mod tests {
         time::Duration,
     };
 
+    use neqo_common::to_u64;
     use test_fixture::now;
 
     use super::PacketSender;
@@ -324,7 +329,7 @@ mod tests {
 
         let pkts: Vec<_> = (0..n)
             .map(|pn| {
-                let p = sent::make_packet(pn as u64, now, mtu);
+                let p = sent::make_packet(to_u64(pn), now, mtu);
                 sender.on_packet_sent(&p, RTT, now);
                 p
             })
@@ -340,25 +345,19 @@ mod tests {
     }
 
     #[test]
-    fn pacing_limited_allows_cwnd_growth() {
-        // Sending more than PACING_BURST_SIZE packets exhausts burst credit,
-        // making subsequent sends pacing-limited rather than app-limited.
-        let (before, after) = send_and_ack(true, super::PACING_BURST_SIZE + 1);
-        assert!(after > before, "cwnd should grow: {after} vs {before}");
-    }
-
-    #[test]
-    fn app_limited_suppresses_cwnd_growth() {
-        // A single packet is well below cwnd and within burst — genuinely app-limited.
-        let (before, after) = send_and_ack(true, 1);
+    fn app_limited_suppresses_cwnd_growth_without_pacing() {
+        // Sending PACING_BURST_SIZE + 1 packets is not filling the initial congestion window, thus
+        // should leave us genuinely app-limited, thus the congestion window shouldn't grow.
+        let (before, after) = send_and_ack(false, super::PACING_BURST_SIZE + 1);
         assert_eq!(after, before, "cwnd should not grow when app-limited");
     }
 
     #[test]
-    fn pacing_disabled_never_pacing_limited() {
-        // With pacing off, spend() always returns false, so single-packet
-        // sends remain app-limited regardless of burst budget.
-        let (before, after) = send_and_ack(false, 1);
-        assert_eq!(after, before, "cwnd should not grow with pacing disabled");
+    fn app_limited_suppresses_cwnd_growth_with_pacing() {
+        // Sending PACING_BURST_SIZE + 1 packets is not filling the initial congestion window, thus
+        // should leave us genuinely app-limited, thus the congestion window shouldn't grow, even
+        // though we are pacing delayed.
+        let (before, after) = send_and_ack(true, super::PACING_BURST_SIZE + 1);
+        assert_eq!(after, before, "cwnd should not grow when app limited");
     }
 }

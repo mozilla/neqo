@@ -1,0 +1,209 @@
+// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
+// option. This file may not be copied, modified, or distributed
+// except according to those terms.
+
+#![expect(clippy::unwrap_used, reason = "This is test code.")]
+
+use std::{
+    cmp::max,
+    time::{Duration, Instant},
+};
+
+use neqo_common::{Datagram, Dscp, Ecn, Tos, qtrace};
+
+use super::Rng;
+
+const CODEL_TARGET: Duration = Duration::from_millis(5);
+const CODEL_INTERVAL: Duration = Duration::from_millis(100);
+const CODEL_FAST_RESTART_WINDOW: Duration = CODEL_INTERVAL.saturating_mul(16);
+
+/// `CoDel` (RFC 8289) algorithm state.
+#[derive(Clone, Default)]
+pub struct CodelState {
+    /// When sojourn time first exceeded TARGET in the current busy period,
+    /// offset by INTERVAL. None when sojourn is below target or queue is empty.
+    first_above_time: Option<Instant>,
+    /// Whether we are currently in the "dropping" (signalling) state.
+    dropping: bool,
+    /// How many marks/drops have occurred in the current dropping interval.
+    /// `u32` so it converts losslessly to `f64` (via [`f64::from`]) in `control_law`.
+    count: u32,
+    /// `count` at entry to the last dropping period; used for fast restart.
+    lastcount: u32,
+    /// The time at which the next mark/drop is due (only valid when dropping).
+    next_mark_time: Option<Instant>,
+}
+
+impl CodelState {
+    /// Update the `CoDel` state machine for the packet just dequeued.
+    /// Returns true if congestion should be signalled for this packet.
+    pub(super) fn update(&mut self, sojourn: Duration, queue_empty: bool, now: Instant) -> bool {
+        // Track when sojourn first exceeded TARGET.
+        if sojourn < CODEL_TARGET || queue_empty {
+            self.first_above_time = None;
+        } else if self.first_above_time.is_none() {
+            self.first_above_time = Some(now + CODEL_INTERVAL);
+        }
+
+        let over_interval = self.first_above_time.is_some_and(|fat| now >= fat);
+
+        if self.dropping {
+            if !over_interval {
+                // ok_to_drop became false (RFC 8289): leave dropping state.
+                self.dropping = false;
+            } else if let Some(dn) = self.next_mark_time.filter(|&dn| now >= dn) {
+                // Time for another mark/drop in the current dropping interval.
+                // RFC 8289: next drop is relative to the previous next_mark_time, not now.
+                self.count += 1;
+                self.next_mark_time = Some(self.control_law(dn));
+                return true;
+            }
+            return false;
+        }
+        if !over_interval {
+            return false;
+        }
+        // Enter dropping state.
+        self.dropping = true;
+        // Fast restart (RFC 8289 §4): if we re-enter dropping within CODEL_FAST_RESTART_WINDOW,
+        // start count at the increment from the last dropping period rather than 1.
+        let recently_dropping = self
+            .next_mark_time
+            .is_some_and(|dn| now.saturating_duration_since(dn) < CODEL_FAST_RESTART_WINDOW);
+        self.count = if recently_dropping {
+            max(1, self.count.saturating_sub(self.lastcount))
+        } else {
+            1
+        };
+        self.lastcount = self.count;
+        self.next_mark_time = Some(self.control_law(now));
+        true
+    }
+
+    /// `next_mark_time` = base + INTERVAL / sqrt(count)
+    pub(super) fn control_law(&self, base: Instant) -> Instant {
+        base + CODEL_INTERVAL.div_f64(f64::from(self.count.max(1)).sqrt())
+    }
+}
+
+/// RED (Random Early Detection) state.
+#[derive(Clone, Default)]
+pub struct RedState {
+    rng: Option<Rng>,
+}
+
+impl RedState {
+    pub(super) fn should_mark(&self, used: usize, capacity: usize) -> bool {
+        // Apply RED which starts at 0 mark chance at 40% of the capacity.
+        // From there, follow a quadratic that reaches 1 at 90% capacity.
+        // Cap at around 95% mark probability.
+        //
+        // let p = (2 * ((used / capacity) - 0.4));
+        // if rand(0, 1) < p.pow(2).clamp(0, 0.95) { mark(d) } else { d }
+        //
+        // This code scales that up by a factor of 1024 so we can use integers.
+        // This is mostly because our RNG can't sample from 0..1_f64.
+        let Some(n) = (2048 * used).checked_sub(capacity * 4096 / 5) else {
+            return false; // (used / capacity) < 0.4
+        };
+        // Cap pre-squaring: 998 =~ 1024 * Math.pow(0.95, 1/2)
+        let p = u128::try_from(n.min(capacity * 998)).unwrap();
+        let c = u128::try_from(capacity).unwrap();
+        let p = u64::try_from(p * p / c / c).unwrap();
+        let r = self
+            .rng
+            .as_ref()
+            .unwrap()
+            .borrow_mut()
+            .random_from(0..(1 << 20));
+        r < p
+    }
+}
+
+/// The outcome of applying AQM policy to a dequeued packet.
+pub(super) enum MarkResult {
+    /// AQM chose not to signal; forward the packet unchanged.
+    Forward(Datagram),
+    /// AQM signalled and the packet is ECT-capable; forward CE-marked.
+    Marked(Datagram),
+    /// AQM signalled but the packet is not ECT-capable; drop it.
+    Dropped,
+}
+
+/// CE-mark an ECT(0) datagram in place; forward CE unchanged; drop if not ECT-capable.
+fn mark_ce(mut dgram: Datagram) -> Option<Datagram> {
+    let tos = dgram.tos();
+    let ecn = Ecn::from(tos);
+    if ecn == Ecn::Ce {
+        // Already marked; forwarding again is a no-op (RFC 3168 §5).
+        Some(dgram)
+    } else if ecn.is_ect() {
+        assert_ne!(ecn, Ecn::Ect1, "ECT(1)/L4S is not implemented");
+        qtrace!("taildrop marking {} bytes CE", dgram.len());
+        dgram.set_tos(Tos::from((Dscp::from(tos), Ecn::Ce)));
+        Some(dgram)
+    } else {
+        qtrace!("taildrop dropping {} bytes (not ECT-capable)", dgram.len());
+        None
+    }
+}
+
+/// Congestion-signalling mode for a [`TailDrop`](super::taildrop::TailDrop) queue.
+///
+/// The inner state types are opaque; use [`Aqm::codel()`] and [`Aqm::red()`] to create instances.
+#[derive(Clone, Default)]
+pub enum Aqm {
+    /// No AQM; packets are dropped only on buffer overflow (pure tail-drop).
+    #[default]
+    None,
+    /// `CoDel` (RFC 8289) sojourn-time marking with TARGET=5ms / INTERVAL=100ms.
+    CoDel(CodelState),
+    /// RED (Random Early Detection) ECN marking; requires RNG initialisation via `Node::init`.
+    Red(RedState),
+}
+
+impl Aqm {
+    /// Create a [`CoDel`](Aqm::CoDel) instance with default parameters.
+    #[must_use]
+    pub fn codel() -> Self {
+        Self::CoDel(CodelState::default())
+    }
+
+    /// Create a [`Red`](Aqm::Red) instance.
+    /// The node must be passed to a [`Simulator`](crate::sim::Simulator) (or have
+    /// `Node::init` called) before use so the RNG is wired up.
+    #[must_use]
+    pub fn red() -> Self {
+        Self::Red(RedState::default())
+    }
+
+    /// Wire up the RNG for [`Aqm::Red`]; no-op for other variants.
+    pub(super) fn init_rng(&mut self, rng: Rng) {
+        if let Self::Red(state) = self {
+            state.rng = Some(rng);
+        }
+    }
+
+    /// Apply AQM policy to the dequeued packet.
+    pub(super) fn mark(
+        &mut self,
+        pkt: Datagram,
+        sojourn: Duration,
+        used: usize,
+        capacity: usize,
+        now: Instant,
+    ) -> MarkResult {
+        let should_signal = match self {
+            Self::CoDel(state) => state.update(sojourn, used == 0, now),
+            Self::Red(state) => Ecn::from(pkt.tos()).is_ect() && state.should_mark(used, capacity),
+            Self::None => false,
+        };
+        if should_signal {
+            mark_ce(pkt).map_or(MarkResult::Dropped, MarkResult::Marked)
+        } else {
+            MarkResult::Forward(pkt)
+        }
+    }
+}

@@ -1,5 +1,5 @@
 name: CPU tuning for benchmarks
-description: Configure CPU for consistent benchmark performance (disable turbo boost, SMT, set performance governor, isolate CPUs with cset)
+description: Configure CPU for consistent benchmark performance (disable turbo boost, SMT, THP and deep C-states, set performance governor, isolate CPUs with cset)
 
 inputs:
   mode:
@@ -89,6 +89,19 @@ runs:
           tune_sysfs /sys/devices/system/cpu/intel_pstate/no_turbo "1" "Intel P-state turbo"
           [ -f /proc/sys/kernel/perf_event_paranoid ] && cp /proc/sys/kernel/perf_event_paranoid /tmp/cpu-tuning-perf-paranoid
           tune_sysfs /proc/sys/kernel/perf_event_paranoid "-1" "perf_event_paranoid"
+          # Avoid THP compaction stalls mid-benchmark.
+          if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
+            grep -o '\[[a-z]*\]' /sys/kernel/mm/transparent_hugepage/enabled | tr -d '[]' > /tmp/cpu-tuning-thp-orig
+            tune_sysfs /sys/kernel/mm/transparent_hugepage/enabled "never" "THP"
+          fi
+          # Disable deep idle (C-)states to avoid idle-exit latency spikes.
+          CSTATES_DISABLED=()
+          for state in /sys/devices/system/cpu/cpu*/cpuidle/state[1-9]*; do
+            [ -f "$state/disable" ] || continue
+            [ "$(cat "$state/disable" 2>/dev/null)" = "0" ] || continue
+            echo 1 | sudo tee "$state/disable" > /dev/null 2>&1 && CSTATES_DISABLED+=("$state")
+          done
+          [ ${#CSTATES_DISABLED[@]} -gt 0 ] && printf '%s\n' "${CSTATES_DISABLED[@]}" > /tmp/cpu-tuning-cstates
 
           if [ -n "$MTU" ]; then
             cp /sys/class/net/lo/mtu /tmp/cpu-tuning-mtu-orig
@@ -237,6 +250,17 @@ runs:
           if [ -f /tmp/cpu-tuning-mtu-orig ]; then
             sudo ip link set dev lo mtu "$(< /tmp/cpu-tuning-mtu-orig)"
             rm -f /tmp/cpu-tuning-mtu-orig
+          fi
+
+          if [ -f /tmp/cpu-tuning-thp-orig ]; then
+            tune_sysfs /sys/kernel/mm/transparent_hugepage/enabled "$(< /tmp/cpu-tuning-thp-orig)" "THP"
+            rm -f /tmp/cpu-tuning-thp-orig
+          fi
+          if [ -f /tmp/cpu-tuning-cstates ]; then
+            while IFS= read -r state; do
+              tune_sysfs "$state/disable" "0" "re-enable $state"
+            done < /tmp/cpu-tuning-cstates
+            rm -f /tmp/cpu-tuning-cstates
           fi
 
         fi  # mode

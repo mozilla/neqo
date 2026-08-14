@@ -8,7 +8,7 @@
 
 use std::time::Instant;
 
-use neqo_common::qlog::Qlog;
+use neqo_common::{qlog::Qlog, to_u64};
 use neqo_transport::StreamId;
 use qlog::events::{DataRecipient, EventData};
 
@@ -18,7 +18,7 @@ pub fn h3_data_moved_up(qlog: &mut Qlog, stream_id: StreamId, amount: usize, now
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
                 stream_id: Some(stream_id.as_u64()),
                 offset: None,
-                length: Some(u64::try_from(amount).expect("usize fits in u64")),
+                length: Some(to_u64(amount)),
                 from: Some(DataRecipient::Transport),
                 to: Some(DataRecipient::Application),
                 raw: None,
@@ -36,7 +36,7 @@ pub fn h3_data_moved_down(qlog: &mut Qlog, stream_id: StreamId, amount: usize, n
             let ev_data = EventData::DataMoved(qlog::events::quic::DataMoved {
                 stream_id: Some(stream_id.as_u64()),
                 offset: None,
-                length: Some(u64::try_from(amount).expect("usize fits in u64")),
+                length: Some(to_u64(amount)),
                 from: Some(DataRecipient::Application),
                 to: Some(DataRecipient::Transport),
                 raw: None,

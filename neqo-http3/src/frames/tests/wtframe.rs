@@ -13,5 +13,5 @@ fn wt_close_session() {
         error: 5,
         message: "Hello".to_string(),
     };
-    enc_dec_wtframe(&f, "6843090000000548656c6c6f", 0);
+    enc_dec_wtframe(&f, "6843090000000548656c6c6f", 0, true);
 }

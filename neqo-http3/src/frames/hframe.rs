@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::fmt::{Debug, Write as _};
+use std::fmt::{self, Debug, Write as _};
 
-use neqo_common::{Buffer, Decoder, Encoder};
+use neqo_common::{Buffer, Decoder, Encoder, hex::HexWithLen};
 use neqo_transport::StreamId;
 use nss::random;
 
@@ -14,6 +14,20 @@ use crate::{Error, Priority, PushId, Res, frames::reader::FrameDecoder, settings
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HFrameType(pub u64);
+
+/// Limit on the declared length of a HEADERS/`PUSH_PROMISE` frame we'll buffer
+/// before decoding.
+///
+/// A conservative reuse of the QPACK decoded-size limit: encoded size is usually smaller than
+/// decoded. Worst-case memory is bounded by the transport's stream concurrency limit, roughly
+/// `max_streams_bidi * MAX_HEADER_BYTES`.
+pub const MAX_HEADER_BYTES: usize = neqo_qpack::reader::LiteralReader::MAX_LEN;
+
+/// Limit for frame types that carry at most a single varint.
+pub const MAX_SINGLE_VARINT_FRAME_BYTES: usize = 8;
+
+/// Limit for other buffered frame types (`SETTINGS`, `PRIORITY_UPDATE_*`).
+pub const MAX_BUFFERED_FRAME_BYTES: usize = 4 * 1024;
 
 impl HFrameType {
     pub const DATA: Self = Self(0x0);
@@ -37,7 +51,7 @@ impl From<HFrameType> for u64 {
 }
 
 // data for DATA frame is not read into HFrame::Data.
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq)]
 pub enum HFrame {
     Data {
         len: u64, // length of the data
@@ -115,9 +129,7 @@ impl HFrame {
                 push_id,
                 header_block,
             } => {
-                enc.encode_varint(
-                    (header_block.len() + (Encoder::varint_len(u64::from(*push_id)))) as u64,
-                );
+                enc.encode_len(header_block.len() + Encoder::varint_len(u64::from(*push_id)));
                 enc.encode_varint(*push_id);
                 enc.encode(header_block);
             }
@@ -164,19 +176,32 @@ impl FrameDecoder<Self> for HFrame {
         Ok(())
     }
 
+    fn max_frame_data(frame_type: HFrameType) -> usize {
+        match frame_type {
+            HFrameType::HEADERS | HFrameType::PUSH_PROMISE => MAX_HEADER_BYTES,
+            HFrameType::CANCEL_PUSH | HFrameType::GOAWAY | HFrameType::MAX_PUSH_ID => {
+                MAX_SINGLE_VARINT_FRAME_BYTES
+            }
+            HFrameType::SETTINGS
+            | HFrameType::PRIORITY_UPDATE_REQUEST
+            | HFrameType::PRIORITY_UPDATE_PUSH => MAX_BUFFERED_FRAME_BYTES,
+            _ => usize::MAX,
+        }
+    }
+
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {
         if frame_type == HFrameType::DATA {
             Ok(Some(Self::Data { len: frame_len }))
         } else if let Some(payload) = data {
             let mut dec = Decoder::from(payload);
-            Ok(match frame_type {
+            let f = match frame_type {
                 HFrameType::DATA => unreachable!("DATA frame has been handled already"),
-                HFrameType::HEADERS => Some(Self::Headers {
+                HFrameType::HEADERS => Self::Headers {
                     header_block: dec.decode_remainder().to_vec(),
-                }),
-                HFrameType::CANCEL_PUSH => Some(Self::CancelPush {
+                },
+                HFrameType::CANCEL_PUSH => Self::CancelPush {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
-                }),
+                },
                 HFrameType::SETTINGS => {
                     let mut settings = HSettings::default();
                     settings.decode_frame_contents(&mut dec).map_err(|e| {
@@ -186,36 +211,41 @@ impl FrameDecoder<Self> for HFrame {
                             Error::HttpFrame
                         }
                     })?;
-                    Some(Self::Settings { settings })
+                    Self::Settings { settings }
                 }
-                HFrameType::PUSH_PROMISE => Some(Self::PushPromise {
+                HFrameType::PUSH_PROMISE => Self::PushPromise {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
                     header_block: dec.decode_remainder().to_vec(),
-                }),
-                HFrameType::GOAWAY => Some(Self::Goaway {
+                },
+                HFrameType::GOAWAY => Self::Goaway {
                     stream_id: StreamId::new(dec.decode_varint().ok_or(Error::HttpFrame)?),
-                }),
-                HFrameType::MAX_PUSH_ID => Some(Self::MaxPushId {
+                },
+                HFrameType::MAX_PUSH_ID => Self::MaxPushId {
                     push_id: dec.decode_varint().ok_or(Error::HttpFrame)?.into(),
-                }),
+                },
                 HFrameType::PRIORITY_UPDATE_REQUEST | HFrameType::PRIORITY_UPDATE_PUSH => {
                     let element_id = dec.decode_varint().ok_or(Error::HttpFrame)?;
                     let priority = dec.decode_remainder();
                     let priority = Priority::from_bytes(priority)?;
                     if frame_type == HFrameType::PRIORITY_UPDATE_REQUEST {
-                        Some(Self::PriorityUpdateRequest {
+                        Self::PriorityUpdateRequest {
                             element_id,
                             priority,
-                        })
+                        }
                     } else {
-                        Some(Self::PriorityUpdatePush {
+                        Self::PriorityUpdatePush {
                             element_id,
                             priority,
-                        })
+                        }
                     }
                 }
-                _ => None,
-            })
+                _ => return Ok(None),
+            };
+            if dec.remaining() > 0 {
+                Err(Error::HttpFrame)
+            } else {
+                Ok(Some(f))
+            }
         } else {
             Ok(None)
         }
@@ -234,5 +264,50 @@ impl FrameDecoder<Self> for HFrame {
                 | HFrameType::PRIORITY_UPDATE_REQUEST
                 | HFrameType::PRIORITY_UPDATE_PUSH
         )
+    }
+}
+
+impl Debug for HFrame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Data { len } => {
+                write!(f, "DATA[{len}]")
+            }
+            Self::Headers { header_block } => {
+                write!(f, "HEADERS {}", HexWithLen::new(header_block))
+            }
+            Self::CancelPush { push_id } => {
+                write!(f, "CANCEL_PUSH {push_id}")
+            }
+            Self::Settings { settings } => {
+                write!(f, "SETTINGS {settings:?}")
+            }
+            Self::PushPromise {
+                push_id,
+                header_block,
+            } => {
+                write!(
+                    f,
+                    "PUSH_PROMISE {push_id} {}",
+                    HexWithLen::new(header_block)
+                )
+            }
+            Self::Goaway { stream_id } => {
+                write!(f, "GOAWAY {stream_id}")
+            }
+            Self::MaxPushId { push_id } => {
+                write!(f, "MAX_PUSH_ID {push_id}")
+            }
+            Self::Grease => f.write_str("GREASE"),
+            Self::PriorityUpdateRequest {
+                element_id,
+                priority,
+            } => write!(f, "PRIORITY_UPDATE request {element_id} {priority}"),
+
+            Self::PriorityUpdatePush {
+                element_id,
+                priority,
+            } => write!(f, "PRIORITY_UPDATE push {element_id} {priority}"),
+        }
     }
 }

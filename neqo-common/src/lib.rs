@@ -13,15 +13,15 @@ pub mod event;
 #[cfg(feature = "build-fuzzing-corpus")]
 mod fuzz;
 pub mod header;
+pub mod hex;
 pub mod hrtime;
 mod incrdecoder;
 pub mod log;
 pub mod qlog;
 pub mod tos;
 
-use std::fmt::Write as _;
-
 use enum_map::Enum;
+use static_assertions::const_assert;
 use strum::Display;
 
 #[cfg(feature = "build-fuzzing-corpus")]
@@ -36,52 +36,65 @@ pub use self::{
 };
 
 #[must_use]
-pub fn hex<A: AsRef<[u8]>>(buf: A) -> String {
-    let mut ret = String::with_capacity(buf.as_ref().len() * 2);
-    for b in buf.as_ref() {
-        write!(&mut ret, "{b:02x}").expect("write OK");
-    }
-    ret
-}
-
-#[must_use]
-pub fn hex_snip_middle<A: AsRef<[u8]>>(buf: A) -> String {
-    const SHOW_LEN: usize = 8;
-    let buf = buf.as_ref();
-    if buf.len() <= SHOW_LEN * 2 {
-        hex_with_len(buf)
-    } else {
-        let mut ret = String::with_capacity(SHOW_LEN * 2 + 16);
-        write!(&mut ret, "[{}]: ", buf.len()).expect("write OK");
-        for b in &buf[..SHOW_LEN] {
-            write!(&mut ret, "{b:02x}").expect("write OK");
-        }
-        ret.push_str("..");
-        for b in &buf[buf.len() - SHOW_LEN..] {
-            write!(&mut ret, "{b:02x}").expect("write OK");
-        }
-        ret
-    }
-}
-
-#[must_use]
-pub fn hex_with_len<A: AsRef<[u8]>>(buf: A) -> String {
-    let buf = buf.as_ref();
-    let mut ret = String::with_capacity(10 + buf.len() * 2);
-    write!(&mut ret, "[{}]: ", buf.len()).expect("write OK");
-    for b in buf {
-        write!(&mut ret, "{b:02x}").expect("write OK");
-    }
-    ret
-}
-
-#[must_use]
 pub const fn const_max(a: usize, b: usize) -> usize {
     [a, b][(a <= b) as usize]
 }
 #[must_use]
 pub const fn const_min(a: usize, b: usize) -> usize {
     [a, b][(a > b) as usize]
+}
+#[must_use]
+pub const fn const_min_u64(a: u64, b: u64) -> u64 {
+    [a, b][(a > b) as usize]
+}
+
+// The conversions below depend on this relationship.
+const_assert!(usize::BITS <= u64::BITS);
+
+/// A trait for values that represent a length or byte count, convertible
+/// to the wire domain (`u64`).
+pub trait Length: Copy {
+    fn as_u64(self) -> u64;
+}
+
+impl Length for u64 {
+    fn as_u64(self) -> u64 {
+        self
+    }
+}
+
+impl Length for usize {
+    fn as_u64(self) -> u64 {
+        to_u64(self)
+    }
+}
+
+/// Convert a `usize` to `u64`.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "debug_assert roundtrip `v as u64 as usize` contains a u64→usize cast; \
+              const_assert above ensures it is lossless on all supported targets"
+)]
+#[inline]
+#[must_use]
+pub const fn to_u64(v: usize) -> u64 {
+    debug_assert!(v as u64 as usize == v);
+    v as u64
+}
+
+/// Convert a numeric type to a `usize`.
+/// # Panics
+/// If we have an overflow on the conversion.
+/// Callers of this function should document why they think overflow is impossible.
+#[inline]
+#[must_use]
+#[track_caller]
+pub fn expect_usize<T>(v: T) -> usize
+where
+    usize: TryFrom<T>,
+    <usize as TryFrom<T>>::Error: std::fmt::Debug,
+{
+    usize::try_from(v).expect("usize should be large enough for this value")
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Enum, Display)]
@@ -135,13 +148,7 @@ macro_rules! dispatch {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn hex_output() {
-        assert_eq!(hex([]), "");
-        assert_eq!(hex([0xab, 0xcd]), "abcd");
-    }
+    use super::{const_max, const_min};
 
     #[test]
     fn const_minmax() {
@@ -149,26 +156,5 @@ mod tests {
             assert_eq!(const_min(a, b), min);
             assert_eq!(const_max(a, b), max);
         }
-    }
-
-    #[test]
-    fn hex_snip_middle_boundary() {
-        // Exactly SHOW_LEN*2 = 16 bytes: should use full hex (no "..").
-        let short: Vec<u8> = (0..16).collect();
-        let s = hex_snip_middle(&short);
-        assert!(!s.contains(".."), "16 bytes should not be truncated");
-        assert!(s.ends_with("0e0f"));
-
-        // 17 bytes: one over the boundary, should be truncated.
-        let just_over: Vec<u8> = (0..17).collect();
-        assert!(hex_snip_middle(&just_over).contains(".."));
-
-        // 20 bytes: truncated, check first 8 and last 8 bytes are exact.
-        let long: Vec<u8> = (0..20).collect();
-        let s = hex_snip_middle(&long);
-        assert!(s.starts_with("[20]: 0001020304050607"));
-        assert!(s.contains(".."));
-        // Last 8 bytes (12..20 = 0x0c..0x13) must be exactly "0c0d0e0f10111213".
-        assert!(s.ends_with("0c0d0e0f10111213"));
     }
 }
