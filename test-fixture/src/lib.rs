@@ -147,7 +147,8 @@ pub fn counting_cid(counter: u32) -> [u8; 8] {
 pub fn varying_cid(counter: u32) -> Vec<u8> {
     let mut cid = random::<20>();
     // Ensure that the connection ID is long enough to pass for an original destination
-    // connection ID.
+    // connection ID.  This is the same bias toward 8 that
+    // `neqo_transport::ConnectionId::generate_initial` applies.
     let len = max(8, 5 + ((cid[0] >> 4) & cid[0]));
     cid[0] = len; // The length byte.
     cid[1..5].copy_from_slice(&counter.to_be_bytes());
@@ -633,4 +634,26 @@ pub fn damage_ech_config(config: &[u8]) -> Vec<u8> {
     // Change the config_id so that the server doesn't recognize it.
     cfg[6] ^= 0x94;
     cfg
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use crate::{counting_cid, fixture_init, varying_cid};
+
+    /// Both `decode_cid` implementations rely on the first byte holding the length.
+    #[test]
+    fn length_byte_matches_length() {
+        fixture_init();
+        for counter in 0..100 {
+            let cid = counting_cid(counter);
+            assert_eq!(usize::from(cid[0]), cid.len());
+            assert_eq!(cid[1..5], counter.to_be_bytes());
+
+            let cid = varying_cid(counter);
+            assert_eq!(usize::from(cid[0]), cid.len());
+            assert!(matches!(cid.len(), 8..=20));
+            assert_eq!(cid[1..5], counter.to_be_bytes());
+        }
+    }
 }

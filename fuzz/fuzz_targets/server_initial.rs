@@ -9,15 +9,15 @@ fuzz_target!(|data: &[u8]| {
     use neqo_transport::{ConnectionParameters, Version, packet::MIN_INITIAL_PACKET_SIZE};
     use nss::RecordProtectionOps as _;
     use test_fixture::{
-        CountingConnectionIdGenerator, DEFAULT_ALPN,
+        DEFAULT_ALPN, VaryingConnectionIdGenerator,
         header_protection::{self, decode_initial_header, initial_aead_and_hp},
         new_client, new_server, now,
     };
 
     let mut client =
-        new_client::<CountingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
+        new_client::<VaryingConnectionIdGenerator>(ConnectionParameters::default().mlkem(false));
     let ci = client.process_output(now()).dgram().expect("a datagram");
-    let mut server = new_server::<CountingConnectionIdGenerator, &str>(
+    let mut server = new_server::<VaryingConnectionIdGenerator, &str>(
         DEFAULT_ALPN,
         ConnectionParameters::default().mlkem(false),
     );
