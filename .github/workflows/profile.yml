@@ -64,7 +64,6 @@ jobs:
       - uses: ./.github/actions/quic-build
         with:
           impl: ${{ matrix.impl }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: ${{ matrix.impl }}-binaries
 
   build-neqo:
@@ -80,10 +79,9 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build neqo
         run: |
@@ -91,7 +89,7 @@ jobs:
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
 
-      - uses: ./.github/actions/bundle-nss
+      - uses: $/.github/actions/bundle-nss
         with:
           path: binaries
 
@@ -117,11 +115,10 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
           tools: samply
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build benchmark
         env:
@@ -192,12 +189,11 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
           tools: samply
           nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download neqo
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

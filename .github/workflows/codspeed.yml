@@ -54,7 +54,6 @@ jobs:
         with:
           version: stable
           tools: cargo-codspeed
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build bench
         env:

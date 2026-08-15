@@ -32,7 +32,6 @@ jobs:
       - uses: ./.github/actions/install-build-deps
         with:
           version: nightly
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run baseline test
         id: baseline
@@ -63,7 +62,6 @@ jobs:
         with:
           version: nightly
           tools: cargo-mutants
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Find mutants
         env:

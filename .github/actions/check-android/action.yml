@@ -20,9 +20,6 @@ inputs:
   nss:
     description: "Whether to install NSS."
     default: "true"
-  github-token:
-    description: "A Github PAT"
-    required: true
 
 runs:
   using: composite
@@ -43,14 +40,13 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: ./.github/actions/install-build-deps
+    - uses: $/.github/actions/install-build-deps
       with:
         version: stable
         target: ${{ inputs.target }}
         tools: cargo-ndk@^4
         nss: ${{ inputs.nss }}
         working-directory: ${{ inputs.working-directory }}
-        token: ${{ inputs.github-token }}
 
     - shell: bash
       env:

@@ -12,7 +12,10 @@ inputs:
     description: Additional Rust tools to install
     default: ""
   target:
-    description: Target triple; passed to both the Rust toolchain and the NSS build
+    description: Single target triple; passed to both the Rust toolchain and the NSS build
+    default: ""
+  workspaces:
+    description: Newline-separated list of workspaces
     default: ""
   rust-cache:
     description: Whether to enable Rust dependency caching
@@ -20,6 +23,12 @@ inputs:
   cache-key:
     description: Extra component for the Rust cache key, to separate jobs that would otherwise share one entry
     default: ""
+  sccache:
+    description: Whether to enable sccache for Rust compilation caching
+    default: "false"
+  make-default:
+    description: Whether to make the installed toolchain the default
+    default: "true"
   nss:
     description: Whether to install NSS
     default: "true"
@@ -27,25 +36,37 @@ inputs:
     description: Directory containing the Cargo.toml that pins the NSS version
     default: "."
   token:
-    description: A GitHub PAT
-    required: true
+    description: A GitHub PAT; defaults to the job's `github.token`
+    required: false
+
+outputs:
+  cache-key:
+    description: The rust-cache shared-key this invocation would use
+    value: ${{ steps.rust.outputs.cache-key }}
+  cache-hit:
+    description: Whether rust-cache restored an exact match (empty when caching is disabled)
+    value: ${{ steps.rust.outputs.cache-hit }}
 
 runs:
   using: composite
   steps:
-    - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+    - id: rust
+      uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
       with:
         version: ${{ inputs.version }}
         components: ${{ inputs.components }}
         tools: ${{ inputs.tools }}
         targets: ${{ inputs.target }}
+        workspaces: ${{ inputs.workspaces }}
         rust-cache: ${{ inputs.rust-cache }}
         cache-key: ${{ inputs.cache-key }}
-        token: ${{ inputs.token }}
+        sccache: ${{ inputs.sccache }}
+        make-default: ${{ inputs.make-default }}
+        token: ${{ inputs.token || github.token }}
 
     - if: ${{ inputs.nss == 'true' }}
       uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
       with:
         working-directory: ${{ inputs.working-directory }}
         target: ${{ inputs.target }}
-        token: ${{ inputs.token }}
+        token: ${{ inputs.token || github.token }}

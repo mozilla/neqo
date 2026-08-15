@@ -28,7 +28,6 @@ jobs:
         with:
           version: nightly
           tools: cargo-mutants
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate diff
         env:

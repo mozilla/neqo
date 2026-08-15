@@ -93,7 +93,6 @@ jobs:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           cache-key: ${{ matrix.type }} # Debug and release are different.
 
       - name: Run tests and determine coverage
@@ -213,7 +212,6 @@ jobs:
           version: stable
           tools: cargo-hack
           nss: "false"
-          token: ${{ secrets.GITHUB_TOKEN }}
       - run: |
           cargo update -w --locked
           cargo hack update -w --locked
@@ -232,7 +230,6 @@ jobs:
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms

@@ -5,9 +5,6 @@ inputs:
   impl:
     description: Implementation to build (google, quiche, s2n)
     required: true
-  token:
-    description: GitHub token for API access
-    required: true
   artifact-name:
     description: Artifact name (if set, uploads binaries as artifact)
     default: ""
@@ -38,11 +35,10 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: ./.github/actions/install-build-deps
+      uses: $/.github/actions/install-build-deps
       with:
         version: stable
         nss: "false"
-        token: ${{ inputs.token }}
 
     - name: Determine cache key
       id: cache-key

@@ -29,7 +29,6 @@ jobs:
       - uses: ./.github/actions/install-build-deps
         with:
           version: nightly
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install cargo-fuzz
         if: ${{ matrix.check == 'fuzz' }}

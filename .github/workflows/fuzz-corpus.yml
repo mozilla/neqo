@@ -40,7 +40,6 @@ jobs:
       - uses: ./.github/actions/install-build-deps
         with:
           version: nightly
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install cargo-fuzz
         # cargo-fuzz must be compiled from source so it targets the native toolchain;

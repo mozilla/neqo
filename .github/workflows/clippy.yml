@@ -57,7 +57,6 @@ jobs:
           version: ${{ matrix.rust-toolchain }}
           components: clippy
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Run clippy and tests across all meaningful feature combinations. Using
       # --all-targets (not --no-dev-deps) ensures test code is also compiled

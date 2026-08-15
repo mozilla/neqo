@@ -38,7 +38,6 @@ jobs:
       - uses: ./.github/actions/install-build-deps
         with:
           nss: "false"
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run network namespace tests
         run: sudo -E env "PATH=$PATH" cargo test --locked --package mtu --test netns -- --nocapture
@@ -94,7 +93,6 @@ jobs:
           target: ${{ matrix.target }}
           working-directory: mtu
           nss: "false" # The mtu crate does not need NSS.
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms

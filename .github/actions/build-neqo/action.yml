@@ -5,9 +5,6 @@ description: >
   and upload everything as a single artifact.
 
 inputs:
-  token:
-    description: GitHub token
-    required: true
   artifact-name:
     description: Name for the uploaded artifact
     required: true
@@ -28,13 +25,10 @@ runs:
         sudo apt-get install -y --no-install-recommends clang lld
 
     - name: Install Rust and NSS
-      # Self-repository reference, since the caller checks this repo out into neqo/
-      # and a workspace-relative `./` path would not resolve.
       uses: $/.github/actions/install-build-deps
       with:
         version: stable
         working-directory: neqo
-        token: ${{ inputs.token }}
 
     - name: Build neqo
       shell: bash

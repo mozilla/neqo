@@ -23,7 +23,6 @@ jobs:
         with:
           tools: cargo-readme
           nss: "false"
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: |
           cd mtu # Only works for this crate currently.
