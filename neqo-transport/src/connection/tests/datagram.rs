@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// Minimum overhead for a short header packet carrying a DATAGRAM frame:
-/// - 8 bytes: connection ID length (from `CountingConnectionIdGenerator`)
+/// - 8 bytes: connection ID (fixed length, from `CountingConnectionIdGenerator`)
 /// - 1 byte: short header (header form, spin, reserved, key phase, PN length)
 /// - 1 byte: minimum packet number encoding
 /// - 1 byte: DATAGRAM frame type
