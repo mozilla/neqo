@@ -26,9 +26,9 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    CountingConnectionIdGenerator, VaryingConnectionIdGenerator, connect_fail, connect_force_idle,
+    connect_rtt_idle, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator,
@@ -1116,7 +1116,7 @@ impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
 fn retire_all() {
     let mut client = default_client();
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default()));
     let mut server = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -1154,7 +1154,7 @@ fn retire_all() {
 fn retire_cid_queue_bounded() {
     let mut client = default_client();
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default()));
     let mut server = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -1221,7 +1221,7 @@ fn retire_unissued_connection_id() {
 fn retire_prior_to_migration_failure() {
     let mut client = default_client();
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default()));
     let mut server = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -1276,7 +1276,7 @@ fn retire_prior_to_migration_failure() {
 fn retire_prior_to_migration_success() {
     let mut client = default_client();
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default()));
     let mut server = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -1340,7 +1340,7 @@ fn error_on_new_path_with_no_connection_id() {
     connect_force_idle(&mut client, &mut server);
 
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default()));
     let retire_all = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
 
     client.process_input(retire_all, now());

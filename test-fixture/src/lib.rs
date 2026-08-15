@@ -9,6 +9,7 @@
 
 use std::{
     cell::{OnceCell, RefCell},
+    cmp::max,
     fmt::{self, Display, Formatter},
     io::{self, Cursor, Result, Write},
     mem,
@@ -125,16 +126,32 @@ const fn addr_v4() -> SocketAddr {
 /// length makes tests and benchmarks that count bytes irreproducible.  8 bytes is also
 /// long enough to pass for an original destination connection ID.
 ///
-/// `neqo_transport`'s own unit tests need a second [`ConnectionIdGenerator`], because the
-/// trait there comes from a different build of that crate.  They share this function, so
-/// that the two cannot disagree.
+/// Shared with the copy of the generator in `neqo_transport`'s own unit tests, so that
+/// the two cannot disagree.
 #[must_use]
-pub fn counting_cid(counter: u32) -> Vec<u8> {
-    const LEN: u8 = 8;
-    let mut cid = random::<{ LEN as usize }>().to_vec();
-    cid[0] = LEN;
+pub fn counting_cid(counter: u32) -> [u8; 8] {
+    let mut cid = random::<8>();
+    cid[0] = 8; // The length byte.
     cid[1..5].copy_from_slice(&counter.to_be_bytes());
     cid
+}
+
+/// The bytes of a connection ID for [`VaryingConnectionIdGenerator`].
+///
+/// As [`counting_cid`], but with a length between 8 and 20 bytes, so that tests exercise
+/// connection IDs that are longer than the minimum.
+///
+/// Shared with the copy of the generator in `neqo_transport`'s own unit tests, so that
+/// the two cannot disagree.
+#[must_use]
+pub fn varying_cid(counter: u32) -> Vec<u8> {
+    let mut cid = random::<20>();
+    // Ensure that the connection ID is long enough to pass for an original destination
+    // connection ID.
+    let len = max(8, 5 + ((cid[0] >> 4) & cid[0]));
+    cid[0] = len; // The length byte.
+    cid[1..5].copy_from_slice(&counter.to_be_bytes());
+    cid[..usize::from(len)].to_vec()
 }
 
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
@@ -153,6 +170,33 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         let cid = counting_cid(self.counter);
+        self.counter += 1;
+        Some(ConnectionId::from(&cid))
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
+/// As [`CountingConnectionIdGenerator`], but the connection IDs vary in length.  Use this
+/// for tests of connection ID handling; tests and benchmarks that count bytes need the
+/// fixed-length generator.
+#[derive(Debug, Default)]
+pub struct VaryingConnectionIdGenerator {
+    counter: u32,
+}
+
+impl ConnectionIdDecoder for VaryingConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        let len = usize::from(dec.peek_byte()?);
+        dec.decode(len).map(ConnectionIdRef::from)
+    }
+}
+
+impl ConnectionIdGenerator for VaryingConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        let cid = varying_cid(self.counter);
         self.counter += 1;
         Some(ConnectionId::from(&cid))
     }

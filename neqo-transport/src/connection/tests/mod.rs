@@ -90,6 +90,33 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     }
 }
 
+/// As [`CountingConnectionIdGenerator`], but the connection IDs vary in length.  This is
+/// the module-local version of `test_fixture::VaryingConnectionIdGenerator`, for the same
+/// reason.
+#[derive(Debug, Default)]
+pub struct VaryingConnectionIdGenerator {
+    counter: u32,
+}
+
+impl ConnectionIdDecoder for VaryingConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        let len = usize::from(dec.peek_byte()?);
+        dec.decode(len).map(ConnectionIdRef::from)
+    }
+}
+
+impl ConnectionIdGenerator for VaryingConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        let cid = test_fixture::varying_cid(self.counter);
+        self.counter += 1;
+        Some(ConnectionId::from(&cid))
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
 // This is fabulous: because test_fixture uses the public API for Connection,
 // it gets a different type to the ones that are referenced via super::super::*.
 // Thus, this code can't use default_client() and default_server() from
