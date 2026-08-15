@@ -652,7 +652,7 @@ mod tests {
 
             let cid = varying_cid(counter);
             assert_eq!(usize::from(cid[0]), cid.len());
-            assert!(matches!(cid.len(), 8..=20));
+            assert!(matches!(cid.len(), 8..=neqo_transport::ConnectionId::MAX_LEN));
             assert_eq!(cid[1..5], counter.to_be_bytes());
         }
     }
