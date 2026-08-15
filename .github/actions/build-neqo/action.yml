@@ -27,15 +27,12 @@ runs:
         [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
         sudo apt-get install -y --no-install-recommends clang lld
 
-    - name: Install Rust
-      uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+    - name: Install Rust and NSS
+      # Self-repository reference, since the caller checks this repo out into neqo/
+      # and a workspace-relative `./` path would not resolve.
+      uses: $/.github/actions/install-build-deps
       with:
         version: stable
-        token: ${{ inputs.token }}
-
-    - name: Install NSS
-      uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-      with:
         working-directory: neqo
         token: ${{ inputs.token }}
 
@@ -84,18 +81,14 @@ runs:
         if [[ "$BENCHES" == "true" ]]; then build_walltime_benches ../dist/neqo; fi
         cp target/release/neqo-client target/release/neqo-server ../dist/neqo/
 
-    - name: Bundle NSS libraries and test fixture
+    - name: Bundle NSS libraries
+      uses: $/.github/actions/bundle-nss
+      with:
+        path: dist
+
+    - name: Bundle test fixture
       shell: bash
       run: |
-        mkdir -p dist/lib
-        if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
-          cp -L "$NSS_DIR"/../dist/Release/lib/*.so dist/lib/ 2>/dev/null || true
-          cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* dist/lib/ 2>/dev/null || true
-        else
-          for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
-            cp -L /usr/lib/*/lib${lib}.so* dist/lib/ 2>/dev/null || true
-          done
-        fi
         NSS_DB=$(cd neqo && cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
         mkdir -p dist/test-fixture
         cp -r "$NSS_DB" dist/test-fixture/

@@ -80,13 +80,9 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build neqo
@@ -95,17 +91,9 @@ jobs:
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
 
-      - name: Bundle NSS libraries
-        run: |
-          mkdir -p binaries/lib
-          if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
-            cp -L "$NSS_DIR"/../dist/Release/lib/*.so binaries/lib/ 2>/dev/null || true
-            cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* binaries/lib/ 2>/dev/null || true
-          else
-            for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
-              cp -L /usr/lib/*/lib${lib}.so* binaries/lib/ 2>/dev/null || true
-            done
-          fi
+      - uses: ./.github/actions/bundle-nss
+        with:
+          path: binaries
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -129,14 +117,10 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
           tools: samply
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build benchmark
@@ -208,10 +192,11 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
           tools: samply
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download neqo

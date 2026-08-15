@@ -38,9 +38,10 @@ runs:
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      uses: ./.github/actions/install-build-deps
       with:
         version: stable
+        nss: "false"
         token: ${{ inputs.token }}
 
     - name: Determine cache key
