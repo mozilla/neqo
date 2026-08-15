@@ -29,7 +29,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
+      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -63,7 +63,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
+      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 

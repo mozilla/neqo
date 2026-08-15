@@ -859,8 +859,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.14.5"
-source = "git+https://github.com/mozilla/nss-rs#325e90524dc2983c974abe2ee3543a17fa2ff8d3"
+version = "0.14.6"
+source = "git+https://github.com/mozilla/nss-rs#63c63046208f587573f71bb3885f16d10e0bf4eb"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -1237,7 +1237,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs#325e90524dc2983c974abe2ee3543a17fa2ff8d3"
+source = "git+https://github.com/mozilla/nss-rs#63c63046208f587573f71bb3885f16d10e0bf4eb"
 dependencies = [
  "log",
  "nss-rs",
