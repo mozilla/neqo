@@ -26,7 +26,7 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{
-    Buffer, Encoder, Role,
+    Buffer, Encoder, Role, expect_usize,
     hex::{Hex, HexSnipMiddle},
     qdebug, qinfo, qtrace, to_u64,
 };
@@ -1461,6 +1461,9 @@ impl Display for CryptoStates {
     }
 }
 
+/// What one CRYPTO frame covers: an offset into the stream and a length.
+type Chunk = (u64, usize);
+
 #[derive(Debug, Default)]
 pub struct CryptoStream {
     tx: TxBuffer,
@@ -1622,38 +1625,11 @@ impl CryptoStreams {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        fn write_chunk<B: Buffer>(
-            offset: u64,
-            data: &[u8],
-            builder: &mut packet::Builder<B>,
-        ) -> Option<(u64, usize)> {
-            let mut header_len = 1 + Encoder::varint_len(offset) + 1;
-
-            // Don't bother if there isn't room for the header and some data.
-            if builder.remaining() < header_len + 1 {
-                return None;
-            }
-            // Calculate length of data based on the minimum of:
-            // - available data
-            // - remaining space, less the header, which counts only one byte for the length at
-            //   first to avoid underestimating length
-            let length = min(data.len(), builder.remaining() - header_len);
-            header_len += Encoder::varint_len(to_u64(length)) - 1;
-            let length = min(data.len(), builder.remaining() - header_len);
-
-            builder.encode_frame(FrameType::Crypto, |b| {
-                b.encode_varint(offset);
-                b.encode_vvec(&data[..length]);
-            });
-            Some((offset, length))
-        }
-
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
             tokens: &mut recovery::Tokens,
-            offset: u64,
-            len: usize,
+            (offset, len): Chunk,
             stats: &mut FrameStats,
         ) {
             cs.tx.mark_as_sent(offset, len);
@@ -1666,35 +1642,6 @@ impl CryptoStreams {
             stats.crypto += 1;
         }
 
-        #[expect(clippy::type_complexity, reason = "Yeah, a bit complex but still OK.")]
-        const fn limit_chunks<'a>(
-            left: (u64, &'a [u8]),
-            right: (u64, &'a [u8]),
-            limit: usize,
-        ) -> ((u64, &'a [u8]), (u64, &'a [u8])) {
-            let (left_offset, mut left) = left;
-            let (mut right_offset, mut right) = right;
-            if left.len() + right.len() <= limit {
-                // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
-                // over multiple packets. But at least it's in two unordered CRYPTO frames.
-            } else if left.len() <= limit {
-                // `left` is short enough to fit into this packet. So send from the *end*
-                // of `right`, so that the second half of the SNI is in another packet.
-                let right_len = right.len() + left.len() - limit;
-                right_offset += to_u64(right_len);
-                (_, right) = right.split_at(right_len);
-            } else if right.len() <= limit {
-                // `right` is short enough to fit into this packet. So only send a part of `left`.
-                // The SNI begins at the end of `left`, so send the beginnig of it in this packet.
-                (left, _) = left.split_at(limit - right.len());
-            } else {
-                // Both chunks are too long to fit into one packet. Just send a part of each.
-                (left, _) = left.split_at(limit / 2);
-                (right, _) = right.split_at(limit / 2);
-            }
-            ((left_offset, left), (right_offset, right))
-        }
-
         let Some(cs) = self.get_mut(space) else {
             return;
         };
@@ -1703,38 +1650,25 @@ impl CryptoStreams {
             if offset == 0 {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", data);
             }
-            let written = if sni_slicing && offset == 0 {
-                if let Some(sni) = find_sni(data) {
-                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
-                    let (left, right) = data.split_at(mid);
-
-                    // Truncate the chunks so we can fit them into roughly evenly-filled packets.
-                    let packets_needed = data.len().div_ceil(builder.limit());
-                    let limit = data.len() / packets_needed;
-                    let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + to_u64(mid), right), limit);
-                    (
-                        write_chunk(right_offset, right, builder),
-                        write_chunk(left_offset, left, builder),
-                    )
-                } else {
-                    // No SNI found, write the entire data.
-                    (write_chunk(offset, data, builder), None)
-                }
+            let sliced = (sni_slicing && offset == 0)
+                .then(|| slice_sni(data, offset, builder.limit()))
+                .flatten();
+            let written = if let Some((first, second)) = sliced {
+                (
+                    write_at(data, offset, first, builder),
+                    write_at(data, offset, second, builder),
+                )
             } else {
-                // SNI slicing disabled or data not at offset 0, write the entire data.
+                // No SNI found, slicing disabled, or data not at offset 0: write the entire data.
                 (write_chunk(offset, data, builder), None)
             };
 
             match written {
                 (None, None) => break,
-                (None, Some((offset, len))) | (Some((offset, len)), None) => {
-                    mark_as_sent(cs, space, tokens, offset, len, stats);
-                }
-                (Some((offset1, len1)), Some((offset2, len2))) => {
-                    mark_as_sent(cs, space, tokens, offset1, len1, stats);
-                    mark_as_sent(cs, space, tokens, offset2, len2, stats);
+                (None, Some(c)) | (Some(c), None) => mark_as_sent(cs, space, tokens, c, stats),
+                (Some(first), Some(second)) => {
+                    mark_as_sent(cs, space, tokens, first, stats);
+                    mark_as_sent(cs, space, tokens, second, stats);
                     // We only end up in this arm if we successfully sliced above. In that case,
                     // don't try and fit more crypto data into this packet.
                     break;
@@ -1742,6 +1676,81 @@ impl CryptoStreams {
             }
         }
     }
+}
+
+/// Write a CRYPTO frame with as much of `data` as fits, or `None` if not even one byte does.
+fn write_chunk<B: Buffer>(
+    offset: u64,
+    data: &[u8],
+    builder: &mut packet::Builder<B>,
+) -> Option<Chunk> {
+    let mut header_len = 1 + Encoder::varint_len(offset) + 1;
+
+    if builder.remaining() < header_len + 1 {
+        return None;
+    }
+    // Calculate len based on minimum of the data and the remaining space (less the header).
+    let length = min(data.len(), builder.remaining() - header_len);
+    // The header counted only one byte for the length varint; correct that and redo.
+    header_len += Encoder::varint_len(to_u64(length)) - 1;
+    let length = min(data.len(), builder.remaining() - header_len);
+
+    builder.encode_frame(FrameType::Crypto, |b| {
+        b.encode_varint(offset);
+        b.encode_vvec(&data[..length]);
+    });
+    Some((offset, length))
+}
+
+/// Write one chunk of `data`, which itself starts at `offset` in the stream.
+fn write_at<B: Buffer>(
+    data: &[u8],
+    offset: u64,
+    (at, len): Chunk,
+    builder: &mut packet::Builder<B>,
+) -> Option<Chunk> {
+    let start = expect_usize(at - offset); // `at` is within `data`, so this fits a `usize`.
+    write_chunk(at, &data[start..start + len], builder)
+}
+
+/// Truncate both halves so that they fill packets of `limit` bytes roughly evenly.
+const fn limit_chunks(left: Chunk, right: Chunk, limit: usize) -> (Chunk, Chunk) {
+    let (left_offset, mut left) = left;
+    let (mut right_offset, mut right) = right;
+    if left + right <= limit {
+        // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
+        // over multiple packets. But at least it's in two unordered CRYPTO frames.
+    } else if left <= limit {
+        // `left` is short enough to fit into this packet. So send from the *end*
+        // of `right`, so that the second half of the SNI is in another packet.
+        let skip = right + left - limit;
+        right_offset += to_u64(skip);
+        right -= skip;
+    } else if right <= limit {
+        // `right` is short enough to fit into this packet. So only send a part of `left`.
+        // The SNI begins at the end of `left`, so send the beginnig of it in this packet.
+        left = limit - right;
+    } else {
+        // Both chunks are too long to fit into one packet. Just send a part of each.
+        left = limit / 2;
+        right = limit / 2;
+    }
+    ((left_offset, left), (right_offset, right))
+}
+
+/// Cut `data` at the midpoint of the SNI, so that no packet carries the whole name.
+/// Returns the halves in the order to write them, or `None` if there is no SNI.
+fn slice_sni(data: &[u8], offset: u64, limit: usize) -> Option<(Chunk, Chunk)> {
+    let sni = find_sni(data)?;
+    let mid = sni.start + (sni.end - sni.start) / 2;
+    let packets_needed = data.len().div_ceil(limit);
+    let (left, right) = limit_chunks(
+        (offset, mid),
+        (offset + to_u64(mid), data.len() - mid),
+        data.len() / packets_needed,
+    );
+    // Second half first, so that packet order does not follow data order.
+    Some((right, left))
 }
 
 impl Default for CryptoStreams {
