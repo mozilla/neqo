@@ -14,7 +14,7 @@ use std::{
 };
 
 use clap::{Parser, builder::TypedValueParser as _};
-use neqo_common::{json, qinfo};
+use neqo_common::{json, qerror, qinfo};
 use neqo_transport::{
     CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, Stats, StreamType,
     Version, tparams::PreferredAddress,
@@ -301,21 +301,20 @@ fn now() -> Instant {
 }
 
 /// Report `stats` as compact JSON: appended to `path` if given, or logged
-/// via `qinfo!` otherwise.
-///
-/// # Errors
-///
-/// If `path` is given and the file can't be opened or written to.
-pub fn report_stats(stats: &Stats, path: Option<&Path>) -> std::io::Result<()> {
+/// via `qinfo!` otherwise. Failures to write to `path` are logged.
+pub fn report_stats(stats: &Stats, path: Option<&Path>) {
     let json = json::compact(stats);
-    if let Some(path) = path {
-        writeln!(
-            OpenOptions::new().create(true).append(true).open(path)?,
-            "{json}"
-        )
-    } else {
+    let Some(path) = path else {
         qinfo!("{json}");
-        Ok(())
+        return;
+    };
+    if let Err(e) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| writeln!(f, "{json}"))
+    {
+        qerror!("Failed to report stats to {}: {e}", path.display());
     }
 }
 

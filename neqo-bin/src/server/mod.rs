@@ -23,7 +23,6 @@ use std::{
     path::PathBuf,
     pin::Pin,
     process::exit,
-    ptr,
     rc::{Rc, Weak},
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -36,7 +35,9 @@ use futures::{
 };
 use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::Http3Server;
-use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress};
+use neqo_transport::{
+    Connection, OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress,
+};
 use neqo_udp::{DatagramIter, RecvBuf};
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey,
@@ -46,7 +47,7 @@ use nss::{
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now, send_data::SendData};
+use crate::{SharedArgs, now, report_stats, send_data::SendData};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -212,36 +213,43 @@ impl Args {
     }
 }
 
-/// Tracks connections a server has already reported.
-pub(super) struct ReportedConnections<T>(Vec<Weak<RefCell<T>>>);
-
-impl<T> Default for ReportedConnections<T> {
-    fn default() -> Self {
-        Self(Vec::new())
-    }
+/// Reports the stats of closed connections to wherever `--stats` asked for
+/// them, at most once per connection.
+pub(super) struct StatsReporter {
+    #[expect(clippy::option_option, reason = "clap flag-with-optional-value shape")]
+    path: Option<Option<PathBuf>>,
+    /// Connections already reported. `Weak`, so that entries for connections
+    /// the server has since dropped can be pruned.
+    reported: Vec<Weak<RefCell<Connection>>>,
 }
 
-impl<T> ReportedConnections<T> {
-    /// Records `conn` as reported. Returns `true` the first time a given
-    /// connection is seen, `false` on every subsequent call for the same one.
-    pub(super) fn insert(&mut self, conn: &Rc<RefCell<T>>) -> bool {
-        self.0.retain(|w| w.strong_count() > 0);
-        if self.0.iter().any(|w| ptr::eq(w.as_ptr(), Rc::as_ptr(conn))) {
-            false
-        } else {
-            self.0.push(Rc::downgrade(conn));
-            true
+impl StatsReporter {
+    pub(super) fn new(args: &SharedArgs) -> Self {
+        Self {
+            path: args.stats.clone(),
+            reported: Vec::new(),
         }
     }
 
-    #[cfg(test)]
-    pub(super) const fn len(&self) -> usize {
-        self.0.len()
+    /// Reports `conn`'s stats, unless `--stats` was not given or `conn` was
+    /// reported already.
+    pub(super) fn report(&mut self, conn: &Rc<RefCell<Connection>>) {
+        let Some(path) = &self.path else {
+            return;
+        };
+        let conn_weak = Rc::downgrade(conn);
+        self.reported.retain(|w| w.strong_count() > 0);
+        if self.reported.iter().any(|w| Weak::ptr_eq(w, &conn_weak)) {
+            return;
+        }
+        self.reported.push(conn_weak);
+        report_stats(&conn.borrow().stats(), path.as_deref());
     }
 
+    /// How many connections have been reported so far.
     #[cfg(test)]
-    pub(super) const fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    pub(super) const fn count(&self) -> usize {
+        self.reported.len()
     }
 }
 
@@ -632,15 +640,40 @@ pub(super) mod test_support {
         server::{Server, ValidateAddress},
     };
     use nss::AuthenticationStatus;
-    use test_fixture::now;
+    use test_fixture::{default_client, now};
 
-    use super::Args;
+    use super::{Args, StatsReporter};
 
     pub(super) fn stats_args(stats: bool) -> Args {
         let mut args = Args::default();
         args.shared.alpn = "alpn".to_string(); // matches test_fixture::DEFAULT_ALPN
         args.shared.stats = stats.then_some(None); // Some(None): log, not a file
         args
+    }
+
+    /// What [`reported_on_close`] needs of a server beyond [`super::HttpServer`]:
+    /// the inner server to hand to [`connect`], and the reporter to inspect.
+    pub(super) trait StatsServer: super::HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer;
+        fn stats(&self) -> &StatsReporter;
+    }
+
+    /// Connect to `server` and close the connection again, returning the number
+    /// of connections `server` reported stats for. Asserts that processing the
+    /// closed connection's events a second time doesn't report it again.
+    pub(super) fn reported_on_close(server: &mut impl StatsServer) -> usize {
+        let mut client = default_client();
+        connect(&mut client, server.transport());
+
+        client.close(now(), 0, "bye");
+        let out = client.process_output(now());
+        _ = server.transport().process(out.dgram(), now());
+
+        server.process_events(now());
+        let reported = server.stats().count();
+        server.process_events(now());
+        assert_eq!(server.stats().count(), reported, "must not double-report");
+        reported
     }
 
     /// Minimal common surface of `neqo_transport::server::Server` and
@@ -670,7 +703,7 @@ pub(super) mod test_support {
 
     /// Complete a handshake between `client` and `server`. Adapted from
     /// `neqo-transport/tests/common/mod.rs::connect`.
-    pub(super) fn connect(client: &mut Connection, server: &mut impl ProcessServer) {
+    pub(super) fn connect(client: &mut Connection, server: &mut dyn ProcessServer) {
         server.set_validation(ValidateAddress::Never);
 
         assert_eq!(*client.state(), State::Init);
@@ -709,31 +742,34 @@ mod tests {
     use std::{cell::RefCell, path::PathBuf, rc::Rc};
 
     use clap::Parser as _;
+    use test_fixture::{default_client, fixture_init};
 
-    use super::{Args, ReportedConnections, response_for_path};
+    use super::{Args, StatsReporter, response_for_path, test_support::stats_args};
 
-    #[test]
-    fn reported_connections_first_insert_reports() {
-        let mut reported = ReportedConnections::default();
-        let conn = Rc::new(RefCell::new(0));
-        assert!(reported.insert(&conn), "first sighting must report");
+    fn reporter(stats: bool) -> StatsReporter {
+        fixture_init();
+        StatsReporter::new(&stats_args(stats).shared)
     }
 
     #[test]
-    fn reported_connections_dedupes_same_connection() {
-        let mut reported = ReportedConnections::default();
-        let conn = Rc::new(RefCell::new(0));
-        assert!(reported.insert(&conn));
-        assert!(!reported.insert(&conn), "must not report twice");
+    fn reports_each_connection_once() {
+        let mut stats = reporter(true);
+        let a = Rc::new(RefCell::new(default_client()));
+        let b = Rc::new(RefCell::new(default_client()));
+
+        stats.report(&a);
+        assert_eq!(stats.count(), 1, "first sighting must report");
+        stats.report(&a);
+        assert_eq!(stats.count(), 1, "must not report twice");
+        stats.report(&b);
+        assert_eq!(stats.count(), 2, "a different connection must report");
     }
 
     #[test]
-    fn reported_connections_tracks_distinct_connections_separately() {
-        let mut reported = ReportedConnections::default();
-        let a = Rc::new(RefCell::new(0));
-        let b = Rc::new(RefCell::new(0));
-        assert!(reported.insert(&a));
-        assert!(reported.insert(&b), "a different connection must report");
+    fn reports_nothing_without_the_stats_flag() {
+        let mut stats = reporter(false);
+        stats.report(&Rc::new(RefCell::new(default_client())));
+        assert_eq!(stats.count(), 0);
     }
 
     #[test]

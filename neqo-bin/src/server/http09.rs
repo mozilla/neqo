@@ -13,10 +13,10 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug, qerror, qwarn};
+use neqo_common::{Datagram, event::Provider as _, qdebug, qwarn};
 use neqo_http3::Error;
 use neqo_transport::{
-    Connection, ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
+    ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
     server::{ConnectionRef, Server},
 };
 use nss::{AllowZeroRtt, AntiReplay};
@@ -24,9 +24,9 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::Args;
 use crate::{
-    STREAM_IO_BUFFER_SIZE, report_stats,
+    STREAM_IO_BUFFER_SIZE,
     send_data::{SendData, SendResult},
-    server::ReportedConnections,
+    server::StatsReporter,
 };
 
 #[derive(Default)]
@@ -41,10 +41,7 @@ pub struct HttpServer {
     read_state: HashMap<StreamId, Vec<u8>>,
     is_qns_test: bool,
     read_buffer: Vec<u8>,
-    #[expect(clippy::option_option, reason = "clap flag-with-optional-value shape")]
-    stats: Option<Option<std::path::PathBuf>>,
-    /// Connections already reported via `--stats`.
-    reported: ReportedConnections<Connection>,
+    stats: StatsReporter,
 }
 
 impl HttpServer {
@@ -71,8 +68,7 @@ impl HttpServer {
             read_state: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
-            stats: args.shared.stats.clone(),
-            reported: ReportedConnections::default(),
+            stats: StatsReporter::new(&args.shared),
         })
     }
 
@@ -238,12 +234,7 @@ impl super::HttpServer for HttpServer {
                             .unwrap();
                     }
                     ConnectionEvent::StateChange(state) if state.closed() => {
-                        if let Some(path) = &self.stats
-                            && self.reported.insert(&acr.connection())
-                            && let Err(e) = report_stats(&acr.borrow().stats(), path.as_deref())
-                        {
-                            qerror!("Failed to report stats: {e}");
-                        }
+                        self.stats.report(&acr.connection());
                     }
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamCreatable { .. }
@@ -271,15 +262,16 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use neqo_transport::RandomConnectionIdGenerator;
-    use test_fixture::{anti_replay, default_client, fixture_init, now};
+    use test_fixture::{anti_replay, fixture_init};
 
     use super::{Args, HttpServer};
     use crate::server::{
-        HttpServer as _,
-        test_support::{connect, stats_args},
+        StatsReporter,
+        test_support::{ProcessServer, StatsServer, reported_on_close, stats_args},
     };
 
     fn make_server(args: &Args) -> HttpServer {
+        fixture_init();
         HttpServer::new(
             args,
             anti_replay(),
@@ -288,41 +280,24 @@ mod tests {
         .expect("build server")
     }
 
+    impl StatsServer for HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer {
+            &mut self.server
+        }
+
+        fn stats(&self) -> &StatsReporter {
+            &self.stats
+        }
+    }
+
     #[test]
     fn reports_stats_once_on_close_when_enabled() {
-        fixture_init();
-        let args = stats_args(true);
-        let mut server = make_server(&args);
-        let mut client = default_client();
-        connect(&mut client, &mut server.server);
-
-        client.close(now(), 0, "bye");
-        let out = client.process_output(now());
-        _ = server.server.process(out.dgram(), now());
-
-        server.process_events(now());
-        assert_eq!(server.reported.len(), 1, "should report exactly once");
-
-        // A second pass over the same (now draining/closed) connection must
-        // not double-report.
-        server.process_events(now());
-        assert_eq!(server.reported.len(), 1, "must not double-report");
+        assert_eq!(reported_on_close(&mut make_server(&stats_args(true))), 1);
     }
 
     #[test]
     fn does_not_report_when_stats_disabled() {
-        fixture_init();
-        let args = stats_args(false);
-        let mut server = make_server(&args);
-        let mut client = default_client();
-        connect(&mut client, &mut server.server);
-
-        client.close(now(), 0, "bye");
-        let out = client.process_output(now());
-        _ = server.server.process(out.dgram(), now());
-
-        server.process_events(now());
-        assert!(server.reported.is_empty());
+        assert_eq!(reported_on_close(&mut make_server(&stats_args(false))), 0);
     }
 
     // Issue 1 (FIN-only frame after buffered partial data) is exercised by
