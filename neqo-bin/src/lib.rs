@@ -14,7 +14,7 @@ use std::{
 };
 
 use clap::{Parser, builder::TypedValueParser as _};
-use neqo_common::{json, qerror, qinfo};
+use neqo_common::{qerror, qinfo};
 use neqo_transport::{
     CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, Stats, StreamType,
     Version, tparams::PreferredAddress,
@@ -300,13 +300,23 @@ fn now() -> Instant {
     Instant::now()
 }
 
-/// Report `stats` as compact JSON: appended to `path` if given, or logged
-/// via `qinfo!` otherwise. Failures to write to `path` are logged.
+/// Report `stats` as JSON: appended to `path` as one record per line (i.e. JSON
+/// Lines) if given, or logged via `qinfo!` in indented form otherwise. Failures
+/// to serialize or to write to `path` are logged.
 pub fn report_stats(stats: &Stats, path: Option<&Path>) {
-    let json = json::compact(stats);
     let Some(path) = path else {
-        qinfo!("{json}");
+        match serde_json::to_string_pretty(stats) {
+            Ok(json) => qinfo!("{json}"),
+            Err(e) => qerror!("Failed to serialize stats: {e}"),
+        }
         return;
+    };
+    let json = match serde_json::to_string(stats) {
+        Ok(json) => json,
+        Err(e) => {
+            qerror!("Failed to serialize stats: {e}");
+            return;
+        }
     };
     if let Err(e) = OpenOptions::new()
         .create(true)
@@ -322,9 +332,14 @@ pub fn report_stats(stats: &Stats, path: Option<&Path>) {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{fs, path::PathBuf, time::SystemTime};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::SystemTime,
+    };
 
-    use crate::{client, server};
+    use crate::{Stats, client, report_stats, server};
 
     struct TempDir {
         path: PathBuf,
@@ -332,12 +347,16 @@ mod tests {
 
     impl TempDir {
         fn new() -> Self {
+            // Tests run concurrently, so the name has to be unique per instance:
+            // sharing one means the first `Drop` deletes the other's directory.
+            static SEQ: AtomicUsize = AtomicUsize::new(0);
             let dir = std::env::temp_dir().join(format!(
-                "neqo-bin-test-{}",
+                "neqo-bin-test-{}-{}",
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
-                    .as_secs()
+                    .as_nanos(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
@@ -386,5 +405,30 @@ mod tests {
             assert!(metadata.is_file(), "expect a file, found something else");
             assert!(metadata.len() > 0, "expect file not be empty");
         }
+    }
+
+    #[test]
+    fn report_stats_appends_json_lines() {
+        let dir = TempDir::new();
+        let path = dir.path().join("stats.json");
+
+        report_stats(&Stats::default(), Some(&path));
+        let first = fs::read_to_string(&path).unwrap();
+        report_stats(&Stats::default(), Some(&path));
+        let second = fs::read_to_string(&path).unwrap();
+
+        assert!(second.starts_with(&first), "must append, not truncate");
+        let lines: Vec<_> = second.lines().collect();
+        assert_eq!(lines.len(), 2, "one record per call");
+        for line in lines {
+            serde_json::from_str::<serde_json::Value>(line).expect("each line is a JSON record");
+        }
+    }
+
+    #[test]
+    fn report_stats_to_unwritable_path_is_not_fatal() {
+        // A directory can't be opened for appending.
+        let dir = TempDir::new();
+        report_stats(&Stats::default(), Some(&dir.path()));
     }
 }

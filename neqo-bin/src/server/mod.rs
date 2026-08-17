@@ -246,7 +246,8 @@ impl StatsReporter {
         report_stats(&conn.borrow().stats(), path.as_deref());
     }
 
-    /// How many connections have been reported so far.
+    /// How many of the connections reported so far are still alive: entries for
+    /// connections the server has dropped are pruned by [`Self::report`].
     #[cfg(test)]
     pub(super) const fn count(&self) -> usize {
         self.reported.len()
@@ -646,7 +647,7 @@ pub(super) mod test_support {
 
     pub(super) fn stats_args(stats: bool) -> Args {
         let mut args = Args::default();
-        args.shared.alpn = "alpn".to_string(); // matches test_fixture::DEFAULT_ALPN
+        args.shared.alpn = test_fixture::DEFAULT_ALPN[0].to_string();
         args.shared.stats = stats.then_some(None); // Some(None): log, not a file
         args
     }
@@ -675,6 +676,36 @@ pub(super) mod test_support {
         assert_eq!(server.stats().count(), reported, "must not double-report");
         reported
     }
+
+    /// The `--stats` tests for one server type, which differ only in how the
+    /// server is built. Expects `$make` to take [`Args`] and return a
+    /// `HttpServer` whose inner server field is named `server` and whose
+    /// reporter field is named `stats`.
+    macro_rules! stats_tests {
+        ($make:ident) => {
+            impl StatsServer for HttpServer {
+                fn transport(&mut self) -> &mut dyn ProcessServer {
+                    &mut self.server
+                }
+
+                fn stats(&self) -> &StatsReporter {
+                    &self.stats
+                }
+            }
+
+            #[test]
+            fn reports_stats_once_on_close_when_enabled() {
+                assert_eq!(reported_on_close(&mut $make(&stats_args(true))), 1);
+            }
+
+            #[test]
+            fn does_not_report_when_stats_disabled() {
+                assert_eq!(reported_on_close(&mut $make(&stats_args(false))), 0);
+            }
+        };
+    }
+
+    pub(super) use stats_tests;
 
     /// Minimal common surface of `neqo_transport::server::Server` and
     /// `Http3Server` needed to drive a handshake in tests.

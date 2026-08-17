@@ -128,8 +128,14 @@ impl AddAssign<Ecn> for Count {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
 pub struct ValidationCount(EnumMap<ValidationOutcome, u64>);
+
+impl Serialize for ValidationCount {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::stats::serialize_sparse(self.0, |count| *count == 0, serializer)
+    }
+}
 
 impl Deref for ValidationCount {
     type Target = EnumMap<ValidationOutcome, u64>;
@@ -156,12 +162,6 @@ pub enum ValidationError {
 pub enum ValidationOutcome {
     Capable,
     NotCapable(ValidationError),
-}
-
-impl Serialize for ValidationOutcome {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(&format_args!("{self:?}"))
-    }
 }
 
 #[derive(Debug, Default)]

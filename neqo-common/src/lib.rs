@@ -16,7 +16,6 @@ pub mod header;
 pub mod hex;
 pub mod hrtime;
 mod incrdecoder;
-pub mod json;
 pub mod log;
 pub mod qlog;
 pub mod tos;
