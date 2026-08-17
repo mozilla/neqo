@@ -201,21 +201,28 @@ pub struct CongestionControlStats {
     pub w_max: Option<f64>,
 }
 
+/// Serialize `entries` as a map, leaving out the ones `skip` selects.
+fn serialize_sparse<S: Serializer, K: Serialize, V: Serialize>(
+    entries: impl IntoIterator<Item = (K, V)>,
+    skip: impl Fn(&V) -> bool,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut map = serializer.serialize_map(None)?;
+    for (key, value) in entries {
+        if !skip(&value) {
+            map.serialize_entry(&key, &value)?;
+        }
+    }
+    map.end()
+}
+
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
 impl Serialize for EcnCount {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(None)?;
-        for (pt, count) in self.0 {
-            // Don't show all-zero rows.
-            if count.is_empty() {
-                continue;
-            }
-            map.serialize_entry(&pt, &count)?;
-        }
-        map.end()
+        serialize_sparse(self.0, ecn::Count::is_empty, serializer)
     }
 }
 
@@ -250,31 +257,18 @@ impl DerefMut for EcnTransitions {
 }
 
 /// Transitions recorded for a single "from" ECN mark, keyed by "to" mark.
-struct EcnTransitionRow<'a>(&'a EnumMap<Ecn, Option<(packet::Type, packet::Number)>>);
+struct EcnTransitionRow(EnumMap<Ecn, Option<(packet::Type, packet::Number)>>);
 
-impl Serialize for EcnTransitionRow<'_> {
+impl Serialize for EcnTransitionRow {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(None)?;
-        for to in Ecn::iter() {
-            if let Some(pkt) = self.0[to] {
-                map.serialize_entry(&to, &pkt)?;
-            }
-        }
-        map.end()
+        serialize_sparse(self.0, Option::is_none, serializer)
     }
 }
 
 impl Serialize for EcnTransitions {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut outer = serializer.serialize_map(None)?;
-        for from in Ecn::iter() {
-            // Don't show all-None rows.
-            if self.0[from].iter().all(|(_, v)| v.is_none()) {
-                continue;
-            }
-            outer.serialize_entry(&from, &EcnTransitionRow(&self.0[from]))?;
-        }
-        outer.end()
+        let rows = Ecn::iter().map(|from| (from, EcnTransitionRow(self.0[from])));
+        serialize_sparse(rows, |row| row.0.values().all(Option::is_none), serializer)
     }
 }
 
@@ -284,15 +278,7 @@ pub struct DscpCount(EnumMap<Dscp, usize>);
 
 impl Serialize for DscpCount {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut map = serializer.serialize_map(None)?;
-        for (dscp, count) in self.0 {
-            // Don't show zero counts.
-            if count == 0 {
-                continue;
-            }
-            map.serialize_entry(&dscp, &count)?;
-        }
-        map.end()
+        serialize_sparse(self.0, |count| *count == 0, serializer)
     }
 }
 

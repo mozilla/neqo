@@ -8,7 +8,6 @@ use std::{
     cell::RefCell,
     fmt::{self, Display},
     num::NonZeroUsize,
-    path::PathBuf,
     rc::Rc,
     slice,
     time::Instant,
@@ -18,7 +17,7 @@ use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, StreamId,
 };
-use neqo_transport::{Connection, ConnectionIdGenerator, OutputBatch};
+use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
 use rustc_hash::FxHashMap as HashMap;
 
@@ -26,7 +25,7 @@ use super::Args;
 use crate::{
     now,
     send_data::{SendData, SendResult},
-    server::ReportedConnections,
+    server::StatsReporter,
 };
 
 pub struct HttpServer {
@@ -36,10 +35,7 @@ pub struct HttpServer {
     /// Tracks POST requests: (bytes received, optional response size from path)
     posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
-    #[expect(clippy::option_option, reason = "clap flag-with-optional-value shape")]
-    stats: Option<Option<PathBuf>>,
-    /// Connections already reported via `--stats`.
-    reported: ReportedConnections<Connection>,
+    stats: StatsReporter,
 }
 
 impl HttpServer {
@@ -114,8 +110,7 @@ impl HttpServer {
             remaining_data: HashMap::default(),
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
-            stats: args.shared.stats.clone(),
-            reported: ReportedConnections::default(),
+            stats: StatsReporter::new(&args.shared),
         }
     }
 }
@@ -219,14 +214,7 @@ impl super::HttpServer for HttpServer {
                 Http3ServerEvent::StateChange {
                     conn,
                     state: Http3State::Closing(_) | Http3State::Closed(_),
-                } => {
-                    if let Some(path) = &self.stats
-                        && self.reported.insert(&conn.connection())
-                        && let Err(e) = crate::report_stats(&conn.borrow().stats(), path.as_deref())
-                    {
-                        qerror!("Failed to report stats: {e}");
-                    }
-                }
+                } => self.stats.report(&conn.connection()),
                 _ => {}
             }
         }
@@ -242,15 +230,16 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use neqo_transport::RandomConnectionIdGenerator;
-    use test_fixture::{anti_replay, default_client, fixture_init, now};
+    use test_fixture::{anti_replay, fixture_init};
 
     use super::{Args, HttpServer};
     use crate::server::{
-        HttpServer as _,
-        test_support::{connect, stats_args},
+        StatsReporter,
+        test_support::{ProcessServer, StatsServer, reported_on_close, stats_args},
     };
 
     fn make_server(args: &Args) -> HttpServer {
+        fixture_init();
         HttpServer::new(
             args,
             anti_replay(),
@@ -258,40 +247,23 @@ mod tests {
         )
     }
 
+    impl StatsServer for HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer {
+            &mut self.server
+        }
+
+        fn stats(&self) -> &StatsReporter {
+            &self.stats
+        }
+    }
+
     #[test]
     fn reports_stats_once_on_close_when_enabled() {
-        fixture_init();
-        let args = stats_args(true);
-        let mut server = make_server(&args);
-        let mut client = default_client();
-        connect(&mut client, &mut server.server);
-
-        client.close(now(), 0, "bye");
-        let out = client.process_output(now());
-        _ = server.server.process(out.dgram(), now());
-
-        server.process_events(now());
-        assert_eq!(server.reported.len(), 1, "should report exactly once");
-
-        // A second pass over the same (now draining/closed) connection must
-        // not double-report.
-        server.process_events(now());
-        assert_eq!(server.reported.len(), 1, "must not double-report");
+        assert_eq!(reported_on_close(&mut make_server(&stats_args(true))), 1);
     }
 
     #[test]
     fn does_not_report_when_stats_disabled() {
-        fixture_init();
-        let args = stats_args(false);
-        let mut server = make_server(&args);
-        let mut client = default_client();
-        connect(&mut client, &mut server.server);
-
-        client.close(now(), 0, "bye");
-        let out = client.process_output(now());
-        _ = server.server.process(out.dgram(), now());
-
-        server.process_events(now());
-        assert!(server.reported.is_empty());
+        assert_eq!(reported_on_close(&mut make_server(&stats_args(false))), 0);
     }
 }
