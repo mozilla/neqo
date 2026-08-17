@@ -394,6 +394,8 @@ pub struct Stats {
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,
+    /// Number of times an MTU black hole was detected.
+    pub pmtud_black_hole: usize,
     /// MTU of the local interface used for the most recent path.
     pub pmtud_iface_mtu: usize,
     /// The peer's `max_udp_payload_size` transport parameter.
@@ -514,10 +516,11 @@ impl Debug for Stats {
         self.cc.fmt(f)?;
         writeln!(
             f,
-            "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
+            "  pmtud: {} sent {} acked {} lost {} black holes {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
             self.pmtud_tx,
             self.pmtud_ack,
             self.pmtud_lost,
+            self.pmtud_black_hole,
             self.pmtud_iface_mtu,
             self.pmtud_peer_max_udp_payload,
             self.pmtud_pmtu
@@ -628,7 +631,7 @@ fn debug() {
     cwnd 0 in_flight 0
     ce_loss 0 ce_ecn 0 ce_spurious 0
     ss_exit_cwnd None ss_exit_reason None
-  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
+  pmtud: 0 sent 0 acked 0 lost 0 black holes 0 iface_mtu None peer_max_udp_payload 0 pmtu
   resumed: false
   frames rx:
     crypto 0 done 0 token 0 close 0

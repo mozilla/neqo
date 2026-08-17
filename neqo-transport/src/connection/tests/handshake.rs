@@ -14,7 +14,7 @@ use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(not(feature = "disable-encryption"))]
@@ -31,9 +31,9 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State},
-    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, DEFAULT_STREAM_DATA, assert_error,
-    connect, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
-    handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
+    get_tokens, handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
@@ -43,6 +43,7 @@ use crate::{
         tests::{exchange_ticket, new_client, new_server},
     },
     events::ConnectionEvent,
+    pmtud::MAX_PROBE_MTU,
     server::ValidateAddress,
     stats::FrameStats,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -55,21 +56,34 @@ const ECH_PUBLIC_NAME: &str = "public.example";
 fn full_handshake(pmtud: bool) {
     qdebug!("---- client: generate CH");
     let mut client = new_client(ConnectionParameters::default().pmtud(pmtud));
-    let out = client.process_output(now());
-    let out2 = client.process_output(now());
-    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
-    assert_eq!(out2.as_dgram_ref().unwrap().len(), client.plpmtu());
+    // How many datagrams the first flight takes depends on how large the ClientHello is and on
+    // what else the connection puts in front of it, so take whatever comes.
+    let mut flight = Vec::new();
+    while let Some(d) = client.process_output(now()).dgram() {
+        flight.push(d);
+    }
+    assert_eq!(
+        flight.last().expect("a first flight").len(),
+        client.plpmtu()
+    );
 
     qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = new_server(ConnectionParameters::default().pmtud(pmtud));
-    server.process_input(out.dgram().unwrap(), now());
-    let out = server.process(out2.dgram(), now());
-    assert!(out.as_dgram_ref().is_some());
-    assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu());
+    for d in flight {
+        server.process_input(d, now());
+    }
+    // The whole flight has to reach the client, not just its last datagram: with probing it takes
+    // several, and only some of them carry the CRYPTO the client needs.
+    let mut out = None;
+    while let Some(d) = server.process_output(now()).dgram() {
+        out = client
+            .process(Some(d), now())
+            .dgram()
+            .or_else(|| out.take());
+    }
 
     qdebug!("---- client: cert verification");
-    let out = client.process(out.dgram(), now());
+    let out = Output::Datagram(out.expect("client should respond"));
     assert!(out.as_dgram_ref().is_some());
 
     let out = server.process(out.dgram(), now());
@@ -93,11 +107,13 @@ fn full_handshake(pmtud: bool) {
     qdebug!("---- client: ACKS -> 0");
     let out = client.process(out.dgram(), now());
     if pmtud {
-        // PMTUD causes a PING probe to be sent here
-        let pkt = out.dgram().unwrap();
-        assert!(pkt.len() > client.plpmtu());
+        assert_eq!(
+            client.plpmtu(),
+            MAX_PROBE_MTU - Pmtud::header_size(DEFAULT_ADDR.ip())
+        );
     } else {
         assert!(out.as_dgram_ref().is_none());
+        assert_eq!(client.plpmtu(), Pmtud::default_plpmtu(DEFAULT_ADDR.ip()));
     }
     assert_eq!(*client.state(), State::Confirmed);
 }
@@ -2141,4 +2157,125 @@ fn client_initial_with_token() {
     let dropped = client.stats().dropped_rx;
     client.process_input(datagram(server_initial(&ci, &[0x01])), now());
     assert_eq!(client.stats().dropped_rx, dropped + 1);
+}
+
+/// Produce a datagram carrying CRYPTO the peer already has, in whatever spaces are available.
+/// The frame needs a packet to ride along in, so wait out any pacing delay first.
+fn duplicate_crypto(c: &mut Connection, now: &mut Instant) -> Datagram {
+    loop {
+        match c.test_write_frames(CryptoWriter {}, *now) {
+            Output::Datagram(d) => return d,
+            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
+            o => panic!("no datagram to carry duplicate CRYPTO: {o:?}"),
+        }
+    }
+}
+
+/// Drain everything `c` will send, handing each datagram to `deliver` and advancing `now` over any
+/// pacing delay, so that a paced sender is followed to the end of its flight.
+fn drain(c: &mut Connection, now: &mut Instant, mut deliver: impl FnMut(Datagram, Instant)) {
+    loop {
+        match c.process_output(*now) {
+            Output::Datagram(d) => deliver(d, *now),
+            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
+            _ => break,
+        }
+    }
+}
+
+/// Move everything `from` has to send to `to`.
+fn flush_to(from: &mut Connection, to: &mut Connection, now: &mut Instant) {
+    drain(from, now, |d, t| to.process_input(d, t));
+}
+
+/// Drop everything `c` has to send, as if it were all lost.
+fn drop_flight(c: &mut Connection, now: &mut Instant) {
+    drain(c, now, |_, _| {});
+}
+
+/// Deliver `dgram` to `c` and return how many CRYPTO frames it sends in response.
+fn crypto_sent_for(c: &mut Connection, dgram: Datagram, now: &mut Instant) -> usize {
+    let before = c.stats().frame_tx.crypto;
+    c.process_input(dgram, *now);
+    drop_flight(c, now);
+    c.stats().frame_tx.crypto - before
+}
+
+/// Duplicate CRYPTO in an Initial makes an endpoint resend its own unacknowledged CRYPTO ahead of
+/// the PTO, per Section 6.2.3 of RFC 9002 -- but only once per connection.
+#[test]
+fn crypto_resent_at_most_once() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // The server gets the whole ClientHello and answers, leaving its own CRYPTO unacknowledged.
+    flush_to(&mut client, &mut server, &mut now);
+    drop_flight(&mut server, &mut now);
+
+    // The first duplicate resends the server's flight.
+    now += DEFAULT_RTT;
+    let dup = duplicate_crypto(&mut client, &mut now);
+    assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
+
+    // The second changes nothing.
+    now += DEFAULT_RTT;
+    let dup = duplicate_crypto(&mut client, &mut now);
+    assert_eq!(crypto_sent_for(&mut server, dup, &mut now), 0);
+}
+
+/// Only duplicate CRYPTO in an *Initial* is a sign of loss, per Section 6.2.3 of RFC 9002.
+#[test]
+fn crypto_resent_only_for_initial() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // Bring the client to Handshake keys and flush its Finished without delivering it.
+    flush_to(&mut client, &mut server, &mut now);
+    flush_to(&mut server, &mut client, &mut now);
+    assert!(maybe_authenticate(&mut client));
+    drop_flight(&mut client, &mut now);
+
+    // The server repeats CRYPTO the client already has. Deliver only the Handshake packet of that
+    // datagram: the coalesced Initial would be the very trigger under test, and in the coalesced
+    // 1-RTT packet the offset is one the client has *not* received, so that copy is not a
+    // duplicate at all. The client has nothing to learn from the Handshake packet and must not
+    // resend its Finished.
+    let dup = duplicate_crypto(&mut server, &mut now);
+    let (_initial, rest) = split_datagram(&dup);
+    let (handshake, _short) = split_datagram(&rest.expect("a coalesced Handshake packet"));
+    assert_handshake(&handshake);
+    assert_eq!(crypto_sent_for(&mut client, handshake, &mut now), 0);
+}
+
+/// A duplicate that arrives while nothing is outstanding has nothing to resend, so it must not use
+/// up the one chance an endpoint gets to resend ahead of the PTO.
+#[test]
+fn crypto_resend_chance_survives_useless_duplicate() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // Give the server only the first part of the ClientHello. It cannot answer yet, so it has no
+    // CRYPTO of its own outstanding, and SNI slicing puts offset 0 in this first datagram.
+    let ch1 = client.process_output(now).dgram().expect("a datagram");
+    let ch2 = client.process_output(now).dgram().expect("a datagram");
+    server.process_input(ch1, now);
+
+    // A duplicate here finds nothing to resend.
+    let dup = duplicate_crypto(&mut client, &mut now);
+    assert_eq!(crypto_sent_for(&mut server, dup, &mut now), 0);
+
+    // Complete the ClientHello and drop the server's answer, leaving its CRYPTO unacknowledged.
+    server.process_input(ch2, now);
+    drop_flight(&mut server, &mut now);
+
+    // The chance was not spent above, so this duplicate still gets the flight resent.
+    now += DEFAULT_RTT;
+    let dup = duplicate_crypto(&mut client, &mut now);
+    assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
 }

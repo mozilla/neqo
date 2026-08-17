@@ -399,27 +399,39 @@ pub fn exchange_packets(
 /// When connection establishment fails.
 pub fn connect_peers(hconn_c: &mut Http3Client, hconn_s: &mut Http3Server) -> Option<Datagram> {
     assert_eq!(hconn_c.state(), Http3State::Initializing);
-    let out = hconn_c.process_output(now()); // Initial
-    let out2 = hconn_c.process_output(now()); // Initial
-    _ = hconn_s.process(out.dgram(), now()); // ACK
-    let out = hconn_s.process(out2.dgram(), now()); // Initial + Handshake
-    let out = hconn_c.process(out.dgram(), now());
-    let out = hconn_s.process(out.dgram(), now());
-    let out = hconn_c.process(out.dgram(), now());
-    drop(hconn_s.process(out.dgram(), now())); // consume ACK
     let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
-    assert!(hconn_c.events().any(authentication_needed));
-    hconn_c.authenticated(AuthenticationStatus::Ok, now());
-    let out = hconn_c.process_output(now()); // Handshake
-    assert_eq!(hconn_c.state(), Http3State::Connected);
-    let out = hconn_s.process(out.dgram(), now()); // Handshake
-    let out = hconn_c.process(out.dgram(), now());
-    let out = hconn_s.process(out.dgram(), now());
-    // assert!(hconn_s.settings_received);
-    let out = hconn_c.process(out.dgram(), now());
-    // assert!(hconn_c.settings_received);
 
-    out.dgram()
+    // Drive the handshake to completion. The last thing the client produces is held back and
+    // returned, so the caller has a datagram to drive the next exchange with.
+    let mut held = None;
+    loop {
+        let mut progressed = false;
+        while let Some(d) = hconn_c.process_output(now()).dgram() {
+            progressed = true;
+            let feed = if hconn_c.state() == Http3State::Connected {
+                held.replace(d)
+            } else {
+                Some(d)
+            };
+            if let Some(d) = feed {
+                let mut input = Some(d);
+                while let Some(r) = hconn_s.process(input.take(), now()).dgram() {
+                    hconn_c.process_input(r, now());
+                }
+            }
+        }
+        // Reading events drains them, so only look while the handshake is still running.
+        if hconn_c.state() != Http3State::Connected && hconn_c.events().any(authentication_needed) {
+            hconn_c.authenticated(AuthenticationStatus::Ok, now());
+            progressed = true;
+        }
+        if !progressed {
+            break;
+        }
+    }
+    assert_eq!(hconn_c.state(), Http3State::Connected);
+
+    held
 }
 
 /// Split the first packet off a coalesced packet.

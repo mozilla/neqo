@@ -228,8 +228,11 @@ impl PacketSender {
     }
 
     pub fn on_packet_sent(&mut self, pkt: &sent::Packet, rtt: Duration, now: Instant) {
-        self.pacer
-            .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
+        // A round of PMTUD probes is a burst that RFC 9002, Section 7.7 permits. Don't pace.
+        if !pkt.is_pmtud_probe() {
+            self.pacer
+                .spend(pkt.time_sent(), rtt, self.cc.cwnd(), pkt.len());
+        }
         self.cc.on_packet_sent(pkt, now);
     }
 

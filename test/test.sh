@@ -16,7 +16,7 @@ cargo build --locked --bin neqo-client --bin neqo-server
 addr=localhost
 port=4433
 path=/20000
-flags="--verbose --verbose --verbose --qlog-dir $tmp --alpn hq-interop --quic-version 1"
+flags="--no-sni-slicing --verbose --verbose --verbose --qlog-dir $tmp --alpn hq-interop --quic-version 1"
 if [ "$(uname -s)" != "Linux" ]; then
         iface=lo0
 else
@@ -27,6 +27,16 @@ if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
         export LD_LIBRARY_PATH="$NSS_DIR/../dist/$NSS_TARGET/lib"
         export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
 fi
+
+# Add QUIC frame detail: CRYPTO is offset,length; STREAM is id,offset,length,fin; ACK is largest
+# acknowledged, first ACK range, then gap,range pairs. There is no way to add a column, only to
+# replace the whole set, so start from the one tshark would otherwise use.
+columns=$(tshark -G currentprefs |
+        sed -n '/^gui\.column\.format:/,/^$/s/^[[:space:]]\{1,\}//p' | tr -d '\n')
+[ "$columns" ] || { echo "cannot read tshark's column format" >&2; exit 1; }
+columns+=',"CRYPTO","%Cus:quic.crypto.offset or quic.crypto.length:0:R",'
+columns+='"STREAM","%Cus:quic.stream.stream_id or quic.stream.offset or quic.stream.length or quic.stream.fin:0:U",'
+columns+='"ACK","%Cus:quic.ack.largest_acknowledged or quic.ack.first_ack_range or quic.ack.gap or quic.ack.ack_range:0:R"'
 
 client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
 server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
@@ -42,5 +52,6 @@ tmux \
         split-window -v -f "\
                 until [ -e $tmp/done ]; do sleep 1; done; \
                 echo $tmp; ls -l $tmp; echo; \
-                tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey" \; \
+                tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey \
+                        -o gui.column.format:'$columns'" \; \
         set remain-on-exit on

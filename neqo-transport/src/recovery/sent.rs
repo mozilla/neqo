@@ -87,12 +87,19 @@ impl Packet {
             .any(|t| matches!(t, recovery::Token::EcnEct0))
     }
 
+    /// The full IP MTU this packet probes for, if it is a PMTUD probe.
+    #[must_use]
+    pub fn pmtud_probe_size(&self) -> Option<usize> {
+        self.tokens.iter().find_map(|t| match t {
+            recovery::Token::PmtudProbe(mtu) => Some(*mtu),
+            _ => None,
+        })
+    }
+
     /// Returns `true` if this packet is a PMTUD probe.
     #[must_use]
     pub fn is_pmtud_probe(&self) -> bool {
-        self.tokens
-            .iter()
-            .any(|t| matches!(t, recovery::Token::PmtudProbe))
+        self.pmtud_probe_size().is_some()
     }
 
     /// The time that this packet was sent.
@@ -136,9 +143,8 @@ impl Packet {
         self.primary_path = false;
     }
 
-    /// For Initial packets, it is possible that the packet builder needs to amend the length.
-    pub fn track_padding(&mut self, padding: usize) {
-        debug_assert_eq!(self.pt, packet::Type::Initial);
+    /// Account for padding that expands the datagram after this packet was built.
+    pub const fn track_padding(&mut self, padding: usize) {
         self.len += padding;
     }
 

@@ -52,8 +52,9 @@ fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
 
     // Connect client and proxy.
     let out = test_fixture::connect_peers(&mut client, &mut proxy);
-    let out = proxy.process(out, now()).dgram().unwrap();
-    client.process_input(out, now());
+    if let Some(out) = proxy.process(out, now()).dgram() {
+        client.process_input(out, now());
+    }
     assert!(client.connect_udp_enabled());
 
     // Establish connect-udp session.

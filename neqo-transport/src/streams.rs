@@ -629,6 +629,12 @@ impl Streams {
         self.send.get(stream_id)
     }
 
+    /// See [`SendStreams::buffered`].
+    #[must_use]
+    pub fn buffered(&self) -> usize {
+        self.send.buffered()
+    }
+
     /// # Errors
     /// When the stream does not exist.
     pub fn get_recv_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
