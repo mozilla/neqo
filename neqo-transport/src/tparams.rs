@@ -995,6 +995,7 @@ mod tests {
         Role::{Client, Server},
         qdebug, to_u64,
     };
+    use test_fixture::fixture_init;
 
     use super::PreferredAddress;
     use crate::{
@@ -1596,6 +1597,7 @@ mod tests {
 
     #[test]
     fn server_rejects_server_only_tparams() {
+        fixture_init();
         for tp in [
             OriginalDestinationConnectionId,
             RetrySourceConnectionId,
