@@ -232,6 +232,21 @@ impl RxStreamOrderer {
         Self::default()
     }
 
+    /// Whether every byte of `[offset, offset + len)` has already been received or read.
+    /// Call this before [`Self::inbound_frame`], which wipes the ability to determine this.
+    #[must_use]
+    pub fn covered(&self, offset: u64, len: usize) -> bool {
+        let end = offset + to_u64(len);
+        let mut covered = max(offset, self.retired);
+        for (&start, data) in self.data_ranges.range(..end) {
+            if start > covered {
+                return false;
+            }
+            covered = max(covered, start + to_u64(data.len()));
+        }
+        covered >= end
+    }
+
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
@@ -1420,6 +1435,43 @@ mod tests {
             2,
             "a 4096-byte buffer must not be extended further"
         );
+    }
+
+    #[test]
+    fn covered_spanning_adjacent_ranges() {
+        const LEN: usize = 2 * RxStreamOrderer::RANGE_TARGET + 10;
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[0u8; RxStreamOrderer::RANGE_TARGET])
+            .unwrap();
+        s.inbound_frame(4096, &[1u8; RxStreamOrderer::RANGE_TARGET])
+            .unwrap();
+        s.inbound_frame(8192, &[2u8; 10]).unwrap();
+        assert_eq!(s.data_ranges.len(), 3);
+
+        assert!(s.covered(0, LEN));
+        assert!(s.covered(4090, 16));
+        assert!(!s.covered(0, LEN + 1), "one byte beyond what was received");
+
+        // The same duplicate frame grows `received`, which is why `covered` exists.
+        let received = s.received();
+        s.inbound_frame(0, &[0u8; LEN]).unwrap();
+        assert!(s.received() > received);
+    }
+
+    /// Coverage is against what was received *or* read, and a gap is never covered.
+    #[test]
+    fn covered_retired_and_gaps() {
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[0u8; 10]).unwrap();
+        s.inbound_frame(20, &[1u8; 10]).unwrap();
+
+        let mut buf = [0u8; 10];
+        assert_eq!(s.read(&mut buf), 10);
+        assert!(s.covered(0, 10), "already read");
+        assert!(s.covered(25, 5));
+        assert!(!s.covered(10, 10), "the gap");
+        assert!(!s.covered(5, 10), "spans into the gap");
+        assert!(s.covered(15, 0), "an empty range is covered");
     }
 
     /// A buffer of 4095 bytes IS extended when the next frame is contiguous.
