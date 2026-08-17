@@ -76,6 +76,8 @@ pub struct Crypto {
     tls: Agent,
     streams: CryptoStreams,
     states: CryptoStates,
+    /// Whether [`Self::speed_up_handshake`] has already resent anything.
+    handshake_sped_up: bool,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -133,6 +135,7 @@ impl Crypto {
             tls: agent,
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
+            handshake_sped_up: false,
         })
     }
 
@@ -373,6 +376,18 @@ impl Crypto {
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
+    }
+
+    /// Resend unacknowledged handshake CRYPTO ahead of the PTO, to speed up handshake completion
+    /// per Section 6.2.3 of RFC 9002. Returns whether anything was resent.
+    pub fn speed_up_handshake(&mut self) -> bool {
+        if self.handshake_sped_up {
+            return false;
+        }
+        // `|`, not `||`: both spaces need to be resent.
+        self.handshake_sped_up = self.streams.resend_unacked(PacketNumberSpace::Initial)
+            | self.streams.resend_unacked(PacketNumberSpace::Handshake);
+        self.handshake_sped_up
     }
 
     /// Discard state for a packet number space and return true
@@ -1525,11 +1540,19 @@ impl CryptoStreams {
         Ok(())
     }
 
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+    /// Buffer a CRYPTO frame. Returns whether any of it was new.
+    pub fn inbound_frame(
+        &mut self,
+        space: PacketNumberSpace,
+        offset: u64,
+        data: &[u8],
+    ) -> Res<bool> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
+        let received = rx.received();
         rx.inbound_frame(offset, data);
+        let fresh = rx.received() > received;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
-            Ok(())
+            Ok(fresh)
         } else {
             Err(Error::CryptoBufferExceeded)
         }
@@ -1561,12 +1584,15 @@ impl CryptoStreams {
     }
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
-    /// This can help speed up handshake times.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
+    /// This can help speed up handshake times. Returns whether anything is now waiting to be sent.
+    pub fn resend_unacked(&mut self, space: PacketNumberSpace) -> bool {
         if space != PacketNumberSpace::ApplicationData
             && let Some(cs) = self.get_mut(space)
         {
             cs.tx.unmark_sent();
+            !cs.tx.is_empty()
+        } else {
+            false
         }
     }
 
