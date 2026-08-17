@@ -750,6 +750,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "rustc-hash",
+ "serde_json",
  "strum",
  "test-fixture 0.1.0",
  "test-fixture 0.31.1",
@@ -770,7 +771,6 @@ dependencies = [
  "mach2",
  "qlog",
  "serde",
- "serde_json",
  "sha1",
  "static_assertions",
  "strum",
@@ -831,6 +831,7 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "serde",
+ "serde_json",
  "serde_with",
  "smallvec",
  "static_assertions",
@@ -1269,6 +1270,7 @@ dependencies = [
  "neqo-transport",
  "nss-rs",
  "qlog",
+ "serde_json",
  "test-fixture 0.1.0",
 ]
 

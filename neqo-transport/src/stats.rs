@@ -8,6 +8,7 @@
 
 use std::{
     cell::RefCell,
+    fmt::Debug,
     ops::{Deref, DerefMut},
     rc::Rc,
     time::Duration,
@@ -190,9 +191,11 @@ pub struct CongestionControlStats {
     pub search_zero_sent_bytes: usize,
     /// The `latest_rtt` from the first ACK that initialized SEARCH. Used to evaluate whether the
     /// initial RTT sample (which sets `bin_duration`) is inflated relative to `min_rtt`.
+    #[serde(serialize_with = "opt_ms")]
     pub search_first_rtt: Option<Duration>,
     /// The `latest_rtt` from the second ACK processed by SEARCH. Together with `search_first_rtt`,
     /// allows evaluating whether `min(first, second)` would be a better initialization value.
+    #[serde(serialize_with = "opt_ms")]
     pub search_second_rtt: Option<Duration>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
@@ -201,8 +204,39 @@ pub struct CongestionControlStats {
     pub w_max: Option<f64>,
 }
 
+/// Serialize a [`Duration`] as fractional milliseconds, the unit RTTs are
+/// compared in. serde's default is a `{"secs": _, "nanos": _}` pair.
+fn ms<S: Serializer>(d: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_f64(d.as_secs_f64() * 1000.0)
+}
+
+/// [`ms`] for an optional [`Duration`].
+#[expect(clippy::ref_option, reason = "signature required by serialize_with")]
+fn opt_ms<S: Serializer>(d: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error> {
+    match d {
+        Some(d) => ms(d, serializer),
+        None => serializer.serialize_none(),
+    }
+}
+
+/// A map key, serialized as its [`Debug`] form.
+///
+/// JSON object keys have to be strings, but `serde` renders a key variant that
+/// carries data — such as [`ecn::ValidationOutcome::NotCapable`] — as an object,
+/// which `serde_json` rejects. Going through [`Debug`] keeps that off the table
+/// for every key type, present and future. For the unit-only key enums it emits
+/// the same variant name `serde` would.
+struct Key<K>(K);
+
+impl<K: Debug> Serialize for Key<K> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&format_args!("{:?}", self.0))
+    }
+}
+
 /// Serialize `entries` as a map, leaving out the ones `skip` selects.
-fn serialize_sparse<S: Serializer, K: Serialize, V: Serialize>(
+#[expect(clippy::redundant_pub_crate, reason = "also used by crate::ecn")]
+pub(crate) fn serialize_sparse<S: Serializer, K: Debug, V: Serialize>(
     entries: impl IntoIterator<Item = (K, V)>,
     skip: impl Fn(&V) -> bool,
     serializer: S,
@@ -210,7 +244,7 @@ fn serialize_sparse<S: Serializer, K: Serialize, V: Serialize>(
     let mut map = serializer.serialize_map(None)?;
     for (key, value) in entries {
         if !skip(&value) {
-            map.serialize_entry(&key, &value)?;
+            map.serialize_entry(&Key(key), &value)?;
         }
     }
     map.end()
@@ -343,10 +377,13 @@ pub struct Stats {
     pub resumed: bool,
 
     /// The current, estimated round-trip time on the primary path.
+    #[serde(serialize_with = "ms")]
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
+    #[serde(serialize_with = "ms")]
     pub rttvar: Duration,
     /// The current minimum RTT observed on the primary path.
+    #[serde(serialize_with = "ms")]
     pub min_rtt: Duration,
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
@@ -449,13 +486,22 @@ impl Deref for StatsCell {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::{Ecn, json};
+    use std::time::Duration;
+
+    use neqo_common::Ecn;
+    use serde::Serialize;
+    use serde_json::{Value, json};
 
     use super::{EcnCount, EcnTransitions, Stats, StatsCell};
     use crate::{
         packet,
         stats::{CongestionControlStats, DscpCount, SearchResetStats},
     };
+
+    /// The JSON `Stats` serializes to, as it is written to a `--stats` file.
+    fn to_json<T: Serialize>(value: &T) -> String {
+        serde_json::to_string(value).expect("serializes")
+    }
 
     #[test]
     fn stats_init_sets_info() {
@@ -488,23 +534,44 @@ mod tests {
 
     #[test]
     fn ecn_count_json_skips_only_empty_rows() {
-        assert_eq!(json::compact(&EcnCount::default()), "{}");
+        assert_eq!(to_json(&EcnCount::default()), "{}");
 
         let mut counts = EcnCount::default();
         counts[packet::Type::Short][Ecn::Ce] = 3;
-        let json = json::compact(&counts);
+        let json = to_json(&counts);
         assert!(json.contains("Short"));
         assert!(!json.contains("Initial") && !json.contains("Handshake"));
     }
 
     #[test]
     fn ecn_transitions_json_skips_rows_with_no_transitions() {
-        assert_eq!(json::compact(&EcnTransitions::default()), "{}");
+        assert_eq!(to_json(&EcnTransitions::default()), "{}");
     }
 
     #[test]
     fn dscp_count_json_skips_zero_entries() {
-        assert_eq!(json::compact(&DscpCount::default()), "{}");
+        assert_eq!(to_json(&DscpCount::default()), "{}");
+    }
+
+    /// Serializing a default [`Stats`] exercises every field's serializer, so
+    /// this covers fields added later without needing to be told about them.
+    #[test]
+    fn stats_json_round_trips() {
+        let json = to_json(&Stats::default());
+        serde_json::from_str::<Value>(&json)
+            .unwrap_or_else(|e| panic!("invalid JSON: {e}: {json}"));
+    }
+
+    #[test]
+    fn durations_are_fractional_milliseconds() {
+        let stats = Stats {
+            min_rtt: Duration::from_micros(1500),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&stats).expect("serializes")["min_rtt"],
+            json!(1.5)
+        );
     }
 
     #[test]
@@ -522,7 +589,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let json = json::compact(&stats);
+        let json = to_json(&stats);
 
         for field in ["ecn_last_mark", "w_max"] {
             assert!(json.contains(&format!("\"{field}\"")));

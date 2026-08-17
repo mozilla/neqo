@@ -267,7 +267,7 @@ mod tests {
     use super::{Args, HttpServer};
     use crate::server::{
         StatsReporter,
-        test_support::{ProcessServer, StatsServer, reported_on_close, stats_args},
+        test_support::{ProcessServer, StatsServer, reported_on_close, stats_args, stats_tests},
     };
 
     fn make_server(args: &Args) -> HttpServer {
@@ -280,25 +280,7 @@ mod tests {
         .expect("build server")
     }
 
-    impl StatsServer for HttpServer {
-        fn transport(&mut self) -> &mut dyn ProcessServer {
-            &mut self.server
-        }
-
-        fn stats(&self) -> &StatsReporter {
-            &self.stats
-        }
-    }
-
-    #[test]
-    fn reports_stats_once_on_close_when_enabled() {
-        assert_eq!(reported_on_close(&mut make_server(&stats_args(true))), 1);
-    }
-
-    #[test]
-    fn does_not_report_when_stats_disabled() {
-        assert_eq!(reported_on_close(&mut make_server(&stats_args(false))), 0);
-    }
+    stats_tests!(make_server);
 
     // Issue 1 (FIN-only frame after buffered partial data) is exercised by
     // the QNS zerortt interop test end-to-end; unit testing it would require
