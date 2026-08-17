@@ -14,7 +14,7 @@ use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(not(feature = "disable-encryption"))]
@@ -31,9 +31,9 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State},
-    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, DEFAULT_STREAM_DATA, assert_error,
-    connect, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
-    handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
+    get_tokens, handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
@@ -2141,4 +2141,112 @@ fn client_initial_with_token() {
     let dropped = client.stats().dropped_rx;
     client.process_input(datagram(server_initial(&ci, &[0x01])), now());
     assert_eq!(client.stats().dropped_rx, dropped + 1);
+}
+
+/// Produce a datagram carrying CRYPTO the peer already has, in whatever spaces are available.
+fn duplicate_crypto(c: &mut Connection, now: Instant) -> Datagram {
+    c.test_write_frames(CryptoWriter {}, now)
+        .dgram()
+        .expect("a datagram")
+}
+
+/// Move everything `from` has to send at `now` to `to`.
+fn flush_to(from: &mut Connection, to: &mut Connection, now: Instant) {
+    while let Some(d) = from.process_output(now).dgram() {
+        to.process_input(d, now);
+    }
+}
+
+/// Drop everything `c` has to send at `now`, as if it were all lost.
+fn drop_flight(c: &mut Connection, now: Instant) {
+    while c.process_output(now).dgram().is_some() {}
+}
+
+/// Deliver `dgram` to `c` and return how many CRYPTO frames it sends in response.
+fn crypto_sent_for(c: &mut Connection, dgram: Datagram, now: Instant) -> usize {
+    let before = c.stats().frame_tx.crypto;
+    c.process_input(dgram, now);
+    drop_flight(c, now);
+    c.stats().frame_tx.crypto - before
+}
+
+/// Duplicate CRYPTO in an Initial makes an endpoint resend its own unacknowledged CRYPTO ahead of
+/// the PTO, per Section 6.2.3 of RFC 9002 -- but only once per connection.
+#[test]
+fn crypto_resent_at_most_once() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // The server gets the whole ClientHello and answers, leaving its own CRYPTO unacknowledged.
+    flush_to(&mut client, &mut server, now);
+    drop_flight(&mut server, now);
+
+    // The first duplicate resends the server's flight.
+    now += DEFAULT_RTT;
+    let dup = duplicate_crypto(&mut client, now);
+    assert!(crypto_sent_for(&mut server, dup, now) >= 2);
+
+    // The second changes nothing.
+    now += DEFAULT_RTT;
+    let dup = duplicate_crypto(&mut client, now);
+    assert_eq!(crypto_sent_for(&mut server, dup, now), 0);
+}
+
+/// Only duplicate CRYPTO in an *Initial* is a sign of loss, per Section 6.2.3 of RFC 9002.
+#[test]
+fn crypto_resent_only_for_initial() {
+    fixture_init();
+    // Without pacing, so that the whole flight goes out at one instant.
+    let mut client = new_client(ConnectionParameters::default().pacing(false));
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    let now = now();
+
+    // Bring the client to Handshake keys and flush its Finished without delivering it.
+    flush_to(&mut client, &mut server, now);
+    flush_to(&mut server, &mut client, now);
+    assert!(maybe_authenticate(&mut client));
+    drop_flight(&mut client, now);
+
+    // The server repeats CRYPTO the client already has. Deliver only the Handshake packet of that
+    // datagram: the coalesced Initial would be the very trigger under test, and in the coalesced
+    // 1-RTT packet the offset is one the client has *not* received, so that copy is not a
+    // duplicate at all. The client has nothing to learn from the Handshake packet and must not
+    // resend its Finished.
+    let dup = duplicate_crypto(&mut server, now);
+    let (_initial, rest) = split_datagram(&dup);
+    let (handshake, _short) = split_datagram(&rest.expect("a coalesced Handshake packet"));
+    assert_handshake(&handshake);
+    assert_eq!(crypto_sent_for(&mut client, handshake, now), 0);
+}
+
+/// A duplicate that arrives while nothing is outstanding has nothing to resend, so it must not use
+/// up the one chance an endpoint gets to resend ahead of the PTO.
+#[test]
+fn crypto_resend_chance_survives_useless_duplicate() {
+    fixture_init();
+    // Without pacing, so that everything below happens at one instant.
+    let mut client = new_client(ConnectionParameters::default().pacing(false));
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    let mut now = now();
+
+    // Give the server only the first part of the ClientHello. It cannot answer yet, so it has no
+    // CRYPTO of its own outstanding, and SNI slicing puts offset 0 in this first datagram.
+    let ch1 = client.process_output(now).dgram().expect("a datagram");
+    let ch2 = client.process_output(now).dgram().expect("a datagram");
+    server.process_input(ch1, now);
+
+    // A duplicate here finds nothing to resend.
+    let dup = duplicate_crypto(&mut client, now);
+    assert_eq!(crypto_sent_for(&mut server, dup, now), 0);
+
+    // Complete the ClientHello and drop the server's answer, leaving its CRYPTO unacknowledged.
+    server.process_input(ch2, now);
+    drop_flight(&mut server, now);
+
+    // The chance was not spent above, so this duplicate still gets the flight resent.
+    now += DEFAULT_RTT;
+    let dup = duplicate_crypto(&mut client, now);
+    assert!(crypto_sent_for(&mut server, dup, now) >= 2);
 }
