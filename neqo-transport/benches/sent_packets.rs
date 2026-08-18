@@ -106,5 +106,9 @@ fn remove_expired(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, take_ranges, track, remove_expired);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = take_ranges, track, remove_expired
+}
 criterion_main!(benches);

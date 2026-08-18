@@ -85,10 +85,9 @@ fn pacer_spend_disabled(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    pacer_spend_pacing_limited,
-    pacer_next_fast_path,
-    pacer_spend_disabled,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = pacer_spend_pacing_limited, pacer_next_fast_path, pacer_spend_disabled
+}
 criterion_main!(benches);
