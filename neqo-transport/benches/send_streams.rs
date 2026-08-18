@@ -210,15 +210,16 @@ fn write_frames_3_groups_9_sendordered(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    write_frames_1_stream,
-    write_frames_5_streams,
-    write_frames_20_streams,
-    write_frames_5_fair_all_active,
-    write_frames_20_fair_all_active,
-    write_frames_3_groups_9_streams,
-    write_frames_5_sendordered,
-    write_frames_3_groups_9_sendordered,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = write_frames_1_stream,
+        write_frames_5_streams,
+        write_frames_20_streams,
+        write_frames_5_fair_all_active,
+        write_frames_20_fair_all_active,
+        write_frames_3_groups_9_streams,
+        write_frames_5_sendordered,
+        write_frames_3_groups_9_sendordered
+}
 criterion_main!(benches);

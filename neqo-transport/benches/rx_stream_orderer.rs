@@ -124,11 +124,9 @@ fn inbound_duplicates(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    inbound_in_order,
-    inbound_with_loss,
-    inbound_reordered,
-    inbound_duplicates,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = inbound_in_order, inbound_with_loss, inbound_reordered, inbound_duplicates
+}
 criterion_main!(benches);
