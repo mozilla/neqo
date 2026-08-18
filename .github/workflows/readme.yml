@@ -19,10 +19,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           tools: cargo-readme
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
 
       - run: |
           cd mtu # Only works for this crate currently.

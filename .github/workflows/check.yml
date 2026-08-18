@@ -88,17 +88,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           cache-key: ${{ matrix.type }} # Debug and release are different.
-
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests and determine coverage
         env:
@@ -124,7 +119,7 @@ jobs:
           fi
           # Run tests across all meaningful feature combinations.
           # shellcheck disable=SC2086
-          cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default
+          cargo hack test $BUILD_TYPE --locked --feature-powerset --tests --exclude-features gecko,ci,build-fuzzing-corpus --mutually-exclusive-features bench,blapi,default,disable-encryption
 
       - name: Run client/server transfer
         run: |
@@ -212,11 +207,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
       - run: |
           cargo update -w --locked
           cargo hack update -w --locked
@@ -232,14 +227,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
-        with:
-          target: ${{ matrix.target }}
-          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms

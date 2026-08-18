@@ -150,12 +150,13 @@ fn mark_acked_fragmented(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    benchmark_coalesce,
-    mark_sent_sequential,
-    mark_sent_retransmit,
-    mark_acked_gap_empty_covered,
-    mark_acked_fragmented,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = benchmark_coalesce,
+        mark_sent_sequential,
+        mark_sent_retransmit,
+        mark_acked_gap_empty_covered,
+        mark_acked_fragmented
+}
 criterion_main!(benches);

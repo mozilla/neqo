@@ -101,7 +101,7 @@ neqo/
 ├── mtu/                # MTU detection (tests require GitHub Actions)
 └── .github/            # CI workflows and actions
     ├── workflows/      # CI pipeline definitions
-    └── actions/        # Reusable GitHub Actions (rust, nss, etc.)
+    └── actions/        # Reusable GitHub Actions (install-build-deps, build-neqo, etc.)
 ```
 
 ### Key Files

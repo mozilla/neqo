@@ -207,6 +207,30 @@ impl ConnectionIdGenerator for VaryingConnectionIdGenerator {
     }
 }
 
+/// The qlog to attach to a fixture connection: none when benchmarking, because
+/// it distorts measurements; file-backed when `QLOGDIR` is set; in-memory
+/// otherwise.  `name` is only evaluated for the file-backed case.
+fn fixture_qlog<F: FnOnce() -> String>(role: Role, name: F) -> Option<Qlog> {
+    if cfg!(feature = "bench") {
+        return None;
+    }
+    Some(std::env::var("QLOGDIR").map_or_else(
+        |_| new_neqo_qlog().0,
+        |dir| {
+            let label = format!("Neqo {role} qlog");
+            Qlog::enabled_with_file(
+                dir.parse().unwrap(),
+                role,
+                Some(label.clone()),
+                Some(label),
+                name(),
+                now(),
+            )
+            .unwrap()
+        },
+    ))
+}
+
 /// Create a new client.
 ///
 /// # Panics
@@ -229,21 +253,9 @@ where
     )
     .expect("create a client");
 
-    if let Ok(dir) = std::env::var("QLOGDIR") {
-        let cid = client.odcid().unwrap();
-        client.set_qlog(
-            Qlog::enabled_with_file(
-                dir.parse().unwrap(),
-                Role::Client,
-                Some("Neqo client qlog".to_string()),
-                Some("Neqo client qlog".to_string()),
-                format!("client-{cid}"),
-                now(),
-            )
-            .unwrap(),
-        );
-    } else {
-        let (log, _contents) = new_neqo_qlog();
+    if let Some(log) = fixture_qlog(Role::Client, || {
+        format!("client-{}", client.odcid().unwrap())
+    }) {
         client.set_qlog(log);
     }
     client
@@ -288,22 +300,10 @@ where
         params,
     )
     .expect("create a server");
-    if let Ok(dir) = std::env::var("QLOGDIR") {
+    if let Some(log) = fixture_qlog(Role::Server, || {
         // Use random bytes to generate a unique name
-        let unique_name = format!("server-{}", Hex::new(random::<10>()));
-        c.set_qlog(
-            Qlog::enabled_with_file(
-                dir.parse().unwrap(),
-                Role::Server,
-                Some("Neqo server qlog".to_string()),
-                Some("Neqo server qlog".to_string()),
-                unique_name,
-                now(),
-            )
-            .unwrap(),
-        );
-    } else {
-        let (log, _contents) = new_neqo_qlog();
+        format!("server-{}", Hex::new(random::<10>()))
+    }) {
         c.set_qlog(log);
     }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
@@ -587,11 +587,6 @@ impl Display for SharedVec {
 #[must_use]
 pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     let buf = SharedVec::default();
-
-    if cfg!(feature = "bench") {
-        return (Qlog::disabled(), buf);
-    }
-
     let mut trace = new_trace(Role::Client);
     // Set reference time to 0.0 for testing.
     trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
