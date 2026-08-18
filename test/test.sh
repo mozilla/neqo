@@ -10,8 +10,9 @@
 
 set -e
 
+missing=
 for tool in cargo tmux tcpdump tshark; do
-        hash "$tool" 2>/dev/null || missing+=" $tool"
+        command -v "$tool" >/dev/null || missing+=" $tool"
 done
 [ -z "$missing" ] || { echo "missing tools:$missing" >&2; exit 1; }
 
