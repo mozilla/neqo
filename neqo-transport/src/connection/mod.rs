@@ -48,7 +48,7 @@ use crate::{
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
     packet::{self},
     path::{Path, PathRef, Paths},
-    qlog,
+    qlog::{self, PacketDroppedTrigger, TransportOwner},
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
     recovery::{self, SendProfile, sent},
     recv_stream,
@@ -214,16 +214,17 @@ enum SendOption {
     ),
 }
 
-/// Used by `Connection::preprocess` to determine what to do
-/// with an packet before attempting to remove protection.
+/// What `Connection::preprocess_packet` makes of a packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PreprocessResult {
-    /// End processing and return successfully.
-    End,
-    /// Stop processing this datagram and move on to the next.
-    Next,
+    /// A Version Negotiation packet was accepted.
+    VersionNegotiation,
+    /// Drop this packet and the rest of the datagram, logging why.
+    Discard(PacketDroppedTrigger),
+    /// Preprocessing did everything this packet needs.
+    Handled,
     /// Continue and process this packet.
-    Continue,
+    Process,
 }
 
 /// `AddressValidationInfo` holds information relevant to either
@@ -1333,15 +1334,16 @@ impl Connection {
         output
     }
 
-    fn handle_retry(&mut self, packet: &packet::Public, now: Instant) -> Res<()> {
+    /// Returns whether the Retry was accepted.
+    fn handle_retry(&mut self, packet: &packet::Public, now: Instant) -> Res<bool> {
         qinfo!("[{self}] received Retry");
         if matches!(self.address_validation, AddressValidationInfo::Retry { .. }) {
             self.stats.borrow_mut().pkt_dropped("Extra Retry");
-            return Ok(());
+            return Ok(false);
         }
         if packet.token().is_empty() {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
-            return Ok(());
+            return Ok(false);
         }
         let odcid = self
             .original_destination_cid
@@ -1351,7 +1353,7 @@ impl Connection {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
-            return Ok(());
+            return Ok(false);
         }
         // RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet that
         // carries a Source Connection ID identical to the Destination Connection ID
@@ -1361,7 +1363,7 @@ impl Connection {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with SCID matching our Initial DCID");
-            return Ok(());
+            return Ok(false);
         }
         // At this point, we should only have the connection ID that we generated.
         // Update to the one that the server prefers.
@@ -1369,7 +1371,7 @@ impl Connection {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry without an existing path");
-            return Ok(());
+            return Ok(false);
         };
 
         path.borrow_mut().set_remote_cid(packet.scid());
@@ -1393,7 +1395,7 @@ impl Connection {
             token: packet.token().to_vec(),
             retry_source_cid: retry_scid,
         };
-        Ok(())
+        Ok(true)
     }
 
     fn discard_keys(&mut self, space: PacketNumberSpace, now: Instant) {
@@ -1456,13 +1458,14 @@ impl Connection {
             );
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!("[{self}] input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(saved.d, saved.t, now);
+                // Reported as received when it arrived, so not again here.
+                self.input_with_id(saved.d, saved.datagram_id, saved.t, now);
             }
         }
     }
 
     /// In case a datagram arrives that we can only partially process, save any
-    /// part that we don't have keys for.
+    /// part that we don't have keys for. A full store means losing it instead.
     #[expect(
         clippy::needless_pass_by_value,
         reason = "To consume an owned datagram below."
@@ -1472,6 +1475,8 @@ impl Connection {
         epoch: Epoch,
         d: Datagram<impl AsRef<[u8]>>,
         remaining: usize,
+        packet_len: usize,
+        datagram_id: u32,
         now: Instant,
     ) {
         let d = Datagram::new(
@@ -1480,11 +1485,26 @@ impl Connection {
             d.tos(),
             d[d.len() - remaining..].to_vec(),
         );
-        self.saved_datagrams.save(epoch, d, now);
-        self.stats.borrow_mut().saved_datagrams += 1;
-        // We already counted the datagram as received in [`input_path`]. We
-        // will do so again when we (re-)process it, so reduce the count now.
-        self.stats.borrow_mut().packets_rx -= 1;
+        if self.saved_datagrams.save(epoch, d, datagram_id, now) {
+            qlog::packet_buffered(&mut self.qlog, datagram_id, packet_len, now);
+            self.stats.borrow_mut().saved_datagrams += 1;
+            // We already counted the datagram as received in [`input_path`]. We
+            // will do so again when we (re-)process it, so reduce the count now.
+            self.stats.borrow_mut().packets_rx -= 1;
+        } else {
+            self.stats.borrow_mut().pkt_dropped("Saved datagrams full");
+            // This packet did parse, so unlike trailing padding it is worth naming,
+            // at the same length the sibling branch would have buffered it at.
+            qlog::packet_dropped(
+                &mut self.qlog,
+                None,
+                packet_len,
+                datagram_id,
+                None,
+                PacketDroppedTrigger::InternalError,
+                now,
+            );
+        }
     }
 
     /// Perform version negotiation.
@@ -1534,6 +1554,13 @@ impl Connection {
         }
     }
 
+    /// Count a packet as dropped and say why, so that the statistics and the qlog
+    /// cannot give different reasons for the same packet.
+    fn discard(&self, reason: impl AsRef<str>, trigger: PacketDroppedTrigger) -> PreprocessResult {
+        self.stats.borrow_mut().pkt_dropped(reason);
+        PreprocessResult::Discard(trigger)
+    }
+
     /// Perform any processing that we might have to do on packets prior to
     /// attempting to remove protection.
     #[expect(clippy::too_many_lines, reason = "Yeah, it's a work in progress.")]
@@ -1545,10 +1572,10 @@ impl Connection {
         now: Instant,
     ) -> Res<PreprocessResult> {
         if dcid.is_some_and(|d| d != &packet.dcid()) {
-            self.stats
-                .borrow_mut()
-                .pkt_dropped("Coalesced packet has different DCID");
-            return Ok(PreprocessResult::Next);
+            return Ok(self.discard(
+                "Coalesced packet has different DCID",
+                PacketDroppedTrigger::ConnectionUnknown,
+            ));
         }
 
         if (packet.packet_type() == packet::Type::Initial
@@ -1559,7 +1586,10 @@ impl Connection {
             // If we have received a packet from a different address than we have sent to
             // we should ignore the packet. In such a case a path will be a newly created
             // temporary path, not the primary path.
-            return Ok(PreprocessResult::Next);
+            return Ok(self.discard(
+                "Received on a non-primary path",
+                PacketDroppedTrigger::ConnectionUnknown,
+            ));
         }
 
         match (packet.packet_type(), &self.state, &self.role) {
@@ -1569,18 +1599,17 @@ impl Connection {
             // is preferred here: the token length sits in the unprotected header, so an
             // off-path injection must not be able to tear down the connection.
             (packet::Type::Initial, _, Role::Client) if !packet.token().is_empty() => {
-                self.stats
-                    .borrow_mut()
-                    .pkt_dropped("Client received an Initial with a token");
-                return Ok(PreprocessResult::Next);
+                return Ok(self.discard(
+                    "Client received an Initial with a token",
+                    PacketDroppedTrigger::Invalid,
+                ));
             }
             (packet::Type::Initial, State::Init, Role::Server) => {
                 let version = packet.version().ok_or(Error::ProtocolViolation)?;
                 if !packet.is_valid_initial()
                     || !self.conn_params.get_versions().all().contains(&version)
                 {
-                    self.stats.borrow_mut().pkt_dropped("Invalid Initial");
-                    return Ok(PreprocessResult::Next);
+                    return Ok(self.discard("Invalid Initial", PacketDroppedTrigger::Invalid));
                 }
                 qinfo!(
                     "[{self}] Received valid Initial packet with scid {:?} dcid {:?}",
@@ -1596,7 +1625,6 @@ impl Connection {
                     self.conn_params.randomize_first_pn_enabled(),
                 )?;
                 self.original_destination_cid = Some(dcid);
-                self.set_state(State::WaitInitial, now);
 
                 // We need to make sure that we set this transport parameter.
                 // This has to happen prior to processing the packet so that
@@ -1607,6 +1635,7 @@ impl Connection {
                         .local_mut()
                         .set_bytes(OriginalDestinationConnectionId, packet.dcid().to_vec());
                 }
+                self.set_state(State::WaitInitial, now);
             }
             (packet::Type::VersionNegotiation, State::WaitInitial, Role::Client) => {
                 if let Ok(versions) = packet.supported_versions() {
@@ -1619,18 +1648,20 @@ impl Connection {
                         // Ignore VersionNegotiation packets that contain the current version.
                         // Or don't have the right connection ID.
                         // Or are received after a Retry.
-                        self.stats.borrow_mut().pkt_dropped("Invalid VN");
-                    } else {
-                        self.version_negotiation(&versions, now)?;
+                        return Ok(self.discard("Invalid VN", PacketDroppedTrigger::Invalid));
                     }
+                    self.version_negotiation(&versions, now)?;
                 } else {
-                    self.stats.borrow_mut().pkt_dropped("VN with no versions");
+                    return Ok(self.discard("VN with no versions", PacketDroppedTrigger::Invalid));
                 }
-                return Ok(PreprocessResult::End);
+                return Ok(PreprocessResult::VersionNegotiation);
             }
             (packet::Type::Retry, State::WaitInitial, Role::Client) => {
-                self.handle_retry(packet, now)?;
-                return Ok(PreprocessResult::Next);
+                return Ok(if self.handle_retry(packet, now)? {
+                    PreprocessResult::Handled
+                } else {
+                    PreprocessResult::Discard(PacketDroppedTrigger::Invalid)
+                });
             }
             (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
                 // This packet can't be processed now, but it could be a sign
@@ -1651,22 +1682,20 @@ impl Connection {
                 packet::Type::VersionNegotiation | packet::Type::Retry | packet::Type::OtherVersion,
                 ..,
             ) => {
-                self.stats
-                    .borrow_mut()
-                    .pkt_dropped(format!("{:?}", packet.packet_type()));
-                return Ok(PreprocessResult::Next);
+                return Ok(self.discard(
+                    format!("{:?}", packet.packet_type()),
+                    PacketDroppedTrigger::Unsupported,
+                ));
             }
             _ => {}
         }
 
         let res = match self.state {
-            State::Init => {
-                self.stats
-                    .borrow_mut()
-                    .pkt_dropped("Received while in Init state");
-                PreprocessResult::Next
-            }
-            State::WaitInitial => PreprocessResult::Continue,
+            State::Init => self.discard(
+                "Received while in Init state",
+                PacketDroppedTrigger::Unsupported,
+            ),
+            State::WaitInitial => PreprocessResult::Process,
             State::WaitVersion | State::Handshaking | State::Connected | State::Confirmed => {
                 if self.cid_manager.is_valid(packet.dcid()) {
                     if self.role == Role::Server && packet.packet_type() == packet::Type::Handshake
@@ -1674,12 +1703,12 @@ impl Connection {
                         // Server has received a Handshake packet -> discard Initial keys and states
                         self.discard_keys(PacketNumberSpace::Initial, now);
                     }
-                    PreprocessResult::Continue
+                    PreprocessResult::Process
                 } else {
-                    self.stats
-                        .borrow_mut()
-                        .pkt_dropped(format!("Invalid DCID {:?}", packet.dcid()));
-                    PreprocessResult::Next
+                    self.discard(
+                        format!("Invalid DCID {:?}", packet.dcid()),
+                        PacketDroppedTrigger::ConnectionUnknown,
+                    )
                 }
             }
             State::Closing { .. } => {
@@ -1695,14 +1724,16 @@ impl Connection {
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
                 self.state_signaling.send_close();
-                PreprocessResult::Next
+                // The packet is answered but not processed, so its bytes are
+                // discarded; a trace that omitted them could not add up.
+                self.discard("Received while closing", PacketDroppedTrigger::Rejected)
             }
             State::Draining { .. } | State::Closed(..) => {
                 // Do nothing.
-                self.stats
-                    .borrow_mut()
-                    .pkt_dropped(format!("State {:?}", self.state));
-                PreprocessResult::Next
+                self.discard(
+                    format!("State {:?}", self.state),
+                    PacketDroppedTrigger::Unsupported,
+                )
             }
         };
         Ok(res)
@@ -1787,6 +1818,18 @@ impl Connection {
         received: Instant,
         now: Instant,
     ) {
+        let datagram_id = self.qlog.next_datagram_id();
+        qlog::datagram_received(&mut self.qlog, datagram_id, d.len(), now);
+        self.input_with_id(d, datagram_id, received, now);
+    }
+
+    fn input_with_id(
+        &mut self,
+        d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        datagram_id: u32,
+        received: Instant,
+        now: Instant,
+    ) {
         // First determine the path.
         let path = self.paths.find_path(
             d.destination(),
@@ -1796,21 +1839,58 @@ impl Connection {
             &mut self.stats.borrow_mut(),
         );
         path.borrow_mut().add_received(d.len());
-        let res = self.input_path(&path, d, received);
+        let res = self.input_path(&path, d, datagram_id, received);
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
+    }
+
+    /// Report bytes that could not be used; `len` runs to the end of the datagram.
+    ///
+    /// Anything after the first packet is reported as padding. Those bytes were sent
+    /// and received, so they took up bandwidth and have to be accounted for, but
+    /// padding can be any value: there is no telling it from a packet that cannot be
+    /// used, so naming a packet type would be a guess.
+    fn drop_rest_of_datagram(
+        &mut self,
+        packet_type: Option<packet::Type>,
+        len: usize,
+        dgram_len: usize,
+        datagram_id: u32,
+        trigger: PacketDroppedTrigger,
+        now: Instant,
+    ) {
+        let (packet_type, details, trigger) = if len == dgram_len {
+            (packet_type, None, trigger)
+        } else {
+            (
+                None,
+                Some("padding".to_string()),
+                PacketDroppedTrigger::General,
+            )
+        };
+        qlog::packet_dropped(
+            &mut self.qlog,
+            packet_type,
+            len,
+            datagram_id,
+            details,
+            trigger,
+            now,
+        );
     }
 
     fn input_path(
         &mut self,
         path: &PathRef,
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        datagram_id: u32,
         now: Instant,
     ) -> Res<()> {
         qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
         let mut slc = d.as_mut();
-        self.stats.borrow_mut().bytes_rx += slc.len();
+        let dgram_len = slc.len();
+        self.stats.borrow_mut().bytes_rx += dgram_len;
         let mut dcid = None;
         let pto = path.borrow().rtt().pto(self.confirmed());
 
@@ -1819,23 +1899,44 @@ impl Connection {
             self.stats.borrow_mut().packets_rx += 1;
             self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             let slc_len = slc.len();
-            let (packet, remainder) =
-                match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
-                    Ok((packet, remainder)) => {
-                        #[cfg(feature = "build-fuzzing-corpus")]
-                        neqo_common::write_item_to_fuzzing_corpus("packet", packet.data());
-                        (packet, remainder)
-                    }
-                    Err(e) => {
-                        qinfo!("[{self}] Garbage packet: {e}");
-                        self.stats.borrow_mut().pkt_dropped("Garbage packet");
-                        break;
-                    }
-                };
+            // Bound here so the `cid_manager` borrow ends before `self` is needed below.
+            let decoded = packet::Public::decode(slc, self.cid_manager.decoder().as_ref());
+            let (packet, remainder) = match decoded {
+                Ok((packet, remainder)) => {
+                    #[cfg(feature = "build-fuzzing-corpus")]
+                    neqo_common::write_item_to_fuzzing_corpus("packet", packet.data());
+                    (packet, remainder)
+                }
+                Err(e) => {
+                    qinfo!("[{self}] Garbage packet: {e}");
+                    self.stats.borrow_mut().pkt_dropped("Garbage packet");
+                    // The header did not parse, so the packet type is unknown.
+                    self.drop_rest_of_datagram(
+                        None,
+                        slc_len,
+                        dgram_len,
+                        datagram_id,
+                        PacketDroppedTrigger::Invalid,
+                        now,
+                    );
+                    break;
+                }
+            };
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
-                PreprocessResult::Continue => (),
-                PreprocessResult::Next => break,
-                PreprocessResult::End => return Ok(()),
+                PreprocessResult::Process => (),
+                PreprocessResult::Discard(trigger) => {
+                    self.drop_rest_of_datagram(
+                        Some(packet.packet_type()),
+                        slc_len,
+                        dgram_len,
+                        datagram_id,
+                        trigger,
+                        now,
+                    );
+                    break;
+                }
+                PreprocessResult::Handled => break,
+                PreprocessResult::VersionNegotiation => return Ok(()),
             }
 
             qtrace!("[{self}] Received unverified packet {packet:?}");
@@ -1844,48 +1945,17 @@ impl Connection {
             match packet.decrypt(self.crypto.states_mut(), now + pto) {
                 Ok(payload) => {
                     // OK, we have a valid packet.
-                    let pn = payload.pn();
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
+                        datagram_id,
                         now,
                     );
 
                     #[cfg(feature = "build-fuzzing-corpus")]
-                    if payload.packet_type() == packet::Type::Initial {
-                        let target = if self.role == Role::Client {
-                            "server_initial"
-                        } else {
-                            "client_initial"
-                        };
-                        neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
-                    }
+                    self.save_fuzzing_corpus(&payload);
 
-                    let space = PacketNumberSpace::from(payload.packet_type());
-                    if let Some(space) = self.acks.get_mut(space) {
-                        if space.is_duplicate(pn) {
-                            qdebug!("Duplicate packet {space}-{pn}");
-                            self.stats.borrow_mut().dups_rx += 1;
-                        } else {
-                            match self.process_packet(path, &payload, now) {
-                                Ok(migrate) => {
-                                    self.postprocess_packet(
-                                        path, tos, remote, &payload, pn, migrate, now,
-                                    );
-                                }
-                                Err(e) => {
-                                    self.ensure_error_path(path, &payload, now);
-                                    return Err(e);
-                                }
-                            }
-                        }
-                    } else {
-                        qdebug!(
-                            "[{self}] Received packet {space} for untracked space {}",
-                            payload.pn()
-                        );
-                        return Err(Error::ProtocolViolation);
-                    }
+                    self.process_decrypted(path, tos, remote, &payload, now)?;
                     dcid = Some(ConnectionId::from(payload.dcid()));
                 }
                 Err(e) => {
@@ -1893,8 +1963,7 @@ impl Connection {
                         Error::KeysPending(epoch) => {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
-                            let remaining = slc_len;
-                            self.save_datagram(epoch, d, remaining, now);
+                            self.save_datagram(epoch, d, slc_len, packet_len, datagram_id, now);
                             return Ok(());
                         }
                         // Exhausting read keys is fatal. So is a packet that
@@ -1911,7 +1980,15 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&mut self.qlog, &e, now);
+                    qlog::packet_dropped(
+                        &mut self.qlog,
+                        Some(e.packet_type()),
+                        e.len(),
+                        datagram_id,
+                        Some(e.error.to_string()),
+                        PacketDroppedTrigger::DecryptionFailure,
+                        now,
+                    );
                     dcid = Some(e.dcid);
                 }
             }
@@ -1919,6 +1996,19 @@ impl Connection {
         }
         self.check_stateless_reset(path, &d, dcid.is_none(), now)?;
         Ok(())
+    }
+
+    /// Keep the peer's Initial packets for fuzzing to work from.
+    #[cfg(feature = "build-fuzzing-corpus")]
+    fn save_fuzzing_corpus(&self, payload: &packet::Decrypted) {
+        if payload.packet_type() == packet::Type::Initial {
+            let target = if self.role == Role::Client {
+                "server_initial"
+            } else {
+                "client_initial"
+            };
+            neqo_common::write_item_to_fuzzing_corpus(target, &payload[..]);
+        }
     }
 
     /// Handle receiving a packet for which keys have been discarded.
@@ -1932,6 +2022,38 @@ impl Connection {
         if self.role == Role::Server && epoch == Epoch::Handshake && self.state == State::Confirmed
         {
             self.state_signaling.handshake_done();
+        }
+    }
+
+    /// Process a packet that authenticated, unless it is a duplicate.
+    fn process_decrypted(
+        &mut self,
+        path: &PathRef,
+        tos: Tos,
+        remote: SocketAddr,
+        payload: &packet::Decrypted,
+        now: Instant,
+    ) -> Res<()> {
+        let pn = payload.pn();
+        let space = PacketNumberSpace::from(payload.packet_type());
+        let Some(space) = self.acks.get_mut(space) else {
+            qdebug!("[{self}] Received packet {space} for untracked space {pn}");
+            return Err(Error::ProtocolViolation);
+        };
+        if space.is_duplicate(pn) {
+            qdebug!("Duplicate packet {space}-{pn}");
+            self.stats.borrow_mut().dups_rx += 1;
+            return Ok(());
+        }
+        match self.process_packet(path, payload, now) {
+            Ok(migrate) => {
+                self.postprocess_packet(path, tos, remote, payload, pn, migrate, now);
+                Ok(())
+            }
+            Err(e) => {
+                self.ensure_error_path(path, payload, now);
+                Err(e)
+            }
         }
     }
 
@@ -2762,6 +2884,7 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
+        let datagram_id = self.qlog.next_datagram_id();
 
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
@@ -2776,6 +2899,7 @@ impl Connection {
                 continue;
             };
             let aead_expansion = tx.expansion();
+            let crypto_pad = tx.extra_padding();
 
             let header_start = encoder.len();
 
@@ -2847,11 +2971,12 @@ impl Connection {
                     path,
                     pt,
                     pn,
-                    builder.len() + aead_expansion,
+                    builder.lengths(crypto_pad, aead_expansion),
                     &builder.as_ref()[payload_start..],
                     packet_tos,
                     self.version,
                 ),
+                datagram_id,
                 now,
             );
 
@@ -2932,7 +3057,8 @@ impl Connection {
                 }
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
-            path.borrow_mut().add_sent(encoder.len());
+            path.borrow_mut().add_sent(encoder.len()); // Only now is the size of the datagram final.
+            qlog::datagram_sent(&mut self.qlog, datagram_id, encoder.len(), now);
             Ok(SendOption::Yes)
         }
     }
@@ -3121,7 +3247,12 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow(), now);
+        qlog::tparams_set(
+            &mut self.qlog,
+            &self.tps.borrow(),
+            TransportOwner::Remote,
+            now,
+        );
         Ok(())
     }
 
@@ -3768,6 +3899,14 @@ impl Connection {
         if state > self.state {
             qdebug!("[{self}] State change from {:?} -> {state:?}", self.state);
             let old_state = self.state.clone();
+            if old_state == State::Init {
+                qlog::tparams_set(
+                    &mut self.qlog,
+                    &self.tps.borrow(),
+                    TransportOwner::Local,
+                    now,
+                );
+            }
             self.state = state.clone();
             if self.state.closed() {
                 self.streams.clear_streams();
@@ -4111,7 +4250,7 @@ impl Connection {
         self.paths.primary().unwrap().borrow().plpmtu()
     }
 
-    fn log_packet(&mut self, meta: packet::MetaData, now: Instant) {
+    fn log_packet(&mut self, meta: packet::MetaData, datagram_id: u32, now: Instant) {
         if log::log_enabled!(log::Level::Debug) {
             let mut s = String::new();
             let mut d = Decoder::from(meta.payload());
@@ -4128,7 +4267,7 @@ impl Connection {
             qdebug!("[{self}] {meta}{s}");
         }
 
-        qlog::packet_io(&mut self.qlog, meta, now);
+        qlog::packet_io(&mut self.qlog, meta, datagram_id, now);
     }
 }
 

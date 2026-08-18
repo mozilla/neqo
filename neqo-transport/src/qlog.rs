@@ -16,16 +16,17 @@ use qlog::events::{
     ApplicationErrorCode, ConnectionErrorCode, EventData, RawInfo,
     connectivity::{
         ConnectionClosed, ConnectionClosedTrigger, ConnectionStarted, ConnectionState,
-        ConnectionStateUpdated, MtuUpdated, TransportOwner,
+        ConnectionStateUpdated, MtuUpdated,
     },
     quic::{
-        AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, ErrorSpace,
-        LossTimerEventType, LossTimerUpdated, MetricsUpdated, PacketDropped, PacketDroppedTrigger,
-        PacketHeader, PacketLost, PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace,
-        PacketReceived, PacketSent, PacketsAcked, QuicFrame, RecoveryParametersSet, StreamType,
-        TimerType, VersionInformation,
+        AckedRanges, CongestionStateUpdated, CongestionStateUpdatedTrigger, DatagramsReceived,
+        DatagramsSent, ErrorSpace, LossTimerEventType, LossTimerUpdated, MetricsUpdated,
+        PacketBuffered, PacketBufferedTrigger, PacketDropped, PacketHeader, PacketLost,
+        PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent,
+        PacketsAcked, QuicFrame, RecoveryParametersSet, StreamType, TimerType, VersionInformation,
     },
 };
+pub use qlog::events::{connectivity::TransportOwner, quic::PacketDroppedTrigger}; // Re-export
 use smallvec::SmallVec;
 
 use crate::{
@@ -56,37 +57,61 @@ fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
     Hex::new(v).to_string()
 }
 
-pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
+/// Some qlog fields are `u32` and not optional, while the varints they carry
+/// are wider. Saturate rather than wrap.
+fn to_u32(v: u64) -> u32 {
+    u32::try_from(v).unwrap_or(u32::MAX)
+}
+
+/// A length is all that is known about most of what is logged raw.
+fn raw(len: usize) -> RawInfo {
+    RawInfo {
+        length: Some(to_u64(len)),
+        ..Default::default()
+    }
+}
+
+pub fn tparams_set(
+    qlog: &mut Qlog,
+    tph: &TransportParametersHandler,
+    owner: TransportOwner,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
-            let remote = tph.remote();
-            #[expect(clippy::cast_possible_truncation, reason = "These are OK.")]
+            let tp = match &owner {
+                TransportOwner::Local => tph.local(),
+                TransportOwner::Remote => tph.remote(),
+            };
+            // These fields are narrower than the parameters they carry, so a value
+            // that does not fit is left out rather than truncated into a lie.
             let ev_data =
                 EventData::TransportParametersSet(qlog::events::quic::TransportParametersSet {
-                    owner: Some(TransportOwner::Remote),
-                    original_destination_connection_id: remote
+                    owner: Some(owner),
+                    original_destination_connection_id: tp
                         .get_bytes(OriginalDestinationConnectionId)
                         .map(to_hex),
-                    stateless_reset_token: remote.get_bytes(StatelessResetToken).map(to_hex),
-                    disable_active_migration: remote.get_empty(DisableMigration).then_some(true),
-                    max_idle_timeout: Some(remote.get_integer(TransportParameterId::IdleTimeout)),
-                    max_udp_payload_size: Some(remote.get_integer(MaxUdpPayloadSize) as u32),
-                    ack_delay_exponent: Some(remote.get_integer(AckDelayExponent) as u16),
-                    max_ack_delay: Some(remote.get_integer(MaxAckDelay) as u16),
-                    active_connection_id_limit: Some(
-                        remote.get_integer(ActiveConnectionIdLimit) as u32
-                    ),
-                    initial_max_data: Some(remote.get_integer(InitialMaxData)),
+                    stateless_reset_token: tp.get_bytes(StatelessResetToken).map(|_| String::new()), // Don't log the SRT
+                    disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
+                    max_idle_timeout: Some(tp.get_integer(TransportParameterId::IdleTimeout)),
+                    max_udp_payload_size: u32::try_from(tp.get_integer(MaxUdpPayloadSize)).ok(),
+                    ack_delay_exponent: u16::try_from(tp.get_integer(AckDelayExponent)).ok(),
+                    max_ack_delay: u16::try_from(tp.get_integer(MaxAckDelay)).ok(),
+                    active_connection_id_limit: u32::try_from(
+                        tp.get_integer(ActiveConnectionIdLimit),
+                    )
+                    .ok(),
+                    initial_max_data: Some(tp.get_integer(InitialMaxData)),
                     initial_max_stream_data_bidi_local: Some(
-                        remote.get_integer(InitialMaxStreamDataBidiLocal),
+                        tp.get_integer(InitialMaxStreamDataBidiLocal),
                     ),
                     initial_max_stream_data_bidi_remote: Some(
-                        remote.get_integer(InitialMaxStreamDataBidiRemote),
+                        tp.get_integer(InitialMaxStreamDataBidiRemote),
                     ),
-                    initial_max_stream_data_uni: Some(remote.get_integer(InitialMaxStreamDataUni)),
-                    initial_max_streams_bidi: Some(remote.get_integer(InitialMaxStreamsBidi)),
-                    initial_max_streams_uni: Some(remote.get_integer(InitialMaxStreamsUni)),
-                    preferred_address: remote.get_preferred_address().and_then(|(paddr, cid)| {
+                    initial_max_stream_data_uni: Some(tp.get_integer(InitialMaxStreamDataUni)),
+                    initial_max_streams_bidi: Some(tp.get_integer(InitialMaxStreamsBidi)),
+                    initial_max_streams_uni: Some(tp.get_integer(InitialMaxStreamsUni)),
+                    preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
                         Some(qlog::events::quic::PreferredAddress {
                             ip_v4: paddr.ipv4()?.ip().to_string(),
                             ip_v6: paddr.ipv6()?.ip().to_string(),
@@ -225,13 +250,13 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
+pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, datagram_id: u32, now: Instant) {
     qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
                 length: Some(to_u64(meta.length())),
-                payload_length: None,
+                payload_length: Some(to_u64(meta.payload_length())),
                 data: None,
             };
 
@@ -250,12 +275,14 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
                     header: meta.into(),
                     frames: Some(frames),
                     raw: Some(raw),
+                    datagram_id: Some(datagram_id),
                     ..Default::default()
                 })),
                 Direction::Rx => Some(EventData::PacketReceived(PacketReceived {
                     header: meta.into(),
                     frames: Some(frames.to_vec()),
                     raw: Some(raw),
+                    datagram_id: Some(datagram_id),
                     ..Default::default()
                 })),
             }
@@ -263,32 +290,82 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
         now,
     );
 }
-pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
+
+/// `packet_type` is `None` when the header did not parse.
+///
+/// `len` runs from this packet to the end of the datagram.
+pub fn packet_dropped(
+    qlog: &mut Qlog,
+    packet_type: Option<packet::Type>,
+    len: usize,
+    datagram_id: u32,
+    details: Option<String>,
+    trigger: PacketDroppedTrigger,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
-            let header =
-                PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
-            let raw = RawInfo {
-                length: Some(to_u64(decrypt_err.len())),
-                ..Default::default()
-            };
+            Some(EventData::PacketDropped(PacketDropped {
+                header: packet_type
+                    .map(|pt| PacketHeader::with_type(pt.into(), None, None, None, None)),
+                raw: Some(raw(len)),
+                datagram_id: Some(datagram_id),
+                details,
+                trigger: Some(trigger),
+            }))
+        },
+        now,
+    );
+}
 
-            let ev_data = EventData::PacketDropped(PacketDropped {
-                header: Some(header),
-                raw: Some(raw),
-                details: Some(decrypt_err.error.to_string()),
-                trigger: Some(PacketDroppedTrigger::DecryptionFailure),
-                ..Default::default()
-            });
+/// A packet was set aside because the keys to decrypt it are not available yet.
+/// It is logged again, as received, once it can be processed.
+pub fn packet_buffered(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::PacketBuffered(PacketBuffered {
+                header: None,
+                raw: Some(raw(len)),
+                datagram_id: Some(datagram_id),
+                trigger: Some(PacketBufferedTrigger::KeysUnavailable),
+            }))
+        },
+        now,
+    );
+}
 
-            Some(ev_data)
+pub fn datagram_sent(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
+    datagram_io(qlog, Direction::Tx, datagram_id, len, now);
+}
+
+pub fn datagram_received(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
+    datagram_io(qlog, Direction::Rx, datagram_id, len, now);
+}
+
+fn datagram_io(qlog: &mut Qlog, direction: Direction, datagram_id: u32, len: usize, now: Instant) {
+    qlog.add_event_at(
+        || {
+            let (count, raw, datagram_ids) =
+                (Some(1), Some(vec![raw(len)]), Some(vec![datagram_id]));
+            Some(match direction {
+                Direction::Tx => EventData::DatagramsSent(DatagramsSent {
+                    count,
+                    raw,
+                    datagram_ids,
+                }),
+                Direction::Rx => EventData::DatagramsReceived(DatagramsReceived {
+                    count,
+                    raw,
+                    datagram_ids,
+                }),
+            })
         },
         now,
     );
 }
 
 pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
-    qlog.add_event_with_stream(|stream| {
+    qlog.add_event_with_stream(now, |stream, now| {
         for pkt in pkts {
             let header =
                 PacketHeader::with_type(pkt.packet_type().into(), Some(pkt.pn()), None, None, None);
@@ -306,7 +383,7 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
 
             stream.add_event_data_with_instant(ev_data, now)?;
         }
-        Ok(())
+        Ok(!pkts.is_empty())
     });
 }
 
@@ -578,11 +655,6 @@ fn loss_timer_updated(
 // Helper functions
 
 #[expect(clippy::too_many_lines, reason = "Yeah, but it's a nice match.")]
-#[expect(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    reason = "We need to truncate here."
-)]
 impl From<Frame<'_>> for QuicFrame {
     fn from(frame: Frame) -> Self {
         match frame {
@@ -613,8 +685,14 @@ impl From<Frame<'_>> for QuicFrame {
                     )
                 });
 
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "qlog ack_delay is f32, there is no lossless conversion"
+                )]
+                let ack_delay = Some(ack_delay as f32 / 1000.0);
+
                 Self::Ack {
-                    ack_delay: Some(ack_delay as f32 / 1000.0),
+                    ack_delay,
                     acked_ranges,
                     ect1: ecn_count.map(|c| c[Ecn::Ect1]),
                     ect0: ecn_count.map(|c| c[Ecn::Ect0]),
@@ -717,14 +795,15 @@ impl From<Frame<'_>> for QuicFrame {
                 connection_id,
                 stateless_reset_token,
             } => Self::NewConnectionId {
-                sequence_number: sequence_number as u32,
-                retire_prior_to: retire_prior as u32,
-                connection_id_length: Some(connection_id.len() as u8),
+                sequence_number: to_u32(sequence_number),
+                retire_prior_to: to_u32(retire_prior),
+                // A CID is at most 20 bytes, so this always fits.
+                connection_id_length: u8::try_from(connection_id.len()).ok(),
                 connection_id: to_hex(connection_id),
                 stateless_reset_token: Some(to_hex(stateless_reset_token)),
             },
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
-                sequence_number: sequence_number as u32,
+                sequence_number: to_u32(sequence_number),
             },
             Frame::PathChallenge { data } => Self::PathChallenge {
                 data: Some(to_hex(data)),

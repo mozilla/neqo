@@ -32,6 +32,7 @@ pub struct MetaData<'a> {
     tos: Tos,
     len: usize,
     payload: &'a [u8],
+    payload_len: usize, // Can exceed `payload`: header protection padding is added later.
 }
 
 impl MetaData<'_> {
@@ -50,6 +51,7 @@ impl MetaData<'_> {
             version,
             tos,
             len,
+            payload_len: decrypted.len(),
             payload: decrypted,
         }
     }
@@ -58,7 +60,7 @@ impl MetaData<'_> {
         path: &'a PathRef,
         packet_type: packet::Type,
         packet_number: packet::Number,
-        length: usize,
+        lengths: packet::Lengths,
         payload: &'a [u8],
         tos: Tos,
         version: Version,
@@ -70,8 +72,9 @@ impl MetaData<'_> {
             packet_number,
             version,
             tos,
-            len: length,
+            len: lengths.packet,
             payload,
+            payload_len: lengths.payload,
         }
     }
 
@@ -88,6 +91,11 @@ impl MetaData<'_> {
     #[must_use]
     pub const fn payload(&self) -> &[u8] {
         self.payload
+    }
+
+    #[must_use]
+    pub const fn payload_length(&self) -> usize {
+        self.payload_len
     }
 }
 
