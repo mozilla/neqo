@@ -1,0 +1,30 @@
+name: Bundle NSS libraries
+description: >
+  Copy the NSS shared libraries that neqo binaries link against into <path>/lib.
+  Requires install-build-deps to have run first, which sets NSS_DIR.
+
+inputs:
+  path:
+    description: Directory to create lib/ under
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        DEST: ${{ inputs.path }}
+      run: |
+        mkdir -p "$DEST/lib"
+        if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
+          cp -L "$NSS_DIR"/../dist/Release/lib/*.so "$DEST/lib/" 2>/dev/null || true
+          cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* "$DEST/lib/" 2>/dev/null || true
+        else
+          for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
+            cp -L /usr/lib/*/lib${lib}.so* "$DEST/lib/" 2>/dev/null || true
+          done
+        fi
+        if [ -z "$(ls -A "$DEST/lib")" ]; then
+          echo "::error::No NSS libraries found (NSS_DIR=${NSS_DIR:-unset})"
+          exit 1
+        fi

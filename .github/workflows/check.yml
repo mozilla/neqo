@@ -88,17 +88,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           cache-key: ${{ matrix.type }} # Debug and release are different.
-
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests and determine coverage
         env:
@@ -212,11 +207,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
       - run: |
           cargo update -w --locked
           cargo hack update -w --locked
@@ -232,14 +227,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          target: ${{ matrix.target }}
-          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms
