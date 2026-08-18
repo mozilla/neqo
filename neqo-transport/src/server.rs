@@ -35,8 +35,13 @@ use crate::{
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
     packet::{self, MIN_INITIAL_PACKET_SIZE, Public},
-    saved::SavedDatagram,
 };
+
+/// A datagram whose processing was deferred, along with the time it arrived at.
+struct DeferredDatagram {
+    d: Datagram,
+    t: Instant,
+}
 
 /// A `ServerZeroRttChecker` is a simple wrapper around a single checker.
 /// It uses `RefCell` so that the wrapped checker can be shared between
@@ -128,7 +133,7 @@ pub struct Server {
     /// an immediate return without further processing of the remaining
     /// datagrams. To be processed on consecutive calls to
     /// [`Server::process_multiple`].
-    saved_datagrams: VecDeque<SavedDatagram>,
+    saved_datagrams: VecDeque<DeferredDatagram>,
 }
 
 impl Server {
@@ -398,6 +403,15 @@ impl Server {
         }
     }
 
+    /// Set datagrams aside for a later call to [`Server::process_multiple`].
+    fn defer<A: AsRef<[u8]>>(&mut self, dgrams: impl Iterator<Item = Datagram<A>>, now: Instant) {
+        self.saved_datagrams
+            .extend(dgrams.map(|d| DeferredDatagram {
+                d: d.to_owned(),
+                t: now,
+            }));
+    }
+
     /// Process new input datagrams on the connection.
     pub fn process_multiple_input<
         A: AsRef<[u8]> + AsMut<[u8]>,
@@ -408,13 +422,9 @@ impl Server {
         now: Instant,
     ) -> OutputBatch {
         // Process input datagrams from previous call.
-        while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
+        while let Some(DeferredDatagram { d, t }) = self.saved_datagrams.pop_front() {
             if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
-                self.saved_datagrams
-                    .extend(dgrams.into_iter().map(|d| SavedDatagram {
-                        d: d.to_owned(),
-                        t: now,
-                    }));
+                self.defer(dgrams.into_iter(), now);
                 return OutputBatch::DatagramBatch(b);
             }
         }
@@ -500,10 +510,7 @@ impl Server {
                     now,
                 );
 
-                self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
-                    d: d.to_owned(),
-                    t: now,
-                }));
+                self.defer(dgrams, now);
 
                 return OutputBatch::DatagramBatch(
                     Datagram::new(destination, source, Tos::default(), vn).into(),
@@ -520,10 +527,7 @@ impl Server {
                     // `dgram`.
                     let initial = InitialDetails::new(&packet);
                     if let o @ Output::Datagram(_) = self.handle_initial(initial, dgram, now) {
-                        self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
-                            d: d.to_owned(),
-                            t: now,
-                        }));
+                        self.defer(dgrams, now);
                         return o.into();
                     }
                 }
