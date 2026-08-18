@@ -63,12 +63,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Run clippy and tests across all meaningful feature combinations. Using
-      # --all-targets (not --no-dev-deps) ensures test code is also compiled
-      # and linted for each combination. Excluded features are either empty
-      # (ci, test-fixture, gecko), benchmarking-only (bench), or have their
-      # own dedicated workflow (build-fuzzing-corpus).
-      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default -- -D warnings
+      # Run clippy across all meaningful feature combinations.
+      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci --mutually-exclusive-features bench,blapi,build-fuzzing-corpus,default,disable-encryption -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

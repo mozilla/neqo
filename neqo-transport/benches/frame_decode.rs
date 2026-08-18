@@ -21,7 +21,7 @@ const FRAME_PAYLOAD: usize = 100;
 /// then decode them all in one pass.  This isolates `Frame::decode` and the
 /// varint path it calls.
 ///
-/// Frame type 0x0e = StreamWithOffLen (offset present, length present, no FIN).
+/// Frame type 0x0e = `StreamWithOffLen` (offset present, length present, no FIN).
 fn encode_stream_frames(n: usize) -> Vec<u8> {
     let mut enc = Encoder::default();
     for i in 0..to_u64(n) {
