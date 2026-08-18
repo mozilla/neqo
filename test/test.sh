@@ -9,6 +9,12 @@
 # the qlog output and the packet capture.
 
 set -e
+
+for tool in cargo tmux tcpdump tshark; do
+        hash "$tool" 2>/dev/null || missing+=" $tool"
+done
+[ -z "$missing" ] || { echo "missing tools:$missing" >&2; exit 1; }
+
 tmp=$(mktemp -d)
 
 cargo build --locked --bin neqo-client --bin neqo-server
@@ -28,15 +34,12 @@ if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
         export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
 fi
 
-# Add QUIC frame detail: CRYPTO is offset,length; STREAM is id,offset,length,fin; ACK is largest
-# acknowledged, first ACK range, then gap,range pairs. There is no way to add a column, only to
-# replace the whole set, so start from the one tshark would otherwise use.
-columns=$(tshark -G currentprefs |
-        sed -n '/^gui\.column\.format:/,/^$/s/^[[:space:]]\{1,\}//p' | tr -d '\n')
-[ "$columns" ] || { echo "cannot read tshark's column format" >&2; exit 1; }
-columns+=',"CRYPTO","%Cus:quic.crypto.offset or quic.crypto.length:0:R",'
-columns+='"STREAM","%Cus:quic.stream.stream_id or quic.stream.offset or quic.stream.length or quic.stream.fin:0:U",'
-columns+='"ACK","%Cus:quic.ack.largest_acknowledged or quic.ack.first_ack_range or quic.ack.gap or quic.ack.ack_range:0:R"'
+columns='"No.","%m","Time","%t","Source","%s","SPort","%uS","Destination","%d","DPort","%uD"'
+columns+=',"Protocol","%p","Length","%L"'
+columns+=',"CRYPTO","%Cus:quic.crypto.offset or quic.crypto.length:0:R"'
+columns+=',"STREAM","%Cus:quic.stream.stream_id or quic.stream.offset or quic.stream.length or quic.stream.fin:0:U"'
+columns+=',"ACK","%Cus:quic.ack.largest_acknowledged or quic.ack.first_ack_range or quic.ack.gap or quic.ack.ack_range:0:R"'
+columns+=',"Info","%i"'
 
 client="./target/debug/neqo-client $flags --output-dir $tmp --stats https://$addr:$port$path"
 server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
