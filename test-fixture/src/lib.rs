@@ -324,10 +324,23 @@ pub fn default_http3_client() -> Http3Client {
 /// When the client can't be created.
 #[must_use]
 pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
+    http3_client_with_cid_gen(CountingConnectionIdGenerator::default(), params)
+}
+
+/// Create a http3 client that uses the given connection ID generator.
+///
+/// # Panics
+///
+/// When the client can't be created.
+#[must_use]
+pub fn http3_client_with_cid_gen<G: ConnectionIdGenerator + 'static>(
+    cid_gen: G,
+    params: Http3Parameters,
+) -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(cid_gen)),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
         params,
@@ -359,13 +372,26 @@ pub fn default_http3_server() -> Http3Server {
 /// When the server can't be created.
 #[must_use]
 pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
+    http3_server_with_cid_gen(CountingConnectionIdGenerator::default(), params)
+}
+
+/// Create a http3 server that uses the given connection ID generator.
+///
+/// # Panics
+///
+/// When the server can't be created.
+#[must_use]
+pub fn http3_server_with_cid_gen<G: ConnectionIdGenerator + 'static>(
+    cid_gen: G,
+    params: Http3Parameters,
+) -> Http3Server {
     fixture_init();
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(cid_gen)),
         params,
         None,
     )
