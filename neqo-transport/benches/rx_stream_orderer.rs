@@ -54,10 +54,10 @@ fn inbound_with_loss(c: &mut Criterion) {
                         rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD);
                     }
                     // Deliver a retransmission ~20 frames later.
-                    if i % 20 == 19 {
-                        if let Some(lost) = missing.pop_front() {
-                            rx.inbound_frame(lost * to_u64(CHUNK), &PAYLOAD);
-                        }
+                    if i % 20 == 19
+                        && let Some(lost) = missing.pop_front()
+                    {
+                        rx.inbound_frame(lost * to_u64(CHUNK), &PAYLOAD);
                     }
                     rx.read_to_end(&mut drain);
                     drain.clear();
@@ -124,11 +124,9 @@ fn inbound_duplicates(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    inbound_in_order,
-    inbound_with_loss,
-    inbound_reordered,
-    inbound_duplicates,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = inbound_in_order, inbound_with_loss, inbound_reordered, inbound_duplicates
+}
 criterion_main!(benches);
