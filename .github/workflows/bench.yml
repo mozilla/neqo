@@ -4,7 +4,6 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
@@ -174,14 +173,9 @@ jobs:
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../profiles
 
-      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
-      - name: Restore machine
-        if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
-        with:
-          mode: restore
-
+      # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
+        timeout-minutes: 30
         run: |
           for f in profiles/*/*.perf; do
             # Convert for profiler.firefox.com
@@ -189,6 +183,13 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
+
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
+      - name: Restore machine
+        if: always()
+        uses: ./neqo/.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Format results as Markdown
         id: results

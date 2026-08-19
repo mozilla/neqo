@@ -1,0 +1,11 @@
+name: Enable perf
+description: >
+  Relax the kernel restrictions that perf recording and samply symbolication need.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo sysctl -w kernel.perf_event_paranoid=-1
+        sudo sysctl -w kernel.kptr_restrict=0
