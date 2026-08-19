@@ -46,7 +46,7 @@ use crate::{
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxUdpPayloadSize,
             OriginalDestinationConnectionId, StatelessResetToken,
         },
-        TransportParametersHandler,
+        TransportParameters, TransportParametersHandler,
     },
     tracking::PacketNumberSpace,
     version::{self, Version},
@@ -59,7 +59,7 @@ fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
 
 /// Some qlog fields are `u32` and not optional, while the varints they carry
 /// are wider. Saturate rather than wrap.
-fn to_u32(v: u64) -> u32 {
+fn force_u32(v: u64) -> u32 {
     u32::try_from(v).unwrap_or(u32::MAX)
 }
 
@@ -69,6 +69,12 @@ fn raw(len: usize) -> RawInfo {
         length: Some(to_u64(len)),
         ..Default::default()
     }
+}
+
+/// A transport parameter, for a qlog field narrower than the varint that carries it.
+/// A value that does not fit is left out rather than reported wrongly.
+fn narrow<T: TryFrom<u64>>(tp: &TransportParameters, id: TransportParameterId) -> Option<T> {
+    T::try_from(tp.get_integer(id)).ok()
 }
 
 pub fn tparams_set(
@@ -83,8 +89,7 @@ pub fn tparams_set(
                 TransportOwner::Local => tph.local(),
                 TransportOwner::Remote => tph.remote(),
             };
-            // These fields are narrower than the parameters they carry, so a value
-            // that does not fit is left out rather than truncated into a lie.
+            let int = |id| Some(tp.get_integer(id));
             let ev_data =
                 EventData::TransportParametersSet(qlog::events::quic::TransportParametersSet {
                     owner: Some(owner),
@@ -93,24 +98,17 @@ pub fn tparams_set(
                         .map(to_hex),
                     stateless_reset_token: tp.get_bytes(StatelessResetToken).map(|_| String::new()), // Don't log the SRT
                     disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
-                    max_idle_timeout: Some(tp.get_integer(TransportParameterId::IdleTimeout)),
-                    max_udp_payload_size: u32::try_from(tp.get_integer(MaxUdpPayloadSize)).ok(),
-                    ack_delay_exponent: u16::try_from(tp.get_integer(AckDelayExponent)).ok(),
-                    max_ack_delay: u16::try_from(tp.get_integer(MaxAckDelay)).ok(),
-                    active_connection_id_limit: u32::try_from(
-                        tp.get_integer(ActiveConnectionIdLimit),
-                    )
-                    .ok(),
-                    initial_max_data: Some(tp.get_integer(InitialMaxData)),
-                    initial_max_stream_data_bidi_local: Some(
-                        tp.get_integer(InitialMaxStreamDataBidiLocal),
-                    ),
-                    initial_max_stream_data_bidi_remote: Some(
-                        tp.get_integer(InitialMaxStreamDataBidiRemote),
-                    ),
-                    initial_max_stream_data_uni: Some(tp.get_integer(InitialMaxStreamDataUni)),
-                    initial_max_streams_bidi: Some(tp.get_integer(InitialMaxStreamsBidi)),
-                    initial_max_streams_uni: Some(tp.get_integer(InitialMaxStreamsUni)),
+                    max_idle_timeout: int(TransportParameterId::IdleTimeout),
+                    max_udp_payload_size: narrow(tp, MaxUdpPayloadSize),
+                    ack_delay_exponent: narrow(tp, AckDelayExponent),
+                    max_ack_delay: narrow(tp, MaxAckDelay),
+                    active_connection_id_limit: narrow(tp, ActiveConnectionIdLimit),
+                    initial_max_data: int(InitialMaxData),
+                    initial_max_stream_data_bidi_local: int(InitialMaxStreamDataBidiLocal),
+                    initial_max_stream_data_bidi_remote: int(InitialMaxStreamDataBidiRemote),
+                    initial_max_stream_data_uni: int(InitialMaxStreamDataUni),
+                    initial_max_streams_bidi: int(InitialMaxStreamsBidi),
+                    initial_max_streams_uni: int(InitialMaxStreamsUni),
                     preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
                         Some(qlog::events::quic::PreferredAddress {
                             ip_v4: paddr.ipv4()?.ip().to_string(),
@@ -130,15 +128,7 @@ pub fn tparams_set(
     );
 }
 
-pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    connection_started(qlog, path, now);
-}
-
-pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    connection_started(qlog, path, now);
-}
-
-fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+pub fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     qlog.add_event_at(
         || {
             let p = path.deref().borrow();
@@ -334,15 +324,13 @@ pub fn packet_buffered(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Insta
     );
 }
 
-pub fn datagram_sent(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
-    datagram_io(qlog, Direction::Tx, datagram_id, len, now);
-}
-
-pub fn datagram_received(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
-    datagram_io(qlog, Direction::Rx, datagram_id, len, now);
-}
-
-fn datagram_io(qlog: &mut Qlog, direction: Direction, datagram_id: u32, len: usize, now: Instant) {
+pub fn datagram_io(
+    qlog: &mut Qlog,
+    direction: Direction,
+    datagram_id: u32,
+    len: usize,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
             let (count, raw, datagram_ids) =
@@ -794,16 +782,17 @@ impl From<Frame<'_>> for QuicFrame {
                 retire_prior,
                 connection_id,
                 stateless_reset_token,
-            } => Self::NewConnectionId {
-                sequence_number: to_u32(sequence_number),
-                retire_prior_to: to_u32(retire_prior),
-                // A CID is at most 20 bytes, so this always fits.
-                connection_id_length: u8::try_from(connection_id.len()).ok(),
-                connection_id: to_hex(connection_id),
-                stateless_reset_token: Some(to_hex(stateless_reset_token)),
-            },
+            } => {
+                Self::NewConnectionId {
+                    sequence_number: force_u32(sequence_number),
+                    retire_prior_to: force_u32(retire_prior),
+                    connection_id_length: u8::try_from(connection_id.len()).ok(), /* CID is at most 20 bytes, so always fits. */
+                    connection_id: to_hex(connection_id),
+                    stateless_reset_token: Some(to_hex(stateless_reset_token)),
+                }
+            }
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
-                sequence_number: to_u32(sequence_number),
+                sequence_number: force_u32(sequence_number),
             },
             Frame::PathChallenge { data } => Self::PathChallenge {
                 data: Some(to_hex(data)),

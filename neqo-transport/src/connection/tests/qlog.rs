@@ -9,10 +9,7 @@
 //! reports its own size, that everything received is accounted for, and that
 //! events do not go backwards in time.
 
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::{Datagram, Decoder};
 use test_fixture::{datagram, now, strip_padding};
@@ -85,10 +82,7 @@ fn datagrams_sent_reports_the_padded_size() {
     let packet = named(&trace, "transport:packet_sent")
         .next()
         .expect("a packet_sent event");
-    assert!(
-        raw_length(packet).unwrap() < len as u64,
-        "expected the Initial to be padded out, trace: {trace}"
-    );
+    assert!(raw_length(packet).unwrap() < len as u64);
 }
 
 #[test]
@@ -99,11 +93,12 @@ fn coalesced_packet_lengths_agree_with_the_peer() {
     drop((client, server));
 
     let (sent, received) = (client_log.to_string(), server_log.to_string());
+    // Both lengths, so that `payload_length` is held to the same standard.
     let key = |l: &str| {
         Some((
             field(l, "\"packet_type\":")?.to_owned(),
             number(l, "\"packet_number\":")?,
-            raw_length(l)?,
+            (raw_length(l)?, number(l, "\"payload_length\":")?),
         ))
     };
     let tx = named(&sent, "transport:packet_sent")
@@ -112,16 +107,13 @@ fn coalesced_packet_lengths_agree_with_the_peer() {
     let rx = named(&received, "transport:packet_received")
         .filter_map(key)
         .collect::<Vec<_>>();
-    assert!(
-        tx.len() > 1 && !rx.is_empty(),
-        "sent {tx:?} received {rx:?}"
-    );
+    assert!(tx.len() > 1 && !rx.is_empty());
 
     // Every packet the server decoded has to match what the client said it sent.
     let mut compared = 0;
-    for (packet_type, pn, len) in &rx {
-        if let Some((_, _, sent_len)) = tx.iter().find(|(t, n, _)| t == packet_type && n == pn) {
-            assert_eq!(sent_len, len);
+    for (packet_type, pn, lengths) in &rx {
+        if let Some((_, _, sent)) = tx.iter().find(|(t, n, _)| t == packet_type && n == pn) {
+            assert_eq!(sent, lengths);
             compared += 1;
         }
     }
@@ -130,28 +122,39 @@ fn coalesced_packet_lengths_agree_with_the_peer() {
 
 #[test]
 fn packets_name_their_datagram() {
-    let (mut client, contents) = new_client_with_qlog(ConnectionParameters::default());
-    let mut server = default_server();
+    let (mut client, client_log) = new_client_with_qlog(ConnectionParameters::default());
+    let (mut server, server_log) = new_server_with_qlog(ConnectionParameters::default());
     connect(&mut client, &mut server);
-    drop(client);
+    drop((client, server));
 
-    let trace = contents.to_string();
-    let datagrams = named(&trace, "transport:datagrams_sent")
-        .filter_map(|l| number(l, "\"datagram_ids\":["))
-        .collect::<Vec<_>>();
-    assert!(!datagrams.is_empty(), "no datagrams_sent in {trace}");
+    // Both directions, because each side decides the `datagram_id` for what it logs.
+    names_its_datagram(
+        &client_log.to_string(),
+        "transport:datagrams_sent",
+        "transport:packet_sent",
+    );
+    names_its_datagram(
+        &server_log.to_string(),
+        "transport:datagrams_received",
+        "transport:packet_received",
+    );
+}
 
-    let mut per_datagram: HashMap<u64, usize> = HashMap::new();
-    for packet in named(&trace, "transport:packet_sent") {
+/// Every packet names a datagram that was itself reported, and some datagram carried
+/// more than one packet, so that coalescing is recoverable from the trace.
+fn names_its_datagram(trace: &str, datagrams: &str, packets: &str) {
+    let reported =
+        |id| named(trace, datagrams).any(|d| number(d, "\"datagram_ids\":[") == Some(id));
+    let mut coalesced = false;
+    let mut last = None;
+    for packet in named(trace, packets) {
         let id = number(packet, "\"datagram_id\":").expect("a datagram_id");
-        assert!(
-            datagrams.contains(&id),
-            "packet in unreported datagram {id}: {packet}"
-        );
-        *per_datagram.entry(id).or_default() += 1;
+        assert!(reported(id), "packet in unreported datagram {id}: {packet}");
+        // Packets of one datagram are logged together, so a repeat means coalescing.
+        coalesced |= last == Some(id);
+        last = Some(id);
     }
-    let shared = per_datagram.values().filter(|n| **n > 1).count();
-    assert!(shared > 0, "expected coalescing during the handshake");
+    assert!(coalesced, "expected a coalesced datagram in {trace}");
 }
 
 const RTT: Duration = Duration::from_millis(100);
@@ -235,13 +238,10 @@ fn dropping_a_datagram_is_reported() {
     let trace = contents.to_string();
     let buffered = named(&trace, "transport:packet_buffered").count();
     assert_eq!(buffered, SavedDatagrams::CAPACITY, "trace: {trace}");
-
-    let dropped = named(&trace, "transport:packet_dropped")
-        .filter_map(raw_length)
-        .collect::<Vec<_>>();
     assert!(
-        dropped.contains(&(last as u64)),
-        "expected a dropped datagram of {last} bytes, got {dropped:?}, trace: {trace}"
+        named(&trace, "transport:packet_dropped")
+            .filter_map(raw_length)
+            .any(|len| len == last as u64)
     );
 }
 
@@ -253,11 +253,10 @@ fn transport_parameters_are_logged_for_both_peers() {
     drop(client);
 
     let trace = contents.to_string();
-    let peers = named(&trace, "transport:parameters_set")
-        .filter_map(|l| field(l, "\"owner\":").map(ToOwned::to_owned))
-        .collect::<Vec<_>>();
-    assert!(peers.contains(&"local".to_owned()), "trace: {trace}");
-    assert!(peers.contains(&"remote".to_owned()), "trace: {trace}");
+    let owner =
+        |o| named(&trace, "transport:parameters_set").any(|l| field(l, "\"owner\":") == Some(o));
+    assert!(owner("local"), "trace: {trace}");
+    assert!(owner("remote"), "trace: {trace}");
 }
 
 #[test]
@@ -271,10 +270,7 @@ fn server_logs_its_original_destination_connection_id() {
     let local = named(&trace, "transport:parameters_set")
         .find(|l| field(l, "\"owner\":") == Some("local"))
         .expect("the server's own parameters");
-    assert!(
-        field(local, "\"original_destination_connection_id\":").is_some_and(|v| !v.is_empty()),
-        "trace: {trace}"
-    );
+    assert!(field(local, "\"original_destination_connection_id\":").is_some_and(|v| !v.is_empty()));
 }
 
 #[test]
@@ -291,10 +287,10 @@ fn stateless_reset_token_is_not_logged() {
     drop(client);
 
     let trace = contents.to_string();
-    let logged = named(&trace, "transport:parameters_set")
-        .filter_map(|l| field(l, "\"stateless_reset_token\":"))
-        .collect::<Vec<_>>();
-    assert_eq!(logged, vec![""], "trace: {trace}");
+    let mut logged = named(&trace, "transport:parameters_set")
+        .filter_map(|l| field(l, "\"stateless_reset_token\":"));
+    assert_eq!(logged.next(), Some(""), "trace: {trace}");
+    assert_eq!(logged.next(), None, "trace: {trace}");
 }
 
 /// The DCID and SCID of the client's first Initial, to address a packet back at it.
@@ -327,11 +323,7 @@ fn an_accepted_retry_is_not_reported_as_dropped() {
     drop(client);
 
     let trace = contents.to_string();
-    assert_eq!(
-        named(&trace, "transport:packet_dropped").count(),
-        0,
-        "trace: {trace}"
-    );
+    assert_eq!(named(&trace, "transport:packet_dropped").count(), 0);
 }
 
 #[cfg(not(feature = "disable-encryption"))]
@@ -354,9 +346,13 @@ fn rejected_retry_is_reported_as_dropped() {
     drop(client);
 
     let trace = contents.to_string();
-    let dropped = named(&trace, "transport:packet_dropped").collect::<Vec<_>>();
-    assert_eq!(dropped.len(), 1, "trace: {trace}");
-    assert_eq!(raw_length(dropped[0]), Some(len as u64), "trace: {trace}");
+    let mut dropped = named(&trace, "transport:packet_dropped");
+    assert_eq!(
+        dropped.next().and_then(raw_length),
+        Some(len as u64),
+        "{trace}"
+    );
+    assert_eq!(dropped.next(), None, "trace: {trace}");
 }
 
 #[test]
@@ -382,32 +378,6 @@ fn received_datagram_is_reported_once() {
 }
 
 #[test]
-fn received_packets_name_their_datagram() {
-    let mut client = default_client();
-    let (mut server, contents) = new_server_with_qlog(ConnectionParameters::default());
-    connect(&mut client, &mut server);
-    drop((client, server));
-
-    let trace = contents.to_string();
-    let datagrams = named(&trace, "transport:datagrams_received")
-        .filter_map(|l| number(l, "\"datagram_ids\":["))
-        .collect::<Vec<_>>();
-    assert!(!datagrams.is_empty(), "no datagrams_received in {trace}");
-
-    let mut per_datagram: HashMap<u64, usize> = HashMap::new();
-    for packet in named(&trace, "transport:packet_received") {
-        let id = number(packet, "\"datagram_id\":").expect("a datagram_id");
-        assert!(
-            datagrams.contains(&id),
-            "packet in unreported datagram {id}: {packet}"
-        );
-        *per_datagram.entry(id).or_default() += 1;
-    }
-    let shared = per_datagram.values().filter(|n| **n > 1).count();
-    assert!(shared > 0, "expected a coalesced datagram in {trace}");
-}
-
-#[test]
 fn replayed_datagrams_are_not_counted_twice() {
     let mut client = default_client();
     let (mut server, contents) = new_server_with_qlog(ConnectionParameters::default());
@@ -426,12 +396,7 @@ fn replayed_datagrams_are_not_counted_twice() {
 
     let trace = contents.to_string();
     let received = named(&trace, "transport:datagrams_received").count();
-    assert_eq!(
-        received - before,
-        1,
-        "replay reported {} extra datagrams, trace: {trace}",
-        received - before - 1
-    );
+    assert_eq!(received - before, 1);
 
     // Every datagram set aside is one that was reported as received.
     let ids = named(&trace, "transport:datagrams_received")
@@ -468,81 +433,52 @@ fn rejected_version_negotiation_is_reported() {
     assert_eq!(dropped.len(), 1, "trace: {trace}");
     // Reported against the datagram it arrived in, at the size that arrived.
     assert_eq!(raw_length(dropped[0]), Some(len as u64), "trace: {trace}");
-    assert!(
-        number(dropped[0], "\"datagram_id\":").is_some(),
-        "trace: {trace}"
-    );
+    assert!(number(dropped[0], "\"datagram_id\":").is_some());
 }
 
-/// The sum of a trace's `raw` lengths, for the events named.
-fn total(trace: &str, name: &str) -> u64 {
-    named(trace, name).filter_map(raw_length).sum()
-}
-
-/// Every byte that arrives is accounted for, exactly once, by a packet event:
-/// received, dropped, or set aside. This is what the datagram events are for, so it
-/// is checked on both roles and across a close, where packets keep arriving but stop
-/// being processed.
 #[test]
 fn every_received_byte_is_accounted_for() {
     let (mut client, client_log) = new_client_with_qlog(ConnectionParameters::default());
     let (mut server, server_log) = new_server_with_qlog(ConnectionParameters::default());
-    connect(&mut client, &mut server);
+    let mut t = now();
+    let last = handshake_but_for_the_last_flight(&mut client, &mut server, &mut t);
+    // Buffered by the server, and replayed when the flight below supplies the keys.
+    fill_saved_datagrams(&mut client, &mut server, t);
+    t += RTT;
+    _ = server.process(Some(last), t).dgram();
+    assert_eq!(*server.state(), State::Confirmed);
 
-    let d = send_something(&mut client, now());
-    server.process_input(d, now());
     // Held back, so that it reaches the client only once it is closing.
-    let late = send_something(&mut server, now());
-
-    client.close(now(), 0, "done");
+    let late = send_something(&mut server, t);
+    client.close(t, 0, "done");
     assert!(matches!(client.state(), State::Closing { .. }));
-    client.process_input(late, now());
+    client.process_input(late, t);
     drop((client, server));
 
-    for (role, trace) in [
-        ("client", client_log.to_string()),
-        ("server", server_log.to_string()),
-    ] {
-        let arrived = named(&trace, "transport:datagrams_received")
-            .filter_map(raw_list_length)
-            .sum::<u64>();
-        let accounted = total(&trace, "transport:packet_received")
-            + total(&trace, "transport:packet_dropped")
-            + total(&trace, "transport:packet_buffered");
-        let mut per: HashMap<u64, (u64, u64)> = HashMap::new();
-        for e in named(&trace, "transport:datagrams_received") {
-            if let (Some(id), Some(len)) = (number(e, "\"datagram_ids\":["), raw_list_length(e)) {
-                per.entry(id).or_default().0 += len;
-            }
-        }
-        for n in [
-            "transport:packet_received",
-            "transport:packet_dropped",
-            "transport:packet_buffered",
-        ] {
-            for e in named(&trace, n) {
-                if let (Some(id), Some(len)) = (number(e, "\"datagram_id\":"), raw_length(e)) {
-                    per.entry(id).or_default().1 += len;
-                }
-            }
-        }
-        let off = per
-            .iter()
-            .filter(|(_, (a, b))| a != b)
-            .map(|(id, (a, b))| (*id, *a, *b))
-            .collect::<Vec<_>>();
-        assert!(
-            off.is_empty(),
-            "{role}: (datagram, arrived, accounted) {off:?}"
-        );
-        assert_eq!(arrived, accounted, "{role}");
-        assert!(arrived > 0, "{role} received nothing");
-    }
+    let server_trace = server_log.to_string();
+    assert!(named(&server_trace, "transport:packet_buffered").count() > 0);
+    accounts_for_every_byte(&client_log.to_string());
+    accounts_for_every_byte(&server_trace);
 }
 
-/// Trailing bytes that cannot be used are reported as padding: they were sent and
-/// received, so they took up bandwidth, but there is no telling padding from a packet
-/// we cannot use, so no packet type is claimed for them.
+/// Every byte that arrived in a datagram is accounted for by that datagram's packet
+/// events, and none is counted twice.
+fn accounts_for_every_byte(trace: &str) {
+    let mut datagrams = 0;
+    for d in named(trace, "transport:datagrams_received") {
+        let id = number(d, "\"datagram_ids\":[").expect("a datagram_id");
+        let accounted = ["transport:packet_received", "transport:packet_dropped"]
+            .into_iter()
+            .flat_map(|name| named(trace, name))
+            .filter(|p| number(p, "\"datagram_id\":") == Some(id))
+            .filter_map(raw_length)
+            .sum::<u64>();
+        assert_eq!(raw_list_length(d), Some(accounted), "datagram {id}: {d}");
+        datagrams += 1;
+    }
+    assert!(datagrams > 0, "nothing arrived in {trace}");
+}
+
 #[test]
 fn trailing_bytes_are_reported_as_padding() {
     let mut client = default_client();
@@ -554,18 +490,14 @@ fn trailing_bytes_are_reported_as_padding() {
     drop(server);
 
     let trace = contents.to_string();
-    let initial = named(&trace, "transport:packet_received")
+    let padding = named(&trace, "transport:packet_dropped")
         .next()
-        .expect("the Initial");
-    let dropped = named(&trace, "transport:packet_dropped").collect::<Vec<_>>();
-    assert_eq!(dropped.len(), 1, "trace: {trace}");
+        .expect("the padding");
     // Named as padding, with no packet type invented for it.
-    assert_eq!(field(dropped[0], "\"details\":"), Some("padding"));
-    assert_eq!(field(dropped[0], "\"packet_type\":"), None);
-    // And it covers exactly the bytes the Initial did not.
-    assert_eq!(
-        raw_length(initial).unwrap() + raw_length(dropped[0]).unwrap(),
-        len as u64,
-        "trace: {trace}"
-    );
+    assert_eq!(field(padding, "\"details\":"), Some("padding"));
+    assert_eq!(field(padding, "\"packet_type\":"), None);
+    // This is the case the accounting rests on, so hold it to the sum as well: the
+    // handshake tests strip padding, so nothing else covers it.
+    assert!(raw_length(padding).unwrap() < len as u64);
+    accounts_for_every_byte(&trace);
 }

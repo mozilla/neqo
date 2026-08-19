@@ -129,15 +129,16 @@ impl Qlog {
         F: FnOnce() -> Option<qlog::events::EventData>,
     {
         self.add_event_with_stream(now, |s, now| {
-            f().map_or(Ok(false), |ev_data| {
-                s.add_event_data_with_instant(ev_data, now).map(|()| true)
-            })
+            let Some(ev_data) = f() else {
+                return Ok(false);
+            };
+            s.add_event_data_with_instant(ev_data, now)?;
+            Ok(true)
         });
     }
 
-    /// If logging enabled, closure is given the Qlog stream to write events and
-    /// frames to, along with the time to write them at. Reports whether it
-    /// wrote an event.
+    /// If logging enabled, closure is given the Qlog stream to write timestamped events and
+    /// frames to. Reports whether it wrote an event.
     pub fn add_event_with_stream<F>(&mut self, now: Instant, f: F)
     where
         F: FnOnce(&mut QlogStreamer, Instant) -> Result<bool, qlog::Error>,
@@ -295,22 +296,14 @@ mod test {
         // Back at the earlier time, and so must be logged at it.
         log.add_event_at(|| Some(EV_DATA), now);
 
-        // Absolute times depend on the trace's reference time, so compare the two.
+        // Events carry the same data, so if written at the same time they produce identical lines.
         let output = contents.to_string();
-        let times = output
+        let events = output
             .lines()
             .filter(|l| l.contains("spin_bit_updated"))
-            .filter_map(|l| {
-                l.split("\"time\":")
-                    .nth(1)?
-                    .split(',')
-                    .next()?
-                    .parse::<f64>()
-                    .ok()
-            })
             .collect::<Vec<_>>();
-        assert_eq!(times.len(), 2, "expected both events in {output}");
-        assert_eq!(times[0], times[1], "clamped to a non-event in {output}");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], events[1]);
     }
 
     #[test]
