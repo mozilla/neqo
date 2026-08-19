@@ -74,40 +74,38 @@ pub fn tparams_set(
                 TransportInitiator::Local => tph.local(),
                 TransportInitiator::Remote => tph.remote(),
             };
-            let ev_data = EventData::QuicParametersSet(Box::new(ParametersSet {
-                initiator: Some(owner),
-                original_destination_connection_id: tp
-                    .get_bytes(OriginalDestinationConnectionId)
-                    .map(to_hex),
-                stateless_reset_token: tp.get_bytes(StatelessResetToken).map(|_| String::new()), // Don't log the SRT
-                disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
-                max_idle_timeout: Some(tp.get_integer(TransportParameterId::IdleTimeout)),
-                max_udp_payload_size: Some(tp.get_integer(MaxUdpPayloadSize)),
-                ack_delay_exponent: Some(tp.get_integer(AckDelayExponent)),
-                max_ack_delay: Some(tp.get_integer(MaxAckDelay)),
-                active_connection_id_limit: Some(tp.get_integer(ActiveConnectionIdLimit)),
-                initial_max_data: Some(tp.get_integer(InitialMaxData)),
-                initial_max_stream_data_bidi_local: Some(
-                    tp.get_integer(InitialMaxStreamDataBidiLocal),
-                ),
-                initial_max_stream_data_bidi_remote: Some(
-                    tp.get_integer(InitialMaxStreamDataBidiRemote),
-                ),
-                initial_max_stream_data_uni: Some(tp.get_integer(InitialMaxStreamDataUni)),
-                initial_max_streams_bidi: Some(tp.get_integer(InitialMaxStreamsBidi)),
-                initial_max_streams_uni: Some(tp.get_integer(InitialMaxStreamsUni)),
-                preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
-                    Some(PreferredAddress {
-                        ip_v4: paddr.ipv4()?.ip().to_string(),
-                        ip_v6: paddr.ipv6()?.ip().to_string(),
-                        port_v4: paddr.ipv4()?.port(),
-                        port_v6: paddr.ipv6()?.port(),
-                        connection_id: cid.connection_id().to_string(),
-                        stateless_reset_token: to_hex(cid.reset_token()),
-                    })
-                }),
-                ..Default::default()
-            }));
+            let int = |id| Some(tp.get_integer(id));
+            let ev_data =
+                EventData::QuicParametersSet(Box::new(ParametersSet {
+                    initiator: Some(owner),
+                    original_destination_connection_id: tp
+                        .get_bytes(OriginalDestinationConnectionId)
+                        .map(to_hex),
+                    stateless_reset_token: tp.get_bytes(StatelessResetToken).map(|_| String::new()), // Don't log the SRT
+                    disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
+                    max_idle_timeout: int(TransportParameterId::IdleTimeout),
+                    max_udp_payload_size: int(MaxUdpPayloadSize),
+                    ack_delay_exponent: int(AckDelayExponent),
+                    max_ack_delay: int(MaxAckDelay),
+                    active_connection_id_limit: int(ActiveConnectionIdLimit),
+                    initial_max_data: int(InitialMaxData),
+                    initial_max_stream_data_bidi_local: int(InitialMaxStreamDataBidiLocal),
+                    initial_max_stream_data_bidi_remote: int(InitialMaxStreamDataBidiRemote),
+                    initial_max_stream_data_uni: int(InitialMaxStreamDataUni),
+                    initial_max_streams_bidi: int(InitialMaxStreamsBidi),
+                    initial_max_streams_uni: int(InitialMaxStreamsUni),
+                    preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
+                        Some(PreferredAddress {
+                            ip_v4: paddr.ipv4()?.ip().to_string(),
+                            ip_v6: paddr.ipv6()?.ip().to_string(),
+                            port_v4: paddr.ipv4()?.port(),
+                            port_v6: paddr.ipv6()?.port(),
+                            connection_id: cid.connection_id().to_string(),
+                            stateless_reset_token: to_hex(cid.reset_token()),
+                        })
+                    }),
+                    ..Default::default()
+                }));
 
             Some(ev_data)
         },
@@ -318,15 +316,13 @@ pub fn packet_buffered(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Insta
     );
 }
 
-pub fn datagram_sent(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
-    datagram_io(qlog, Direction::Tx, datagram_id, len, now);
-}
-
-pub fn datagram_received(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
-    datagram_io(qlog, Direction::Rx, datagram_id, len, now);
-}
-
-fn datagram_io(qlog: &mut Qlog, direction: Direction, datagram_id: u32, len: usize, now: Instant) {
+pub fn datagram_io(
+    qlog: &mut Qlog,
+    direction: Direction,
+    datagram_id: u32,
+    len: usize,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
             let (count, raw, datagram_ids) =
@@ -811,15 +807,16 @@ impl From<Frame<'_>> for QuicFrame {
                 retire_prior,
                 connection_id,
                 stateless_reset_token,
-            } => Self::NewConnectionId {
-                sequence_number,
-                retire_prior_to: retire_prior,
-                // A CID is at most 20 bytes, so this always fits.
-                connection_id_length: u8::try_from(connection_id.len()).ok(),
-                connection_id: to_hex(connection_id),
-                stateless_reset_token: Some(to_hex(stateless_reset_token)),
-                raw: None,
-            },
+            } => {
+                Self::NewConnectionId {
+                    sequence_number,
+                    retire_prior_to: retire_prior,
+                    connection_id_length: u8::try_from(connection_id.len()).ok(), /* CID is at most 20 bytes, so always fits. */
+                    connection_id: to_hex(connection_id),
+                    stateless_reset_token: Some(to_hex(stateless_reset_token)),
+                    raw: None,
+                }
+            }
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
                 sequence_number,
                 raw: None,

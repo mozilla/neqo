@@ -111,7 +111,7 @@ mod tests {
         }
         assert!(saved.is_either_full());
 
-        // One more should be dropped, and say so.
+        // One more should be dropped.
         assert!(!saved.save(Epoch::ApplicationData, make_dgram(), 0, t));
 
         saved.make_available(Epoch::ApplicationData);

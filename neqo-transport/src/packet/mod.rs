@@ -437,8 +437,8 @@ impl<B: Buffer> Builder<B> {
     }
 
     /// Where [`Self::pad_for_crypto`] pads to.
-    const fn crypto_pad_target(&self, crypto_pad: usize) -> usize {
-        self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad
+    fn crypto_pad_target(&self, crypto: &CryptoDxState) -> usize {
+        self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto.extra_padding()
     }
 
     /// What this packet will measure on the wire.
@@ -446,10 +446,10 @@ impl<B: Buffer> Builder<B> {
     /// This is more than [`Self::len`], because [`Self::build`] pads for header protection and
     /// AEAD expansion. Unlike [`Self::len`], it covers only this packet and not the datagram.
     #[must_use]
-    pub fn lengths(&self, crypto_pad: usize, expansion: usize) -> Lengths {
-        let end = max(self.len(), self.crypto_pad_target(crypto_pad));
+    pub fn lengths(&self, crypto: &CryptoDxState) -> Lengths {
+        let end = max(self.len(), self.crypto_pad_target(crypto));
         Lengths {
-            packet: end - self.header.start + expansion,
+            packet: end - self.header.start + crypto.expansion(),
             payload: end - self.header.end,
         }
     }
@@ -467,8 +467,7 @@ impl<B: Buffer> Builder<B> {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2>
 
-        self.encoder
-            .pad_to(self.crypto_pad_target(crypto.extra_padding()), 0);
+        self.encoder.pad_to(self.crypto_pad_target(crypto), 0);
     }
 
     /// A lot of frames here are just a collection of varints.
@@ -510,7 +509,7 @@ impl<B: Buffer> Builder<B> {
             return Err(Error::Internal);
         }
 
-        let expected = self.lengths(crypto.extra_padding(), crypto.expansion());
+        let expected = self.lengths(crypto);
         let header_start = self.header.start;
 
         self.pad_for_crypto(crypto);

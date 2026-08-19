@@ -47,7 +47,7 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
-    packet,
+    packet::{self, metadata::Direction},
     path::{Path, PathRef, Paths},
     qlog::{self, PacketDroppedTrigger, TransportInitiator},
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagrams},
@@ -1502,8 +1502,6 @@ impl Connection {
             self.stats.borrow_mut().packets_rx -= 1;
         } else {
             self.stats.borrow_mut().pkt_dropped("Saved datagrams full");
-            // This packet did parse, so unlike trailing padding it is worth naming,
-            // at the same length the sibling branch would have buffered it at.
             qlog::packet_dropped(
                 &mut self.qlog,
                 None,
@@ -1563,8 +1561,7 @@ impl Connection {
         }
     }
 
-    /// Count a packet as dropped and say why, so that the statistics and the qlog
-    /// cannot give different reasons for the same packet.
+    /// Count a packet as dropped and say why.
     fn discard(&self, reason: impl AsRef<str>, trigger: PacketDroppedTrigger) -> PreprocessResult {
         self.stats.borrow_mut().pkt_dropped(reason);
         PreprocessResult::Discard(trigger)
@@ -1733,8 +1730,6 @@ impl Connection {
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
                 self.state_signaling.send_close();
-                // The packet is answered but not processed, so its bytes are
-                // discarded; a trace that omitted them could not add up.
                 self.discard("Received while closing", PacketDroppedTrigger::Rejected)
             }
             State::Draining { .. } | State::Closed(..) => {
@@ -1825,7 +1820,13 @@ impl Connection {
         now: Instant,
     ) {
         let datagram_id = self.qlog.next_datagram_id();
-        qlog::datagram_received(&mut self.qlog, datagram_id, d.len(), now);
+        qlog::datagram_io(
+            &mut self.qlog,
+            Direction::Rx,
+            datagram_id,
+            d.len(),
+            received,
+        );
         self.input_with_id(d, datagram_id, received, now);
     }
 
@@ -1849,39 +1850,43 @@ impl Connection {
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
     }
 
-    /// Report bytes that could not be used; `len` runs to the end of the datagram.
-    ///
-    /// Anything after the first packet is reported as padding. Those bytes were sent
-    /// and received, so they took up bandwidth and have to be accounted for, but
-    /// padding can be any value: there is no telling it from a packet that cannot be
-    /// used, so naming a packet type would be a guess.
-    fn drop_rest_of_datagram(
+    /// Report bytes that could not be used.
+    fn drop_unusable(
         &mut self,
-        packet_type: Option<packet::Type>,
+        packet: Option<&packet::Public>,
         len: usize,
-        dgram_len: usize,
+        first: bool,
         datagram_id: u32,
         trigger: PacketDroppedTrigger,
         now: Instant,
     ) {
-        let (packet_type, details, trigger) = if len == dgram_len {
-            (packet_type, None, trigger)
+        let (packet_type, packet_len) = if first {
+            packet.map_or((None, len), |p| (Some(p.packet_type()), p.len()))
         } else {
+            (None, 0)
+        };
+        for (packet_type, len, details, trigger) in [
+            (packet_type, packet_len, None, trigger),
             (
                 None,
-                Some("padding".to_string()),
+                len - packet_len,
+                Some("padding"),
                 PacketDroppedTrigger::General,
-            )
-        };
-        qlog::packet_dropped(
-            &mut self.qlog,
-            packet_type,
-            len,
-            datagram_id,
-            details,
-            trigger,
-            now,
-        );
+            ),
+        ] {
+            if len > 0 {
+                let details = details.map(ToOwned::to_owned);
+                qlog::packet_dropped(
+                    &mut self.qlog,
+                    packet_type,
+                    len,
+                    datagram_id,
+                    details,
+                    trigger,
+                    now,
+                );
+            }
+        }
     }
 
     fn input_path(
@@ -1905,7 +1910,7 @@ impl Connection {
             self.stats.borrow_mut().packets_rx += 1;
             self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             let slc_len = slc.len();
-            // Bound here so the `cid_manager` borrow ends before `self` is needed below.
+            let first = slc_len == dgram_len;
             let decoded = packet::Public::decode(slc, self.cid_manager.decoder().as_ref());
             let (packet, remainder) = match decoded {
                 Ok((packet, remainder)) => {
@@ -1916,29 +1921,15 @@ impl Connection {
                 Err(e) => {
                     qinfo!("[{self}] Garbage packet: {e}");
                     self.stats.borrow_mut().pkt_dropped("Garbage packet");
-                    // The header did not parse, so the packet type is unknown.
-                    self.drop_rest_of_datagram(
-                        None,
-                        slc_len,
-                        dgram_len,
-                        datagram_id,
-                        PacketDroppedTrigger::Invalid,
-                        now,
-                    );
+                    let trigger = PacketDroppedTrigger::Invalid;
+                    self.drop_unusable(None, slc_len, first, datagram_id, trigger, now);
                     break;
                 }
             };
             match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Process => (),
                 PreprocessResult::Discard(trigger) => {
-                    self.drop_rest_of_datagram(
-                        Some(packet.packet_type()),
-                        slc_len,
-                        dgram_len,
-                        datagram_id,
-                        trigger,
-                        now,
-                    );
+                    self.drop_unusable(Some(&packet), slc_len, first, datagram_id, trigger, now);
                     break;
                 }
                 PreprocessResult::Handled => break,
@@ -2031,7 +2022,7 @@ impl Connection {
         }
     }
 
-    /// Process a packet that authenticated, unless it is a duplicate.
+    /// Process a packet that decrypted, unless it is a duplicate.
     fn process_decrypted(
         &mut self,
         path: &PathRef,
@@ -2907,7 +2898,6 @@ impl Connection {
                 continue;
             };
             let aead_expansion = tx.expansion();
-            let crypto_pad = tx.extra_padding();
 
             let header_start = encoder.len();
 
@@ -2974,12 +2964,21 @@ impl Connection {
                 tokens.push(recovery::Token::EcnEct0);
             }
 
+            // Scoped, because logging needs `self` again below.
+            let lengths = {
+                let tx = self
+                    .crypto
+                    .states_mut()
+                    .tx_mut(self.version, epoch)
+                    .ok_or(Error::Internal)?;
+                builder.lengths(tx)
+            };
             self.log_packet(
                 packet::MetaData::new_out(
                     path,
                     pt,
                     pn,
-                    builder.lengths(crypto_pad, aead_expansion),
+                    lengths,
                     &builder.as_ref()[payload_start..],
                     packet_tos,
                     self.version,
@@ -3066,7 +3065,13 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(encoder.len()); // Only now is the size of the datagram final.
-            qlog::datagram_sent(&mut self.qlog, datagram_id, encoder.len(), now);
+            qlog::datagram_io(
+                &mut self.qlog,
+                Direction::Tx,
+                datagram_id,
+                encoder.len(),
+                now,
+            );
             Ok(SendOption::Yes)
         }
     }
