@@ -238,41 +238,41 @@ impl RxStreamOrderer {
             return;
         }
 
-        // Common case: new_start >= end
-        if new_start >= self.end {
-            debug_assert_eq!(
-                self.end,
-                self.data_ranges
-                    .last_key_value()
-                    .map_or(self.retired, |(&k, v)| k + to_u64(v.len())),
-                "end must equal the end of the last range, or retired if empty"
-            );
-            self.received += to_u64(new_data.len());
-            // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
-            // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
-            // (by up to one frame). Gap (new_start > end): falls through to insert.
-            let adjacent = new_start == self.end;
-            if adjacent
-                && let Some(mut e) = self
-                    .data_ranges
-                    .last_entry()
-                    .filter(|e| e.get().len() < Self::RANGE_TARGET)
-            {
-                e.get_mut().extend_from_slice(new_data);
-            } else {
-                // A new entry only because the existing one hit RANGE_TARGET; not a gap.
-                let continues_previous = adjacent && !self.data_ranges.is_empty();
-                self.data_ranges.insert(new_start, new_data.to_vec());
-                if continues_previous {
-                    self.split_ranges += 1;
-                }
-            }
-            // new_end > new_start >= end, so direct assignment is correct.
-            self.end = new_end;
+        if new_start < self.end {
+            self.inbound_overlapping(new_start, new_data, new_end);
             return;
         }
 
-        self.inbound_overlapping(new_start, new_data, new_end);
+        // Common case: new_start >= end
+        debug_assert_eq!(
+            self.end,
+            self.data_ranges
+                .last_key_value()
+                .map_or(self.retired, |(&k, v)| k + to_u64(v.len())),
+            "end must equal the end of the last range, or retired if empty"
+        );
+        self.received += to_u64(new_data.len());
+        // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
+        // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
+        // (by up to one frame). Gap (new_start > end): falls through to insert.
+        let adjacent = new_start == self.end;
+        if adjacent
+            && let Some(mut e) = self
+                .data_ranges
+                .last_entry()
+                .filter(|e| e.get().len() < Self::RANGE_TARGET)
+        {
+            e.get_mut().extend_from_slice(new_data);
+        } else {
+            // A new entry only because the existing one hit RANGE_TARGET; not a gap.
+            let continues_previous = adjacent && !self.data_ranges.is_empty();
+            self.data_ranges.insert(new_start, new_data.to_vec());
+            if continues_previous {
+                self.split_ranges += 1;
+            }
+        }
+        // new_end > new_start >= end, so direct assignment is correct.
+        self.end = new_end;
     }
 
     /// Handle a frame that overlaps data we already hold, i.e. `new_start < self.end`.
@@ -285,23 +285,7 @@ impl RxStreamOrderer {
             self.data_ranges.range_mut(..=new_start).next_back()
         {
             let prev_end = prev_start + to_u64(prev_vec.len());
-            if new_end > prev_end {
-                // PPPPPP    ->  PPPPPP
-                //   NNNNNN            NN
-                // NNNNNNNN            NN
-                // Add a range containing only new data
-                let overlap = prev_end.saturating_sub(new_start);
-                qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
-                new_start += overlap;
-                // This conversion is guaranteed to work because the overlap cannot exceed
-                // the size of the new data, which has to fit in usize.
-                new_data = &new_data[expect_usize(overlap)..];
-                // If it is small enough, extend the previous buffer.
-                // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
-                // to one frame). This can't always extend, because otherwise the
-                // buffer could end up growing indefinitely without being released.
-                prev_vec.len() < Self::RANGE_TARGET && prev_end == new_start
-            } else {
+            if new_end <= prev_end {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
                 // NNNN
@@ -309,6 +293,21 @@ impl RxStreamOrderer {
                 qtrace!("Dropping frame with already-received range {new_start}-{new_end}");
                 return;
             }
+            // PPPPPP    ->  PPPPPP
+            //   NNNNNN            NN
+            // NNNNNNNN            NN
+            // Add a range containing only new data
+            let overlap = prev_end.saturating_sub(new_start);
+            qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
+            new_start += overlap;
+            // This conversion is guaranteed to work because the overlap cannot exceed
+            // the size of the new data, which has to fit in usize.
+            new_data = &new_data[expect_usize(overlap)..];
+            // If it is small enough, extend the previous buffer.
+            // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
+            // to one frame). This can't always extend, because otherwise the
+            // buffer could end up growing indefinitely without being released.
+            prev_vec.len() < Self::RANGE_TARGET && prev_end == new_start
         } else {
             qtrace!("New frame {new_start}-{new_end} received");
             false
@@ -369,38 +368,40 @@ impl RxStreamOrderer {
             });
         }
 
-        if !to_add.is_empty() {
-            self.received += to_u64(to_add.len());
-            // Credit each side this joins up with, so the count tracks gaps, not entries.
-            let add_end = new_start + to_u64(to_add.len());
-            let joins_next = self
-                .data_ranges
-                .range(add_end..)
-                .next()
-                .is_some_and(|(&start, _)| start == add_end);
-            if extend {
-                if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
-                    buf.extend_from_slice(to_add);
-                }
-            } else {
-                let continues_previous = self
-                    .data_ranges
-                    .range(..new_start)
-                    .next_back()
-                    .is_some_and(|(&start, data)| start + to_u64(data.len()) == new_start);
-                self.data_ranges.insert(new_start, to_add.to_vec());
-                if continues_previous {
-                    self.split_ranges += 1;
-                }
+        if to_add.is_empty() {
+            // A surviving forward entry with next_end >= new_end exists, so self.end is
+            // already correct.
+            return;
+        }
+
+        self.received += to_u64(to_add.len());
+        // Credit each side this joins up with, so the count tracks gaps, not entries.
+        let add_end = new_start + to_u64(to_add.len());
+        let joins_next = self
+            .data_ranges
+            .range(add_end..)
+            .next()
+            .is_some_and(|(&start, _)| start == add_end);
+        if extend {
+            if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
+                buf.extend_from_slice(to_add);
             }
-            if joins_next {
+        } else {
+            let continues_previous = self
+                .data_ranges
+                .range(..new_start)
+                .next_back()
+                .is_some_and(|(&start, data)| start + to_u64(data.len()) == new_start);
+            self.data_ranges.insert(new_start, to_add.to_vec());
+            if continues_previous {
                 self.split_ranges += 1;
             }
-            // new_start was advanced by overlap, so new_end is still the real end.
-            // When to_add is empty, a surviving forward entry with next_end >= new_end
-            // exists, so self.end is already correct — the max() is a no-op in that case.
-            self.end = max(self.end, new_end);
         }
+        if joins_next {
+            self.split_ranges += 1;
+        }
+        // new_start was advanced by overlap, so new_end is still the real end.
+        self.end = max(self.end, new_end);
     }
 
     /// Whether we buffer more than `MAX_SPLIT_RANGES` non-adjacent ranges.
@@ -819,6 +820,11 @@ impl RecvStream {
         }
     }
 
+    /// Whether every byte the peer sent is now buffered, i.e. there are no gaps left.
+    fn all_received(fc: &ReceiverFlowControl<StreamId>, recv_buf: &RxStreamOrderer) -> bool {
+        fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready())
+    }
+
     /// # Errors
     /// When the incoming data violates flow control limits, or
     /// [`Error::ProtocolViolation`] when it pushes the stream past `MAX_SPLIT_RANGES`
@@ -842,24 +848,23 @@ impl RecvStream {
             } => {
                 recv_buf.inbound_frame(offset, data);
                 if fin {
-                    let all_recv =
-                        fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready());
-                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
-                    let fc_copy = mem::take(fc);
-                    let session_fc_copy = mem::take(session_fc);
-                    if all_recv {
-                        self.set_state(RecvStreamState::DataRecvd {
-                            fc: fc_copy,
-                            session_fc: session_fc_copy,
-                            recv_buf: buf,
-                        });
+                    let all_recv = Self::all_received(fc, recv_buf);
+                    let fc = mem::take(fc);
+                    let session_fc = mem::take(session_fc);
+                    let recv_buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    self.set_state(if all_recv {
+                        RecvStreamState::DataRecvd {
+                            fc,
+                            session_fc,
+                            recv_buf,
+                        }
                     } else {
-                        self.set_state(RecvStreamState::SizeKnown {
-                            fc: fc_copy,
-                            session_fc: session_fc_copy,
-                            recv_buf: buf,
-                        });
-                    }
+                        RecvStreamState::SizeKnown {
+                            fc,
+                            session_fc,
+                            recv_buf,
+                        }
+                    });
                 }
             }
             RecvStreamState::SizeKnown {
@@ -868,14 +873,14 @@ impl RecvStream {
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data);
-                if fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready()) {
-                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
-                    let fc_copy = mem::take(fc);
-                    let session_fc_copy = mem::take(session_fc);
+                if Self::all_received(fc, recv_buf) {
+                    let fc = mem::take(fc);
+                    let session_fc = mem::take(session_fc);
+                    let recv_buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     self.set_state(RecvStreamState::DataRecvd {
-                        fc: fc_copy,
-                        session_fc: session_fc_copy,
-                        recv_buf: buf,
+                        fc,
+                        session_fc,
+                        recv_buf,
                     });
                 }
             }
