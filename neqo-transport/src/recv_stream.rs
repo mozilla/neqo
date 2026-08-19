@@ -211,10 +211,12 @@ impl RxStreamOrderer {
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
+    /// # Errors
+    /// `ProtocolViolation` if this pushes buffered non-adjacent ranges over `MAX_SPLIT_RANGES`.
     /// # Panics
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
-    pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) {
+    pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) -> Res<()> {
         qtrace!("Inbound data offset={new_start} len={}", new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
@@ -224,7 +226,7 @@ impl RxStreamOrderer {
 
         if new_end <= self.retired {
             // Range already read by application, this frame is very late and unneeded.
-            return;
+            return Ok(());
         }
 
         if new_start < self.retired {
@@ -235,12 +237,11 @@ impl RxStreamOrderer {
 
         if new_data.is_empty() {
             // No data to insert
-            return;
+            return Ok(());
         }
 
         if new_start < self.end {
-            self.inbound_overlapping(new_start, new_data, new_end);
-            return;
+            return self.inbound_overlapping(new_start, new_data, new_end);
         }
 
         // Common case: new_start >= end
@@ -255,8 +256,7 @@ impl RxStreamOrderer {
         // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
         // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
         // (by up to one frame). Gap (new_start > end): falls through to insert.
-        let adjacent = new_start == self.end;
-        if adjacent
+        if new_start == self.end
             && let Some(mut e) = self
                 .data_ranges
                 .last_entry()
@@ -264,8 +264,9 @@ impl RxStreamOrderer {
         {
             e.get_mut().extend_from_slice(new_data);
         } else {
-            // A new entry only because the existing one hit RANGE_TARGET; not a gap.
-            let continues_previous = adjacent && !self.data_ranges.is_empty();
+            // The last range ends exactly at `self.end` and nothing starts in between, so a
+            // gap here means no range ends at `new_start`.
+            let continues_previous = new_start == self.end && !self.data_ranges.is_empty();
             self.data_ranges.insert(new_start, new_data.to_vec());
             if continues_previous {
                 self.split_ranges += 1;
@@ -273,6 +274,7 @@ impl RxStreamOrderer {
         }
         // new_end > new_start >= end, so direct assignment is correct.
         self.end = new_end;
+        self.check_split_limit()
     }
 
     /// Handle a frame that overlaps data we already hold, i.e. `new_start < self.end`.
@@ -280,8 +282,13 @@ impl RxStreamOrderer {
     /// # Panics
     /// Only when `u64` values cannot be converted to `usize`, which only
     /// happens on 32-bit machines that hold far too much data at the same time.
-    fn inbound_overlapping(&mut self, mut new_start: u64, mut new_data: &[u8], new_end: u64) {
-        let extend = if let Some((&prev_start, prev_vec)) =
+    fn inbound_overlapping(
+        &mut self,
+        mut new_start: u64,
+        mut new_data: &[u8],
+        new_end: u64,
+    ) -> Res<()> {
+        let (extend, continues_previous) = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
             let prev_end = prev_start + to_u64(prev_vec.len());
@@ -291,7 +298,7 @@ impl RxStreamOrderer {
                 // NNNN
                 // Do nothing
                 qtrace!("Dropping frame with already-received range {new_start}-{new_end}");
-                return;
+                return Ok(());
             }
             // PPPPPP    ->  PPPPPP
             //   NNNNNN            NN
@@ -307,10 +314,11 @@ impl RxStreamOrderer {
             // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
             // to one frame). This can't always extend, because otherwise the
             // buffer could end up growing indefinitely without being released.
-            prev_vec.len() < Self::RANGE_TARGET && prev_end == new_start
+            let adjacent = prev_end == new_start;
+            (prev_vec.len() < Self::RANGE_TARGET && adjacent, adjacent)
         } else {
             qtrace!("New frame {new_start}-{new_end} received");
-            false
+            (false, false)
         };
 
         let mut to_add = new_data;
@@ -369,44 +377,35 @@ impl RxStreamOrderer {
         }
 
         if to_add.is_empty() {
-            // A surviving forward entry with next_end >= new_end exists, so self.end is
-            // already correct.
-            return;
+            // A surviving forward entry with next_end >= new_end exists, so self.end is already
+            // correct. Nothing was added, so the limit cannot have been crossed.
+            return Ok(());
         }
 
         self.received += to_u64(to_add.len());
-        // Credit each side this joins up with, so the count tracks gaps, not entries.
-        let add_end = new_start + to_u64(to_add.len());
-        let joins_next = self
-            .data_ranges
-            .range(add_end..)
-            .next()
-            .is_some_and(|(&start, _)| start == add_end);
         if extend {
             if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
                 buf.extend_from_slice(to_add);
             }
         } else {
-            let continues_previous = self
-                .data_ranges
-                .range(..new_start)
-                .next_back()
-                .is_some_and(|(&start, data)| start + to_u64(data.len()) == new_start);
             self.data_ranges.insert(new_start, to_add.to_vec());
             if continues_previous {
                 self.split_ranges += 1;
             }
         }
-        if joins_next {
-            self.split_ranges += 1;
-        }
         // new_start was advanced by overlap, so new_end is still the real end.
         self.end = max(self.end, new_end);
+
+        self.check_split_limit()
     }
 
-    /// Whether we buffer more than `MAX_SPLIT_RANGES` non-adjacent ranges.
-    pub(crate) fn overly_fragmented(&self) -> bool {
-        self.data_ranges.len() > Self::MAX_SPLIT_RANGES + self.split_ranges
+    /// Checks the `MAX_SPLIT_RANGES` limit.
+    fn check_split_limit(&self) -> Res<()> {
+        if self.data_ranges.len() > Self::MAX_SPLIT_RANGES + self.split_ranges {
+            qwarn!("Excessive non-adjacent reassembly ranges, closing connection");
+            return Err(Error::ProtocolViolation);
+        }
+        Ok(())
     }
 
     /// Are any bytes readable?
@@ -846,7 +845,7 @@ impl RecvStream {
                 fc,
                 session_fc,
             } => {
-                recv_buf.inbound_frame(offset, data);
+                recv_buf.inbound_frame(offset, data)?;
                 if fin {
                     let all_recv = Self::all_received(fc, recv_buf);
                     let fc = mem::take(fc);
@@ -872,7 +871,7 @@ impl RecvStream {
                 fc,
                 session_fc,
             } => {
-                recv_buf.inbound_frame(offset, data);
+                recv_buf.inbound_frame(offset, data)?;
                 if Self::all_received(fc, recv_buf) {
                     let fc = mem::take(fc);
                     let session_fc = mem::take(session_fc);
@@ -894,7 +893,7 @@ impl RecvStream {
                 let keep = reliable_size.saturating_sub(offset);
                 if keep > 0 {
                     let keep = min(data.len(), usize::try_from(keep)?);
-                    recv_buf.inbound_frame(offset, &data[..keep]);
+                    recv_buf.inbound_frame(offset, &data[..keep])?;
                 }
             }
             RecvStreamState::DataRecvd { .. }
@@ -904,19 +903,6 @@ impl RecvStream {
             | RecvStreamState::ResetRecvd { .. } => {
                 qtrace!("data received when we are in state {}", self.state);
             }
-        }
-
-        // Don't let a peer pin memory by forcing us to buffer many non-adjacent ranges.
-        if self
-            .state
-            .recv_buf()
-            .is_some_and(RxStreamOrderer::overly_fragmented)
-        {
-            qwarn!(
-                "Excessive non-adjacent STREAM ranges on {}, closing connection",
-                self.stream_id
-            );
-            return Err(Error::ProtocolViolation);
         }
 
         if !already_data_ready && (self.data_ready() || self.needs_to_inform_app_about_fin()) {
@@ -1425,7 +1411,9 @@ mod tests {
         let mut s = RxStreamOrderer::default();
         for r in ranges {
             let data = &ZEROES[..expect_usize(r.end - r.start)];
-            s.inbound_frame(r.start, data);
+            s.inbound_frame(r.start, data).unwrap();
+            // The credit must never make the limit more permissive than the real run count.
+            assert!(s.split_ranges + s.split_ranges() <= s.data_ranges.len());
         }
 
         let mut buf = [0xff; 100];
@@ -1433,6 +1421,8 @@ mod tests {
         loop {
             let recvd = s.read(&mut buf[..]);
             qtrace!("recv_ranges read {recvd}");
+            // The credit must survive removals without becoming permissive.
+            assert!(s.split_ranges + s.split_ranges() <= s.data_ranges.len());
             total_recvd += recvd;
             if recvd == 0 {
                 assert_eq!(total_recvd, available);
@@ -1446,10 +1436,10 @@ mod tests {
     fn inbound_frame_no_extend_at_4096() {
         let mut s = RxStreamOrderer::default();
         // Fill to the extend threshold.
-        s.inbound_frame(0, &[0u8; 4096]);
+        s.inbound_frame(0, &[0u8; 4096]).unwrap();
         assert_eq!(s.data_ranges[&0].len(), 4096);
         // The next byte must not be merged; the threshold has been reached.
-        s.inbound_frame(4096, &[1u8]);
+        s.inbound_frame(4096, &[1u8]).unwrap();
         assert_eq!(
             s.data_ranges.len(),
             2,
@@ -1461,8 +1451,8 @@ mod tests {
     #[test]
     fn inbound_frame_extends_below_4096() {
         let mut s = RxStreamOrderer::default();
-        s.inbound_frame(0, &[0u8; 4095]);
-        s.inbound_frame(4095, &[1u8]);
+        s.inbound_frame(0, &[0u8; 4095]).unwrap();
+        s.inbound_frame(4095, &[1u8]).unwrap();
         assert_eq!(s.data_ranges.len(), 1);
         assert_eq!(s.data_ranges[&0].len(), 4096);
     }
@@ -1471,8 +1461,8 @@ mod tests {
     #[test]
     fn read_exact_available_removes_range() {
         let mut s = RxStreamOrderer::default();
-        s.inbound_frame(0, &[1u8; 5]);
-        s.inbound_frame(5, &[2u8; 5]);
+        s.inbound_frame(0, &[1u8; 5]).unwrap();
+        s.inbound_frame(5, &[2u8; 5]).unwrap();
 
         let mut buf = [0u8; 5];
         assert_eq!(s.read(&mut buf), 5);
@@ -1597,11 +1587,11 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add three chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]);
+        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
         let offset = to_u64(CHUNK_SIZE);
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
         let offset = to_u64(CHUNK_SIZE + EXTRA_SIZE);
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
 
         // Read, providing only enough space for the first.
         let mut buf = [0; 100];
@@ -1616,7 +1606,7 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add a chunk
-        s.inbound_frame(0, &[0; 150]);
+        s.inbound_frame(0, &[0; 150]).unwrap();
         assert_eq!(s.data_ranges[&0].len(), 150);
         // Read, providing only enough space for the first 100.
         let mut buf = [0; 100];
@@ -1627,7 +1617,7 @@ mod tests {
         // Add a second frame that overlaps.
         // This shouldn't truncate the first frame, as we're already
         // Reading from it.
-        s.inbound_frame(120, &[0; 60]);
+        s.inbound_frame(120, &[0; 60]).unwrap();
         assert_eq!(s.data_ranges[&0].len(), 180);
         // Read second part of first frame and all of the second frame
         let count = s.read(&mut buf[..]);
@@ -1642,9 +1632,9 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add three chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]);
+        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
         let offset = to_u64(CHUNK_SIZE + EXTRA_SIZE);
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
 
         // Read, providing only enough space for the first chunk.
         let mut buf = [0; 100];
@@ -1653,7 +1643,7 @@ mod tests {
 
         // Now fill the gap and ensure that everything can be read.
         let offset = to_u64(CHUNK_SIZE);
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
         let count = s.read(&mut buf[..]);
         assert_eq!(count, EXTRA_SIZE * 2);
     }
@@ -1666,9 +1656,9 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add two chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]);
+        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
         let offset = to_u64(CHUNK_SIZE);
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
 
         // Read, providing only enough space for some of the first chunk.
         let mut buf = [0; 100];
@@ -1687,9 +1677,9 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         // Add two chunks.
-        s.inbound_frame(0, &[0; CHUNK_SIZE]);
+        s.inbound_frame(0, &[0; CHUNK_SIZE]).unwrap();
         let offset = to_u64(CHUNK_SIZE);
-        s.inbound_frame(offset, &[0; EXTRA_SIZE]);
+        s.inbound_frame(offset, &[0; EXTRA_SIZE]).unwrap();
 
         let mut buf = [0; 1];
         for _ in 0..CHUNK_SIZE + EXTRA_SIZE {
@@ -1787,27 +1777,27 @@ mod tests {
     fn stream_rx_dedupe_tail() {
         let mut s = RxStreamOrderer::new();
 
-        s.inbound_frame(0, &[1; 6]);
+        s.inbound_frame(0, &[1; 6]).unwrap();
         check_chunks(&s, &[(0, 6)]);
 
         // New data that overlaps entirely (starting from the head), is ignored.
-        s.inbound_frame(0, &[2; 3]);
+        s.inbound_frame(0, &[2; 3]).unwrap();
         check_chunks(&s, &[(0, 6)]);
 
         // New data that overlaps at the tail has any new data appended.
-        s.inbound_frame(2, &[3; 6]);
+        s.inbound_frame(2, &[3; 6]).unwrap();
         check_chunks(&s, &[(0, 8)]);
 
         // New data that overlaps entirely (up to the tail), is ignored.
-        s.inbound_frame(4, &[4; 4]);
+        s.inbound_frame(4, &[4; 4]).unwrap();
         check_chunks(&s, &[(0, 8)]);
 
         // New data that overlaps, starting from the beginning is appended too.
-        s.inbound_frame(0, &[5; 10]);
+        s.inbound_frame(0, &[5; 10]).unwrap();
         check_chunks(&s, &[(0, 10)]);
 
         // New data that is entirely subsumed is ignored.
-        s.inbound_frame(2, &[6; 2]);
+        s.inbound_frame(2, &[6; 2]).unwrap();
         check_chunks(&s, &[(0, 10)]);
 
         let mut buf = [0; 16];
@@ -1820,15 +1810,15 @@ mod tests {
     fn stream_rx_dedupe_head() {
         let mut s = RxStreamOrderer::new();
 
-        s.inbound_frame(1, &[6; 6]);
+        s.inbound_frame(1, &[6; 6]).unwrap();
         check_chunks(&s, &[(1, 6)]);
 
         // Insertion before an existing chunk causes truncation of the new chunk.
-        s.inbound_frame(0, &[7; 6]);
+        s.inbound_frame(0, &[7; 6]).unwrap();
         check_chunks(&s, &[(0, 1), (1, 6)]);
 
         // Perfect overlap with existing slices has no effect.
-        s.inbound_frame(0, &[8; 7]);
+        s.inbound_frame(0, &[8; 7]).unwrap();
         check_chunks(&s, &[(0, 1), (1, 6)]);
 
         let mut buf = [0; 16];
@@ -1840,16 +1830,16 @@ mod tests {
     fn stream_rx_dedupe_new_tail() {
         let mut s = RxStreamOrderer::new();
 
-        s.inbound_frame(1, &[6; 6]);
+        s.inbound_frame(1, &[6; 6]).unwrap();
         check_chunks(&s, &[(1, 6)]);
 
         // Insertion before an existing chunk causes truncation of the new chunk.
-        s.inbound_frame(0, &[7; 6]);
+        s.inbound_frame(0, &[7; 6]).unwrap();
         check_chunks(&s, &[(0, 1), (1, 6)]);
 
         // New data at the end causes the tail to be added to the first chunk,
         // replacing later chunks entirely.
-        s.inbound_frame(0, &[9; 8]);
+        s.inbound_frame(0, &[9; 8]).unwrap();
         check_chunks(&s, &[(0, 8)]);
 
         let mut buf = [0; 16];
@@ -1861,15 +1851,15 @@ mod tests {
     fn stream_rx_dedupe_replace() {
         let mut s = RxStreamOrderer::new();
 
-        s.inbound_frame(2, &[6; 6]);
+        s.inbound_frame(2, &[6; 6]).unwrap();
         check_chunks(&s, &[(2, 6)]);
 
         // Insertion before an existing chunk causes truncation of the new chunk.
-        s.inbound_frame(1, &[7; 6]);
+        s.inbound_frame(1, &[7; 6]).unwrap();
         check_chunks(&s, &[(1, 1), (2, 6)]);
 
         // New data at the start and end replaces all the slices.
-        s.inbound_frame(0, &[9; 10]);
+        s.inbound_frame(0, &[9; 10]).unwrap();
         check_chunks(&s, &[(0, 10)]);
 
         let mut buf = [0; 16];
@@ -1882,14 +1872,14 @@ mod tests {
         let mut s = RxStreamOrderer::new();
 
         let mut buf = [0; 18];
-        s.inbound_frame(0, &[1; 10]);
+        s.inbound_frame(0, &[1; 10]).unwrap();
 
         // Partially read slices are retained.
         assert_eq!(s.read(&mut buf[..6]), 6);
         check_chunks(&s, &[(0, 10)]);
 
         // Partially read slices are kept and so are added to.
-        s.inbound_frame(3, &buf[..10]);
+        s.inbound_frame(3, &buf[..10]).unwrap();
         check_chunks(&s, &[(0, 13)]);
 
         // Wholly read pieces are dropped.
@@ -1897,7 +1887,7 @@ mod tests {
         assert!(s.data_ranges.is_empty());
 
         // New data that overlaps with retired data is trimmed.
-        s.inbound_frame(0, &buf[..]);
+        s.inbound_frame(0, &buf[..]).unwrap();
         check_chunks(&s, &[(13, 5)]);
     }
 
@@ -2057,7 +2047,8 @@ mod tests {
         let mut s = RxStreamOrderer::default();
         for i in 0..N {
             let offset = to_u64(i * RxStreamOrderer::RANGE_TARGET);
-            s.inbound_frame(offset, &[0u8; RxStreamOrderer::RANGE_TARGET]);
+            s.inbound_frame(offset, &[0u8; RxStreamOrderer::RANGE_TARGET])
+                .unwrap();
         }
         assert_eq!(s.data_ranges.len(), N, "one entry per RANGE_TARGET chunk");
         assert_eq!(s.split_ranges(), 1);
@@ -2078,7 +2069,8 @@ mod tests {
         let mut s = RxStreamOrderer::default();
         for i in 0..N {
             let offset = to_u64(i * RxStreamOrderer::RANGE_TARGET);
-            s.inbound_frame(offset, &[0u8; RxStreamOrderer::RANGE_TARGET]);
+            s.inbound_frame(offset, &[0u8; RxStreamOrderer::RANGE_TARGET])
+                .unwrap();
         }
         assert_eq!(s.split_ranges, N - 1);
 
@@ -2092,24 +2084,24 @@ mod tests {
     fn split_ranges_reduced_after_overlap_removal() {
         let mut s = RxStreamOrderer::default();
         // The first insert splits nothing.
-        s.inbound_frame(0, &[0u8; 1]);
+        s.inbound_frame(0, &[0u8; 1]).unwrap();
         assert_eq!(s.split_ranges, 0);
 
         // Two later, non-adjacent inserts: not credited.
-        s.inbound_frame(10, &[0u8; 1]);
-        s.inbound_frame(20, &[0u8; 1]);
+        s.inbound_frame(10, &[0u8; 1]).unwrap();
+        s.inbound_frame(20, &[0u8; 1]).unwrap();
         assert_eq!(s.data_ranges.len(), 3);
         assert_eq!(s.split_ranges, 0);
 
         // An overlapping frame spanning [0, 20) entirely swallows the entry at 10
         // (via the `to_remove` path) and extends the entry at 0; the entry at 20
         // survives untouched. Net effect: one entry disappears.
-        s.inbound_frame(0, &[0u8; 20]);
+        s.inbound_frame(0, &[0u8; 20]).unwrap();
         assert_eq!(s.data_ranges.len(), 2, "entry at 10 was fully absorbed");
 
-        // One credit back for the absorbed entry, one earned for closing the gap at 20.
-        assert_eq!(s.split_ranges, 1);
-        assert_eq!(s.data_ranges.len() - s.split_ranges, s.split_ranges());
+        // Nothing here was ever credited, so there is no credit to give back.
+        assert_eq!(s.split_ranges, 0);
+        assert!(s.split_ranges + s.split_ranges() <= s.data_ranges.len());
     }
 
     /// A contiguous run assembled by filling a gap must not consume the gap budget.
@@ -2120,23 +2112,24 @@ mod tests {
         let mut s = RxStreamOrderer::default();
 
         // A full range, a gap, then the frame that fills the gap.
-        s.inbound_frame(0, &payload);
-        s.inbound_frame(2 * target, &payload);
-        s.inbound_frame(target, &payload);
+        s.inbound_frame(0, &payload).unwrap();
+        s.inbound_frame(2 * target, &payload).unwrap();
+        s.inbound_frame(target, &payload).unwrap();
 
         assert_eq!(s.data_ranges.len(), 3, "one entry per RANGE_TARGET chunk");
         assert_eq!(s.split_ranges(), 1, "all of it is one contiguous run");
-        // The filling entry continues the first range and closes the gap before the last.
-        assert_eq!(s.split_ranges, 2);
-        assert_eq!(s.data_ranges.len() - s.split_ranges, s.split_ranges());
-        assert!(!s.overly_fragmented());
+        // The filling entry continues the first range, so it is credited; the entry that
+        // started the far side of the gap is not, leaving the run charged for two ranges.
+        assert_eq!(s.split_ranges, 1);
+        assert!(s.split_ranges + s.split_ranges() <= s.data_ranges.len());
+        assert_eq!(s.check_split_limit(), Ok(()));
     }
 
     #[test]
     fn stream_orderer_bytes_ready() {
         let mut rx_ord = RxStreamOrderer::new();
 
-        rx_ord.inbound_frame(0, &[1; 6]);
+        rx_ord.inbound_frame(0, &[1; 6]).unwrap();
         assert_eq!(rx_ord.bytes_ready(), 6);
         assert_eq!(rx_ord.buffered(), 6);
         assert_eq!(rx_ord.retired(), 0);
@@ -2149,19 +2142,19 @@ mod tests {
         assert_eq!(rx_ord.retired(), 2);
 
         // an overlapping frame
-        rx_ord.inbound_frame(5, &[2; 6]);
+        rx_ord.inbound_frame(5, &[2; 6]).unwrap();
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 9);
         assert_eq!(rx_ord.retired(), 2);
 
         // a noncontig frame
-        rx_ord.inbound_frame(20, &[3; 6]);
+        rx_ord.inbound_frame(20, &[3; 6]).unwrap();
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);
 
         // an old frame
-        rx_ord.inbound_frame(0, &[4; 2]);
+        rx_ord.inbound_frame(0, &[4; 2]).unwrap();
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);
@@ -2924,7 +2917,7 @@ mod tests {
     #[test]
     fn orderer_discard_after() {
         let mut o = RxStreamOrderer::new();
-        o.inbound_frame(0, &[1; 10]);
+        o.inbound_frame(0, &[1; 10]).unwrap();
         o.discard_after(4);
         // Only `[0, 4)` remains readable.
         let mut buf = [0; 16];
@@ -2932,19 +2925,19 @@ mod tests {
 
         // A later frame entirely beyond the discard point still slots in correctly.
         let mut o = RxStreamOrderer::new();
-        o.inbound_frame(0, &[1; 4]);
-        o.inbound_frame(8, &[2; 4]); // gap at [4,8)
+        o.inbound_frame(0, &[1; 4]).unwrap();
+        o.inbound_frame(8, &[2; 4]).unwrap(); // gap at [4,8)
         o.discard_after(6); // drops [8,12), keeps [0,4)
-        o.inbound_frame(4, &[3; 2]); // fills [4,6)
+        o.inbound_frame(4, &[3; 2]).unwrap(); // fills [4,6)
         assert_eq!(o.read(&mut buf), 6);
 
         // The end marker is correctly maintained when the discard empties it out.
         let mut o = RxStreamOrderer::new();
-        o.inbound_frame(0, &[1; 4]);
+        o.inbound_frame(0, &[1; 4]).unwrap();
         assert_eq!(o.read(&mut buf), 4);
-        o.inbound_frame(8, &[2; 4]); // gap at [4,8)
+        o.inbound_frame(8, &[2; 4]).unwrap(); // gap at [4,8)
         o.discard_after(6); // drops [8,12), keeps [0,4)
-        o.inbound_frame(4, &[3; 2]); // fills [4,6)
+        o.inbound_frame(4, &[3; 2]).unwrap(); // fills [4,6)
         assert_eq!(o.read(&mut buf), 2);
     }
 
