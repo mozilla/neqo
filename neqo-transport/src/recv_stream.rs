@@ -201,6 +201,9 @@ impl RxStreamOrderer {
     const RANGE_TARGET: usize = 4096;
 
     /// Maximum number of buffered ranges that are separated by a gap.
+    ///
+    /// Enforced against `data_ranges.len() - split_ranges`, which is an upper bound on the
+    /// number of gap-separated ranges, never an under-estimate.
     const MAX_SPLIT_RANGES: usize = 4096;
 
     #[must_use]
@@ -315,66 +318,60 @@ impl RxStreamOrderer {
             // to one frame). This can't always extend, because otherwise the
             // buffer could end up growing indefinitely without being released.
             let adjacent = prev_end == new_start;
-            (prev_vec.len() < Self::RANGE_TARGET && adjacent, adjacent)
+            (
+                (prev_vec.len() < Self::RANGE_TARGET && adjacent).then_some(prev_start),
+                adjacent,
+            )
         } else {
             qtrace!("New frame {new_start}-{new_end} received");
-            (false, false)
+            (None, false)
         };
 
+        // At the end (common case): the loop below finds nothing.
+        //  PPPPPP        -> PPPPPP
+        //        NNNNNNN          NNNNNNN
+        // or
+        //  PPPPPP             -> PPPPPP
+        //             NNNNNNN               NNNNNNN
+        //
+        // Otherwise, handle possible overlap with next entries
+        //  PPPPPP       AAA      -> PPPPPP
+        //        NNNNNNN                  NNNNNNN
+        // or
+        //  PPPPPP     AAAA      -> PPPPPP     AAAA
+        //        NNNNNNN                 NNNNN
+        // or (this is where to_remove is used)
+        //  PPPPPP    AA       -> PPPPPP
+        //        NNNNNNN               NNNNNNN
         let mut to_add = new_data;
-        if self
-            .data_ranges
-            .last_entry()
-            .is_some_and(|e| *e.key() >= new_start)
-        {
-            // Is this at the end (common case)?  If so, nothing to do in this block
-            // Common case:
-            //  PPPPPP        -> PPPPPP
-            //        NNNNNNN          NNNNNNN
-            // or
-            //  PPPPPP             -> PPPPPP
-            //             NNNNNNN               NNNNNNN
-            //
-            // Not the common case, handle possible overlap with next entries
-            //  PPPPPP       AAA      -> PPPPPP
-            //        NNNNNNN                  NNNNNNN
-            // or
-            //  PPPPPP     AAAA      -> PPPPPP     AAAA
-            //        NNNNNNN                 NNNNN
-            // or (this is where to_remove is used)
-            //  PPPPPP    AA       -> PPPPPP
-            //        NNNNNNN               NNNNNNN
-
-            let mut to_remove = SmallVec::<[_; 8]>::new();
-
-            for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
-                let next_end = next_start + to_u64(next_data.len());
-                let overlap = new_end.saturating_sub(next_start);
-                if overlap == 0 {
-                    // Fills in the hole, exactly (probably common)
-                    break;
-                } else if next_end >= new_end {
-                    qtrace!(
-                        "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
-                    );
-                    // Safe conversion because any overlap has to be held in a buffer.
-                    let truncate_to = new_data.len() - expect_usize(overlap);
-                    to_add = &new_data[..truncate_to];
-                    break;
-                }
-                qtrace!(
-                    "New frame {new_start}-{new_end} spans entire next frame {next_start}-{next_end}, replacing"
-                );
-                to_remove.push(next_start);
-                // Continue, since we may have more overlaps
+        let mut to_remove = SmallVec::<[_; 8]>::new();
+        for (&next_start, next_data) in self.data_ranges.range_mut(new_start..) {
+            let next_end = next_start + to_u64(next_data.len());
+            let overlap = new_end.saturating_sub(next_start);
+            if overlap == 0 {
+                // Fills in the hole, exactly (probably common)
+                break;
             }
-
-            self.mutate_ranges(|data_ranges| {
-                for start in to_remove {
-                    data_ranges.remove(&start);
-                }
-            });
+            if next_end >= new_end {
+                qtrace!(
+                    "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
+                );
+                // Safe conversion because any overlap has to be held in a buffer.
+                let truncate_to = new_data.len() - expect_usize(overlap);
+                to_add = &new_data[..truncate_to];
+                break;
+            }
+            qtrace!(
+                "New frame {new_start}-{new_end} spans entire next frame {next_start}-{next_end}, replacing"
+            );
+            to_remove.push(next_start);
+            // Continue, since we may have more overlaps
         }
+        self.mutate_ranges(|data_ranges| {
+            for start in to_remove {
+                data_ranges.remove(&start);
+            }
+        });
 
         if to_add.is_empty() {
             // A surviving forward entry with next_end >= new_end exists, so self.end is already
@@ -382,10 +379,23 @@ impl RxStreamOrderer {
             return Ok(());
         }
 
-        self.received += to_u64(to_add.len());
-        if extend {
-            if let Some((_, buf)) = self.data_ranges.range_mut(..=new_start).next_back() {
+        let added = to_u64(to_add.len());
+        self.received += added;
+        if let Some(prev_start) = extend {
+            // Absorb the following entry when this closes a gap, so filling gaps doesn't leave
+            // the buffer permanently fragmented into tiny entries.
+            let add_end = new_start + added;
+            let next = self
+                .data_ranges
+                .get(&add_end)
+                .is_some_and(|n| to_add.len() + n.len() <= Self::RANGE_TARGET)
+                .then(|| self.mutate_ranges(|r| r.remove(&add_end)))
+                .flatten();
+            if let Some(buf) = self.data_ranges.get_mut(&prev_start) {
                 buf.extend_from_slice(to_add);
+                if let Some(next) = &next {
+                    buf.extend_from_slice(next);
+                }
             }
         } else {
             self.data_ranges.insert(new_start, to_add.to_vec());
@@ -2093,15 +2103,33 @@ mod tests {
         assert_eq!(s.data_ranges.len(), 3);
         assert_eq!(s.split_ranges, 0);
 
-        // An overlapping frame spanning [0, 20) entirely swallows the entry at 10
-        // (via the `to_remove` path) and extends the entry at 0; the entry at 20
-        // survives untouched. Net effect: one entry disappears.
+        // An overlapping frame spanning [0, 20) swallows the entry at 10 via `to_remove`,
+        // extends the entry at 0, and then coalesces the entry at 20 that it now abuts.
         s.inbound_frame(0, &[0u8; 20]).unwrap();
-        assert_eq!(s.data_ranges.len(), 2, "entry at 10 was fully absorbed");
+        assert_eq!(s.data_ranges.len(), 1, "all three entries merged into one");
 
         // Nothing here was ever credited, so there is no credit to give back.
         assert_eq!(s.split_ranges, 0);
         assert!(s.split_ranges + s.split_ranges() <= s.data_ranges.len());
+    }
+
+    /// Repeatedly filling one-byte gaps must not fragment the buffer into one entry per
+    /// gap, or contiguous readable data trips the `MAX_SPLIT_RANGES` limit.
+    #[test]
+    fn gap_fills_are_coalesced() {
+        let mut s = RxStreamOrderer::default();
+        let iterations = to_u64(RxStreamOrderer::MAX_SPLIT_RANGES) * 2;
+        for i in 0..iterations {
+            let offset = 2 * i;
+            s.inbound_frame(offset + 1, &[0u8; 1]).unwrap();
+            s.inbound_frame(offset, &[0u8; 1]).unwrap();
+        }
+        assert_eq!(s.split_ranges(), 1, "all of it is one contiguous run");
+        assert!(
+            s.data_ranges.len() < RxStreamOrderer::MAX_SPLIT_RANGES,
+            "entries stay bounded: {}",
+            s.data_ranges.len()
+        );
     }
 
     /// A contiguous run assembled by filling a gap must not consume the gap budget.
