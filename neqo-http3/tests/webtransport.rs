@@ -17,15 +17,15 @@ use neqo_http3::{
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
 use nss::AuthenticationStatus;
 use test_fixture::{
-    DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS, DEFAULT_SERVER_NAME, VaryingConnectionIdGenerator,
-    anti_replay, exchange_packets, fixture_init, now,
+    CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
+    DEFAULT_SERVER_NAME, anti_replay, exchange_packets, fixture_init, now,
 };
 
 fn connect() -> (Http3Client, Http3Server) {
     fixture_init();
     let mut client = Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
         Http3Parameters::default().webtransport(true),
@@ -37,7 +37,7 @@ fn connect() -> (Http3Client, Http3Server) {
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         Http3Parameters::default().webtransport(true),
         None,
     )

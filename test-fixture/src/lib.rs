@@ -119,43 +119,8 @@ const fn addr_v4() -> SocketAddr {
     SocketAddr::new(v4ip, DEFAULT_ADDR.port())
 }
 
-/// The bytes of a connection ID for [`CountingConnectionIdGenerator`].
-///
-/// A length byte, 4 counter bytes, then random padding.  The length is fixed, so that a
-/// connection ID contributes the same number of bytes to every short header; a varying
-/// length makes tests and benchmarks that count bytes irreproducible.  8 bytes is also
-/// long enough to pass for an original destination connection ID.
-///
-/// Shared with the copy of the generator in `neqo_transport`'s own unit tests, so that
-/// the two cannot disagree.
-#[must_use]
-pub fn counting_cid(counter: u32) -> [u8; 8] {
-    let mut cid = random::<8>();
-    cid[0] = 8; // The length byte.
-    cid[1..5].copy_from_slice(&counter.to_be_bytes());
-    cid
-}
-
-/// The bytes of a connection ID for [`VaryingConnectionIdGenerator`].
-///
-/// As [`counting_cid`], but with a length between 8 and 20 bytes, so that tests exercise
-/// connection IDs that are longer than the minimum.
-///
-/// Shared with the copy of the generator in `neqo_transport`'s own unit tests, so that
-/// the two cannot disagree.
-#[must_use]
-pub fn varying_cid(counter: u32) -> Vec<u8> {
-    let mut cid = random::<20>();
-    // Ensure that the connection ID is long enough to pass for an original destination
-    // connection ID.  This is the same bias toward 8 that
-    // `neqo_transport::ConnectionId::generate_initial` applies.
-    let len = max(8, 5 + ((cid[0] >> 4) & cid[0]));
-    cid[0] = len; // The length byte.
-    cid[1..5].copy_from_slice(&counter.to_be_bytes());
-    cid[..usize::from(len)].to_vec()
-}
-
 /// This connection ID generation scheme is the worst, but it doesn't produce collisions.
+/// It produces a connection ID with a length byte, 4 counter bytes and random padding.
 #[derive(Debug, Default)]
 pub struct CountingConnectionIdGenerator {
     counter: u32,
@@ -170,36 +135,16 @@ impl ConnectionIdDecoder for CountingConnectionIdGenerator {
 
 impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let cid = counting_cid(self.counter);
+        let mut r = random::<20>();
+        // Randomize length, but ensure that the connection ID is long
+        // enough to pass for an original destination connection ID.
+        r[0] = max(8, 5 + ((r[0] >> 4) & r[0]));
+        r[1] = u8::try_from(self.counter >> 24).ok()?;
+        r[2] = u8::try_from((self.counter >> 16) & 0xff).ok()?;
+        r[3] = u8::try_from((self.counter >> 8) & 0xff).ok()?;
+        r[4] = u8::try_from(self.counter & 0xff).ok()?;
         self.counter += 1;
-        Some(ConnectionId::from(&cid))
-    }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
-    }
-}
-
-/// As [`CountingConnectionIdGenerator`], but the connection IDs vary in length.  Use this
-/// for tests of connection ID handling; tests and benchmarks that count bytes need the
-/// fixed-length generator.
-#[derive(Debug, Default)]
-pub struct VaryingConnectionIdGenerator {
-    counter: u32,
-}
-
-impl ConnectionIdDecoder for VaryingConnectionIdGenerator {
-    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        let len = usize::from(dec.peek_byte()?);
-        dec.decode(len).map(ConnectionIdRef::from)
-    }
-}
-
-impl ConnectionIdGenerator for VaryingConnectionIdGenerator {
-    fn generate_cid(&mut self) -> Option<ConnectionId> {
-        let cid = varying_cid(self.counter);
-        self.counter += 1;
-        Some(ConnectionId::from(&cid))
+        Some(ConnectionId::from(&r[..usize::from(r[0])]))
     }
 
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
@@ -379,10 +324,23 @@ pub fn default_http3_client() -> Http3Client {
 /// When the client can't be created.
 #[must_use]
 pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
+    http3_client_with_cid_gen(CountingConnectionIdGenerator::default(), params)
+}
+
+/// Create a http3 client that uses the given connection ID generator.
+///
+/// # Panics
+///
+/// When the client can't be created.
+#[must_use]
+pub fn http3_client_with_cid_gen<G: ConnectionIdGenerator + 'static>(
+    cid_gen: G,
+    params: Http3Parameters,
+) -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(cid_gen)),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
         params,
@@ -414,13 +372,26 @@ pub fn default_http3_server() -> Http3Server {
 /// When the server can't be created.
 #[must_use]
 pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
+    http3_server_with_cid_gen(CountingConnectionIdGenerator::default(), params)
+}
+
+/// Create a http3 server that uses the given connection ID generator.
+///
+/// # Panics
+///
+/// When the server can't be created.
+#[must_use]
+pub fn http3_server_with_cid_gen<G: ConnectionIdGenerator + 'static>(
+    cid_gen: G,
+    params: Http3Parameters,
+) -> Http3Server {
     fixture_init();
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(cid_gen)),
         params,
         None,
     )
@@ -629,29 +600,4 @@ pub fn damage_ech_config(config: &[u8]) -> Vec<u8> {
     // Change the config_id so that the server doesn't recognize it.
     cfg[6] ^= 0x94;
     cfg
-}
-
-#[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use crate::{counting_cid, fixture_init, varying_cid};
-
-    /// Both `decode_cid` implementations rely on the first byte holding the length.
-    #[test]
-    fn length_byte_matches_length() {
-        fixture_init();
-        for counter in 0..100 {
-            let cid = counting_cid(counter);
-            assert_eq!(usize::from(cid[0]), cid.len());
-            assert_eq!(cid[1..5], counter.to_be_bytes());
-
-            let cid = varying_cid(counter);
-            assert_eq!(usize::from(cid[0]), cid.len());
-            assert!(matches!(
-                cid.len(),
-                8..=neqo_transport::ConnectionId::MAX_LEN
-            ));
-            assert_eq!(cid[1..5], counter.to_be_bytes());
-        }
-    }
 }

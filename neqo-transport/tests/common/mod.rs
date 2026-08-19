@@ -14,7 +14,7 @@ use neqo_transport::{
     server::{ConnectionRef, Server, ValidateAddress},
 };
 use nss::{AllowZeroRtt, AuthenticationStatus, ResumptionToken};
-use test_fixture::{VaryingConnectionIdGenerator, default_client, now};
+use test_fixture::{CountingConnectionIdGenerator, default_client, now};
 
 /// # Panics
 ///
@@ -25,9 +25,6 @@ pub fn assert_dscp(stats: &Stats) {
 }
 
 /// Create a server.  This is different than the one in the fixture, which is a single connection.
-///
-/// This uses connection IDs of varying length, so that the server integration tests cover
-/// routing and short header decoding for connection IDs longer than the minimum.
 pub fn new_server(params: ConnectionParameters) -> Server {
     Server::new(
         now(),
@@ -35,7 +32,7 @@ pub fn new_server(params: ConnectionParameters) -> Server {
         test_fixture::DEFAULT_ALPN,
         test_fixture::anti_replay(),
         Box::new(AllowZeroRtt {}),
-        Rc::new(RefCell::new(VaryingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         params,
     )
     .expect("should create a server")
