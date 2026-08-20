@@ -232,7 +232,7 @@ impl RxStreamOrderer {
         Self::default()
     }
 
-    /// Whether every byte of `[offset, offset + len)` has already been received.
+    /// Whether every byte of `[offset, offset + len)` has already been received or read.
     /// Call this before [`Self::inbound_frame`], which wipes the ability to determine this.
     #[must_use]
     pub fn covered(&self, offset: u64, len: usize) -> bool {
@@ -241,7 +241,16 @@ impl RxStreamOrderer {
             return false;
         }
         let mut covered = max(offset, self.retired);
-        for (&start, data) in self.data_ranges.range(..end) {
+        if covered >= end {
+            return true;
+        }
+        // Ranges never overlap, so ones starting below `covered` cannot extend it.
+        let first = self
+            .data_ranges
+            .range(..=covered)
+            .next_back()
+            .map_or(covered, |(&start, _)| start);
+        for (&start, data) in self.data_ranges.range(first..end) {
             if start > covered {
                 return false;
             }
@@ -1460,6 +1469,23 @@ mod tests {
         let received = s.received();
         s.inbound_frame(0, &[0u8; LEN]).unwrap();
         assert!(s.received() > received);
+    }
+
+    /// Many gapped ranges, the shape a peer can create with one-byte CRYPTO frames.
+    #[test]
+    fn covered_many_gapped_ranges() {
+        const COUNT: u64 = 1000;
+        let mut s = RxStreamOrderer::default();
+        for i in 0..COUNT {
+            s.inbound_frame(i * 4, &[0u8; 1]).unwrap();
+        }
+        assert_eq!(s.data_ranges.len(), usize::try_from(COUNT).unwrap());
+
+        let last = (COUNT - 1) * 4;
+        assert!(s.covered(last, 1), "the last byte received");
+        assert!(s.covered(0, 1));
+        assert!(!s.covered(last + 1, 1), "beyond everything received");
+        assert!(!s.covered(0, 4), "spans a gap");
     }
 
     /// Coverage is against what was received *or* read, and a gap is never covered.

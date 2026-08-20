@@ -389,6 +389,16 @@ impl Crypto {
         self.early_resend_used = initial || handshake;
     }
 
+    /// A Retry restarts the connection, so the allowance is available again (RFC9002, Section 6.3).
+    pub const fn retry(&mut self) {
+        self.early_resend_used = false;
+    }
+
+    #[cfg(all(test, not(feature = "disable-encryption")))]
+    pub const fn early_resend_used(&self) -> bool {
+        self.early_resend_used
+    }
+
     /// Discard state for a packet number space and return true
     /// if something was discarded.
     pub fn discard(&mut self, space: PacketNumberSpace) -> bool {

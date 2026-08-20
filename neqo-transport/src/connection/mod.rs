@@ -1383,6 +1383,7 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry(&path, now);
         self.handle_lost_packets(&lost_packets);
 
+        self.crypto.retry();
         self.crypto.states_mut().init(
             self.conn_params.get_versions().compatible(),
             self.role,
