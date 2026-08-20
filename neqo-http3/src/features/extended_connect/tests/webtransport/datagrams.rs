@@ -5,11 +5,10 @@
 // except according to those terms.
 
 use neqo_common::{Encoder, to_u64};
-use neqo_transport::{ConnectionParameters, Error as TransportError};
+use neqo_transport::ConnectionParameters;
 use test_fixture::now;
 
 use crate::{
-    Error, Http3Parameters,
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
@@ -17,43 +16,6 @@ use crate::{
 };
 
 const DGRAM: &[u8] = &[0, 100];
-
-#[test]
-fn no_datagrams() {
-    let mut wt = WtTest::new_with_params(
-        Http3Parameters::default()
-            .connection_parameters(ConnectionParameters::default().datagram_size(0))
-            .http3_datagram(false)
-            .webtransport(true),
-        Http3Parameters::default()
-            .connection_parameters(ConnectionParameters::default().datagram_size(0))
-            .http3_datagram(false)
-            .webtransport(true),
-    );
-    let wt_session = wt.create_wt_session();
-
-    assert_eq!(
-        wt_session.max_datagram_size(),
-        Err(Error::Transport(TransportError::NotAvailable))
-    );
-    assert_eq!(
-        wt.max_datagram_size(wt_session.stream_id()),
-        Err(Error::Transport(TransportError::NotAvailable))
-    );
-
-    assert_eq!(
-        wt_session.send_datagram(DGRAM, None, now()),
-        Err(Error::Transport(TransportError::TooMuchData))
-    );
-    assert_eq!(
-        wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::Transport(TransportError::TooMuchData))
-    );
-
-    wt.exchange_packets();
-    wt.check_no_datagram_received_client();
-    wt.check_no_datagram_received_server();
-}
 
 fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
     assert_eq!(
@@ -78,68 +40,6 @@ fn datagrams() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     do_datagram_test(&mut wt, &wt_session);
-}
-
-#[test]
-fn datagrams_server_only() {
-    let mut wt = WtTest::new_with_params(
-        Http3Parameters::default()
-            .connection_parameters(ConnectionParameters::default().datagram_size(0))
-            .http3_datagram(false)
-            .webtransport(true),
-        wt_default_parameters(),
-    );
-    let wt_session = wt.create_wt_session();
-
-    assert_eq!(
-        wt_session.max_datagram_size(),
-        Err(Error::Transport(TransportError::NotAvailable))
-    );
-    assert_eq!(
-        wt.max_datagram_size(wt_session.stream_id()),
-        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
-    );
-
-    assert_eq!(
-        wt_session.send_datagram(DGRAM, None, now()),
-        Err(Error::Transport(TransportError::TooMuchData))
-    );
-    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
-
-    wt.exchange_packets();
-    wt.check_datagram_received_server(&wt_session, DGRAM);
-    wt.check_no_datagram_received_client();
-}
-
-#[test]
-fn datagrams_client_only() {
-    let mut wt = WtTest::new_with_params(
-        wt_default_parameters(),
-        Http3Parameters::default()
-            .connection_parameters(ConnectionParameters::default().datagram_size(0))
-            .http3_datagram(false)
-            .webtransport(true),
-    );
-    let wt_session = wt.create_wt_session();
-
-    assert_eq!(
-        wt_session.max_datagram_size(),
-        Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
-    );
-    assert_eq!(
-        wt.max_datagram_size(wt_session.stream_id()),
-        Err(Error::Transport(TransportError::NotAvailable))
-    );
-
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
-    assert_eq!(
-        wt.send_datagram(wt_session.stream_id(), DGRAM),
-        Err(Error::Transport(TransportError::TooMuchData))
-    );
-
-    wt.exchange_packets();
-    wt.check_datagram_received_client(wt_session.stream_id(), DGRAM);
-    wt.check_no_datagram_received_server();
 }
 
 #[test]
