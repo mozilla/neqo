@@ -203,11 +203,14 @@ impl RxStreamOrderer {
         Self::default()
     }
 
-    /// Whether every byte of `[offset, offset + len)` has already been received or read.
+    /// Whether every byte of `[offset, offset + len)` has already been received.
     /// Call this before [`Self::inbound_frame`], which wipes the ability to determine this.
     #[must_use]
     pub fn covered(&self, offset: u64, len: usize) -> bool {
         let end = offset + to_u64(len);
+        if end > self.end {
+            return false;
+        }
         let mut covered = max(offset, self.retired);
         for (&start, data) in self.data_ranges.range(..end) {
             if start > covered {
@@ -1376,15 +1379,16 @@ mod tests {
 
     #[test]
     fn covered_spanning_adjacent_ranges() {
+        const TARGET: u64 = to_u64(RxStreamOrderer::RANGE_TARGET);
         const LEN: usize = 2 * RxStreamOrderer::RANGE_TARGET + 10;
         let mut s = RxStreamOrderer::default();
         s.inbound_frame(0, &[0u8; RxStreamOrderer::RANGE_TARGET]);
-        s.inbound_frame(4096, &[1u8; RxStreamOrderer::RANGE_TARGET]);
-        s.inbound_frame(8192, &[2u8; 10]);
+        s.inbound_frame(TARGET, &[1u8; RxStreamOrderer::RANGE_TARGET]);
+        s.inbound_frame(2 * TARGET, &[2u8; 10]);
         assert_eq!(s.data_ranges.len(), 3);
 
         assert!(s.covered(0, LEN));
-        assert!(s.covered(4090, 16));
+        assert!(s.covered(TARGET - 6, 16), "spanning a range boundary");
         assert!(!s.covered(0, LEN + 1), "one byte beyond what was received");
 
         // The same duplicate frame grows `received`, which is why `covered` exists.

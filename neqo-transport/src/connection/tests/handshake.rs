@@ -2143,26 +2143,25 @@ fn client_initial_with_token() {
     assert_eq!(client.stats().dropped_rx, dropped + 1);
 }
 
-/// Produce a datagram carrying CRYPTO the peer already has, in whatever spaces are available.
-/// The frame needs a packet to ride along in, so wait out any pacing delay first.
-fn duplicate_crypto(c: &mut Connection, now: &mut Instant) -> Datagram {
+/// Produce a datagram with one byte of CRYPTO at offset 0, added to every packet in it. Whether
+/// that is a duplicate depends on what the receiver already holds. Waits out any pacing delay.
+fn make_dummy_crypto(c: &mut Connection, now: &mut Instant) -> Datagram {
     loop {
         match c.test_write_frames(CryptoWriter {}, *now) {
             Output::Datagram(d) => return d,
             Output::Callback(t) if t < DEFAULT_RTT => *now += t,
-            o => panic!("no datagram to carry duplicate CRYPTO: {o:?}"),
+            o => panic!("no datagram to carry the dummy CRYPTO frame: {o:?}"),
         }
     }
 }
 
-/// Drain everything `c` will send, handing each datagram to `deliver` and advancing `now` over any
-/// pacing delay, so that a paced sender is followed to the end of its flight.
+/// Drain everything `c` will send, following a paced sender by advancing `now` over short delays.
 fn drain(c: &mut Connection, now: &mut Instant, mut deliver: impl FnMut(Datagram, Instant)) {
     loop {
         match c.process_output(*now) {
             Output::Datagram(d) => deliver(d, *now),
             Output::Callback(t) if t < DEFAULT_RTT => *now += t,
-            _ => break,
+            _ => break, // Too long to be pacing.
         }
     }
 }
@@ -2200,12 +2199,12 @@ fn crypto_resent_at_most_once() {
 
     // The first duplicate resends the server's flight.
     now += DEFAULT_RTT;
-    let dup = duplicate_crypto(&mut client, &mut now);
+    let dup = make_dummy_crypto(&mut client, &mut now);
     assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
 
     // The second changes nothing.
     now += DEFAULT_RTT;
-    let dup = duplicate_crypto(&mut client, &mut now);
+    let dup = make_dummy_crypto(&mut client, &mut now);
     assert_eq!(crypto_sent_for(&mut server, dup, &mut now), 0);
 }
 
@@ -2228,7 +2227,7 @@ fn crypto_resent_only_for_initial() {
     // 1-RTT packet the offset is one the client has *not* received, so that copy is not a
     // duplicate at all. The client has nothing to learn from the Handshake packet and must not
     // resend its Finished.
-    let dup = duplicate_crypto(&mut server, &mut now);
+    let dup = make_dummy_crypto(&mut server, &mut now);
     let (_initial, rest) = split_datagram(&dup);
     let (handshake, _short) = split_datagram(&rest.expect("a coalesced Handshake packet"));
     assert_handshake(&handshake);
@@ -2236,7 +2235,7 @@ fn crypto_resent_only_for_initial() {
 }
 
 /// A duplicate that arrives while nothing is outstanding has nothing to resend, so it must not use
-/// up the one chance an endpoint gets to resend ahead of the PTO.
+/// up the one allowance an endpoint gets to resend ahead of the PTO.
 #[test]
 fn crypto_resend_chance_survives_useless_duplicate() {
     fixture_init();
@@ -2244,22 +2243,21 @@ fn crypto_resend_chance_survives_useless_duplicate() {
     let mut server = default_server();
     let mut now = now();
 
-    // Give the server only the first part of the ClientHello. It cannot answer yet, so it has no
-    // CRYPTO of its own outstanding, and SNI slicing puts offset 0 in this first datagram.
+    // Only the first ClientHello datagram; SNI slicing puts offset 0 in it, but not the rest.
     let ch1 = client.process_output(now).dgram().expect("a datagram");
     let ch2 = client.process_output(now).dgram().expect("a datagram");
     server.process_input(ch1, now);
 
-    // A duplicate here finds nothing to resend.
-    let dup = duplicate_crypto(&mut client, &mut now);
+    // The dummy byte at offset 0 is therefore a duplicate, and finds nothing to resend.
+    let dup = make_dummy_crypto(&mut client, &mut now);
     assert_eq!(crypto_sent_for(&mut server, dup, &mut now), 0);
 
     // Complete the ClientHello and drop the server's answer, leaving its CRYPTO unacknowledged.
     server.process_input(ch2, now);
     drop_flight(&mut server, &mut now);
 
-    // The chance was not spent above, so this duplicate still gets the flight resent.
+    // The allowance was not used above, so this duplicate resends the whole flight.
     now += DEFAULT_RTT;
-    let dup = duplicate_crypto(&mut client, &mut now);
+    let dup = make_dummy_crypto(&mut client, &mut now);
     assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
 }
