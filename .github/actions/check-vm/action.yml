@@ -32,7 +32,7 @@ runs:
       run: |
         # Minimum NSS version required by nss-rs, so that we can detect a too-old system NSS below.
         if [ "$NSS" = "true" ]; then
-          NSS_MIN_VERSION=$(cargo metadata --format-version=1 -q \
+          NSS_MIN_VERSION=$(cargo metadata --locked --format-version=1 -q \
             | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss["min-version"]')
           case "$NSS_MIN_VERSION" in
             [0-9]*.[0-9]*) ;;
