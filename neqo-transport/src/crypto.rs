@@ -632,6 +632,11 @@ impl CryptoDxState {
         self.epoch & 1 != 1
     }
 
+    #[must_use]
+    pub const fn epoch(&self) -> usize {
+        self.epoch
+    }
+
     /// This is a continuation of a previous, so adjust the range accordingly.
     /// Fail if the two ranges overlap.  Do nothing if the directions don't match.
     pub fn continuation(&mut self, prev: &Self) -> Res<()> {
@@ -868,6 +873,11 @@ pub struct CryptoStates {
     // If this is set, then we have noticed a genuine update.
     // Once this time passes, we should switch in new keys.
     read_update_time: Option<Instant>,
+    // The read epoch of the most recent key update we have responded to.
+    // A duplicate of the packet that carried an update decrypts with the same
+    // keys and would otherwise be detected as that update again; comparing
+    // against this stops us from responding to the same update twice.
+    read_update_epoch: Option<usize>,
 }
 
 impl CryptoStates {
@@ -1307,7 +1317,17 @@ impl CryptoStates {
     /// Prepare to update read keys.  This doesn't happen immediately as
     /// we want to ensure that we can continue to receive any delayed
     /// packets that use the old keys.  So we just set a timer.
-    pub fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
+    pub fn key_update_received(&mut self, epoch: usize, expiration: Instant) -> Res<()> {
+        // Respond to each key update once. A duplicate of the packet that
+        // carried the update decrypts with the same keys and is detected as
+        // the same update again; responding twice would advance the write keys
+        // a second time and trip an assertion in `maybe_update_write`.
+        if self.read_update_epoch.is_some_and(|e| epoch <= e) {
+            qtrace!("[{self}] Ignoring duplicate key update for epoch {epoch}");
+            return Ok(());
+        }
+        self.read_update_epoch = Some(epoch);
+
         qtrace!("[{self}] Key update received");
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
@@ -1402,6 +1422,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 
@@ -1451,6 +1472,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 }

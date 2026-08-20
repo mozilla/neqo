@@ -27,7 +27,7 @@ runs:
       shell: bash
       run: |
         {
-          echo "CACHE_VERSION=v4"
+          echo "CACHE_VERSION=v5"
           echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
           echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
           echo "S2N_QUIC_VERSION=v1.82.0"
@@ -55,15 +55,19 @@ runs:
           s2n)    VERSION="$S2N_QUIC_VERSION" ;;
         esac
 
+        FLAGS_HASH=$(printf '%s\0' "${RUSTFLAGS:-}" "${CFLAGS:-}" "${CXXFLAGS:-}" \
+          "${CARGO_PROFILE_RELEASE_DEBUG:-}" "${CARGO_PROFILE_RELEASE_LTO:-}" \
+          "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}" | sha256sum | cut -c1-16)
+
         # Get Rust version hash for Rust-based builds
         if [[ "$IMPL" == "quiche" || "$IMPL" == "s2n" ]]; then
           RUST_HASH=$(rustc --version 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "no-rust")
-          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-rust-$RUST_HASH" >> "$GITHUB_OUTPUT"
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-rust-$RUST_HASH-$FLAGS_HASH" >> "$GITHUB_OUTPUT"
         elif [[ "$IMPL" == "google" ]]; then
           BAZEL_VER=$(bazel --version 2>/dev/null | head -1 || echo "unknown")
-          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$BAZEL_VER" >> "$GITHUB_OUTPUT"
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$BAZEL_VER-$FLAGS_HASH" >> "$GITHUB_OUTPUT"
         else
-          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH" >> "$GITHUB_OUTPUT"
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$FLAGS_HASH" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Restore cache

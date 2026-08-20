@@ -4,7 +4,6 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
@@ -13,6 +12,9 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
+  # `--call-graph fp` needs frame pointers, which x86_64 Rust omits by default. build-neqo appends
+  # this itself; the peer implementations built by quic-build need it from here.
+  RUSTFLAGS: -C force-frame-pointers=yes
   BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
@@ -185,14 +187,9 @@ jobs:
           # perfcompare.py runs under sudo nice, so output files are root-owned; fix for post-processing
           sudo chown -R "$(id -u)" ./*.perf hyperfine hyperfine-baseline 2>/dev/null || true
 
-      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
-      - name: Restore machine
-        if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
-        with:
-          mode: restore
-
+      # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
+        timeout-minutes: 30
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
@@ -200,6 +197,13 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
+
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
+      - name: Restore machine
+        if: always()
+        uses: ./neqo/.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Format results as Markdown
         id: results
@@ -242,6 +246,7 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
+            *.syms.json
             binaries
           compression-level: 9
 
