@@ -55,6 +55,8 @@ pub struct SendProfile {
     probe: PacketNumberSpaceSet,
     /// Whether pacing is active.
     paced: bool,
+    /// Whether this profile is a response to a PTO.
+    pto: bool,
 }
 
 impl SendProfile {
@@ -67,6 +69,7 @@ impl SendProfile {
             limit: max(ACK_ONLY_SIZE_LIMIT - 1, limit),
             probe: PacketNumberSpaceSet::empty(),
             paced: false,
+            pto: false,
         }
     }
 
@@ -77,6 +80,7 @@ impl SendProfile {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
             probe: PacketNumberSpaceSet::empty(),
             paced: true,
+            pto: false,
         }
     }
 
@@ -87,6 +91,7 @@ impl SendProfile {
             limit: mtu,
             probe,
             paced: false,
+            pto: true,
         }
     }
 
@@ -108,6 +113,12 @@ impl SendProfile {
     #[must_use]
     pub const fn paced(&self) -> bool {
         self.paced
+    }
+
+    /// Whether this profile was created in response to a PTO.
+    #[must_use]
+    pub const fn pto(&self) -> bool {
+        self.pto
     }
 
     #[must_use]
@@ -916,6 +927,8 @@ impl Loss {
         let mut allow_probes = PacketNumberSpaceSet::default();
         // The spaces for which packets should be marked for retransmission.
         let mut retransmit = PacketNumberSpaceSet::default();
+        // Where the PTO packets start in `lost`.
+        let pto_packets_start = lost.len();
         for pn_space in PacketNumberSpace::iter() {
             let Some(t) = self.pto_time(primary_path.borrow().rtt(), pn_space) else {
                 continue;
@@ -961,6 +974,14 @@ impl Loss {
 
         qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
         self.fire_pto(pn_space, allow_probes, now);
+
+        let pto_count = self.pto_state.as_ref().map_or(0, PtoState::count);
+        primary_path.borrow_mut().pmtud_mut().on_pto(
+            pto_count,
+            &lost[pto_packets_start..],
+            &mut self.stats.borrow_mut(),
+            now,
+        );
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {
@@ -1013,8 +1034,11 @@ impl Loss {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
+    ///
+    /// `reserve` has to match what [`Path::pmtud_probe`] is given, or this might decide not to
+    /// pace on the basis of a probe that is then not sent.
     #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
-    pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
+    pub fn send_profile(&mut self, path: &Path, reserve: usize, now: Instant) -> SendProfile {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
@@ -1028,9 +1052,11 @@ impl Loss {
             let limit = min(sender.cwnd_avail(), path.amplification_limit());
             if limit > mtu {
                 // More than an MTU available; we might need to pace.
-                if sender
-                    .next_paced(path.rtt().estimate())
-                    .is_some_and(|t| t > now)
+                // Per RFC 9002, Section 7.7, don't pace PMTU probes.
+                if path.pmtud_probe(reserve).is_none()
+                    && sender
+                        .next_paced(path.rtt().estimate())
+                        .is_some_and(|t| t > now)
                 {
                     SendProfile::new_paced()
                 } else {
@@ -1141,7 +1167,7 @@ mod tests {
         }
 
         pub fn send_profile(&mut self, now: Instant) -> SendProfile {
-            self.lr.send_profile(&self.path.borrow(), now)
+            self.lr.send_profile(&self.path.borrow(), 0, now)
         }
     }
 

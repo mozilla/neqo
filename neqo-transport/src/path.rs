@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    cmp::min,
     fmt::{self, Display},
     net::SocketAddr,
     num::NonZeroUsize,
@@ -25,7 +26,7 @@ use crate::{
     ecn,
     frame::{FrameEncoder as _, FrameType},
     packet,
-    pmtud::Pmtud,
+    pmtud::{Pmtud, Probe},
     recovery::{self, sent},
     rtt::{RttEstimate, RttSource},
     scone::{Bitrate, Scone},
@@ -36,6 +37,9 @@ use crate::{
 
 /// The maximum number of paths that `Paths` will track.
 const MAX_PATHS: usize = 15;
+
+/// PMTUD probes to send on a path that has just become primary.
+const NEW_PATH_PROBES: usize = 3;
 
 pub type PathRef = Rc<RefCell<Path>>;
 
@@ -100,7 +104,7 @@ impl Paths {
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                     if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
-                        p.pmtud_mut().set_peer_max_udp_payload(peer_max);
+                        p.pmtud_mut().set_peer_max_udp_payload(peer_max, now, stats);
                     }
                 }
                 Rc::new(RefCell::new(p))
@@ -263,12 +267,6 @@ impl Paths {
                 false
             }
         } else {
-            // See if the PMTUD raise timer wants to fire.
-            if let Some(path) = self.primary() {
-                path.borrow_mut()
-                    .pmtud_mut()
-                    .maybe_fire_raise_timer(now, stats);
-            }
             true
         }
     }
@@ -310,7 +308,8 @@ impl Paths {
         }
 
         if self.pmtud {
-            path.borrow_mut().pmtud_mut().start(now, stats);
+            path.borrow_mut()
+                .plan_pmtud_probes(0, Some(NEW_PATH_PROBES), now);
         }
     }
 
@@ -345,7 +344,10 @@ impl Paths {
                 {
                     drop(self.select_primary(&primary, now));
                     if self.pmtud {
-                        primary.borrow_mut().pmtud_mut().start(now, stats);
+                        // Validation succeeded; probe the new path.
+                        primary
+                            .borrow_mut()
+                            .plan_pmtud_probes(0, Some(NEW_PATH_PROBES), now);
                     }
                     return Some(primary);
                 }
@@ -604,7 +606,14 @@ impl Path {
         } else {
             None
         };
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
+        let pmtud = Pmtud::new(remote.ip(), iface_mtu);
+        // Seed what is reported before anything is probed. `Pmtud::set_mtu` keeps it current from
+        // then on, so only the first path may write it: the temporary paths made for datagrams
+        // from unknown addresses must not reset the size the path in use is sending at.
+        if stats.pmtud_pmtu == 0 {
+            stats.pmtud_pmtu = pmtud.plpmtu() + Pmtud::header_size(remote.ip());
+        }
+        let mut sender = PacketSender::new(conn_params, pmtud, now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -721,6 +730,27 @@ impl Path {
     /// Get a reference to the PMTUD state.
     pub fn pmtud(&self) -> &Pmtud {
         self.sender.pmtud()
+    }
+
+    /// The PMTUD probe this path can send right now, if any, given what is left of its congestion
+    /// window and, for a server, its anti-amplification budget.
+    ///
+    /// `reserve` is data that has to go out regardless, which is held back from the
+    /// anti-amplification budget so that probing cannot starve a handshake flight of it.
+    pub fn pmtud_probe(&self, reserve: usize) -> Option<Probe> {
+        let amplification = self.amplification_limit().saturating_sub(reserve);
+        let avail = min(self.sender.cwnd_avail(), amplification);
+        self.pmtud().probe(avail)
+    }
+
+    /// Plan PMTUD probes, using the congestion window headroom this path has left.
+    ///
+    /// `flight` is the data that has to be sent alongside them.
+    pub fn plan_pmtud_probes(&mut self, flight: usize, max_probes: Option<usize>, now: Instant) {
+        let base = Pmtud::default_plpmtu(self.remote.ip());
+        let reserve = flight.div_ceil(base) * base;
+        let budget = self.sender.cwnd_avail().saturating_sub(reserve);
+        self.sender.pmtud_mut().plan_probes(budget, max_probes, now);
     }
 
     /// Get the first local connection ID.

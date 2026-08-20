@@ -76,6 +76,8 @@ pub struct Crypto {
     tls: Agent,
     streams: CryptoStreams,
     states: CryptoStates,
+    /// Whether [`Self::resend_unacked_early`] has already resent anything.
+    resent_early: bool,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -133,6 +135,7 @@ impl Crypto {
             tls: agent,
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
+            resent_early: false,
         })
     }
 
@@ -349,6 +352,24 @@ impl Crypto {
             .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
+    /// See [`CryptoStreams::buffered`].
+    pub fn buffered(&self, space: PacketNumberSpace) -> usize {
+        self.streams.buffered(space)
+    }
+
+    /// See [`CryptoStreams::write_fragment`].
+    pub fn write_fragment<B: Buffer>(
+        &mut self,
+        space: PacketNumberSpace,
+        sni_slicing: bool,
+        limit: usize,
+        builder: &mut packet::Builder<B>,
+        stats: &mut FrameStats,
+    ) -> bool {
+        self.streams
+            .write_fragment(space, sni_slicing, limit, builder, stats)
+    }
+
     pub fn acked(&mut self, token: &CryptoRecoveryToken) {
         qdebug!(
             "Acked crypto frame space={} offset={} length={}",
@@ -373,6 +394,16 @@ impl Crypto {
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
+    }
+
+    /// Resend unACK'ed Initial and Handshake data earlier than PTO, per Section 6.2.3 of RFC 9002.
+    pub fn resend_unacked_early(&mut self) {
+        if self.resent_early {
+            return;
+        }
+        let initial = self.streams.resend_unacked(PacketNumberSpace::Initial);
+        let handshake = self.streams.resend_unacked(PacketNumberSpace::Handshake);
+        self.resent_early = initial || handshake;
     }
 
     /// Discard state for a packet number space and return true
@@ -1483,10 +1514,16 @@ impl Display for CryptoStates {
     }
 }
 
+/// One piece of the `ClientHello` that a PMTUD probe repeats, as a range into it, plus a second
+/// range for the piece cut around the server name, which goes out as two frames.
+type Fragment = (Range<usize>, Option<Range<usize>>);
+
 #[derive(Debug, Default)]
 pub struct CryptoStream {
     tx: TxBuffer,
     rx: RxStreamOrderer,
+    /// Which [`Fragment`] of [`Self::tx`] the next PMTUD probe should contain.
+    next_fragment: usize,
 }
 
 #[derive(Debug)]
@@ -1547,11 +1584,18 @@ impl CryptoStreams {
         Ok(())
     }
 
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+    /// Buffer a CRYPTO frame. Returns whether any of it was new.
+    pub fn inbound_frame(
+        &mut self,
+        space: PacketNumberSpace,
+        offset: u64,
+        data: &[u8],
+    ) -> Res<bool> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
+        let fresh = !rx.covered(offset, data.len());
         rx.inbound_frame(offset, data);
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
-            Ok(())
+            Ok(fresh)
         } else {
             Err(Error::CryptoBufferExceeded)
         }
@@ -1583,17 +1627,19 @@ impl CryptoStreams {
     }
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
-    /// This can help speed up handshake times.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
-        if space != PacketNumberSpace::ApplicationData
-            && let Some(cs) = self.get_mut(space)
-        {
-            cs.tx.unmark_sent();
-        }
+    /// This can help speed up handshake times. Returns whether anything was queued to resend.
+    pub fn resend_unacked(&mut self, space: PacketNumberSpace) -> bool {
+        space != PacketNumberSpace::ApplicationData
+            && self.get_mut(space).is_some_and(|cs| cs.tx.unmark_sent())
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
         self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
+    }
+
+    /// How much data is buffered for `space`, sent or not.
+    pub fn buffered(&self, space: PacketNumberSpace) -> usize {
+        self.get(space).map_or(0, |cs| cs.tx.buffered())
     }
 
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
@@ -1636,6 +1682,51 @@ impl CryptoStreams {
         }
     }
 
+    /// Repeat the next piece of the buffered data for `space` in a PMTUD probe. Returns `true` if
+    /// anything was written.
+    ///
+    /// Each call advances to the next piece, cycling, so any run of as many probes as there are
+    /// pieces carries all of the data. `limit` is the size of an ordinary packet, so that a piece
+    /// always fits into one.
+    ///
+    /// Nothing is consumed here: no range is marked as sent and no recovery token is produced.
+    pub fn write_fragment<B: Buffer>(
+        &mut self,
+        space: PacketNumberSpace,
+        sni_slicing: bool,
+        limit: usize,
+        builder: &mut packet::Builder<B>,
+        stats: &mut FrameStats,
+    ) -> bool {
+        let Some(cs) = self.get_mut(space) else {
+            return false;
+        };
+        let Some((offset, data)) = cs.tx.data_at(0) else {
+            return false;
+        };
+        if offset != 0 {
+            return false;
+        }
+        let pieces = fragments(data, sni_slicing, limit);
+        if pieces.is_empty() {
+            return false;
+        }
+        let index = cs.next_fragment % pieces.len();
+        cs.next_fragment = index + 1;
+        let (first, second) = pieces[index].clone();
+        let written = [
+            write_chunk(offset, data, first, builder),
+            second.and_then(|s| write_chunk(offset, data, s, builder)),
+        ];
+        let mut wrote = false;
+        for (at, len) in written.into_iter().flatten() {
+            qdebug!("CRYPTO copy for {space} offset={at}, len={len}");
+            stats.crypto += 1;
+            wrote = true;
+        }
+        wrote
+    }
+
     pub fn write_frame<B: Buffer>(
         &mut self,
         space: PacketNumberSpace,
@@ -1644,38 +1735,11 @@ impl CryptoStreams {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        fn write_chunk<B: Buffer>(
-            offset: u64,
-            data: &[u8],
-            builder: &mut packet::Builder<B>,
-        ) -> Option<(u64, usize)> {
-            let mut header_len = 1 + Encoder::varint_len(offset) + 1;
-
-            // Don't bother if there isn't room for the header and some data.
-            if builder.remaining() < header_len + 1 {
-                return None;
-            }
-            // Calculate length of data based on the minimum of:
-            // - available data
-            // - remaining space, less the header, which counts only one byte for the length at
-            //   first to avoid underestimating length
-            let length = min(data.len(), builder.remaining() - header_len);
-            header_len += Encoder::varint_len(to_u64(length)) - 1;
-            let length = min(data.len(), builder.remaining() - header_len);
-
-            builder.encode_frame(FrameType::Crypto, |b| {
-                b.encode_varint(offset);
-                b.encode_vvec(&data[..length]);
-            });
-            Some((offset, length))
-        }
-
         fn mark_as_sent(
             cs: &mut CryptoStream,
             space: PacketNumberSpace,
             tokens: &mut recovery::Tokens,
-            offset: u64,
-            len: usize,
+            (offset, len): (u64, usize),
             stats: &mut FrameStats,
         ) {
             cs.tx.mark_as_sent(offset, len);
@@ -1688,35 +1752,6 @@ impl CryptoStreams {
             stats.crypto += 1;
         }
 
-        #[expect(clippy::type_complexity, reason = "Yeah, a bit complex but still OK.")]
-        const fn limit_chunks<'a>(
-            left: (u64, &'a [u8]),
-            right: (u64, &'a [u8]),
-            limit: usize,
-        ) -> ((u64, &'a [u8]), (u64, &'a [u8])) {
-            let (left_offset, mut left) = left;
-            let (mut right_offset, mut right) = right;
-            if left.len() + right.len() <= limit {
-                // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
-                // over multiple packets. But at least it's in two unordered CRYPTO frames.
-            } else if left.len() <= limit {
-                // `left` is short enough to fit into this packet. So send from the *end*
-                // of `right`, so that the second half of the SNI is in another packet.
-                let right_len = right.len() + left.len() - limit;
-                right_offset += to_u64(right_len);
-                (_, right) = right.split_at(right_len);
-            } else if right.len() <= limit {
-                // `right` is short enough to fit into this packet. So only send a part of `left`.
-                // The SNI begins at the end of `left`, so send the beginnig of it in this packet.
-                (left, _) = left.split_at(limit - right.len());
-            } else {
-                // Both chunks are too long to fit into one packet. Just send a part of each.
-                (left, _) = left.split_at(limit / 2);
-                (right, _) = right.split_at(limit / 2);
-            }
-            ((left_offset, left), (right_offset, right))
-        }
-
         let Some(cs) = self.get_mut(space) else {
             return;
         };
@@ -1725,45 +1760,140 @@ impl CryptoStreams {
             if offset == 0 {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", data);
             }
-            let written = if sni_slicing && offset == 0 {
-                if let Some(sni) = find_sni(data) {
-                    // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
-                    let (left, right) = data.split_at(mid);
-
-                    // Truncate the chunks so we can fit them into roughly evenly-filled packets.
-                    let packets_needed = data.len().div_ceil(builder.limit());
-                    let limit = data.len() / packets_needed;
-                    let ((left_offset, left), (right_offset, right)) =
-                        limit_chunks((offset, left), (offset + to_u64(mid), right), limit);
-                    (
-                        write_chunk(right_offset, right, builder),
-                        write_chunk(left_offset, left, builder),
-                    )
-                } else {
-                    // No SNI found, write the entire data.
-                    (write_chunk(offset, data, builder), None)
-                }
-            } else {
-                // SNI slicing disabled or data not at offset 0, write the entire data.
-                (write_chunk(offset, data, builder), None)
+            let written = match (sni_slicing && offset == 0)
+                .then(|| slice_sni(data, builder.limit()))
+                .flatten()
+            {
+                Some((first, second)) => (
+                    write_chunk(offset, data, first, builder),
+                    write_chunk(offset, data, second, builder),
+                ),
+                // No SNI found, slicing disabled, or data not at offset 0: write the entire data.
+                None => (write_chunk(offset, data, 0..data.len(), builder), None),
             };
 
             match written {
                 (None, None) => break,
-                (None, Some((offset, len))) | (Some((offset, len)), None) => {
-                    mark_as_sent(cs, space, tokens, offset, len, stats);
-                }
-                (Some((offset1, len1)), Some((offset2, len2))) => {
-                    mark_as_sent(cs, space, tokens, offset1, len1, stats);
-                    mark_as_sent(cs, space, tokens, offset2, len2, stats);
+                (None, Some(c)) | (Some(c), None) => mark_as_sent(cs, space, tokens, c, stats),
+                (Some(first), Some(second)) => {
+                    mark_as_sent(cs, space, tokens, first, stats);
+                    mark_as_sent(cs, space, tokens, second, stats);
                     // We only end up in this arm if we successfully sliced above. In that case,
                     // don't try and fit more crypto data into this packet.
+                    // So an empty chunk must stay `Some`, or the SNI's second half lands here too.
                     break;
                 }
             }
         }
     }
+}
+
+/// Write a CRYPTO frame with as much of `data[range]` as fits, or `None` if not even one byte
+/// does. `data` itself starts at `offset` in the stream.
+fn write_chunk<B: Buffer>(
+    offset: u64,
+    data: &[u8],
+    range: Range<usize>,
+    builder: &mut packet::Builder<B>,
+) -> Option<(u64, usize)> {
+    let at = offset + to_u64(range.start);
+    let data = &data[range];
+    let mut header_len = 1 + Encoder::varint_len(at) + 1;
+
+    if builder.remaining() < header_len + 1 {
+        return None;
+    }
+    // Calculate len based on minimum of the data and the remaining space (less the header).
+    let length = min(data.len(), builder.remaining() - header_len);
+    // The header counted only one byte for the length varint; correct that and redo.
+    header_len += Encoder::varint_len(to_u64(length)) - 1;
+    let length = min(data.len(), builder.remaining() - header_len);
+
+    builder.encode_frame(FrameType::Crypto, |b| {
+        b.encode_varint(at);
+        b.encode_vvec(&data[..length]);
+    });
+    Some((at, length))
+}
+
+/// Truncate both halves so that they fill packets of `limit` bytes roughly evenly.
+const fn limit_chunks(
+    left: Range<usize>,
+    right: Range<usize>,
+    limit: usize,
+) -> (Range<usize>, Range<usize>) {
+    // `Range::len` is not `const`, so subtract instead.
+    let (left_len, right_len) = (left.end - left.start, right.end - right.start);
+    if left_len + right_len <= limit {
+        // Nothing to do. Both chunks will fit into one packet, meaning the SNI isn't spread
+        // over multiple packets. But at least it's in two unordered CRYPTO frames.
+        (left, right)
+    } else if left_len <= limit {
+        // `left` is short enough to fit into this packet. So send from the *end*
+        // of `right`, so that the second half of the SNI is in another packet.
+        // When `left_len == limit` this empties `right`; see `write_frame` for why that is OK.
+        let skip = right_len + left_len - limit;
+        (left, right.start + skip..right.end)
+    } else if right_len <= limit {
+        // `right` is short enough to fit into this packet. So only send a part of `left`.
+        // The SNI begins at the end of `left`, so send the beginning of it in this packet.
+        (left.start..left.start + limit - right_len, right)
+    } else {
+        // Both chunks are too long to fit into one packet. Just send a part of each.
+        (
+            left.start..left.start + limit / 2,
+            right.start..right.start + limit / 2,
+        )
+    }
+}
+
+/// Cut `data` at the midpoint of the SNI, so that the halves tend to land in different packets.
+/// Returns the halves in the order to write them, or `None` if there is no SNI.
+/// `limit` must be non-zero.
+///
+/// PMTUD probes repeat what this produces, so it has to be the only place the cut is decided.
+fn slice_sni(data: &[u8], limit: usize) -> Option<(Range<usize>, Range<usize>)> {
+    let sni = find_sni(data)?;
+    let mid = sni.start + sni.len() / 2;
+    let packets_needed = data.len().div_ceil(limit);
+    let (left, right) = limit_chunks(0..mid, mid..data.len(), data.len() / packets_needed);
+    // Second half first, so that packet order does not follow data order.
+    Some((right, left))
+}
+
+/// Split `data` into the pieces PMTUD probes repeat, each of which fits into a packet of `limit`
+/// bytes.
+///
+/// The first piece is the pair the real transmission puts in its first packet, cut around the
+/// server name so that no packet carries the whole of it; the rest covers whatever that left over.
+/// The pieces need not line up exactly with the frames the real transmission ends up writing,
+/// since CRYPTO frames may repeat and overlap freely; what matters is that none of them spans the
+/// cut. `limit` is sized for the whole packet rather than the room a frame will actually get, the
+/// same approximation [`CryptoStreams::write_frame`] makes, and [`write_chunk`] truncates whatever
+/// does not fit.
+fn fragments(data: &[u8], sni_slicing: bool, limit: usize) -> Vec<Fragment> {
+    let mut pieces = Vec::new();
+    let mut rest = Vec::new();
+
+    let sliced = sni_slicing.then(|| slice_sni(data, limit)).flatten();
+    if let Some((first, second)) = sliced {
+        // Whatever the cut did not cover, in order. `second` starts at 0, `first` after it.
+        rest.push(second.end..first.start);
+        rest.push(first.end..data.len());
+        pieces.push((first, Some(second)));
+    } else {
+        rest.push(0..data.len());
+    }
+
+    for gap in rest {
+        let mut at = gap.start;
+        while at < gap.end {
+            let len = min(limit, gap.end - at);
+            pieces.push((at..at + len, None));
+            at += len;
+        }
+    }
+    pieces
 }
 
 impl Default for CryptoStreams {
@@ -1781,6 +1911,26 @@ pub struct CryptoRecoveryToken {
     space: PacketNumberSpace,
     offset: u64,
     length: usize,
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod chunk_tests {
+    use super::limit_chunks;
+
+    #[test]
+    fn limit_chunks_branches() {
+        // Both halves fit: unchanged.
+        assert_eq!(limit_chunks(0..10, 10..20, 20), (0..10, 10..20));
+        // `left` fits: send the tail of `right`.
+        assert_eq!(limit_chunks(0..10, 10..30, 15), (0..10, 25..30));
+        // `right` fits: send the head of `left`.
+        assert_eq!(limit_chunks(0..20, 20..25, 15), (0..10, 20..25));
+        // Neither fits: half of each.
+        assert_eq!(limit_chunks(0..20, 20..40, 10), (0..5, 20..25));
+        // `left` exactly fills the packet, emptying `right`.
+        assert_eq!(limit_chunks(0..500, 500..1000, 500), (0..500, 1000..1000));
+    }
 }
 
 #[cfg(all(test, not(feature = "disable-encryption")))]

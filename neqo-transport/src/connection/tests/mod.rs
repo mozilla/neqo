@@ -193,6 +193,20 @@ impl test_internal::FrameWriter for PingWriter {
     }
 }
 
+/// This inserts a single byte of CRYPTO at offset 0 into packets. A peer that already has that
+/// offset discards the byte, so this is also how to produce a duplicate CRYPTO frame.
+struct CryptoWriter {}
+
+impl test_internal::FrameWriter for CryptoWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        // A first byte of 2 is the byte that indicates a ServerHello.
+        builder.encode_varint(FrameType::Crypto);
+        builder.encode_varint(0_u64); // Offset
+        builder.encode_varint(1_u64); // Length
+        builder.encode_byte(2);
+    }
+}
+
 /// Drive the handshake between the client and server.
 fn handshake_with_modifier<F>(
     client: &mut Connection,

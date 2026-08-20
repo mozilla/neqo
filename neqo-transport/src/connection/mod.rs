@@ -46,8 +46,9 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
-    packet::{self},
+    packet::{self, MIN_INITIAL_PACKET_SIZE},
     path::{Path, PathRef, Paths},
+    pmtud::{Pmtud, Probe},
     qlog,
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
     recovery::{self, SendProfile, sent},
@@ -827,6 +828,7 @@ impl Connection {
         self.version = version;
         self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
+        let peer_max_udp_payload = expect_usize(tp.get_integer(MaxUdpPayloadSize));
         self.tps.borrow_mut().set_remote_0rtt(Some(tp));
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
@@ -837,6 +839,12 @@ impl Connection {
             .borrow_mut()
             .rtt_mut()
             .set_initial(rtt);
+        self.paths
+            .primary()
+            .ok_or(Error::Internal)?
+            .borrow_mut()
+            .pmtud_mut()
+            .set_peer_max_udp_payload(peer_max_udp_payload, now, &mut self.stats.borrow_mut());
         self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
@@ -1265,6 +1273,7 @@ impl Connection {
                 self.process_timer(now);
             }
         }
+        self.maybe_plan_pmtud_probes(now);
 
         match self.output(now, max_datagrams) {
             SendOptionBatch::Yes(dgram) => OutputBatch::DatagramBatch(dgram),
@@ -1634,17 +1643,16 @@ impl Connection {
             }
             (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
                 // This packet can't be processed now, but it could be a sign
-                // that Initial packets were lost.
-                // Resend Initial CRYPTO frames immediately a few times just
-                // in case.  As we don't have an RTT estimate yet, this helps
+                // that Initial packets were lost. Resend CRYPTO frames immediately
+                // just in case.  As we don't have an RTT estimate yet, this helps
                 // when there is a short RTT and losses. Also mark all 0-RTT
-                // data as lost.
+                // data as lost. See Section 6.2.3 of RFC 9002 and `Crypto::resend_unacked_early`.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
                 => {
                     qtrace!("Resending Initial in response to an undecryptable packet");
-                    self.crypto.resend_unacked(PacketNumberSpace::Initial);
+                    self.crypto.resend_unacked_early();
                     self.resend_0rtt(now);
                 }
             (
@@ -2513,6 +2521,17 @@ impl Connection {
         probe
     }
 
+    /// The space whose CRYPTO data a PMTUD probe copies while the handshake is in progress.
+    fn probe_crypto_space(&self) -> Option<PacketNumberSpace> {
+        if self.state.connected() {
+            None
+        } else if self.role == Role::Client {
+            Some(PacketNumberSpace::Initial)
+        } else {
+            Some(PacketNumberSpace::Handshake)
+        }
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
@@ -2522,7 +2541,7 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        coalesced: bool, // Whether this packet is coalesced behind another one.
+        pmtud_probe: Option<Probe>, // The PMTUD probe this datagram is, if any.
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
         let mut tokens = recovery::Tokens::new();
@@ -2564,19 +2583,28 @@ impl Connection {
         }
 
         if primary {
-            if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
-                    && path.borrow().pmtud().needs_probe()
-                    && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
-                    path.borrow_mut().pmtud_mut().send_probe(
-                        builder,
-                        &mut tokens,
-                        &mut self.stats.borrow_mut(),
-                    );
-                    ack_eliciting = true;
+            // A PMTUD probe replaces the frames that would otherwise go into this packet.
+            if let Some(probe) = pmtud_probe {
+                if self.probe_crypto_space() == Some(space) {
+                    let sni_slicing = self.conn_params.sni_slicing_enabled();
+                    let limit = path.borrow().plpmtu();
+                    let stats = &mut self.stats.borrow_mut().frame_tx;
+                    if self
+                        .crypto
+                        .write_fragment(space, sni_slicing, limit, builder, stats)
+                    {
+                        ack_eliciting = true;
+                    }
                 }
+                path.borrow_mut().pmtud_mut().send_probe(
+                    probe,
+                    !ack_eliciting,
+                    builder,
+                    &mut tokens,
+                    &mut self.stats.borrow_mut(),
+                );
+                ack_eliciting = true;
+            } else if space == PacketNumberSpace::ApplicationData {
                 self.write_appdata_frames(builder, &mut tokens, now);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
@@ -2664,13 +2692,12 @@ impl Connection {
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
-        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+            if num_datagrams != 0 && path.borrow().pmtud_probe(self.pending_crypto()).is_some() {
                 // Next datagram will be larger due to PMTUD probing.  GSO
                 // requires that all datagrams in a batch are of equal size.
                 // Only the last datagram can be smaller. Given that this would
@@ -2688,13 +2715,7 @@ impl Connection {
                 // the batch are each `datagram_size` large. The next datagram
                 // can be up to `mtu` large. Break in case the next could be
                 // larger than the ones already in the batch.
-                datagram_size < mtu
-                // GSO allows total datagram batch size up to the address family
-                // max MTU. If the next datagram could exceed that limit, break.
-                //
-                // See for example Linux kernel:
-                // https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402
-                || address_family_max_mtu - send_buffer.len() < mtu
+                datagram_size < mtu || (u16::MAX as usize) - send_buffer.len() < mtu // Batch has to fit into one IP packet
             }) {
                 break;
             }
@@ -2760,12 +2781,37 @@ impl Connection {
     ) -> Res<SendOption> {
         let mut initial_sent = None;
         let mut needs_padding = false;
+        let mut probe_limit = None; // The size this datagram has to reach if it's a PMTUD probe.
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        // A probe has to leave room for the CRYPTO data that has to be sent anyway.
+        let reserve = self.pending_crypto();
+        let profile = self
+            .loss_recovery
+            .send_profile(&path.borrow(), reserve, now);
         qdebug!("[{self}] output_dgram_on_path send_profile {profile:?}");
+
+        // If a PMTUD probe is requested and fits into cwnd, this datagram becomes that probe.
+        let pmtud_probe = if closing_frame.is_none()
+            && path.borrow().is_primary()
+            && !profile.ack_only()
+            && !profile.pto()
+        {
+            path.borrow().pmtud_probe(reserve)
+        } else {
+            None
+        };
+        let probe_space = self
+            .probe_crypto_space()
+            .filter(|s| self.crypto.states().select_tx(self.version, *s).is_some())
+            .unwrap_or_else(|| {
+                PacketNumberSpace::iter()
+                    .rev()
+                    .find(|s| self.crypto.states().select_tx(self.version, *s).is_some())
+                    .unwrap_or(PacketNumberSpace::Initial)
+            });
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
@@ -2779,11 +2825,15 @@ impl Connection {
 
             let header_start = encoder.len();
 
+            let coalesce = !self.state.connected();
+            let probing =
+                pmtud_probe.filter(|_| space == probe_space && (coalesce || header_start == 0));
+
             // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
+            let limit = if let Some(probe) = probing {
                 needs_padding = true;
-                debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size()
+                debug_assert!(probe.limit() >= profile.limit());
+                probe.limit()
             } else {
                 profile.limit()
                     - if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
@@ -2829,13 +2879,31 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, probing, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
                 encoder = builder.abort();
 
                 continue;
+            }
+            if probing.is_some() {
+                probe_limit = Some(limit + aead_expansion); // A probe went into this packet, so the datagram has to reach the probed size.
+            }
+
+            // A short header packet has no length field, so it always extends to the end of the
+            // datagram. Expanding the datagram after building one would make the peer include
+            // those bytes in the ciphertext, so pad from inside the packet instead.
+            if let Some(l) = probe_limit
+                && !pt.is_long()
+                && builder.len() + aead_expansion < l
+            {
+                builder.set_limit(l - aead_expansion);
+                builder.enable_padding(true);
+                if builder.pad() {
+                    self.stats.borrow_mut().frame_tx.padding += 1;
+                    padded = true;
+                }
             }
 
             if packet_tos.is_ecn_marked() {
@@ -2880,16 +2948,23 @@ impl Connection {
                 tokens,
                 encoder.len() - header_start,
             );
-            if padded {
+            // A padded short header packet expands the datagram only to the packet builder's limit.
+            if padded && probe_limit.is_none_or(|l| encoder.len() >= l) {
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
-            } else if pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting) {
-                // Packets containing Initial packets might need padding, and we want to
-                // track that padding along with the Initial packet.  So defer tracking.
+            } else if (pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting))
+                || (probing.is_some() && initial_sent.is_none())
+            {
+                // The datagram still has to be expanded to the minimum size when it carries an
+                // Initial, and to the probed size when it carries a probe.
                 initial_sent = Some(sent);
                 needs_padding = true;
             } else {
-                if pt.is_long() && self.role == Role::Client && initial_sent.is_none() {
+                if pt.is_long()
+                    && self.role == Role::Client
+                    && initial_sent.is_none()
+                    && probe_limit.is_none()
+                {
                     // Disable padding for any long header packet if the UDP packet doesn't include
                     // an Initial packet.
                     needs_padding = false;
@@ -2928,12 +3003,37 @@ impl Connection {
             // Perform additional padding for Initial packets as necessary.
             if let Some(mut initial) = initial_sent.take() {
                 if needs_padding {
-                    self.pad_initial(&mut encoder, &mut initial, &profile);
+                    self.pad_initial(
+                        &mut encoder,
+                        &mut initial,
+                        probe_limit.unwrap_or_else(|| self.initial_padding(&profile, path)),
+                    );
                 }
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
+            debug_assert!(
+                probe_limit.is_none_or(|l| encoder.len() == l),
+                "PMTUD probe is {}, expected {probe_limit:?}",
+                encoder.len()
+            );
             path.borrow_mut().add_sent(encoder.len());
             Ok(SendOption::Yes)
+        }
+    }
+
+    /// How far to expand a datagram carrying an Initial.
+    fn initial_padding(&self, profile: &SendProfile, path: &PathRef) -> usize {
+        if self
+            .crypto
+            .states()
+            .select_tx(self.version, PacketNumberSpace::Handshake)
+            .is_some()
+        {
+            let base = Pmtud::default_plpmtu(path.borrow().remote_address().ip());
+            debug_assert!(base >= MIN_INITIAL_PACKET_SIZE);
+            min(profile.limit(), base)
+        } else {
+            profile.limit()
         }
     }
 
@@ -2941,33 +3041,29 @@ impl Connection {
         &self,
         encoder: &mut Encoder<&mut Vec<u8>>,
         initial: &mut sent::Packet,
-        profile: &SendProfile,
+        limit: usize,
     ) {
-        if encoder.len() >= profile.limit() {
+        if encoder.len() >= limit {
             return;
         }
 
-        qdebug!(
-            "[{self}] pad Initial from {} to {}",
-            encoder.len(),
-            profile.limit()
-        );
-        let pad_amount = profile.limit() - encoder.len();
+        qdebug!("[{self}] pad Initial from {} to {limit}", encoder.len());
+        let pad_amount = limit - encoder.len();
         initial.track_padding(pad_amount);
         if self.conn_params.scone_enabled() {
             // This ensures that the last bytes are a SCONE indication, if there is enough space.
             // This is not tracked, other than for congestion control (above)
             if pad_amount >= Self::SCONE_INDICATION.len() {
                 encoder.pad_to(
-                    profile.limit() - Self::SCONE_INDICATION.len() + 1,
+                    limit - Self::SCONE_INDICATION.len() + 1,
                     Self::SCONE_INDICATION[0],
                 );
                 encoder.encode(&Self::SCONE_INDICATION[1..]);
             } else {
-                encoder.pad_to(profile.limit(), Self::SCONE_INDICATION[0]);
+                encoder.pad_to(limit, Self::SCONE_INDICATION[0]);
             }
         } else {
-            encoder.pad_to(profile.limit(), 0);
+            encoder.pad_to(limit, 0);
         }
     }
 
@@ -3025,6 +3121,32 @@ impl Connection {
             ZeroRttState::Init
         };
         Ok(())
+    }
+
+    /// Plan probing, per draft-seemann-quic-ppdplpmtud.
+    fn maybe_plan_pmtud_probes(&self, now: Instant) {
+        if self.conn_params.pmtud_enabled()
+            && self
+                .probe_crypto_space()
+                .is_some_and(|s| self.crypto.states().select_tx(self.version, s).is_some())
+            && let Some(path) = self.paths.primary()
+            && !path.borrow().pmtud().probed()
+        {
+            path.borrow_mut()
+                .plan_pmtud_probes(self.pending_flight(), None, now);
+        }
+    }
+
+    /// CRYPTO data still to be sent, in whichever space.
+    fn pending_crypto(&self) -> usize {
+        PacketNumberSpace::iter()
+            .map(|s| self.crypto.buffered(s))
+            .sum()
+    }
+
+    /// Everything probing has to leave congestion window for.
+    fn pending_flight(&self) -> usize {
+        self.pending_crypto() + self.streams.buffered()
     }
 
     fn get_closing_period_time(&self, now: Instant) -> Instant {
@@ -3099,9 +3221,11 @@ impl Connection {
 
             // We cap this transport parameter to usize::MAX on decode, so this is safe.
             let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
-            path.borrow_mut()
-                .pmtud_mut()
-                .set_peer_max_udp_payload(max_udp_payload);
+            path.borrow_mut().pmtud_mut().set_peer_max_udp_payload(
+                max_udp_payload,
+                now,
+                &mut self.stats.borrow_mut(),
+            );
             self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
@@ -3322,18 +3446,9 @@ impl Connection {
         Ok(())
     }
 
-    fn set_confirmed(&mut self, now: Instant) -> Res<()> {
+    fn set_confirmed(&mut self, now: Instant) {
         self.set_state(State::Confirmed, now);
-        if self.conn_params.pmtud_enabled() {
-            self.paths
-                .primary()
-                .ok_or(Error::Internal)?
-                .borrow_mut()
-                .pmtud_mut()
-                .start(now, &mut self.stats.borrow_mut());
-        }
         self.paths.start_ecn(&mut self.stats.borrow_mut());
-        Ok(())
     }
 
     #[expect(clippy::too_many_lines, reason = "Yep, but it's a nice big match.")]
@@ -3393,7 +3508,8 @@ impl Connection {
                     d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto
+                let fresh = self
+                    .crypto
                     .streams_mut()
                     .inbound_frame(space, offset, data)?;
 
@@ -3413,14 +3529,15 @@ impl Connection {
                 {
                     self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
-                } else {
-                    // If we get a useless CRYPTO frame send outstanding CRYPTO frames and 0-RTT
-                    // data again.
-                    self.crypto.resend_unacked(space);
-                    if space == PacketNumberSpace::Initial {
-                        self.crypto.resend_unacked(PacketNumberSpace::Handshake);
-                        self.resend_0rtt(now);
-                    }
+                } else if !fresh
+                    && !data.is_empty()
+                    && space == PacketNumberSpace::Initial
+                    && self.stats.borrow().pmtud_tx == 0
+                {
+                    // See Section 6.2.3 of RFC 9002. PMTUD probes already carry copies of this
+                    // data, so once any have been sent, resending would just waste bandwidth.
+                    self.crypto.resend_unacked_early();
+                    self.resend_0rtt(now);
                 }
             }
             Frame::NewToken { token } => {
@@ -3474,13 +3591,7 @@ impl Connection {
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path, now)?;
                 path.borrow_mut().challenged(data);
-                // A PATH_CHALLENGE indicates the peer sees a different path,
-                // so start PMTUD to discover any MTU changes.
-                if self.conn_params.pmtud_enabled() {
-                    path.borrow_mut()
-                        .pmtud_mut()
-                        .start(now, &mut self.stats.borrow_mut());
-                }
+                // PATH_CHALLENGE means the peer sees a different path, but says nothing about ours.
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
@@ -3530,7 +3641,7 @@ impl Connection {
                 if self.role == Role::Server || !self.state.connected() {
                     return Err(Error::ProtocolViolation);
                 }
-                self.set_confirmed(now)?;
+                self.set_confirmed(now);
                 self.discard_keys(PacketNumberSpace::Handshake, now);
                 self.migrate_to_preferred_address(now)?;
             }
@@ -3589,7 +3700,7 @@ impl Connection {
                     }
                     recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
                     // PMTUD probe loss is handled by the PMTUD state machine.
-                    recovery::Token::PmtudProbe => (),
+                    recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3661,7 +3772,7 @@ impl Connection {
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     recovery::Token::EcnEct0 => self.paths.acked_ecn(),
                     // We don't care about these being ACK'ed
-                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe => (),
+                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3758,7 +3869,7 @@ impl Connection {
             self.crypto.tls().info().ok_or(Error::Internal)?.resumed();
         if self.role == Role::Server {
             self.state_signaling.handshake_done();
-            self.set_confirmed(now)?;
+            self.set_confirmed(now);
         }
         qinfo!("[{self}] Connection established");
         Ok(())
