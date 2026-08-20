@@ -10,7 +10,7 @@
 use std::{
     cell::RefCell,
     cmp::{max, min},
-    collections::BTreeMap,
+    collections::{BTreeMap, btree_map::Entry},
     fmt::Debug,
     mem,
     rc::{Rc, Weak},
@@ -221,6 +221,12 @@ impl RxStreamOrderer {
         Ok(())
     }
 
+    /// Add a range, which is the only thing that can take the entry count over the limit.
+    fn insert_range(&mut self, start: u64, data: Vec<u8>) -> Res<()> {
+        self.data_ranges.insert(start, data);
+        self.check_gap_limit()
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -272,24 +278,19 @@ impl RxStreamOrderer {
             // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
             // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
             // (by up to one frame). Gap (new_start > end): falls through to insert.
-            let inserted = if new_start == self.end
+            let adjacent = new_start == self.end;
+            // new_end > new_start >= end, so direct assignment is correct.
+            self.end = new_end;
+            return if adjacent
                 && let Some(mut e) = self
                     .data_ranges
                     .last_entry()
                     .filter(|e| e.get().len() < Self::RANGE_TARGET)
             {
                 e.get_mut().extend_from_slice(new_data);
-                false
-            } else {
-                self.data_ranges.insert(new_start, new_data.to_vec());
-                true
-            };
-            // new_end > new_start >= end, so direct assignment is correct.
-            self.end = new_end;
-            return if inserted {
-                self.check_gap_limit()
-            } else {
                 Ok(())
+            } else {
+                self.insert_range(new_start, new_data.to_vec())
             };
         }
 
@@ -297,7 +298,8 @@ impl RxStreamOrderer {
         let extend = if let Some((&prev_start, prev_vec)) =
             self.data_ranges.range_mut(..=new_start).next_back()
         {
-            let prev_end = prev_start + to_u64(prev_vec.len());
+            let prev_len = prev_vec.len();
+            let prev_end = prev_start + to_u64(prev_len);
             if new_end > prev_end {
                 // PPPPPP    ->  PPPPPP
                 //   NNNNNN            NN
@@ -313,7 +315,8 @@ impl RxStreamOrderer {
                 // Checks existing length, so the chunk may grow slightly past RANGE_TARGET (by up
                 // to one frame). This can't always extend, because otherwise the
                 // buffer could end up growing indefinitely without being released.
-                (prev_vec.len() < Self::RANGE_TARGET && prev_end == new_start).then_some(prev_start)
+                (prev_len < Self::RANGE_TARGET && prev_end == new_start)
+                    .then_some((prev_start, prev_len))
             } else {
                 // PPPPPP    ->  PPPPPP
                 //   NNNN
@@ -382,33 +385,28 @@ impl RxStreamOrderer {
 
         if !to_add.is_empty() {
             self.received += to_u64(to_add.len());
-            let inserted = if let Some(prev_start) = extend {
-                // Absorb the range that follows, now that nothing separates them: remove it, then
-                // append its data to the range before it.
-                let add_end = new_start + to_u64(to_add.len());
-                let next = self
-                    .data_ranges
-                    .get(&add_end)
-                    .is_some_and(|n| to_add.len() + n.len() <= Self::RANGE_TARGET)
-                    .then(|| self.data_ranges.remove(&add_end))
-                    .flatten();
-                if let Some(buf) = self.data_ranges.get_mut(&prev_start) {
-                    buf.extend_from_slice(to_add);
-                    if let Some(next) = &next {
-                        buf.extend_from_slice(next);
-                    }
-                }
-                false
-            } else {
-                self.data_ranges.insert(new_start, to_add.to_vec());
-                true
-            };
             // new_start was advanced by overlap, so new_end is still the real end.
             // When to_add is empty, a surviving forward entry with next_end >= new_end
             // exists, so self.end is already correct — the max() is a no-op in that case.
             self.end = max(self.end, new_end);
-            if inserted {
-                return self.check_gap_limit();
+            if let Some((prev_start, prev_len)) = extend {
+                // Absorb the range that follows, now that nothing separates them: remove it, then
+                // append its data to the range before it.
+                let add_end = new_start + to_u64(to_add.len());
+                let next = match self.data_ranges.entry(add_end) {
+                    Entry::Occupied(n)
+                        if prev_len + to_add.len() + n.get().len() <= Self::RANGE_TARGET =>
+                    {
+                        Some(n.remove())
+                    }
+                    _ => None,
+                };
+                if let Some(buf) = self.data_ranges.get_mut(&prev_start) {
+                    buf.extend_from_slice(to_add);
+                    buf.extend_from_slice(next.as_deref().unwrap_or_default());
+                }
+            } else {
+                return self.insert_range(new_start, to_add.to_vec());
             }
         }
 
@@ -1977,21 +1975,11 @@ mod tests {
             s.inbound_frame(2 * i, &[0u8; 1]).unwrap();
         }
         assert_eq!(s.count_runs(), 1, "all of it is one contiguous run");
-        // Each fill absorbs the range that follows it, so a run keeps growing until it reaches
-        // `RANGE_TARGET`; the fill that finds it too large to extend is left as a single byte
-        // between two runs. That is 16384 bytes in 8 entries, not one entry per gap.
+        // Each fill absorbs the range that follows it, so a run grows to exactly `RANGE_TARGET`
+        // before the next one starts. That is 16384 bytes in 5 entries, not one entry per gap.
         check_chunks(
             &s,
-            &[
-                (0, 1),
-                (1, 4097),
-                (4098, 1),
-                (4099, 4097),
-                (8196, 1),
-                (8197, 4097),
-                (12294, 1),
-                (12295, 4089),
-            ],
+            &[(0, 1), (1, 4096), (4097, 4096), (8193, 4096), (12289, 4095)],
         );
     }
 
