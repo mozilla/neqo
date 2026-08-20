@@ -193,6 +193,40 @@ impl test_internal::FrameWriter for PingWriter {
     }
 }
 
+/// This inserts a single byte of CRYPTO at offset 0 into packets. A peer that already has that
+/// offset discards the byte, so this is also how to produce a duplicate CRYPTO frame.
+struct CryptoWriter {}
+
+impl test_internal::FrameWriter for CryptoWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::Crypto);
+        builder.encode_varint(0_u64); // Offset
+        builder.encode_varint(1_u64); // Length
+        builder.encode_byte(2); // Indicates a ServerHello.
+    }
+}
+
+/// Drain everything `c` will send, following a paced sender by advancing `now` over short delays.
+fn drain(c: &mut Connection, now: &mut Instant, mut deliver: impl FnMut(Datagram, Instant)) {
+    loop {
+        match c.process_output(*now) {
+            Output::Datagram(d) => deliver(d, *now),
+            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
+            _ => break, // Too long to be pacing.
+        }
+    }
+}
+
+/// Move everything `from` has to send to `to`.
+fn flush_to(from: &mut Connection, to: &mut Connection, now: &mut Instant) {
+    drain(from, now, |d, t| to.process_input(d, t));
+}
+
+/// Drop everything `c` has to send, as if it were all lost.
+fn drop_flight(c: &mut Connection, now: &mut Instant) {
+    drain(c, now, |_, _| {});
+}
+
 /// Drive the handshake between the client and server.
 fn handshake_with_modifier<F>(
     client: &mut Connection,
