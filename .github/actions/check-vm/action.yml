@@ -14,8 +14,8 @@ inputs:
   bindgen-args:
     description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
     default: ""
-  nss:
-    description: "Whether NSS is required."
+  nss-version-check:
+    description: "Whether to check the system NSS version against the minimum required by nss-rs."
     default: "true"
 
 runs:
@@ -28,15 +28,14 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
         BINDGEN_ARGS: ${{ inputs.bindgen-args }}
-        NSS: ${{ inputs.nss }}
+        NSS_VERSION_CHECK: ${{ inputs.nss-version-check }}
       run: |
         # Minimum NSS version required by nss-rs, so that we can detect a too-old system NSS below.
-        if [ "$NSS" = "true" ]; then
+        if [ "$NSS_VERSION_CHECK" = "true" ]; then
           NSS_MIN_VERSION=$(cargo metadata --locked --format-version=1 -q \
             | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss["min-version"]')
           case "$NSS_MIN_VERSION" in
-            [0-9]*.[0-9]*) ;;
-            *) echo "Could not determine minimum NSS version"; exit 1 ;;
+            *[!0-9.]*|"") echo "Could not determine minimum NSS version"; exit 1 ;;
           esac
         fi
 
@@ -69,6 +68,16 @@ runs:
           set -ex
           cd "$WD"
           pwd
+          NSS_MIN_VERSION='$NSS_MIN_VERSION'
+          if [ -n "\$NSS_MIN_VERSION" ]; then
+            if ! pkg-config --exists nss; then
+              echo "::warning::No nss.pc on $PLATFORM, cannot check the NSS version"
+            elif ! pkg-config --atleast-version="\$NSS_MIN_VERSION" nss; then
+              echo "Skipping $PLATFORM: system NSS \$(pkg-config --modversion nss) is older than the required \$NSS_MIN_VERSION" > nss-skipped.txt
+              echo "::warning::\$(cat nss-skipped.txt)"
+              exit 0
+            fi
+          fi
           case "$PLATFORM" in
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
@@ -91,12 +100,6 @@ runs:
             *)          [ "$WORKSPACE" ] && EXCLUDE="--exclude fuzz" # Fuzzing not supported on this platform
                         ;;
           esac
-          NSS_MIN_VERSION='$NSS_MIN_VERSION'
-          if [ -n "\$NSS_MIN_VERSION" ] && pkg-config --exists nss &&
-             ! pkg-config --atleast-version="\$NSS_MIN_VERSION" nss; then
-            echo "::warning::Skipping $PLATFORM: system NSS \$(pkg-config --modversion nss) is older than the required \$NSS_MIN_VERSION"
-            exit 0
-          fi
           # Embed at script-generation time; single quotes protect | from shell interpretation.
           BINDGEN_ARGS='$BINDGEN_ARGS'
           # Generate bindings first if requested (before build, so we can bootstrap)
@@ -182,6 +185,14 @@ runs:
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
+
+    - shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "$WORKING_DIR/nss-skipped.txt" ]; then
+          echo "### $(cat "$WORKING_DIR/nss-skipped.txt")" >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - id: check-coverage
       shell: bash
