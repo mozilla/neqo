@@ -14,6 +14,9 @@ inputs:
   bindgen-args:
     description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
     default: ""
+  nss-version-check:
+    description: "Whether to check the system NSS version against the minimum required by nss-rs."
+    default: "true"
 
 runs:
   using: composite
@@ -25,7 +28,17 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
         BINDGEN_ARGS: ${{ inputs.bindgen-args }}
+        NSS_VERSION_CHECK: ${{ inputs.nss-version-check }}
       run: |
+        # Minimum NSS version required by nss-rs, so that we can detect a too-old system NSS below.
+        if [ "$NSS_VERSION_CHECK" = "true" ]; then
+          NSS_MIN_VERSION=$(cargo metadata --locked --format-version=1 -q \
+            | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss["min-version"]')
+          case "$NSS_MIN_VERSION" in
+            *[!0-9.]*|"") echo "Could not determine minimum NSS version"; exit 1 ;;
+          esac
+        fi
+
         cat <<EOF > prepare.sh
           # This executes as root
           set -ex
@@ -55,6 +68,16 @@ runs:
           set -ex
           cd "$WD"
           pwd
+          NSS_MIN_VERSION='$NSS_MIN_VERSION'
+          if [ -n "\$NSS_MIN_VERSION" ]; then
+            if ! pkg-config --exists nss; then
+              echo "::warning::No nss.pc on $PLATFORM, cannot check the NSS version"
+            elif ! pkg-config --atleast-version="\$NSS_MIN_VERSION" nss; then
+              echo "Skipping $PLATFORM: system NSS \$(pkg-config --modversion nss) is older than the required \$NSS_MIN_VERSION" > nss-skipped.txt
+              echo "::warning::\$(cat nss-skipped.txt)"
+              exit 0
+            fi
+          fi
           case "$PLATFORM" in
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
@@ -123,7 +146,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@b84ab5559b5a1bb4b8ee2737d2506a16e1737636 # v1.4.8
+      uses: vmactions/freebsd-vm@83b151f58c6047089f4c80eb5ba2039d158ce093 # v1.5.3
       with:
         usesh: true
         disable-cache: true
@@ -133,7 +156,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@18edb32f4e48dae5865d7b8b3a9587bc01218a20 # v1.4.4
+      uses: vmactions/openbsd-vm@e6c68b637a12e83519688d115d57d5b0b53923cd # v1.4.6
       with:
         usesh: true
         disable-cache: true
@@ -143,7 +166,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@99816dccf75edf233ed6cd00a159e3a5b85ea373 # v1.4.0
+      uses: vmactions/netbsd-vm@00081e82b14bc40114eb97f32b4455306828516b # v1.4.6
       with:
         usesh: true
         disable-cache: true
@@ -153,7 +176,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@d30dd6c228c8661ade859e36ead7660b9a62efcc # v1.3.7
+      uses: vmactions/solaris-vm@315163f088b66e55bbcc45928bd224d4973b2312 # v1.3.8
       with:
         release: "11.4-gcc"
         usesh: true
@@ -162,6 +185,14 @@ runs:
         envs: ${{ steps.prep.outputs.envs }}
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
+
+    - shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "$WORKING_DIR/nss-skipped.txt" ]; then
+          echo "### $(cat "$WORKING_DIR/nss-skipped.txt")" >> "$GITHUB_STEP_SUMMARY"
+        fi
 
     - id: check-coverage
       shell: bash

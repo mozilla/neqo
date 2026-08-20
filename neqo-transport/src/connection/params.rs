@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, time::Duration};
+use std::{cmp::max, num::NonZeroUsize, time::Duration};
 
 use neqo_common::to_u64;
 
@@ -86,8 +86,8 @@ pub const MAX_LOCAL_MAX_STREAM_DATA: u64 = 10 * 1024 * 1024;
 /// See also <https://datatracker.ietf.org/doc/html/rfc9000#frame-max-data>.
 pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTOR;
 
-// Maximum size of a QUIC DATAGRAM frame, as specified in https://datatracker.ietf.org/doc/html/rfc9221#section-3-4.
-const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
+/// Maximum size of a QUIC DATAGRAM frame, as specified in <https://datatracker.ietf.org/doc/html/rfc9221#section-3-4>.
+pub const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
 const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
@@ -135,6 +135,11 @@ pub struct ConnectionParameters {
     ack_ratio: u8,
     /// The duration of the idle timeout for the connection.
     idle_timeout: Duration,
+    /// Maximum number of consecutive PTOs (probe timeouts) without an
+    /// acknowledgement before the connection is declared broken and closed
+    /// locally. `None` (the default) disables the check, leaving the idle timeout
+    /// as the only backstop.
+    max_pto: Option<NonZeroUsize>,
     preferred_address: PreferredAddressConfig,
     datagram_size: u64,
     outgoing_datagram_queue: usize,
@@ -178,6 +183,7 @@ impl Default for ConnectionParameters {
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: Self::DEFAULT_ACK_RATIO,
             idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
+            max_pto: None,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: MAX_DATAGRAM_FRAME_SIZE,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
@@ -364,6 +370,25 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn get_idle_timeout(&self) -> Duration {
         self.idle_timeout
+    }
+
+    /// Close the connection once `count` consecutive PTOs have fired without any
+    /// acknowledgement, treating the path as a black hole. `None` disables the
+    /// check, leaving the idle timeout as the only backstop.
+    ///
+    /// A value of `7` matches mvfst's `maxNumPTOs` and Google QUICHE's default
+    /// "5-RTO" blackhole detection (2 tail-loss probes + 5 RTOs). msquic instead
+    /// uses a fixed-time `DisconnectTimeoutMs` of 16s, which, being independent of
+    /// the RTT, only lines up with a PTO count on one specific RTT.
+    #[must_use]
+    pub const fn max_pto(mut self, count: Option<NonZeroUsize>) -> Self {
+        self.max_pto = count;
+        self
+    }
+
+    #[must_use]
+    pub const fn get_max_pto(&self) -> Option<NonZeroUsize> {
+        self.max_pto
     }
 
     #[must_use]

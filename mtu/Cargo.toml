@@ -31,7 +31,7 @@ windows = { workspace = true, features = [
 ] }
 
 [build-dependencies]
-cfg_aliases = { version = "0.2", default-features = false }
+cfg_aliases = { workspace = true }
 
 [package.metadata.cargo-machete]
 ignored = ["cfg_aliases"]

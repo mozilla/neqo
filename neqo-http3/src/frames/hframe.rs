@@ -15,6 +15,20 @@ use crate::{Error, Priority, PushId, Res, frames::reader::FrameDecoder, settings
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HFrameType(pub u64);
 
+/// Limit on the declared length of a HEADERS/`PUSH_PROMISE` frame we'll buffer
+/// before decoding.
+///
+/// A conservative reuse of the QPACK decoded-size limit: encoded size is usually smaller than
+/// decoded. Worst-case memory is bounded by the transport's stream concurrency limit, roughly
+/// `max_streams_bidi * MAX_HEADER_BYTES`.
+pub const MAX_HEADER_BYTES: usize = neqo_qpack::reader::LiteralReader::MAX_LEN;
+
+/// Limit for frame types that carry at most a single varint.
+pub const MAX_SINGLE_VARINT_FRAME_BYTES: usize = 8;
+
+/// Limit for other buffered frame types (`SETTINGS`, `PRIORITY_UPDATE_*`).
+pub const MAX_BUFFERED_FRAME_BYTES: usize = 4 * 1024;
+
 impl HFrameType {
     pub const DATA: Self = Self(0x0);
     pub const HEADERS: Self = Self(0x1);
@@ -160,6 +174,19 @@ impl FrameDecoder<Self> for HFrame {
             return Err(Error::HttpFrameUnexpected);
         }
         Ok(())
+    }
+
+    fn max_frame_data(frame_type: HFrameType) -> usize {
+        match frame_type {
+            HFrameType::HEADERS | HFrameType::PUSH_PROMISE => MAX_HEADER_BYTES,
+            HFrameType::CANCEL_PUSH | HFrameType::GOAWAY | HFrameType::MAX_PUSH_ID => {
+                MAX_SINGLE_VARINT_FRAME_BYTES
+            }
+            HFrameType::SETTINGS
+            | HFrameType::PRIORITY_UPDATE_REQUEST
+            | HFrameType::PRIORITY_UPDATE_PUSH => MAX_BUFFERED_FRAME_BYTES,
+            _ => usize::MAX,
+        }
     }
 
     fn decode(frame_type: HFrameType, frame_len: u64, data: Option<&[u8]>) -> Res<Option<Self>> {

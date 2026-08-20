@@ -397,6 +397,12 @@ impl Paths {
         });
     }
 
+    /// The number of connection IDs that have been retired locally but whose
+    /// `RETIRE_CONNECTION_ID` frames have not yet been ACK'ed.
+    pub(crate) const fn retire_queue_len(&self) -> usize {
+        self.to_retire.len()
+    }
+
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
     pub fn write_frames<B: Buffer>(
         &mut self,
@@ -985,6 +991,15 @@ impl Path {
     /// Read-only access to the owned sender.
     pub const fn sender(&self) -> &PacketSender {
         &self.sender
+    }
+
+    /// Take a snapshot of this path's RTT and congestion-control stats into `stats`.
+    pub fn update_stats(&self, stats: &mut Stats) {
+        stats.rtt = self.rtt.estimate();
+        stats.rttvar = self.rtt.rttvar();
+        stats.min_rtt = self.rtt.minimum();
+        stats.cc.cwnd = self.sender.cwnd();
+        stats.cc.bytes_in_flight = self.sender.bytes_in_flight();
     }
 
     /// Pass on RTT configuration: the maximum acknowledgment delay of the peer,

@@ -215,7 +215,14 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<()> {
         qtrace!("Close ConnectUdp session {session_id:?}");
-        self.extended_connect_close_session(conn, session_id, error, message, now)
+        self.extended_connect_close_session(
+            conn,
+            session_id,
+            extended_connect::ExtendedConnectType::ConnectUdp,
+            error,
+            message,
+            now,
+        )
     }
 
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(

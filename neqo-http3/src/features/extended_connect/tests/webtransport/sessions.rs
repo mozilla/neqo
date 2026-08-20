@@ -16,6 +16,7 @@ use crate::{
     Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
         CloseReason,
+        stats::SessionStats,
         tests::webtransport::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
@@ -1101,4 +1102,14 @@ fn wt_multiple_groups_separate_sendorder_namespaces() {
             i + 1
         );
     }
+}
+
+#[test]
+fn wt_session_stats_initial() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats, SessionStats::default());
 }

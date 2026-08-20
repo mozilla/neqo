@@ -440,7 +440,10 @@ impl<'a> Frame<'a> {
                 error_code: CloseError::Transport(_),
                 ..
             } => pt != packet::Type::ZeroRtt,
-            Self::NewToken { .. } | Self::ConnectionClose { .. } => pt == packet::Type::Short,
+            Self::NewToken { .. }
+            | Self::ConnectionClose { .. }
+            | Self::PathResponse { .. }
+            | Self::HandshakeDone => pt == packet::Type::Short,
             _ => pt == packet::Type::ZeroRtt || pt == packet::Type::Short,
         }
     }
@@ -1454,6 +1457,22 @@ mod tests {
         };
         assert!(app_close.is_allowed(packet::Type::Short));
         assert!(!app_close.is_allowed(packet::Type::ZeroRtt));
+    }
+
+    /// `is_allowed`: `PATH_RESPONSE` and `HANDSHAKE_DONE` are only allowed in
+    /// 1-RTT packets (RFC 9000, Table 3).
+    #[test]
+    fn is_allowed_path_response_and_handshake_done() {
+        let path_response = Frame::PathResponse { data: [0; 8] };
+        assert!(path_response.is_allowed(packet::Type::Short));
+        assert!(!path_response.is_allowed(packet::Type::ZeroRtt));
+
+        assert!(Frame::HandshakeDone.is_allowed(packet::Type::Short));
+        assert!(!Frame::HandshakeDone.is_allowed(packet::Type::ZeroRtt));
+
+        // PATH_CHALLENGE, by contrast, is permitted in 0-RTT packets.
+        let path_challenge = Frame::PathChallenge { data: [0; 8] };
+        assert!(path_challenge.is_allowed(packet::Type::ZeroRtt));
     }
 
     /// `decode_ack_frame` rejects invalid range configurations.

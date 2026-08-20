@@ -16,9 +16,9 @@ use std::{
 };
 
 use neqo_common::{
-    Buffer, Decoder, Encoder,
+    Buffer, Decoder, Encoder, expect_usize,
     hex::{Hex, HexWithLen},
-    qdebug, qinfo, to_usize,
+    qdebug, qinfo, to_u64,
 };
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
@@ -457,6 +457,11 @@ pub struct ConnectionIdManager {
 impl ConnectionIdManager {
     pub const ACTIVE_LIMIT: usize = 8;
 
+    /// The maximum number of connection IDs that may be pending retirement.
+    /// RFC 9000, Section 5.1.2 recommends allowing for at least twice
+    /// `active_connection_id_limit`.
+    pub const MAX_RETIRE_QUEUE: usize = 2 * Self::ACTIVE_LIMIT;
+
     /// A special value.  See `ConnectionIdManager::add_odcid`.
     const SEQNO_ODCID: u64 = u64::MAX;
 
@@ -560,7 +565,8 @@ impl ConnectionIdManager {
 
     pub fn set_limit(&mut self, limit: u64) {
         debug_assert!(limit >= 2);
-        self.limit = min(Self::ACTIVE_LIMIT, to_usize(limit));
+        // ACTIVE_LIMIT is usize and we use min, so this fits usize.
+        self.limit = expect_usize(min(to_u64(Self::ACTIVE_LIMIT), limit));
     }
 
     pub fn write_frames<B: Buffer>(
