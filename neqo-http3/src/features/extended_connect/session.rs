@@ -393,6 +393,11 @@ impl Session {
 
     /// # Errors
     ///
+    /// Returns `Ok(true)` if the datagram was queued and space remains, or
+    /// `Ok(false)` if it was queued but the outgoing QUIC datagram queue is now
+    /// full and the producer should stop sending until space frees
+    /// (backpressure).
+    ///
     /// Returns an error if:
     /// - The session is not in Active state (`Error::Unavailable`).
     /// - QUIC datagram or HTTP DATAGRAM Capsule sending fails.
@@ -402,7 +407,7 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
@@ -412,12 +417,12 @@ impl Session {
 
         if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            return self.protocol.write_datagram_capsule(
-                &mut self.control_stream_send,
-                conn,
-                buf,
-                now,
-            );
+            // The capsule is written to the flow-controlled control stream,
+            // which applies its own backpressure, so report it as queued.
+            return self
+                .protocol
+                .write_datagram_capsule(&mut self.control_stream_send, conn, buf, now)
+                .map(|()| true);
         }
 
         let mut dgram_data = Encoder::default();
@@ -425,9 +430,9 @@ impl Session {
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
-        conn.send_datagram(dgram_data.into(), id)?;
-        qtrace!("[{self}] sent datagram via QUIC datagram");
-        Ok(())
+        let queued = conn.send_datagram(dgram_data.into(), id)?;
+        qtrace!("[{self}] sent datagram via QUIC datagram, queued={queued}");
+        Ok(queued)
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {

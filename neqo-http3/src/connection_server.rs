@@ -291,6 +291,7 @@ impl Http3ServerHandler {
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::SendStreamCreatable { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
+                | ConnectionEvent::OutgoingDatagramSpaceAvailable
                 | ConnectionEvent::SconeUpdated(_)
                 | ConnectionEvent::PathMigrated { .. } => {}
             }

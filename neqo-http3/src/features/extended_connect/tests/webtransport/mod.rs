@@ -619,7 +619,7 @@ impl WtTest {
         self.client.webtransport_max_datagram_size(stream_id)
     }
 
-    fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<(), Error> {
+    fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<bool, Error> {
         self.client
             .webtransport_send_datagram(stream_id, buf, None, now())
     }

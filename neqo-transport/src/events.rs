@@ -22,7 +22,6 @@ use crate::{
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum OutgoingDatagramOutcome {
     DroppedTooBig,
-    DroppedQueueFull,
     Lost,
     Acked,
 }
@@ -78,6 +77,9 @@ pub enum ConnectionEvent {
         id: u64,
         outcome: OutgoingDatagramOutcome,
     },
+    /// Space has become available in the outgoing QUIC datagram queue after it
+    /// was full. The application can resume sending QUIC datagrams.
+    OutgoingDatagramSpaceAvailable,
     /// An update was received to SCONE throughput advice.
     /// The value is the approximate rate in bits per second; None = unknown.
     SconeUpdated(Option<NonZeroU64>),
@@ -183,6 +185,12 @@ impl ConnectionEvents {
         self.events
             .borrow_mut()
             .push_back(ConnectionEvent::Datagram(data.to_vec()));
+    }
+
+    pub fn datagram_space_available(&self) {
+        // Only one such signal needs to be outstanding at a time.
+        self.remove(|evt| matches!(evt, ConnectionEvent::OutgoingDatagramSpaceAvailable));
+        self.insert(ConnectionEvent::OutgoingDatagramSpaceAvailable);
     }
 
     pub fn datagram_outcome(

@@ -1648,6 +1648,10 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Returns `Ok(true)` if the datagram was queued and space remains, or
+    /// `Ok(false)` if it was queued but the outgoing QUIC datagram queue is now
+    /// full and the producer should stop sending until space frees
+    /// (backpressure).
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1655,7 +1659,7 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .send_datagram(conn, buf, id, now)
