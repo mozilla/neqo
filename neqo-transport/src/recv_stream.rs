@@ -1923,19 +1923,21 @@ mod tests {
     #[test]
     fn reject_unbounded_fragmentation() {
         for descending in [false, true] {
-            let mut s = RxStreamOrderer::new();
+            let mut s = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
             let count = to_u64(RxStreamOrderer::MAX_GAPS) * 4;
-            let rejected = (0..count).any(|i| {
+            let rejected = (0..count).find_map(|i| {
                 let offset = if descending {
                     2 * (count - i)
                 } else {
                     2 * i + 1
                 };
-                s.inbound_frame(offset, &[0u8; 1]).is_err()
+                s.inbound_stream_frame(false, offset, &[0u8; 1]).err()
             });
-            assert!(rejected);
-            let span = expect_usize((s.end - s.retired) / to_u64(RxStreamOrderer::RANGE_TARGET));
-            assert_eq!(s.data_ranges.len(), RxStreamOrderer::MAX_GAPS + span + 1);
+            assert_eq!(rejected, Some(Error::ProtocolViolation));
+            let buf = s.state.recv_buf().unwrap();
+            let span =
+                expect_usize((buf.end - buf.retired) / to_u64(RxStreamOrderer::RANGE_TARGET));
+            assert_eq!(buf.data_ranges.len(), RxStreamOrderer::MAX_GAPS + span + 1);
         }
     }
 

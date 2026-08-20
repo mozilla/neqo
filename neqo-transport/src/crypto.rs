@@ -1552,7 +1552,7 @@ impl CryptoStreams {
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
         // Nothing this far ahead can ever be delivered.
-        if offset > rx.retired() + Self::BUFFER_LIMIT {
+        if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
             return Err(Error::CryptoBufferExceeded);
         }
         rx.inbound_frame(offset, data)
@@ -1793,11 +1793,9 @@ pub struct CryptoRecoveryToken {
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::to_u64;
     use test_fixture::fixture_init;
 
-    use super::{CryptoDxState, CryptoStreams, PacketNumberSpace, RxStreamOrderer};
-    use crate::Error;
+    use super::CryptoDxState;
 
     #[test]
     fn crypto_dx_state_display() {
@@ -1805,24 +1803,39 @@ mod tests {
         let dx = CryptoDxState::test_default_write();
         assert_eq!(dx.to_string(), "epoch 0 Write");
     }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod buffer_limits {
+    use neqo_common::to_u64;
+
+    use super::{CryptoStreams, PacketNumberSpace, RxStreamOrderer};
+    use crate::Error;
+
+    /// How many one-byte ranges, each separated by a one-byte gap, to offer.
+    const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
+
+    // Offsets have to stay inside `BUFFER_LIMIT`.
+    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
 
     #[test]
     fn crypto_offset_beyond_buffer() {
-        let mut cs = CryptoStreams::default();
+        let offset = CryptoStreams::BUFFER_LIMIT + 1;
         assert_eq!(
-            cs.inbound_frame(
-                PacketNumberSpace::Initial,
-                CryptoStreams::BUFFER_LIMIT + 1,
-                &[0; 1]
-            ),
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[0; 1]),
             Err(Error::CryptoBufferExceeded)
+        );
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
+            Ok(())
         );
     }
 
     #[test]
     fn crypto_too_many_ranges() {
         let mut cs = CryptoStreams::default();
-        let rejected = (0..to_u64(RxStreamOrderer::MAX_GAPS) * 2).find_map(|i| {
+        let rejected = (0..RANGES).find_map(|i| {
             cs.inbound_frame(PacketNumberSpace::Initial, 2 * i + 1, &[0; 1])
                 .err()
         });
