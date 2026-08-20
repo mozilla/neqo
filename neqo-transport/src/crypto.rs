@@ -76,8 +76,8 @@ pub struct Crypto {
     tls: Agent,
     streams: CryptoStreams,
     states: CryptoStates,
-    /// Whether [`Self::resend_unacked_early`] has already resent anything.
-    resent_early: bool,
+    /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
+    early_resend_used: bool,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -135,7 +135,7 @@ impl Crypto {
             tls: agent,
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
-            resent_early: false,
+            early_resend_used: false,
         })
     }
 
@@ -379,13 +379,14 @@ impl Crypto {
     }
 
     /// Resend unACK'ed Initial and Handshake data earlier than PTO, per Section 6.2.3 of RFC 9002.
+    /// Does nothing after the first call that finds data.
     pub fn resend_unacked_early(&mut self) {
-        if self.resent_early {
+        if self.early_resend_used {
             return;
         }
         let initial = self.streams.resend_unacked(PacketNumberSpace::Initial);
         let handshake = self.streams.resend_unacked(PacketNumberSpace::Handshake);
-        self.resent_early = initial || handshake;
+        self.early_resend_used = initial || handshake;
     }
 
     /// Discard state for a packet number space and return true
@@ -1574,7 +1575,7 @@ impl CryptoStreams {
         if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
             return Err(Error::CryptoBufferExceeded);
         }
-        let fresh = !rx.covered(offset, data.len());
+        let fresh = !data.is_empty() && !rx.covered(offset, data.len());
         rx.inbound_frame(offset, data)
             .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {

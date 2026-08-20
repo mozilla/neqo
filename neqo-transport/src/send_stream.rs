@@ -3196,7 +3196,7 @@ mod tests {
         assert_eq!(rt.highest_offset(), 5);
         assert_eq!(rt.acked_from_zero(), 0);
 
-        rt.unmark_sent();
+        assert!(rt.unmark_sent());
         assert_eq!(rt.highest_offset(), 0);
         assert_eq!(rt.acked_from_zero(), 0);
         assert_eq!(rt.first_unmarked_range(), (0, None));
@@ -3217,7 +3217,7 @@ mod tests {
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (15, None));
 
-        rt.unmark_sent();
+        assert!(rt.unmark_sent());
         assert_eq!(rt.highest_offset(), 15);
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
@@ -3235,10 +3235,20 @@ mod tests {
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (10, None));
 
-        rt.unmark_sent();
+        assert!(rt.unmark_sent());
         assert_eq!(rt.highest_offset(), 5);
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (5, None));
+    }
+
+    /// Nothing to unmark when nothing is outstanding, which preserves the resend allowance.
+    #[test]
+    fn unmark_sent_nothing_outstanding() {
+        let mut rt = RangeTracker::default();
+        assert!(!rt.unmark_sent(), "nothing sent");
+        rt.mark_acked(0, 5);
+        assert!(!rt.unmark_sent(), "all acked");
+        assert_eq!(rt.acked_from_zero(), 5);
     }
 
     #[test]
