@@ -61,7 +61,7 @@ impl Ecn {
 
 /// Diffserv codepoints, mapped to the upper six bits of the TOS field.
 /// <https://www.iana.org/assignments/dscp-registry/dscp-registry.xhtml>
-#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Enum, Default, Debug, FromRepr)]
 #[repr(u8)]
 pub enum Dscp {
     #[default]

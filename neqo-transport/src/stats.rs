@@ -191,11 +191,11 @@ pub struct CongestionControlStats {
     pub search_zero_sent_bytes: usize,
     /// The `latest_rtt` from the first ACK that initialized SEARCH. Used to evaluate whether the
     /// initial RTT sample (which sets `bin_duration`) is inflated relative to `min_rtt`.
-    #[serde(serialize_with = "opt_ms")]
+    #[serde(rename = "search_first_rtt_ms", serialize_with = "opt_ms")]
     pub search_first_rtt: Option<Duration>,
     /// The `latest_rtt` from the second ACK processed by SEARCH. Together with `search_first_rtt`,
     /// allows evaluating whether `min(first, second)` would be a better initialization value.
-    #[serde(serialize_with = "opt_ms")]
+    #[serde(rename = "search_second_rtt_ms", serialize_with = "opt_ms")]
     pub search_second_rtt: Option<Duration>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
@@ -331,7 +331,7 @@ impl DerefMut for DscpCount {
 
 /// Connection statistics
 #[skip_serializing_none]
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[derive(Default, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub info: String,
 
@@ -377,13 +377,13 @@ pub struct Stats {
     pub resumed: bool,
 
     /// The current, estimated round-trip time on the primary path.
-    #[serde(serialize_with = "ms")]
+    #[serde(rename = "rtt_ms", serialize_with = "ms")]
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
-    #[serde(serialize_with = "ms")]
+    #[serde(rename = "rttvar_ms", serialize_with = "ms")]
     pub rttvar: Duration,
     /// The current minimum RTT observed on the primary path.
-    #[serde(serialize_with = "ms")]
+    #[serde(rename = "min_rtt_ms", serialize_with = "ms")]
     pub min_rtt: Duration,
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
@@ -471,7 +471,7 @@ impl Stats {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
 }
@@ -494,7 +494,7 @@ mod tests {
 
     use super::{EcnCount, EcnTransitions, Stats, StatsCell, opt_ms};
     use crate::{
-        ecn::{ValidationCount, ValidationOutcome},
+        ecn::{ValidationCount, ValidationError, ValidationOutcome},
         packet,
         stats::{CongestionControlStats, DscpCount, SearchResetStats},
     };
@@ -578,8 +578,9 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_value(&stats).expect("serializes");
-        assert_eq!(json["min_rtt"], json!(1.5));
-        assert_eq!(json["cc"]["search_first_rtt"], json!(2.5));
+        // The unit is part of the key, so a consumer needs no out-of-band schema.
+        assert_eq!(json["min_rtt_ms"], json!(1.5));
+        assert_eq!(json["cc"]["search_first_rtt_ms"], json!(2.5));
     }
 
     #[test]
@@ -598,6 +599,16 @@ mod tests {
         let json = to_json(&counts);
         assert!(json.contains("Capable"));
         assert!(!json.contains("NotCapable"));
+    }
+
+    #[test]
+    fn validation_count_json_keys_carry_their_payload() {
+        let mut counts = ValidationCount::default();
+        counts[ValidationOutcome::NotCapable(ValidationError::BlackHole)] = 1;
+        assert_eq!(
+            serde_json::to_value(counts).expect("serializes"),
+            json!({"NotCapable(BlackHole)": 1})
+        );
     }
 
     #[test]
