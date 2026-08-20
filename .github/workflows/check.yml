@@ -237,14 +237,10 @@ jobs:
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
-    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
-    # Allow them to fail without aborting the merge queue.
-    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:
-        # TODO: NSS package on 'solaris' is too old (3.110).
-        os: [freebsd, netbsd, openbsd]
+        os: [freebsd, netbsd, openbsd, solaris]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

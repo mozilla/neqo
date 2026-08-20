@@ -41,7 +41,7 @@ jobs:
   vendor:
     name: Vendor into Gecko
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
     runs-on: ${{ matrix.os }}
