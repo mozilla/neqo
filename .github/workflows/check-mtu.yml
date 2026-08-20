@@ -113,6 +113,7 @@ jobs:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
           bindgen-args: ${{ env.BSD_BINDGEN_ARGS }}
+          nss-version-check: "false"
 
   check-bindings:
     name: Check bindings
