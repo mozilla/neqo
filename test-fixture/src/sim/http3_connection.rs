@@ -18,13 +18,15 @@ use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
 };
-use neqo_transport::{ConnectionParameters, Output, StreamId};
+use neqo_transport::{ConnectionParameters, Output, RandomConnectionIdGenerator, StreamId};
 use nss::AuthenticationStatus;
 
 use crate::{
-    boxed, http3_client_with_params, http3_server_with_params, now,
+    boxed, http3_client_with_cid_gen, http3_server_with_cid_gen, now,
     sim::{self, GoalStatus, Rng},
 };
+
+const CID_LEN: usize = 8;
 
 /// A goal for the connection.
 /// Goals can be accomplished in any order.
@@ -92,7 +94,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: Endpoint::Client(http3_client_with_params(params)),
+            c: Endpoint::Client(http3_client_with_cid_gen(
+                RandomConnectionIdGenerator::new(CID_LEN),
+                params,
+            )),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
@@ -107,7 +112,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: Endpoint::Server(http3_server_with_params(params)),
+            c: Endpoint::Server(http3_server_with_cid_gen(
+                RandomConnectionIdGenerator::new(CID_LEN),
+                params,
+            )),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }

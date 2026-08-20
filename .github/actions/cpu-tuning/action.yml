@@ -36,6 +36,11 @@ runs:
         MTU: ${{ inputs.mtu }}
       shell: bash
       run: |
+        save_orig() {
+          # Don't overwrite an existing copy; a re-run without a restore would save a tuned value.
+          [ -f "$1" ] && [ ! -f "$2" ] && cp "$1" "$2"
+          return 0
+        }
         tune_sysfs() {
           local file="$1" desired="$2" desc="$3" skip="${4:-}"
           [ -f "$file" ] || return 0
@@ -87,11 +92,14 @@ runs:
             tune_sysfs "$boost" "0" "Boost ($boost)"
           done
           tune_sysfs /sys/devices/system/cpu/intel_pstate/no_turbo "1" "Intel P-state turbo"
-          [ -f /proc/sys/kernel/perf_event_paranoid ] && cp /proc/sys/kernel/perf_event_paranoid /tmp/cpu-tuning-perf-paranoid
+          save_orig /proc/sys/kernel/perf_event_paranoid /tmp/cpu-tuning-perf-paranoid
           tune_sysfs /proc/sys/kernel/perf_event_paranoid "-1" "perf_event_paranoid"
+          save_orig /proc/sys/kernel/kptr_restrict /tmp/cpu-tuning-kptr-restrict
+          tune_sysfs /proc/sys/kernel/kptr_restrict "0" "kptr_restrict"
           # Avoid THP compaction stalls mid-benchmark.
           if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
-            grep -o '\[[a-z]*\]' /sys/kernel/mm/transparent_hugepage/enabled | tr -d '[]' > /tmp/cpu-tuning-thp-orig
+            [ -f /tmp/cpu-tuning-thp-orig ] ||
+              grep -o '\[[a-z]*\]' /sys/kernel/mm/transparent_hugepage/enabled | tr -d '[]' > /tmp/cpu-tuning-thp-orig
             tune_sysfs /sys/kernel/mm/transparent_hugepage/enabled "never" "THP"
           fi
           # Disable deep idle (C-)states to avoid idle-exit latency spikes.
@@ -104,7 +112,7 @@ runs:
           [ ${#CSTATES_DISABLED[@]} -gt 0 ] && printf '%s\n' "${CSTATES_DISABLED[@]}" > /tmp/cpu-tuning-cstates
 
           if [ -n "$MTU" ]; then
-            cp /sys/class/net/lo/mtu /tmp/cpu-tuning-mtu-orig
+            save_orig /sys/class/net/lo/mtu /tmp/cpu-tuning-mtu-orig
             sudo ip link set dev lo mtu "$MTU"
           fi
 
@@ -245,6 +253,10 @@ runs:
           if [ -f /tmp/cpu-tuning-perf-paranoid ]; then
             tune_sysfs /proc/sys/kernel/perf_event_paranoid "$(< /tmp/cpu-tuning-perf-paranoid)" "perf_event_paranoid"
             rm -f /tmp/cpu-tuning-perf-paranoid
+          fi
+          if [ -f /tmp/cpu-tuning-kptr-restrict ]; then
+            tune_sysfs /proc/sys/kernel/kptr_restrict "$(< /tmp/cpu-tuning-kptr-restrict)" "kptr_restrict"
+            rm -f /tmp/cpu-tuning-kptr-restrict
           fi
 
           if [ -f /tmp/cpu-tuning-mtu-orig ]; then

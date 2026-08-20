@@ -59,7 +59,7 @@ pub struct FrameStats {
 
 #[cfg(test)]
 impl FrameStats {
-    pub const fn all(&self) -> usize {
+    pub(crate) const fn all(&self) -> usize {
         self.ack
             + self.crypto
             + self.stream

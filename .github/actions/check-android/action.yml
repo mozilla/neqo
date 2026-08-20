@@ -17,9 +17,9 @@ inputs:
     # https://searchfox.org/mozilla-central/search?q=\bapi_level=&path=taskcluster/scripts/misc/build-llvm-common.sh&regexp=true
     # However, NSS requires an API >= 23 for a few symbols.
     default: "23"
-  github-token:
-    description: "A Github PAT"
-    required: true
+  nss:
+    description: "Whether to install NSS."
+    default: "true"
 
 runs:
   using: composite
@@ -40,12 +40,13 @@ runs:
         WD: ${{ inputs.working-directory }}
       run: cd "$WD" && sdkmanager --install "ndk;$NDK_VERSION"
 
-    - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+    - uses: $/.github/actions/install-build-deps
       with:
         version: stable
-        targets: ${{ inputs.target }}
+        target: ${{ inputs.target }}
         tools: cargo-ndk@^4
-        token: ${{ inputs.github-token }}
+        nss: ${{ inputs.nss }}
+        working-directory: ${{ inputs.working-directory }}
 
     - shell: bash
       env:

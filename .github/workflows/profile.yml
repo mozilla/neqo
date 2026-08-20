@@ -10,9 +10,15 @@ env:
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
   TRANSFER_SIZE: 33554432 # 32 MiB
-  PERF_OPT: record -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
+  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
+  # Profiling build settings; see also bench.yml and perfcompare.yml. `RUSTFLAGS` is needed here
+  # because this workflow builds neqo inline rather than via the build-neqo action.
+  CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+  CFLAGS: -fno-omit-frame-pointer
+  CXXFLAGS: -fno-omit-frame-pointer
+  RUSTFLAGS: -C force-frame-pointers=yes
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -64,8 +70,46 @@ jobs:
       - uses: ./.github/actions/quic-build
         with:
           impl: ${{ matrix.impl }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: ${{ matrix.impl }}-binaries
+
+  # The released samply ignores `--presymbolicate` when importing, so the profiles would carry no
+  # symbols. Build it once here rather than in every profiling job.
+  build-samply:
+    name: Build samply
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - uses: ./.github/actions/install-build-deps
+        with:
+          version: stable
+          nss: "false"
+          rust-cache: "false"
+      - name: Resolve samply revision
+        id: samply
+        run: echo "rev=$(git ls-remote https://github.com/mstange/samply main | cut -f1)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: samply/bin/samply
+          key: samply-${{ runner.os }}-${{ runner.arch }}-${{ steps.samply.outputs.rev }}
+      - name: Build samply
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          REV: ${{ steps.samply.outputs.rev }}
+          # This build doesn't need the profiling settings the rest of the workflow uses.
+          CARGO_PROFILE_RELEASE_DEBUG: false
+          CARGO_PROFILE_RELEASE_LTO: false
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+          RUSTFLAGS: ""
+        run: cargo install --locked --git https://github.com/mstange/samply --rev "$REV" --root samply samply
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: samply
+          path: samply/bin/samply
+          retention-days: 1
 
   build-neqo:
     name: Build neqo (${{ matrix.ref.name }})
@@ -80,32 +124,22 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build neqo
         run: |
           cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
+          NSS_DB=$(cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
+          mkdir -p binaries/test-fixture
+          cp -r "$NSS_DB" binaries/test-fixture/
 
-      - name: Bundle NSS libraries
-        run: |
-          mkdir -p binaries/lib
-          if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
-            cp -L "$NSS_DIR"/../dist/Release/lib/*.so binaries/lib/ 2>/dev/null || true
-            cp -L "$NSS_DIR"/../dist/Release/lib/*.so.* binaries/lib/ 2>/dev/null || true
-          else
-            for lib in nss3 nssutil3 smime3 ssl3 nspr4 plc4 plds4; do
-              cp -L /usr/lib/*/lib${lib}.so* binaries/lib/ 2>/dev/null || true
-            done
-          fi
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: binaries
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -116,7 +150,7 @@ jobs:
   bench-profile:
     name: Profile ${{ matrix.bench.bench }} (${{ matrix.ref.name }})
     runs-on: ubuntu-24.04
-    needs: bench-matrix
+    needs: [bench-matrix, build-samply]
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
       fail-fast: false
@@ -129,15 +163,11 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
-          tools: samply
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: $/.github/actions/install-samply
 
       - name: Build benchmark
         env:
@@ -156,27 +186,39 @@ jobs:
             exit 1
           fi
 
-      - name: Enable perf
-        run: sudo sysctl -w kernel.perf_event_paranoid=-1
+      - uses: $/.github/actions/enable-perf
 
-      - name: Run benchmark with perf
+      - name: Record perf
         env:
           BENCH: ${{ matrix.bench.bench }}
         run: |
+          # The binary is absent when the bench doesn't exist on the base ref.
           if [ -f "binaries/$BENCH" ]; then
             # shellcheck disable=SC2086
-            perf $PERF_OPT -o "$BENCH.perf" -- "binaries/$BENCH" --bench --noplot || true
+            sudo env LD_LIBRARY_PATH="$LD_LIBRARY_PATH" CRITERION_HOME=/tmp/criterion perf $PERF_OPT -o "$BENCH.perf" -- "binaries/$BENCH" --bench --noplot || true
+            [ -f "$BENCH.perf" ] || { echo "::error::perf produced no data for $BENCH"; exit 1; }
           fi
 
-      - name: Process with samply
-        env:
-          BENCH: ${{ matrix.bench.bench }}
+      - name: Process perf data
+        timeout-minutes: 30
         run: |
-          if [ -f "$BENCH.perf" ]; then
-            samply import "$BENCH.perf" -o "$BENCH.samply.json.gz" --save-only --presymbolicate || true
-          fi
+          fail=
+          for f in *.perf; do
+            [ -e "$f" ] || continue
+            sudo chown "$(id -u)" "$f"
+            if [ -z "$(perf script -i "$f" | head -n1)" ]; then
+              echo "::error::perf recorded no samples for $f"
+              fail=1
+              continue
+            fi
+            echo "Processing $f..."
+            samply import "$f" -o "${f%.perf}.samply.json.gz" --save-only --presymbolicate ||
+              { echo "::error::samply import failed for $f"; fail=1; }
+          done
+          [ -z "$fail" ]
 
       - name: Upload profile
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-${{ matrix.ref.name }}
@@ -189,8 +231,8 @@ jobs:
   perfcompare-profile:
     name: Profile ${{ matrix.combo.client }}-${{ matrix.combo.server }} (${{ matrix.ref.name }})
     runs-on: ubuntu-24.04
-    needs: [bench-matrix, build-others, build-neqo]
-    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.build-neqo.result == 'success' }}
+    needs: [bench-matrix, build-others, build-neqo, build-samply]
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.build-neqo.result == 'success' && needs.build-samply.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,11 +250,12 @@ jobs:
           persist-credentials: false
           ref: ${{ matrix.ref.sha }}
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
-          tools: samply
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
+
+      - uses: $/.github/actions/install-samply
 
       - name: Download neqo
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -220,8 +263,12 @@ jobs:
           name: neqo-binaries-${{ matrix.ref.name }}
           path: binaries
 
-      - name: Set library path
-        run: echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/binaries/lib:$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
+      - name: Set library and NSS database paths
+        run: |
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/binaries/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/binaries/test-fixture/db"
+          } >> "$GITHUB_ENV"
 
       - name: Download external impl binaries
         if: matrix.combo.client != 'neqo' || matrix.combo.server != 'neqo'
@@ -267,43 +314,51 @@ jobs:
             echo "CLIENT_CMD=$CLIENT_CMD"
           } >> "$GITHUB_ENV"
 
-      - name: Enable perf
-        run: sudo sysctl -w kernel.perf_event_paranoid=-1
+      - uses: $/.github/actions/enable-perf
 
-      - name: Record server perf
+      - name: Record perf
         run: |
-          # shellcheck disable=SC2086
-          perf $PERF_OPT -o "$BENCH_NAME.server.perf" -- $SERVER_CMD &
-          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          # shellcheck disable=SC2206
+          PERF=(sudo env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" perf $PERF_OPT)
+          # Some commands wrap the binary in `bash -c "..."`; the quoting has to survive word splitting.
+          eval "set -- $SERVER_CMD"
+          "${PERF[@]}" -o "$BENCH_NAME.server.perf" -- "$@" &
+          SERVER_PID=$!
           sleep 1
-
-      - name: Record client perf
-        working-directory: /tmp
-        run: |
-          # shellcheck disable=SC2086
-          perf $PERF_OPT -o "$BENCH_NAME.client.perf" -- $CLIENT_CMD || true
-
-      - name: Stop server
-        if: always()
-        run: kill "$SERVER_PID" 2>/dev/null || true
-
-      - name: Collect and process perf data
-        run: |
-          mkdir -p profiles
+          eval "set -- $CLIENT_CMD"
+          "${PERF[@]}" -o "$BENCH_NAME.client.perf" -- "$@" || echo "::warning::client exited with status $?"
+          sudo kill "$SERVER_PID" 2>/dev/null || true
+          # Wait for perf to finish writing its data file.
+          wait "$SERVER_PID" || true
           for role in server client; do
-            f="$BENCH_NAME.$role.perf"
-            [ -f "$f" ] || f="/tmp/$f"
-            [ -f "$f" ] || continue
-            echo "Processing $f..."
-            samply import "$f" -o "profiles/$BENCH_NAME.$role.samply.json.gz" --save-only --presymbolicate || true
+            [ -f "$BENCH_NAME.$role.perf" ] || { echo "::error::perf produced no data for $role"; exit 1; }
           done
 
+      - name: Process perf data
+        timeout-minutes: 30
+        run: |
+          fail=
+          for f in *.perf; do
+            [ -e "$f" ] || continue
+            sudo chown "$(id -u)" "$f"
+            if [ -z "$(perf script -i "$f" | head -n1)" ]; then
+              echo "::error::perf recorded no samples for $f"
+              fail=1
+              continue
+            fi
+            echo "Processing $f..."
+            samply import "$f" -o "${f%.perf}.samply.json.gz" --save-only --presymbolicate ||
+              { echo "::error::samply import failed for $f"; fail=1; }
+          done
+          [ -z "$fail" ]
+
       - name: Upload profiles
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: perfcompare-${{ matrix.combo.client }}-${{ matrix.combo.server }}-${{ matrix.ref.name }}
           path: |
-            profiles/*.samply.json.gz
+            *.samply.json.gz
             binaries
           retention-days: 90
           if-no-files-found: ignore
