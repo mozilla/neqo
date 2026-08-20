@@ -199,7 +199,7 @@ impl RxStreamOrderer {
     const RANGE_TARGET: usize = 4096;
 
     /// Maximum number of gaps allowed in the data a stream holds.
-    const MAX_GAPS: usize = 4096;
+    pub(crate) const MAX_GAPS: usize = 4096;
 
     /// Limit the entries a stream can be made to hold, which flow control does not.
     ///

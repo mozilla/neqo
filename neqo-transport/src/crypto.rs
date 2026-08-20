@@ -1548,11 +1548,15 @@ impl CryptoStreams {
     }
 
     /// # Errors
-    /// `CryptoBufferExceeded` when too much data is buffered, or `ProtocolViolation` when it is
-    /// buffered as excessively many ranges.
+    /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
-        rx.inbound_frame(offset, data)?;
+        // Nothing this far ahead can ever be delivered.
+        if offset > rx.retired() + Self::BUFFER_LIMIT {
+            return Err(Error::CryptoBufferExceeded);
+        }
+        rx.inbound_frame(offset, data)
+            .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
             Ok(())
         } else {
@@ -1789,14 +1793,39 @@ pub struct CryptoRecoveryToken {
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::to_u64;
     use test_fixture::fixture_init;
 
-    use super::CryptoDxState;
+    use super::{CryptoDxState, CryptoStreams, PacketNumberSpace, RxStreamOrderer};
+    use crate::Error;
 
     #[test]
     fn crypto_dx_state_display() {
         fixture_init();
         let dx = CryptoDxState::test_default_write();
         assert_eq!(dx.to_string(), "epoch 0 Write");
+    }
+
+    #[test]
+    fn crypto_offset_beyond_buffer() {
+        let mut cs = CryptoStreams::default();
+        assert_eq!(
+            cs.inbound_frame(
+                PacketNumberSpace::Initial,
+                CryptoStreams::BUFFER_LIMIT + 1,
+                &[0; 1]
+            ),
+            Err(Error::CryptoBufferExceeded)
+        );
+    }
+
+    #[test]
+    fn crypto_too_many_ranges() {
+        let mut cs = CryptoStreams::default();
+        let rejected = (0..to_u64(RxStreamOrderer::MAX_GAPS) * 2).find_map(|i| {
+            cs.inbound_frame(PacketNumberSpace::Initial, 2 * i + 1, &[0; 1])
+                .err()
+        });
+        assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
     }
 }
