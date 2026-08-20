@@ -272,19 +272,25 @@ impl RxStreamOrderer {
             // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
             // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
             // (by up to one frame). Gap (new_start > end): falls through to insert.
-            if new_start == self.end
+            let inserted = if new_start == self.end
                 && let Some(mut e) = self
                     .data_ranges
                     .last_entry()
                     .filter(|e| e.get().len() < Self::RANGE_TARGET)
             {
                 e.get_mut().extend_from_slice(new_data);
+                false
             } else {
                 self.data_ranges.insert(new_start, new_data.to_vec());
-            }
+                true
+            };
             // new_end > new_start >= end, so direct assignment is correct.
             self.end = new_end;
-            return self.check_gap_limit();
+            return if inserted {
+                self.check_gap_limit()
+            } else {
+                Ok(())
+            };
         }
 
         // Retransmission/overlap: new_start < end
@@ -376,8 +382,9 @@ impl RxStreamOrderer {
 
         if !to_add.is_empty() {
             self.received += to_u64(to_add.len());
-            if let Some(prev_start) = extend {
-                // Absorb the range that follows, now that nothing separates them.
+            let inserted = if let Some(prev_start) = extend {
+                // Absorb the range that follows, now that nothing separates them: remove it, then
+                // append its data to the range before it.
                 let add_end = new_start + to_u64(to_add.len());
                 let next = self
                     .data_ranges
@@ -391,20 +398,25 @@ impl RxStreamOrderer {
                         buf.extend_from_slice(next);
                     }
                 }
+                false
             } else {
                 self.data_ranges.insert(new_start, to_add.to_vec());
-            }
+                true
+            };
             // new_start was advanced by overlap, so new_end is still the real end.
             // When to_add is empty, a surviving forward entry with next_end >= new_end
             // exists, so self.end is already correct — the max() is a no-op in that case.
             self.end = max(self.end, new_end);
+            if inserted {
+                return self.check_gap_limit();
+            }
         }
 
-        self.check_gap_limit()
+        Ok(())
     }
 
     #[cfg(test)]
-    fn runs(&self) -> usize {
+    fn count_runs(&self) -> usize {
         let mut runs = 0;
         let mut prev_end = None;
         for (&start, data) in &self.data_ranges {
@@ -1954,7 +1966,7 @@ mod tests {
         }
         // Each frame is already at `RANGE_TARGET`, so none of them extend the one before.
         assert_eq!(s.data_ranges.len(), RxStreamOrderer::MAX_GAPS + 2);
-        assert_eq!(s.runs(), 1);
+        assert_eq!(s.count_runs(), 1);
     }
 
     #[test]
@@ -1964,7 +1976,7 @@ mod tests {
             s.inbound_frame(2 * i + 1, &[0u8; 1]).unwrap();
             s.inbound_frame(2 * i, &[0u8; 1]).unwrap();
         }
-        assert_eq!(s.runs(), 1, "all of it is one contiguous run");
+        assert_eq!(s.count_runs(), 1, "all of it is one contiguous run");
         // Each fill absorbs the range that follows it, so a run keeps growing until it reaches
         // `RANGE_TARGET`; the fill that finds it too large to extend is left as a single byte
         // between two runs. That is 16384 bytes in 8 entries, not one entry per gap.
