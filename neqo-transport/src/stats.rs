@@ -331,7 +331,7 @@ impl DerefMut for DscpCount {
 
 /// Connection statistics
 #[skip_serializing_none]
-#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[derive(Default, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub info: String,
 
@@ -471,7 +471,7 @@ impl Stats {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
 }
@@ -494,7 +494,7 @@ mod tests {
 
     use super::{EcnCount, EcnTransitions, Stats, StatsCell, opt_ms};
     use crate::{
-        ecn::{ValidationCount, ValidationOutcome},
+        ecn::{ValidationCount, ValidationError, ValidationOutcome},
         packet,
         stats::{CongestionControlStats, DscpCount, SearchResetStats},
     };
@@ -598,6 +598,16 @@ mod tests {
         let json = to_json(&counts);
         assert!(json.contains("Capable"));
         assert!(!json.contains("NotCapable"));
+    }
+
+    #[test]
+    fn validation_count_json_keys_carry_their_payload() {
+        let mut counts = ValidationCount::default();
+        counts[ValidationOutcome::NotCapable(ValidationError::BlackHole)] = 1;
+        assert_eq!(
+            serde_json::to_value(counts).expect("serializes"),
+            json!({"NotCapable(BlackHole)": 1})
+        );
     }
 
     #[test]

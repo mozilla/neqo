@@ -304,31 +304,33 @@ fn now() -> Instant {
 /// Lines) if given, or logged via `qinfo!` in indented form otherwise. Failures
 /// to serialize or to write to `path` are logged.
 pub fn report_stats(stats: &Stats, path: Option<&Path>) {
-    let Some(path) = path else {
-        match serde_json::to_string_pretty(stats) {
-            Ok(json) => qinfo!("{json}"),
-            Err(e) => qerror!("Failed to serialize stats: {e}"),
-        }
-        return;
+    let json = if path.is_some() {
+        serde_json::to_string(stats)
+    } else {
+        serde_json::to_string_pretty(stats)
     };
-    let json = match serde_json::to_string(stats) {
+    let mut json = match json {
         Ok(json) => json,
         Err(e) => {
             qerror!("Failed to serialize stats: {e}");
             return;
         }
     };
+    let Some(path) = path else {
+        qinfo!("{json}");
+        return;
+    };
+    json.push('\n'); // Append the record in one write.
     if let Err(e) = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .and_then(|mut f| writeln!(f, "{json}"))
+        .and_then(|mut f| f.write_all(json.as_bytes()))
     {
         qerror!("Failed to report stats to {}: {e}", path.display());
     }
 }
 
-#[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -376,6 +378,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg_attr(target_os = "netbsd", ignore = "FIXME: Test fails on NetBSD.")]
     async fn write_qlog_file() {
         test_fixture::fixture_init();
 

@@ -632,16 +632,7 @@ pub fn run(
 /// and `Http3Server`) before exercising `--stats` close-detection.
 #[cfg(test)]
 pub(super) mod test_support {
-    use std::time::Instant;
-
-    use neqo_common::Datagram;
-    use neqo_http3::Http3Server;
-    use neqo_transport::{
-        Connection, Output, State,
-        server::{Server, ValidateAddress},
-    };
-    use nss::AuthenticationStatus;
-    use test_fixture::{default_client, now};
+    use test_fixture::{ProcessServer, default_client, handshake_with_server, now};
 
     use super::{Args, StatsReporter};
 
@@ -652,8 +643,8 @@ pub(super) mod test_support {
         args
     }
 
-    /// What [`reported_on_close`] needs of a server beyond [`super::HttpServer`]:
-    /// the inner server to hand to [`connect`], and the reporter to inspect.
+    /// What [`reported_on_close`] needs of a server beyond [`super::HttpServer`]: the inner server
+    /// to hand to [`handshake_with_server`], and the reporter to inspect.
     pub(super) trait StatsServer: super::HttpServer {
         fn transport(&mut self) -> &mut dyn ProcessServer;
         fn stats(&self) -> &StatsReporter;
@@ -664,7 +655,9 @@ pub(super) mod test_support {
     /// closed connection's events a second time doesn't report it again.
     pub(super) fn reported_on_close(server: &mut impl StatsServer) -> usize {
         let mut client = default_client();
-        connect(&mut client, server.transport());
+        handshake_with_server(&mut client, server.transport());
+        server.process_events(now());
+        assert_eq!(server.stats().count(), 0, "must only report on close");
 
         client.close(now(), 0, "bye");
         let out = client.process_output(now());
@@ -706,66 +699,6 @@ pub(super) mod test_support {
     }
 
     pub(super) use stats_tests;
-
-    /// Minimal common surface of `neqo_transport::server::Server` and
-    /// `Http3Server` needed to drive a handshake in tests.
-    pub(super) trait ProcessServer {
-        fn set_validation(&self, v: ValidateAddress);
-        fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
-    }
-
-    impl ProcessServer for Server {
-        fn set_validation(&self, v: ValidateAddress) {
-            self.set_validation(v);
-        }
-        fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-            self.process(dgram, now)
-        }
-    }
-
-    impl ProcessServer for Http3Server {
-        fn set_validation(&self, v: ValidateAddress) {
-            self.set_validation(v);
-        }
-        fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
-            self.process(dgram, now)
-        }
-    }
-
-    /// Complete a handshake between `client` and `server`. Adapted from
-    /// `neqo-transport/tests/common/mod.rs::connect`.
-    pub(super) fn connect(client: &mut Connection, server: &mut dyn ProcessServer) {
-        server.set_validation(ValidateAddress::Never);
-
-        assert_eq!(*client.state(), State::Init);
-        let out = client.process_output(now()); // ClientHello
-        let out2 = client.process_output(now()); // ClientHello
-        assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-        _ = server.process(out.dgram(), now()); // ACK
-        let out = server.process(out2.dgram(), now()); // ServerHello...
-        assert!(out.as_dgram_ref().is_some());
-
-        // Ingest the server Certificate.
-        let out = client.process(out.dgram(), now());
-        assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
-        let out = server.process(out.dgram(), now());
-        let out = client.process(out.dgram(), now());
-        let out = server.process(out.dgram(), now());
-        assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
-
-        // Now mark the server as authenticated.
-        client.authenticated(AuthenticationStatus::Ok, now());
-        let out = client.process_output(now());
-        assert!(out.as_dgram_ref().is_some());
-        assert_eq!(*client.state(), State::Connected);
-        let out = server.process(out.dgram(), now());
-        assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
-
-        // Have the client process the HANDSHAKE_DONE.
-        let out = client.process(out.dgram(), now());
-        assert!(out.as_dgram_ref().is_none());
-        assert_eq!(*client.state(), State::Confirmed);
-    }
 }
 
 #[cfg(test)]
@@ -794,6 +727,15 @@ mod tests {
         assert_eq!(stats.count(), 1, "must not report twice");
         stats.report(&b);
         assert_eq!(stats.count(), 2, "a different connection must report");
+    }
+
+    #[test]
+    fn dropped_connections_are_pruned() {
+        let mut stats = reporter(true);
+        let live = Rc::new(RefCell::new(default_client()));
+        stats.report(&Rc::new(RefCell::new(default_client())));
+        stats.report(&live);
+        assert_eq!(stats.count(), 1, "only the connection still held is kept");
     }
 
     #[test]

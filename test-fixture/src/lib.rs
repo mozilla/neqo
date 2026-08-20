@@ -30,7 +30,9 @@ use neqo_common::{
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State, Version, version,
+    ConnectionIdRef, ConnectionParameters, Output, State, Version,
+    server::{Server, ValidateAddress},
+    version,
 };
 use nss::{AllowZeroRtt, AntiReplay, AuthenticationStatus, random};
 use qlog::{events::EventImportance, streamer::QlogStreamer};
@@ -299,6 +301,70 @@ pub fn connect() -> (Connection, Connection) {
     assert_eq!(*client.state(), State::Confirmed);
     assert_eq!(*server.state(), State::Confirmed);
     (client, server)
+}
+
+/// The part of a multi-connection server that [`handshake_with_server`] drives.
+pub trait ProcessServer {
+    fn set_validation(&self, v: ValidateAddress);
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+}
+
+impl ProcessServer for Server {
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+}
+
+impl ProcessServer for Http3Server {
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+}
+
+/// Complete a handshake between `client` and a multi-connection `server`,
+/// asserting the shape of each flight. This is [`handshake`] for servers that
+/// hold more than one connection.
+///
+/// # Panics
+///
+/// When the handshake doesn't proceed as expected.
+pub fn handshake_with_server(client: &mut Connection, server: &mut dyn ProcessServer) {
+    server.set_validation(ValidateAddress::Never);
+
+    assert_eq!(*client.state(), State::Init);
+    let out = client.process_output(now()); // ClientHello
+    let out2 = client.process_output(now()); // ClientHello
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    _ = server.process(out.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
+    assert!(out.as_dgram_ref().is_some());
+
+    // Ingest the server Certificate.
+    let out = client.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
+
+    // Now mark the server as authenticated.
+    client.authenticated(AuthenticationStatus::Ok, now());
+    let out = client.process_output(now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(*client.state(), State::Connected);
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
+
+    // Have the client process the HANDSHAKE_DONE.
+    let out = client.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_none());
+    assert_eq!(*client.state(), State::Confirmed);
 }
 
 /// Create a http3 client with default configuration.

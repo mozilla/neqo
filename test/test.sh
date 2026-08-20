@@ -28,8 +28,8 @@ if [ "$NSS_DIR" ] && [ "$NSS_TARGET" ]; then
         export DYLD_FALLBACK_LIBRARY_PATH="$LD_LIBRARY_PATH"
 fi
 
-client="./target/debug/neqo-client $flags --output-dir $tmp https://$addr:$port$path --stats"
-server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port --stats"
+client="./target/debug/neqo-client $flags --output-dir $tmp --stats=$tmp/client-stats.json https://$addr:$port$path"
+server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags --stats=$tmp/server-stats.json $addr:$port"
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port >/dev/null 2>&1 &
 tcpdump_pid=$!

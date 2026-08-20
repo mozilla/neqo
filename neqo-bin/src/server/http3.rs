@@ -230,12 +230,12 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use neqo_transport::RandomConnectionIdGenerator;
-    use test_fixture::{anti_replay, fixture_init};
+    use test_fixture::{ProcessServer, anti_replay, fixture_init};
 
     use super::{Args, HttpServer};
     use crate::server::{
         StatsReporter,
-        test_support::{ProcessServer, StatsServer, reported_on_close, stats_args, stats_tests},
+        test_support::{StatsServer, reported_on_close, stats_args, stats_tests},
     };
 
     fn make_server(args: &Args) -> HttpServer {
