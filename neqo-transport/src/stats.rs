@@ -492,8 +492,9 @@ mod tests {
     use serde::Serialize;
     use serde_json::{Value, json};
 
-    use super::{EcnCount, EcnTransitions, Stats, StatsCell};
+    use super::{EcnCount, EcnTransitions, Stats, StatsCell, opt_ms};
     use crate::{
+        ecn::{ValidationCount, ValidationOutcome},
         packet,
         stats::{CongestionControlStats, DscpCount, SearchResetStats},
     };
@@ -546,6 +547,10 @@ mod tests {
     #[test]
     fn ecn_transitions_json_skips_rows_with_no_transitions() {
         assert_eq!(to_json(&EcnTransitions::default()), "{}");
+
+        let mut trans = EcnTransitions::default();
+        trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
+        assert_eq!(to_json(&trans), r#"{"Ect0":{"Ce":["Short",42]}}"#);
     }
 
     #[test]
@@ -566,12 +571,33 @@ mod tests {
     fn durations_are_fractional_milliseconds() {
         let stats = Stats {
             min_rtt: Duration::from_micros(1500),
+            cc: CongestionControlStats {
+                search_first_rtt: Some(Duration::from_micros(2500)),
+                ..Default::default()
+            },
             ..Default::default()
         };
-        assert_eq!(
-            serde_json::to_value(&stats).expect("serializes")["min_rtt"],
-            json!(1.5)
-        );
+        let json = serde_json::to_value(&stats).expect("serializes");
+        assert_eq!(json["min_rtt"], json!(1.5));
+        assert_eq!(json["cc"]["search_first_rtt"], json!(2.5));
+    }
+
+    #[test]
+    fn optional_durations_are_milliseconds_or_null() {
+        let value = |d| opt_ms(&d, serde_json::value::Serializer).expect("serializes");
+        assert_eq!(value(Some(Duration::from_micros(1500))), json!(1.5));
+        assert_eq!(value(None), Value::Null);
+    }
+
+    #[test]
+    fn validation_count_json_skips_zero_outcomes() {
+        assert_eq!(to_json(&ValidationCount::default()), "{}");
+
+        let mut counts = ValidationCount::default();
+        counts[ValidationOutcome::Capable] = 1;
+        let json = to_json(&counts);
+        assert!(json.contains("Capable"));
+        assert!(!json.contains("NotCapable"));
     }
 
     #[test]
