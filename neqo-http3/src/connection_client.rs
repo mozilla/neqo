@@ -11,7 +11,7 @@ use std::{
     net::SocketAddr,
     num::NonZeroUsize,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{
@@ -863,6 +863,12 @@ impl Http3Client {
         self.process_http3(now);
 
         out
+    }
+
+    /// The delay after which [`Self::process_multiple_output`] needs to be called again.
+    #[must_use]
+    pub fn next_timeout(&mut self, now: Instant) -> Option<Duration> {
+        self.conn.next_timeout(now)
     }
 
     /// This function takes the provided result and check for an error.

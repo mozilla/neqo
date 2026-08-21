@@ -1164,13 +1164,17 @@ impl Connection {
     }
 
     /// Get the time that we next need to be called back, relative to `now`.
-    fn next_delay(&mut self, now: Instant, paced: bool) -> Duration {
+    fn next_delay(&mut self, now: Instant, paced: bool) -> Option<Duration> {
         qtrace!("[{self}] Get callback delay {now:?}");
+
+        if matches!(self.state, State::Init | State::Closed(_)) {
+            return None;
+        }
 
         // Only one timer matters when closing...
         if let State::Closing { timeout, .. } | State::Draining { timeout, .. } = self.state {
             self.hrtime.update(Self::LOOSE_TIMER_RESOLUTION);
-            return timeout.duration_since(now);
+            return Some(timeout.duration_since(now));
         }
 
         let mut delays = SmallVec::<[_; 7]>::new();
@@ -1221,14 +1225,14 @@ impl Connection {
         // timeout for it  It is expected that other activities will
         // drive it.
 
-        let earliest = delays.into_iter().min().expect("at least one delay");
+        let earliest = delays.into_iter().min()?;
         // TODO(agrover, mt) - need to analyze and fix #47
         // rather than just clamping to zero here.
         debug_assert!(earliest > now);
         let delay = earliest.saturating_duration_since(now);
         qdebug!("[{self}] delay duration {delay:?}");
         self.hrtime.update(delay / 4);
-        delay
+        Some(delay)
     }
 
     /// Wrapper around [`Connection::process_multiple_output`] that processes a
@@ -1239,6 +1243,13 @@ impl Connection {
         self.process_multiple_output(now, 1.try_into().expect(">0"))
             .try_into()
             .expect("max_datagrams is 1")
+    }
+
+    /// The delay after which [`Self::process_multiple_output`] needs to be called again.
+    #[must_use]
+    pub fn next_timeout(&mut self, now: Instant) -> Option<Duration> {
+        // Not paced: waking early is harmless.
+        self.next_delay(now, false)
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -1268,13 +1279,9 @@ impl Connection {
 
         match self.output(now, max_datagrams) {
             SendOptionBatch::Yes(dgram) => OutputBatch::DatagramBatch(dgram),
-            SendOptionBatch::No(paced) => match self.state {
-                State::Init | State::Closed(_) => OutputBatch::None,
-                State::Closing { timeout, .. } | State::Draining { timeout, .. } => {
-                    OutputBatch::Callback(timeout.duration_since(now))
-                }
-                _ => OutputBatch::Callback(self.next_delay(now, paced)),
-            },
+            SendOptionBatch::No(paced) => self
+                .next_delay(now, paced)
+                .map_or(OutputBatch::None, OutputBatch::Callback),
         }
     }
 

@@ -922,3 +922,23 @@ fn max_pto_counter_resets_on_ack() {
     assert_eq!(client.loss_recovery.pto_count(), 2);
     assert!(!matches!(client.state(), State::Closed(_)));
 }
+
+#[test]
+fn no_next_timeout_before_start() {
+    let mut client = default_client();
+    assert_eq!(client.next_timeout(now()), None);
+}
+
+#[test]
+fn next_timeout_no_later_than_callback() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let now = now();
+    let Output::Callback(callback) = client.process_output(now) else {
+        panic!("an idle connection should ask for a callback");
+    };
+    let timeout = client.next_timeout(now).expect("a callback is needed");
+    assert!(timeout <= callback);
+}
