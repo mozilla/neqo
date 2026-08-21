@@ -865,7 +865,9 @@ impl Http3Client {
         out
     }
 
-    /// The delay after which [`Self::process_multiple_output`] needs to be called again.
+    /// The minimum delay after which [`Self::process_multiple_output`] needs to be called again.
+    ///
+    /// Only the QUIC layer is inspected, so HTTP/3 activity queued can shorten this.
     #[must_use]
     pub fn next_timeout(&mut self, now: Instant) -> Option<Duration> {
         self.conn.next_timeout(now)

@@ -1163,7 +1163,7 @@ impl Connection {
         self.streams.cleanup_closed_streams();
     }
 
-    /// Get the time that we next need to be called back, relative to `now`.
+    /// Time until we next need a callback, `None` if never, zero if already due.
     fn next_delay(&mut self, now: Instant, paced: bool) -> Option<Duration> {
         qtrace!("[{self}] Get callback delay {now:?}");
 
@@ -1226,9 +1226,7 @@ impl Connection {
         // drive it.
 
         let earliest = delays.into_iter().min()?;
-        // TODO(agrover, mt) - need to analyze and fix #47
-        // rather than just clamping to zero here.
-        debug_assert!(earliest > now);
+        // Zero if already due, which only a caller that skipped `process_timer` sees.
         let delay = earliest.saturating_duration_since(now);
         qdebug!("[{self}] delay duration {delay:?}");
         self.hrtime.update(delay / 4);
@@ -1246,9 +1244,16 @@ impl Connection {
     }
 
     /// The minimum delay after which [`Self::process_multiple_output`] needs to be called again.
+    ///
+    /// Sending or receiving before then can shorten it.
+    ///
+    /// `None` means no callback needed, except for a not-yet-started client, which needs one now.
+    ///
+    /// Pacing is excluded. While the sender is pacer-blocked, [`Self::process_multiple_output`]
+    /// returns a shorter delay than this.
     #[must_use]
     pub fn next_timeout(&mut self, now: Instant) -> Option<Duration> {
-        // Not paced: waking early is harmless.
+        // `Pacer::next` can be in the past when it is not blocking, so leave it out.
         self.next_delay(now, false)
     }
 
@@ -1279,9 +1284,12 @@ impl Connection {
 
         match self.output(now, max_datagrams) {
             SendOptionBatch::Yes(dgram) => OutputBatch::DatagramBatch(dgram),
-            SendOptionBatch::No(paced) => self
-                .next_delay(now, paced)
-                .map_or(OutputBatch::None, OutputBatch::Callback),
+            SendOptionBatch::No(paced) => {
+                self.next_delay(now, paced).map_or(OutputBatch::None, |d| {
+                    debug_assert!(!d.is_zero());
+                    OutputBatch::Callback(d)
+                })
+            }
         }
     }
 
