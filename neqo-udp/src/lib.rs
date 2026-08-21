@@ -274,7 +274,7 @@ pub fn raise_send_buffer_size<S: SocketRef>(state: &UdpSocketState, socket: &S) 
     );
 }
 
-/// Raise the socket receive buffer to 1 MiB, if it is smaller.
+/// Raise the socket receive buffer to [`MIN_RECV_BUF_SIZE`], if it is smaller.
 pub fn raise_recv_buffer_size<S: SocketRef>(state: &UdpSocketState, socket: &S) {
     raise_buffer_size(
         "Receive",
