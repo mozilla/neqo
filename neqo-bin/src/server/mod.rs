@@ -399,6 +399,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             ) {
                 OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
+                    let mut retry_on_reset = true;
                     loop {
                         // Optimistically attempt sending datagram. In case the
                         // OS buffer is full, wait till socket is writable then
@@ -419,6 +420,15 @@ impl<S: HttpServer + Unpin> Runner<S> {
                                 // Drop the packets and let QUIC handle retransmission.
                                 break;
                             }
+                            Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
+                                // See `read_and_process`. This call consumes the pending error,
+                                // so retry once, then let QUIC handle retransmission.
+                                qdebug!("Ignoring {e} on send, a peer probably closed its socket");
+                                if !retry_on_reset {
+                                    break;
+                                }
+                                retry_on_reset = false;
+                            }
                             e @ Err(_) => return e,
                         }
                     }
@@ -437,8 +447,19 @@ impl<S: HttpServer + Unpin> Runner<S> {
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
             let (host, socket) = &mut self.sockets[sockets_index];
-            let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
-                break;
+            let input_dgrams = match socket.recv(*host, &mut self.recv_buf) {
+                Ok(Some(input_dgrams)) => input_dgrams,
+                Ok(None) => break,
+                Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
+                    // Windows reports an earlier send's ICMP "port unreachable" as
+                    // `WSAECONNRESET` here. This socket serves all connections, so keep going,
+                    // like quinn does.
+                    //
+                    // <https://github.com/quinn-rs/quinn/blob/35fe3379205ed2ace0e6a858f60f3a8a2ff6510e/quinn/src/endpoint.rs#L925-L929>
+                    qdebug!("Ignoring {e} on receive, a peer probably closed its socket");
+                    continue;
+                }
+                Err(e) => return Err(e),
             };
 
             Self::process_inner(
@@ -586,7 +607,87 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use super::response_for_path;
+    use std::fmt;
+
+    use neqo_common::{Tos, datagram};
+    use tokio::time::timeout;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct MockServer {
+        batches: Vec<datagram::Batch>,
+        received: usize,
+    }
+
+    impl Display for MockServer {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "MockServer")
+        }
+    }
+
+    impl HttpServer for MockServer {
+        fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+            &mut self,
+            dgrams: D,
+            _now: Instant,
+            _max_datagrams: NonZeroUsize,
+        ) -> OutputBatch {
+            self.received += dgrams.into_iter().count();
+            self.batches
+                .pop()
+                .map_or(OutputBatch::None, OutputBatch::DatagramBatch)
+        }
+
+        fn process_events(&mut self, _now: Instant) {}
+
+        fn has_events(&self) -> bool {
+            false
+        }
+    }
+
+    /// Expect a peer closing its socket not to stop the server serving everyone else.
+    ///
+    /// Only Windows surfaces the resulting ICMP error, as `WSAECONNRESET`. Elsewhere this
+    /// still covers the send and receive loops.
+    #[tokio::test]
+    async fn ignore_connection_reset() -> Result<(), io::Error> {
+        let socket = crate::udp::Socket::bind("127.0.0.1:0")?;
+        let local_addr = socket.local_addr()?;
+
+        let closed = std::net::UdpSocket::bind("127.0.0.1:0")?;
+        let closed_addr = closed.local_addr()?;
+        drop(closed);
+
+        let mut runner = Runner::new(
+            MockServer::default(),
+            Box::new(now),
+            vec![(local_addr, socket)],
+        );
+
+        // Draw an ICMP "port unreachable" from the closed port.
+        for _ in 0..10 {
+            runner.server.batches.push(
+                Datagram::new(local_addr, closed_addr, Tos::default(), b"hello".to_vec()).into(),
+            );
+            runner.process().await?;
+        }
+
+        // Whatever that did to the socket, this datagram from a live peer has to arrive.
+        std::net::UdpSocket::bind("127.0.0.1:0")?.send_to(b"ping", local_addr)?;
+        timeout(Duration::from_secs(10), async {
+            while runner.server.received == 0 {
+                if let Ready::Socket(i) = runner.ready().await? {
+                    runner.read_and_process(i).await?;
+                }
+            }
+            Ok::<_, io::Error>(())
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "server stopped serving"))??;
+
+        Ok(())
+    }
 
     #[test]
     fn response_for_path_qns_not_found() {
