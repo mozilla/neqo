@@ -361,15 +361,13 @@ impl Http3ServerHandler {
                         HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
                             Err(Error::HttpFrameUnexpected)
                         }
-                        HFrame::PriorityUpdatePush {
-                            element_id,
-                            priority,
-                        } => {
-                            // TODO: check if the element_id references a promised push stream or
-                            // is greater than the maximum Push ID.
-                            self.events
-                                .priority_update(StreamId::from(element_id), priority);
-                            Ok(())
+                        HFrame::PriorityUpdatePush { .. } => {
+                            // RFC 9218, Section 7.2: the push variant of PRIORITY_UPDATE must
+                            // reference a promised push stream, and one referencing a Push ID
+                            // greater than the maximum (or never promised) is a connection error
+                            // of type H3_ID_ERROR. This server promises no pushes, so no Push ID
+                            // is ever valid here.
+                            Err(Error::HttpId)
                         }
                         HFrame::PriorityUpdateRequest {
                             element_id,
