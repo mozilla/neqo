@@ -922,3 +922,53 @@ fn max_pto_counter_resets_on_ack() {
     assert_eq!(client.loss_recovery.pto_count(), 2);
     assert!(!matches!(client.state(), State::Closed(_)));
 }
+
+#[test]
+fn no_next_timeout_before_start() {
+    let mut client = default_client();
+    assert_eq!(client.next_timeout(now()), None);
+}
+
+#[test]
+fn next_timeout_no_later_than_callback() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let now = now();
+    let Output::Callback(callback) = client.process_output(now) else {
+        panic!("an idle connection should ask for a callback");
+    };
+    let timeout = client.next_timeout(now).expect("a callback is needed");
+    assert!(timeout <= callback);
+}
+
+/// Querying after a deadline has passed reports zero rather than panicking.
+#[test]
+fn next_timeout_overdue() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let Output::Callback(callback) = client.process_output(now()) else {
+        panic!("an idle connection should ask for a callback");
+    };
+    // Deliberately no `process_output` in between, so the deadline is still armed.
+    let overdue = now() + callback + Duration::from_secs(1);
+    assert_eq!(client.next_timeout(overdue), Some(Duration::ZERO));
+}
+
+/// A closing connection needs a callback; once closed it needs none.
+#[test]
+fn next_timeout_while_closing() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let now = now();
+    client.close(now, 0, "");
+    let timeout = client.next_timeout(now).expect("closing needs a callback");
+    _ = client.process_output(now + timeout);
+    assert!(matches!(client.state(), State::Closed(_)));
+    assert_eq!(client.next_timeout(now + timeout), None);
+}
