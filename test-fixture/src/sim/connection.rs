@@ -9,7 +9,7 @@
 use std::{
     cmp::min,
     fmt::{self, Debug},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
@@ -177,6 +177,10 @@ impl sim::Node for Node {
 
     fn print_summary(&self, test_name: &str) {
         qinfo!("{test_name}: {:?}", self.c.stats());
+    }
+
+    fn timer_jitter_bound(&self) -> Duration {
+        super::LINUX_TIMER_SLACK
     }
 }
 
