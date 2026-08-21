@@ -221,7 +221,10 @@ impl sim::Node for Node {
 
     fn print_summary(&self, test_name: &str) {
         match &self.c {
-            Endpoint::Client(c) => qinfo!("{test_name}: {:?}", c.transport_stats()),
+            Endpoint::Client(c) => qinfo!(
+                "{test_name}: {}",
+                serde_json::to_string(&c.transport_stats()).unwrap()
+            ),
             Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
         }
     }

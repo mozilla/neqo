@@ -383,6 +383,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6866f3bfdf8207509a033af1a75a7b08abda06bbaaeae6669323fd5a097df2e9"
 dependencies = [
  "enum-map-derive",
+ "serde",
 ]
 
 [[package]]
@@ -740,6 +741,7 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "rustc-hash",
+ "serde_json",
  "strum",
  "test-fixture 0.1.0",
  "test-fixture 0.30.1",
@@ -757,6 +759,7 @@ dependencies = [
  "hex",
  "log",
  "qlog",
+ "serde",
  "sha1",
  "static_assertions",
  "strum",
@@ -816,6 +819,9 @@ dependencies = [
  "nss-rs",
  "qlog",
  "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_with",
  "smallvec",
  "static_assertions",
  "strum",
@@ -1253,6 +1259,7 @@ dependencies = [
  "neqo-transport",
  "nss-rs",
  "qlog",
+ "serde_json",
  "test-fixture 0.1.0",
 ]
 

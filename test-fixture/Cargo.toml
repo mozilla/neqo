@@ -23,6 +23,7 @@ neqo-transport = { path = "../neqo-transport", default-features = false, feature
 nss = { workspace = true }
 nss-test-fixture = { workspace = true }
 qlog = { workspace = true }
+serde_json = { workspace = true }
 
 [features]
 bench = [
