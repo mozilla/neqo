@@ -1163,18 +1163,14 @@ impl Connection {
         self.streams.cleanup_closed_streams();
     }
 
-    /// Time until we next need a callback, `None` if never, zero if already due.
-    fn next_delay(&mut self, now: Instant, paced: bool) -> Option<Duration> {
+    /// Get the time that we next need to be called back, relative to `now`.
+    fn next_delay(&mut self, now: Instant, paced: bool) -> Duration {
         qtrace!("[{self}] Get callback delay {now:?}");
-
-        if matches!(self.state, State::Init | State::Closed(_)) {
-            return None;
-        }
 
         // Only one timer matters when closing...
         if let State::Closing { timeout, .. } | State::Draining { timeout, .. } = self.state {
             self.hrtime.update(Self::LOOSE_TIMER_RESOLUTION);
-            return Some(timeout.duration_since(now));
+            return timeout.duration_since(now);
         }
 
         let mut delays = SmallVec::<[_; 7]>::new();
@@ -1225,12 +1221,14 @@ impl Connection {
         // timeout for it  It is expected that other activities will
         // drive it.
 
-        let earliest = delays.into_iter().min()?;
-        // Zero if already due, which only a caller that skipped `process_timer` sees.
+        let earliest = delays.into_iter().min().expect("at least one delay");
+        // TODO(agrover, mt) - need to analyze and fix #47
+        // rather than just clamping to zero here.
+        debug_assert!(earliest > now);
         let delay = earliest.saturating_duration_since(now);
         qdebug!("[{self}] delay duration {delay:?}");
         self.hrtime.update(delay / 4);
-        Some(delay)
+        delay
     }
 
     /// Wrapper around [`Connection::process_multiple_output`] that processes a
@@ -1241,20 +1239,6 @@ impl Connection {
         self.process_multiple_output(now, 1.try_into().expect(">0"))
             .try_into()
             .expect("max_datagrams is 1")
-    }
-
-    /// The minimum delay after which [`Self::process_multiple_output`] needs to be called again.
-    ///
-    /// Sending or receiving before then can shorten it.
-    ///
-    /// `None` means no callback needed, except for a not-yet-started client, which needs one now.
-    ///
-    /// Pacing is excluded. While the sender is pacer-blocked, [`Self::process_multiple_output`]
-    /// returns a shorter delay than this.
-    #[must_use]
-    pub fn next_timeout(&mut self, now: Instant) -> Option<Duration> {
-        // `Pacer::next` can be in the past when it is not blocking, so leave it out.
-        self.next_delay(now, false)
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -1284,12 +1268,13 @@ impl Connection {
 
         match self.output(now, max_datagrams) {
             SendOptionBatch::Yes(dgram) => OutputBatch::DatagramBatch(dgram),
-            SendOptionBatch::No(paced) => {
-                self.next_delay(now, paced).map_or(OutputBatch::None, |d| {
-                    debug_assert!(!d.is_zero());
-                    OutputBatch::Callback(d)
-                })
-            }
+            SendOptionBatch::No(paced) => match self.state {
+                State::Init | State::Closed(_) => OutputBatch::None,
+                State::Closing { timeout, .. } | State::Draining { timeout, .. } => {
+                    OutputBatch::Callback(timeout.duration_since(now))
+                }
+                _ => OutputBatch::Callback(self.next_delay(now, paced)),
+            },
         }
     }
 
