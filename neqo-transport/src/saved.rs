@@ -15,6 +15,8 @@ pub struct SavedDatagram {
     pub d: Datagram,
     /// The time that the datagram was received.
     pub t: Instant,
+    /// The qlog ID the datagram was reported as received under.
+    pub datagram_id: u32,
 }
 
 #[derive(Default)]
@@ -42,14 +44,17 @@ impl SavedDatagrams {
         self.handshake.len() == Self::CAPACITY || self.application_data.len() == Self::CAPACITY
     }
 
-    pub fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant) {
+    /// Returns whether the datagram was saved.
+    pub fn save(&mut self, epoch: Epoch, d: Datagram, datagram_id: u32, t: Instant) -> bool {
         let store = self.store(epoch);
 
         if store.len() < Self::CAPACITY {
             qdebug!("saving {epoch:?} datagram of {} bytes", d.len());
-            store.push(SavedDatagram { d, t });
+            store.push(SavedDatagram { d, t, datagram_id });
+            true
         } else {
             qinfo!("not saving {epoch:?} datagram of {} bytes", d.len());
+            false
         }
     }
 
@@ -92,7 +97,7 @@ mod tests {
     #[should_panic(expected = "unexpected space")]
     fn save_panics_for_invalid_epoch() {
         let mut saved = SavedDatagrams::default();
-        saved.save(Epoch::Initial, make_dgram(), now());
+        saved.save(Epoch::Initial, make_dgram(), 0, now());
     }
 
     #[test]
@@ -102,12 +107,12 @@ mod tests {
 
         // Fill to exactly CAPACITY.
         for _ in 0..SavedDatagrams::CAPACITY {
-            saved.save(Epoch::ApplicationData, make_dgram(), t);
+            assert!(saved.save(Epoch::ApplicationData, make_dgram(), 0, t));
         }
         assert!(saved.is_either_full());
 
-        // One more should be silently dropped.
-        saved.save(Epoch::ApplicationData, make_dgram(), t);
+        // One more should be dropped.
+        assert!(!saved.save(Epoch::ApplicationData, make_dgram(), 0, t));
 
         saved.make_available(Epoch::ApplicationData);
         let taken = saved.take_saved();

@@ -7,7 +7,7 @@
 // Encoding and decoding packets off the wire.
 
 use std::{
-    cmp::min,
+    cmp::{max, min},
     fmt,
     ops::{Deref, DerefMut, Range},
     time::Instant,
@@ -126,6 +126,13 @@ struct BuilderOffsets {
     len: usize,
     /// The location of the packet number field.
     pn: Range<usize>,
+}
+
+/// What a packet measures on the wire: the whole thing, and its payload alone.
+#[derive(Debug, Clone, Copy)]
+pub struct Lengths {
+    pub packet: usize,
+    pub payload: usize,
 }
 
 /// A packet builder that can be used to produce short packets and long packets.
@@ -429,6 +436,24 @@ impl<B: Buffer> Builder<B> {
         self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
     }
 
+    /// Where [`Self::pad_for_crypto`] pads to.
+    fn crypto_pad_target(&self, crypto: &CryptoDxState) -> usize {
+        self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto.extra_padding()
+    }
+
+    /// What this packet will measure on the wire.
+    ///
+    /// This is more than [`Self::len`], because [`Self::build`] pads for header protection and
+    /// AEAD expansion. Unlike [`Self::len`], it covers only this packet and not the datagram.
+    #[must_use]
+    pub fn lengths(&self, crypto: &CryptoDxState) -> Lengths {
+        let end = max(self.len(), self.crypto_pad_target(crypto));
+        Lengths {
+            packet: end - self.header.start + crypto.expansion(),
+            payload: end - self.header.end,
+        }
+    }
+
     fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
         // Make sure that there is enough data in the packet.
         // The length of the packet number plus the payload length needs to
@@ -442,11 +467,7 @@ impl<B: Buffer> Builder<B> {
         //
         // <https://datatracker.ietf.org/doc/html/rfc9001#section-5.4.2>
 
-        let crypto_pad = crypto.extra_padding();
-        self.encoder.pad_to(
-            self.offsets.pn.start + MAX_PACKET_NUMBER_LEN + crypto_pad,
-            0,
-        );
+        self.encoder.pad_to(self.crypto_pad_target(crypto), 0);
     }
 
     /// A lot of frames here are just a collection of varints.
@@ -488,6 +509,9 @@ impl<B: Buffer> Builder<B> {
             return Err(Error::Internal);
         }
 
+        let expected = self.lengths(crypto);
+        let header_start = self.header.start;
+
         self.pad_for_crypto(crypto);
         if self.offsets.len > 0 {
             self.write_len(crypto.expansion());
@@ -520,6 +544,7 @@ impl<B: Buffer> Builder<B> {
         }
 
         qtrace!("Packet built {}", Hex::new(&self.encoder));
+        debug_assert_eq!(self.encoder.len() - header_start, expected.packet);
         Ok(self.encoder)
     }
 
