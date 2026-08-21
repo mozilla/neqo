@@ -19,7 +19,7 @@ use std::{
 };
 
 use log::{Level, log_enabled};
-use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace, qwarn};
+use neqo_common::{Datagram, Tos, const_max, datagram, qdebug, qtrace, qwarn};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock;
@@ -30,7 +30,7 @@ use windows::Win32::Networking::WinSock;
 /// offloading, multiple smaller datagrams.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
-/// Minimum socket receive buffer size. Same as Firefox.
+/// Minimum kernel socket receive buffer size. Same as Firefox.
 const MIN_RECV_BUF_SIZE: usize = 1 << 20;
 
 /// The number of buffers to pass to the OS on [`Socket::recv`].
@@ -240,8 +240,11 @@ impl<'a> Iterator for DatagramIter<'a> {
     }
 }
 
+/// Minimum socket send-buffer target based on the maximum GSO segment count.
+///
+/// Reserve 2 KiB per possible segment and at least one maximum-size IP packet.
 const fn min_send_buf_size(max_gso_segments: usize) -> usize {
-    max_gso_segments * 2048
+    const_max(max_gso_segments * 2048, u16::MAX as usize)
 }
 
 /// Raise a socket buffer to `min` bytes if it is smaller.
@@ -257,27 +260,29 @@ fn raise_buffer_size(
             Ok(()) => qdebug!("Raised {name} buffer from {size} to {min}, now {:?}", get()),
             Err(e) => qwarn!("Cannot raise {name} buffer from {size} to {min}: {e}"),
         },
-        Err(e) => qdebug!("Cannot read {name} buffer size: {e}"),
+        Err(e) => {
+            qdebug!("Cannot read {name} buffer size: {e}");
+            match set(min) {
+                Ok(()) => qdebug!("Raised {name} buffer to {min}, now {:?}", get()),
+                Err(e) => qwarn!("Cannot raise {name} buffer to {min}: {e}"),
+            }
+        }
     }
-}
-
-fn raise_send_buffer_size_to<S: SocketRef>(state: &UdpSocketState, socket: &S, min: usize) {
-    raise_buffer_size(
-        "Send",
-        min,
-        || state.send_buffer_size(socket.into()),
-        |m| state.set_send_buffer_size(socket.into(), m),
-    );
 }
 
 /// Raise the socket send buffer to hold one full send batch, if it is smaller.
 ///
 /// Call again after anything that changes [`UdpSocketState::max_gso_segments`].
 pub fn raise_send_buffer_size<S: SocketRef>(state: &UdpSocketState, socket: &S) {
-    raise_send_buffer_size_to(state, socket, min_send_buf_size(state.max_gso_segments()));
+    raise_buffer_size(
+        "Send",
+        min_send_buf_size(state.max_gso_segments()),
+        || state.send_buffer_size(socket.into()),
+        |min| state.set_send_buffer_size(socket.into(), min),
+    );
 }
 
-/// Raise the socket receive buffer to `MIN_RECV_BUF_SIZE`, if it is smaller.
+/// Raise the socket kernel receive buffer to 1 MiB, if it is smaller.
 pub fn raise_recv_buffer_size<S: SocketRef>(state: &UdpSocketState, socket: &S) {
     raise_buffer_size(
         "Receive",
@@ -297,15 +302,24 @@ impl<S: SocketRef> Socket<S> {
     /// Create a new [`Socket`] given a raw file descriptor managed externally.
     pub fn new(socket: S) -> Result<Self, io::Error> {
         let state = UdpSocketState::new((&socket).into())?;
-        raise_send_buffer_size(&state, &socket);
         Ok(Self {
             state,
             inner: socket,
         })
     }
 
+    /// Raise the send buffer to hold one send batch, if it is smaller.
+    pub fn raise_send_buffer_size(&self) {
+        raise_send_buffer_size(&self.state, &self.inner);
+    }
+
+    /// Raise the receive buffer, if it is smaller.
+    pub fn raise_recv_buffer_size(&self) {
+        raise_recv_buffer_size(&self.state, &self.inner);
+    }
+
     /// Enable the Apple fast UDP datapath (`sendmsg_x`/`recvmsg_x`) for this
-    /// socket.
+    /// socket, sizing the send buffer before enabling the larger batch size.
     ///
     /// # Safety
     ///
@@ -315,10 +329,12 @@ impl<S: SocketRef> Socket<S> {
     /// The `unsafe` contract is inherited from [`quinn_udp::UdpSocketState::set_apple_fast_path`].
     #[cfg(apple)]
     pub unsafe fn enable_apple_fast_path(&self) {
-        raise_send_buffer_size_to(
-            &self.state,
-            &self.inner,
+        // Grow the buffer before publishing the larger batch size.
+        raise_buffer_size(
+            "Send",
             min_send_buf_size(quinn_udp::BATCH_SIZE),
+            || self.state.send_buffer_size((&self.inner).into()),
+            |min| self.state.set_send_buffer_size((&self.inner).into(), min),
         );
         // SAFETY: Caller ensures the APIs are available on this OS version.
         unsafe { self.state.set_apple_fast_path() }
@@ -373,6 +389,7 @@ mod tests {
         Ok(socket)
     }
 
+    #[cfg(apple)]
     fn assert_send_buffer_covers_one_batch(socket: &Socket<std::net::UdpSocket>) {
         let size = socket
             .state
@@ -385,16 +402,34 @@ mod tests {
     #[test]
     fn send_buffer_covers_one_batch() -> Result<(), io::Error> {
         let socket = socket()?;
-        assert_send_buffer_covers_one_batch(&socket);
         // Shrink first, so that the raise path is exercised where the default already suffices.
         socket
             .state
             .set_send_buffer_size((&socket.inner).into(), 1)?;
         let shrunk = socket.state.send_buffer_size((&socket.inner).into())?;
-        raise_send_buffer_size(&socket.state, &socket.inner);
+        socket.raise_send_buffer_size();
         let raised = socket.state.send_buffer_size((&socket.inner).into())?;
         // Unless the OS refused to shrink below the minimum, the raise must have grown it.
         assert!(raised > shrunk || shrunk >= min_send_buf_size(socket.state.max_gso_segments()));
+        Ok(())
+    }
+
+    #[test]
+    fn receive_buffer_is_raised() -> Result<(), io::Error> {
+        let socket = socket()?;
+        // Shrink first, so that the raise path is exercised where the default already suffices.
+        if socket
+            .state
+            .set_recv_buffer_size((&socket.inner).into(), 1)
+            .is_err()
+        {
+            return Ok(());
+        }
+        let shrunk = socket.state.recv_buffer_size((&socket.inner).into())?;
+        socket.raise_recv_buffer_size();
+        let raised = socket.state.recv_buffer_size((&socket.inner).into())?;
+        // Unless the OS refused to shrink below the minimum, the raise must have grown it.
+        assert!(raised > shrunk || shrunk >= MIN_RECV_BUF_SIZE);
         Ok(())
     }
 
@@ -626,6 +661,7 @@ mod tests {
             socket.enable_apple_fast_path();
         }
         assert!(socket.max_gso_segments() > 1);
+        socket.raise_send_buffer_size();
         assert_send_buffer_covers_one_batch(&socket);
         Ok(())
     }
