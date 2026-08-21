@@ -1245,7 +1245,7 @@ impl Connection {
             .expect("max_datagrams is 1")
     }
 
-    /// The delay after which [`Self::process_multiple_output`] needs to be called again.
+    /// The minimum delay after which [`Self::process_multiple_output`] needs to be called again.
     #[must_use]
     pub fn next_timeout(&mut self, now: Instant) -> Option<Duration> {
         // Not paced: waking early is harmless.
