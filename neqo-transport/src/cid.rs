@@ -11,7 +11,7 @@ use std::{
     cell::{Ref, RefCell},
     cmp::{max, min},
     fmt::{self, Debug, Display, Formatter},
-    ops::Deref,
+    ops::Deref as _,
     rc::Rc,
 };
 
@@ -31,8 +31,9 @@ use crate::{
     stats::FrameStats,
 };
 
-#[derive(Clone, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Default, Eq, Hash, PartialEq, derive_more::Deref)]
 pub struct ConnectionId {
+    #[deref(forward)]
     cid: SmallVec<[u8; Self::MAX_LEN]>,
 }
 
@@ -94,14 +95,6 @@ impl<'a> From<ConnectionIdRef<'a>> for ConnectionId {
     }
 }
 
-impl Deref for ConnectionId {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        &self.cid
-    }
-}
-
 impl Debug for ConnectionId {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.write_str("CID ")?;
@@ -121,8 +114,9 @@ impl<'a> PartialEq<ConnectionIdRef<'a>> for ConnectionId {
     }
 }
 
-#[derive(Hash, Eq, PartialEq, Clone, Copy)]
+#[derive(Hash, Eq, PartialEq, Clone, Copy, derive_more::Deref)]
 pub struct ConnectionIdRef<'a> {
+    #[deref(forward)]
     cid: &'a [u8],
 }
 
@@ -142,14 +136,6 @@ impl Display for ConnectionIdRef<'_> {
 impl<'a, T: AsRef<[u8]> + ?Sized> From<&'a T> for ConnectionIdRef<'a> {
     fn from(cid: &'a T) -> Self {
         Self { cid: cid.as_ref() }
-    }
-}
-
-impl Deref for ConnectionIdRef<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.cid
     }
 }
 

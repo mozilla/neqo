@@ -4,12 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cmp::min,
-    collections::VecDeque,
-    fmt::{self, Display, Formatter},
-    time::Instant,
-};
+use std::{cmp::min, collections::VecDeque, time::Instant};
 
 use neqo_common::{Header, qdebug, qerror, qlog::Qlog, qtrace};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
@@ -44,7 +39,8 @@ impl LocalStreamState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("QPack")]
 pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
@@ -549,12 +545,6 @@ impl Encoder {
     #[cfg(test)]
     const fn blocked_stream_cnt(&self) -> u16 {
         self.blocked_stream_cnt
-    }
-}
-
-impl Display for Encoder {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "QPack")
     }
 }
 

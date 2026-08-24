@@ -20,7 +20,7 @@ pub enum StreamType {
     UniDi = 2,
 }
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash, Default)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Ord, PartialOrd, Hash, Default, derive_more::From)]
 pub struct StreamId(u64);
 
 impl StreamId {
@@ -118,12 +118,6 @@ impl StreamId {
             Role::Server => 1,
             Role::Client => 0,
         }
-    }
-}
-
-impl From<u64> for StreamId {
-    fn from(val: u64) -> Self {
-        Self::new(val)
     }
 }
 

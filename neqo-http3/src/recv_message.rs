@@ -4,13 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    cmp::min,
-    fmt::{self, Debug, Display, Formatter},
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, cmp::min, fmt::Debug, rc::Rc, time::Instant};
 
 use neqo_common::{Header, header::HeadersExt as _, qdebug, qinfo, qtrace};
 use neqo_qpack as qpack;
@@ -63,7 +57,8 @@ enum RecvMessageState {
     ExtendedConnect,
 }
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("RecvMessage {stream_id}")]
 pub struct RecvMessage {
     state: RecvMessageState,
     stream_info: Http3StreamInfo,
@@ -73,12 +68,6 @@ pub struct RecvMessage {
     conn_events: Box<dyn HttpRecvStreamEvents>,
     stream_id: StreamId,
     priority_handler: PriorityHandler,
-}
-
-impl Display for RecvMessage {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "RecvMessage {}", self.stream_id)
-    }
 }
 
 impl RecvMessage {

@@ -361,6 +361,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -368,6 +388,17 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
+]
+
+[[package]]
+name = "displaydoc"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ac70aa55017e108007fbaf5aa0f54b021c98f92ff8af59d42eda9da96e3dd4f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -726,6 +757,7 @@ dependencies = [
  "clap",
  "clap-verbosity-flag",
  "codspeed-criterion-compat",
+ "displaydoc",
  "futures",
  "hex",
  "http",
@@ -752,6 +784,7 @@ name = "neqo-common"
 version = "0.31.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "derive_more",
  "enum-map",
  "env_logger",
  "hex",
@@ -770,6 +803,8 @@ name = "neqo-http3"
 version = "0.31.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "derive_more",
+ "displaydoc",
  "enumset",
  "http",
  "log",
@@ -791,6 +826,8 @@ dependencies = [
 name = "neqo-qpack"
 version = "0.31.0"
 dependencies = [
+ "derive_more",
+ "displaydoc",
  "log",
  "neqo-common",
  "neqo-transport",
@@ -806,6 +843,8 @@ name = "neqo-transport"
 version = "0.31.0"
 dependencies = [
  "codspeed-criterion-compat",
+ "derive_more",
+ "displaydoc",
  "enum-map",
  "enumset",
  "indexmap",
@@ -1247,6 +1286,8 @@ dependencies = [
 name = "test-fixture"
 version = "0.31.0"
 dependencies = [
+ "derive_more",
+ "displaydoc",
  "log",
  "neqo-common",
  "neqo-http3",

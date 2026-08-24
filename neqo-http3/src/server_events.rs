@@ -8,7 +8,6 @@ use std::{
     cell::RefCell,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
-    ops::Deref,
     rc::Rc,
     time::Instant,
 };
@@ -166,15 +165,10 @@ impl StreamHandler {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, derive_more::Deref, displaydoc::Display)]
+#[displaydoc("Stream server {stream_handler:?}")]
 pub struct Http3OrWebTransportStream {
     stream_handler: StreamHandler,
-}
-
-impl Display for Http3OrWebTransportStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Stream server {:?}", self.stream_handler)
-    }
 }
 
 impl Http3OrWebTransportStream {
@@ -219,13 +213,6 @@ impl Http3OrWebTransportStream {
     pub fn stream_close_send(&self, now: Instant) -> Res<()> {
         qdebug!("[{self}] Set new response");
         self.stream_handler.stream_close_send(now)
-    }
-}
-
-impl Deref for Http3OrWebTransportStream {
-    type Target = StreamHandler;
-    fn deref(&self) -> &Self::Target {
-        &self.stream_handler
     }
 }
 

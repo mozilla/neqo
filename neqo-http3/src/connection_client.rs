@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Display, Formatter},
+    fmt::Display,
     iter,
     net::SocketAddr,
     num::NonZeroUsize,
@@ -272,16 +272,12 @@ const fn alpn_from_quic_version(version: Version) -> &'static str {
 ///     }
 /// }
 /// ```
+#[derive(displaydoc::Display)]
+#[displaydoc("Http3 client")]
 pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
     events: Http3ClientEvents,
-}
-
-impl Display for Http3Client {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 client")
-    }
 }
 
 impl Http3Client {

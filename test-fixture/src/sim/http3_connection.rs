@@ -48,18 +48,12 @@ pub struct Node {
 }
 
 #[expect(clippy::large_enum_variant, reason = "test code only")]
+#[derive(displaydoc::Display)]
 pub enum Endpoint {
+    #[displaydoc("{0}")]
     Client(Http3Client),
+    #[displaydoc("{0}")]
     Server(Http3Server),
-}
-
-impl Display for Endpoint {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Client(c) => write!(f, "{c}"),
-            Self::Server(s) => write!(f, "{s}"),
-        }
-    }
 }
 
 impl Endpoint {

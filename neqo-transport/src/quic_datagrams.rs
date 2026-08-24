@@ -41,7 +41,9 @@ impl From<Option<u64>> for DatagramTracking {
     }
 }
 
+#[derive(derive_more::AsRef)]
 pub struct QuicDatagram {
+    #[as_ref([u8])]
     data: Vec<u8>,
     tracking: DatagramTracking,
 }
@@ -51,12 +53,6 @@ impl QuicDatagram {
 
     const fn tracking(&self) -> &DatagramTracking {
         &self.tracking
-    }
-}
-
-impl AsRef<[u8]> for QuicDatagram {
-    fn as_ref(&self) -> &[u8] {
-        &self.data[..]
     }
 }
 
