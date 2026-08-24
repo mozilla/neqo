@@ -105,8 +105,7 @@ impl Session {
                 },
                 qpack_decoder,
                 Box::new(Rc::clone(&stream_event_listener)),
-                None,
-                PriorityHandler::new(false, Priority::default()),
+                PriorityHandler::new(Priority::default()),
             )),
             control_stream_send: Box::new(SendMessage::new(
                 MessageType::Request,

@@ -44,7 +44,7 @@ pub fn enc_dec<T: FrameDecoder<T> + Debug>(
     remaining: usize,
     greedy: bool,
 ) -> T {
-    // For data, headers and push_promise we do not read all bytes from the buffer
+    // For data and headers we do not read all bytes from the buffer
     let d2 = Encoder::from_hex(st);
     assert_eq!(d.as_ref(), &d2.as_ref()[..d.as_ref().len()]);
 
