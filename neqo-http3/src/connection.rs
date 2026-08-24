@@ -1448,10 +1448,11 @@ impl Http3Connection {
         &self,
         session_id: StreamId,
     ) -> Res<extended_connect::stats::SessionStats> {
-        self.webtransport_session(session_id)?
-            .borrow()
-            .stats()
-            .ok_or(Error::InvalidStreamId)
+        let Some(stats) = self.webtransport_session(session_id)?.borrow().stats() else {
+            debug_assert!(false, "a WebTransport session should always have stats");
+            return Err(Error::InvalidStreamId);
+        };
+        Ok(stats)
     }
 
     pub(crate) fn extended_connect_close_session(

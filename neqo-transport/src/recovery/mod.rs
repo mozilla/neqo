@@ -268,12 +268,20 @@ impl LossRecoverySpace {
             self.remove_packet(p);
             eliciting |= p.ack_eliciting();
             if p.lost() {
-                // A packet declared lost that is subsequently acknowledged was never
-                // really lost, so take it back out of the loss counters. Every packet
-                // marked lost was counted by `count_lost`, so this cannot underflow.
                 stats.late_ack += 1;
-                stats.lost -= 1;
-                stats.bytes_lost -= p.len();
+                if let Some(reduced) = stats.lost.checked_sub(1) {
+                    stats.lost = reduced;
+                } else {
+                    debug_assert!(false, "spurious losses should have been lost already");
+                }
+                if let Some(reduced) = stats.bytes_lost.checked_sub(p.len()) {
+                    stats.bytes_lost = reduced;
+                } else {
+                    debug_assert!(
+                        false,
+                        "spurious lost bytes should have been counted already"
+                    );
+                }
             }
             if p.pto_fired() {
                 stats.pto_ack += 1;

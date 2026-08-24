@@ -114,7 +114,10 @@ fn stats_populated_after_transfer() {
         client_stats.bytes_acked > 0,
         "sender should have acked bytes"
     );
-    assert!(cwnd(&client) > 0, "cwnd should be positive");
+    assert!(
+        client_stats.cc.cwnd > 0,
+        "cwnd snapshot should be populated"
+    );
     // min_rtt tracks the smallest observed sample, so it can never exceed the
     // (EWMA-smoothed) rtt estimate.
     assert!(
