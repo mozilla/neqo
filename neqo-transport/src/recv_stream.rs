@@ -235,7 +235,10 @@ impl RxStreamOrderer {
     /// Whether every byte of `[offset, offset + len)` has already been received or read.
     /// Call this before [`Self::inbound_frame`], which wipes the ability to determine this.
     #[must_use]
-    pub fn covered(&self, offset: u64, len: usize) -> bool {
+    pub(crate) fn covered(&self, offset: u64, len: usize) -> bool {
+        if len == 0 {
+            return true; // Vacuously covered, wherever it is.
+        }
         let end = offset + to_u64(len);
         if end > self.end {
             return false;
@@ -244,7 +247,7 @@ impl RxStreamOrderer {
         if covered >= end {
             return true;
         }
-        // Ranges never overlap, so ones starting below `covered` cannot extend it.
+        // Ranges never overlap, so only the last one starting at or below `covered` can extend it.
         let first = self
             .data_ranges
             .range(..=covered)

@@ -2035,7 +2035,7 @@ fn client_initial(c: &mut Connection) -> Vec<u8> {
         .to_vec()
 }
 
-/// Read the connection IDs carried in the client's Initial.
+/// Read the DCID and SCID from the client's Initial, past the first byte and the 4-byte version.
 #[cfg(not(feature = "disable-encryption"))]
 fn initial_cids(initial: &[u8]) -> (Vec<u8>, Vec<u8>) {
     let mut dec = Decoder::from(&initial[5..]);
@@ -2233,6 +2233,17 @@ fn retry_restores_resend_allowance() {
     assert!(client.crypto.early_resend_used(), "allowance spent");
     client.process_input(retry, now());
     assert!(!client.crypto.early_resend_used(), "and available again");
+
+    // ...and the re-sent ClientHello is something to spend it on.
+    assert!(
+        client.process_output(now()).dgram().is_some(),
+        "a new Initial"
+    );
+    client.crypto.resend_unacked_early();
+    assert!(
+        client.crypto.early_resend_used(),
+        "spendable on the new flight"
+    );
 }
 
 /// A duplicate that arrives while nothing is outstanding has nothing to resend, so it must not use

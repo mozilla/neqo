@@ -222,7 +222,7 @@ fn flush_to(from: &mut Connection, to: &mut Connection, now: &mut Instant) {
     drain(from, now, |d, t| to.process_input(d, t));
 }
 
-/// Drop everything `c` has to send, as if it were all lost.
+/// Drop everything `c` has to send, as if it were all lost, including anything a PTO adds.
 fn drop_flight(c: &mut Connection, now: &mut Instant) {
     drain(c, now, |_, _| {});
 }

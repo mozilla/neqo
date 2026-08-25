@@ -379,7 +379,7 @@ impl Crypto {
     }
 
     /// Resend unACK'ed Initial and Handshake data earlier than PTO, per Section 6.2.3 of RFC 9002.
-    /// Does nothing after the first call that finds data.
+    /// Does nothing after the first call that finds data, until [`Self::reset_early_resend`].
     pub fn resend_unacked_early(&mut self) {
         if self.early_resend_used {
             return;
@@ -387,10 +387,13 @@ impl Crypto {
         let initial = self.streams.resend_unacked(PacketNumberSpace::Initial);
         let handshake = self.streams.resend_unacked(PacketNumberSpace::Handshake);
         self.early_resend_used = initial || handshake;
+        if self.early_resend_used {
+            qdebug!("Resending unACK'ed CRYPTO ahead of the PTO");
+        }
     }
 
     /// A Retry restarts the connection, so the allowance is available again (RFC9002, Section 6.3).
-    pub const fn retry(&mut self) {
+    pub const fn reset_early_resend(&mut self) {
         self.early_resend_used = false;
     }
 
@@ -1571,7 +1574,7 @@ impl CryptoStreams {
         Ok(())
     }
 
-    /// Buffer a CRYPTO frame. Returns whether any of it was new.
+    /// Buffer a CRYPTO frame. Returns whether all of it had already been received.
     /// # Errors
     /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
     pub fn inbound_frame(
@@ -1585,11 +1588,11 @@ impl CryptoStreams {
         if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
             return Err(Error::CryptoBufferExceeded);
         }
-        let fresh = !data.is_empty() && !rx.covered(offset, data.len());
+        let duplicate = !data.is_empty() && rx.covered(offset, data.len());
         rx.inbound_frame(offset, data)
             .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
-            Ok(fresh)
+            Ok(duplicate)
         } else {
             Err(Error::CryptoBufferExceeded)
         }
@@ -1856,7 +1859,21 @@ mod buffer_limits {
         );
         assert_eq!(
             CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
-            Ok(false) // Nothing buffered, so nothing new.
+            Ok(false) // Empty data is not duplicate data.
+        );
+    }
+
+    /// The same bytes twice are duplicate; a partial overlap is not.
+    #[test]
+    fn crypto_duplicate_data() {
+        const SPACE: PacketNumberSpace = PacketNumberSpace::Initial;
+        let mut cs = CryptoStreams::default();
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(false));
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(true), "duplicate");
+        assert_eq!(
+            cs.inbound_frame(SPACE, 1, &[0; 2]),
+            Ok(false),
+            "one byte new"
         );
     }
 
