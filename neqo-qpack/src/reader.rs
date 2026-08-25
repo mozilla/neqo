@@ -27,6 +27,7 @@ pub trait Reader {
     fn read(&mut self, buf: &mut [u8]) -> Res<usize>;
 }
 
+#[derive(derive_more::Constructor)]
 pub(crate) struct ReceiverConnWrapper<'a> {
     conn: &'a mut Connection,
     stream_id: StreamId,
@@ -49,12 +50,6 @@ impl Reader for ReceiverConnWrapper<'_> {
             (_, true) => Err(Error::ClosedCriticalStream),
             (amount, false) => Ok(amount),
         }
-    }
-}
-
-impl<'a> ReceiverConnWrapper<'a> {
-    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
-        Self { conn, stream_id }
     }
 }
 

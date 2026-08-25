@@ -506,21 +506,14 @@ trait HttpRecvStream: RecvStream {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Copy, Clone, derive_more::Constructor)]
+#[must_use]
 pub struct Http3StreamInfo {
     stream_id: StreamId,
     stream_type: Http3StreamType,
 }
 
 impl Http3StreamInfo {
-    #[must_use]
-    pub const fn new(stream_id: StreamId, stream_type: Http3StreamType) -> Self {
-        Self {
-            stream_id,
-            stream_type,
-        }
-    }
-
     #[must_use]
     pub const fn stream_id(&self) -> StreamId {
         self.stream_id

@@ -36,7 +36,7 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 const MAX_EVENT_DATA_SIZE: usize = 1024;
 
 #[derive(displaydoc::Display)]
-#[displaydoc("Http3 server ")]
+#[displaydoc("Http3 server")]
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,

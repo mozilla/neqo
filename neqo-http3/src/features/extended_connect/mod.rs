@@ -84,20 +84,14 @@ impl From<ExtendedConnectType> for HSettingType {
     }
 }
 
+#[derive(derive_more::Constructor)]
+#[must_use]
 pub(crate) struct TransportPrerequisites {
     datagrams: bool,
     reliable_reset: bool,
 }
 
 impl TransportPrerequisites {
-    #[must_use]
-    pub const fn new(datagrams: bool, reliable_reset: bool) -> Self {
-        Self {
-            datagrams,
-            reliable_reset,
-        }
-    }
-
     const fn all(&self) -> bool {
         self.datagrams && self.reliable_reset
     }

@@ -678,7 +678,8 @@ impl State {
 }
 
 // See https://www.w3.org/TR/webtransport/#send-stream-stats.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, derive_more::Constructor)]
+#[must_use]
 pub struct Stats {
     // The total number of bytes the consumer has successfully written to
     // this stream. This number can only increase.
@@ -697,15 +698,6 @@ pub struct Stats {
 }
 
 impl Stats {
-    #[must_use]
-    pub const fn new(written: u64, sent: u64, acked: u64) -> Self {
-        Self {
-            written,
-            sent,
-            acked,
-        }
-    }
-
     #[must_use]
     pub const fn bytes_written(&self) -> u64 {
         self.written
@@ -879,7 +871,6 @@ impl SendStream {
         }
     }
 
-    #[must_use]
     pub fn stats(&self) -> Stats {
         Stats::new(self.bytes_written(), self.bytes_sent, self.bytes_acked())
     }

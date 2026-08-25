@@ -28,7 +28,7 @@ struct HttpStreamState {
 }
 
 #[derive(displaydoc::Display)]
-#[displaydoc("Http 0.9 server ")]
+#[displaydoc("Http 0.9 server")]
 pub struct HttpServer {
     server: Server,
     write_state: HashMap<StreamId, HttpStreamState>,

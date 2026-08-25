@@ -688,7 +688,8 @@ impl RecvStreamState {
 }
 
 // See https://www.w3.org/TR/webtransport/#receive-stream-stats
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, derive_more::Constructor)]
+#[must_use]
 pub struct Stats {
     // An indicator of progress on how many of the server application’s bytes
     // intended for this stream have been received so far.
@@ -702,14 +703,6 @@ pub struct Stats {
 }
 
 impl Stats {
-    #[must_use]
-    pub const fn new(bytes_received: u64, bytes_read: u64) -> Self {
-        Self {
-            bytes_received,
-            bytes_read,
-        }
-    }
-
     #[must_use]
     pub const fn bytes_received(&self) -> u64 {
         self.bytes_received
@@ -774,7 +767,6 @@ impl RecvStream {
         self.state = new_state;
     }
 
-    #[must_use]
     pub const fn stats(&self) -> Stats {
         match &self.state {
             RecvStreamState::Recv { recv_buf, .. }
