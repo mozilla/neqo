@@ -143,9 +143,7 @@ mod tests {
     // Bytes whose Huffman codes are 23, 28 and 28 bits long, per `huffman_table.rs`.
     const LONG_CODES: &[u8] = &[0x01, 0x02, 0x06];
 
-    // `encode_literal` never compares Huffman against raw, so it inflates these rather than
-    // sending them as-is. RFC 7541 permits either representation, so this is a missed
-    // optimisation and not a conformance problem.
+    // `encode_literal` never compares Huffman against raw, so it inflates these.
     #[test]
     fn encode_literal_huffman_can_inflate() {
         let mut raw = Encoder::default();
