@@ -826,7 +826,6 @@ dependencies = [
 name = "neqo-qpack"
 version = "0.31.0"
 dependencies = [
- "derive_more",
  "displaydoc",
  "log",
  "neqo-common",
