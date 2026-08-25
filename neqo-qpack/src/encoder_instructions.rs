@@ -331,6 +331,8 @@ mod test {
         let mut buf = neqo_common::Encoder::default();
         instruction.marshal(&mut buf, false);
         assert_eq!(buf.as_ref(), segments.concat());
+        // Read back too, pinning these bytes against the reader a peer runs.
+        test_encoding_decoding(instruction, false);
     }
 
     // RFC 9204 Appendix B's encoder stream instructions, against the bytes printed in the RFC.
