@@ -78,83 +78,18 @@ impl PeriodSet {
 }
 
 #[cfg(target_os = "macos")]
-#[expect(non_camel_case_types, reason = "These are C types.")]
 mod mac {
     use std::ptr::addr_of_mut;
 
-    // These are manually extracted from the many bindings generated
-    // by bindgen when provided with the simple header:
-    // #include <mach/mach_init.h>
-    // #include <mach/mach_time.h>
-    // #include <mach/thread_policy.h>
-    // #include <pthread.h>
-
-    type __darwin_natural_t = ::std::os::raw::c_uint;
-    type __darwin_mach_port_name_t = __darwin_natural_t;
-    type __darwin_mach_port_t = __darwin_mach_port_name_t;
-    type mach_port_t = __darwin_mach_port_t;
-    type thread_t = mach_port_t;
-    type natural_t = __darwin_natural_t;
-    type thread_policy_flavor_t = natural_t;
-    type integer_t = ::std::os::raw::c_int;
-    type thread_policy_t = *mut integer_t;
-    type mach_msg_type_number_t = natural_t;
-    type boolean_t = ::std::os::raw::c_uint;
-    type kern_return_t = ::std::os::raw::c_int;
-
-    #[repr(C)]
-    #[derive(Debug, Copy, Clone, Default)]
-    struct mach_timebase_info {
-        numer: u32,
-        denom: u32,
-    }
-    type mach_timebase_info_t = *mut mach_timebase_info;
-    type mach_timebase_info_data_t = mach_timebase_info;
-    unsafe extern "C" {
-        fn mach_timebase_info(info: mach_timebase_info_t) -> kern_return_t;
-    }
-
-    #[repr(C)]
-    #[derive(Debug, Copy, Clone, Default)]
-    pub struct thread_time_constraint_policy {
-        period: u32,
-        computation: u32,
-        constraint: u32,
-        preemptible: boolean_t,
-    }
-
-    const THREAD_TIME_CONSTRAINT_POLICY: thread_policy_flavor_t = 2;
-    #[expect(clippy::cast_possible_truncation, reason = "These are C types.")]
-    const THREAD_TIME_CONSTRAINT_POLICY_COUNT: mach_msg_type_number_t =
-        (size_of::<thread_time_constraint_policy>() / size_of::<integer_t>())
-            as mach_msg_type_number_t;
-
-    // These function definitions are taken from a comment in <thread_policy.h>.
-    // Why they are inaccessible is unknown, but they work as declared.
-    unsafe extern "C" {
-        fn thread_policy_set(
-            thread: thread_t,
-            flavor: thread_policy_flavor_t,
-            policy_info: thread_policy_t,
-            count: mach_msg_type_number_t,
-        ) -> kern_return_t;
-        fn thread_policy_get(
-            thread: thread_t,
-            flavor: thread_policy_flavor_t,
-            policy_info: thread_policy_t,
-            count: *mut mach_msg_type_number_t,
-            get_default: *mut boolean_t,
-        ) -> kern_return_t;
-    }
-
-    enum _opaque_pthread_t {} // An opaque type is fine here.
-    type __darwin_pthread_t = *mut _opaque_pthread_t;
-    type pthread_t = __darwin_pthread_t;
-
-    unsafe extern "C" {
-        fn pthread_self() -> pthread_t;
-        fn pthread_mach_thread_np(thread: pthread_t) -> mach_port_t;
-    }
+    use libc::{pthread_mach_thread_np, pthread_self};
+    pub use mach2::thread_policy::thread_time_constraint_policy;
+    use mach2::{
+        mach_time::mach_timebase_info,
+        thread_policy::{
+            THREAD_TIME_CONSTRAINT_POLICY, THREAD_TIME_CONSTRAINT_POLICY_COUNT, thread_policy_get,
+            thread_policy_set,
+        },
+    };
 
     /// Set a thread time policy.
     pub fn set_thread_policy(mut policy: thread_time_constraint_policy) {
@@ -170,7 +105,7 @@ mod mac {
 
     pub fn get_scale() -> f64 {
         const NANOS_PER_MSEC: f64 = 1_000_000.0;
-        let mut timebase_info = mach_timebase_info_data_t::default();
+        let mut timebase_info = mach_timebase_info::default();
         unsafe {
             mach_timebase_info(&raw mut timebase_info);
         }
@@ -195,7 +130,12 @@ mod mac {
 
     /// Get the default policy.
     pub fn get_default_policy() -> thread_time_constraint_policy {
-        let mut policy = thread_time_constraint_policy::default();
+        let mut policy = thread_time_constraint_policy {
+            period: 0,
+            computation: 0,
+            constraint: 0,
+            preemptible: 0,
+        };
         let mut count = THREAD_TIME_CONSTRAINT_POLICY_COUNT;
         let mut get_default = 0;
         _ = unsafe {
