@@ -588,8 +588,11 @@ mod tests {
         new_server, now,
     };
 
-    use super::{Connection, Encoder, Error, Header, Res};
-    use crate::Settings;
+    use super::{Connection, Encoder, Error, Header, HeaderTable, Res};
+    use crate::{
+        Settings,
+        header_block::{HeaderDecoder, HeaderDecoderResult},
+    };
 
     struct TestEncoder {
         encoder: Encoder,
@@ -613,6 +616,12 @@ mod tests {
             self.send_instructions(inst);
         }
 
+        fn encode_block(&mut self, stream_id: StreamId, headers: &[Header]) -> Vec<u8> {
+            self.encoder
+                .encode_header_block(&mut self.conn, headers, stream_id)
+                .to_vec()
+        }
+
         pub fn encode_header_block(
             &mut self,
             stream_id: StreamId,
@@ -620,11 +629,58 @@ mod tests {
             expected_encoding: &[u8],
             inst: &[u8],
         ) {
-            let buf = self
-                .encoder
-                .encode_header_block(&mut self.conn, headers, stream_id);
-            assert_eq!(buf.as_ref(), expected_encoding);
+            // The block first: when a change breaks both, that is the more telling failure.
+            let buf = self.encode_block(stream_id, headers);
+            assert_eq!(buf, expected_encoding);
             self.send_instructions(inst);
+        }
+
+        // As above, but returns the block so the caller can assert its shape.
+        pub fn encode_header_block_checked(
+            &mut self,
+            stream_id: StreamId,
+            headers: &[Header],
+            inst: &[u8],
+        ) -> Vec<u8> {
+            let buf = self.encode_block(stream_id, headers);
+            self.send_instructions(inst);
+            buf
+        }
+
+        // One field, asserting no encoder instruction arrives.
+        pub fn encode_field(&mut self, stream_id: StreamId, name: &str, value: &str) -> Vec<u8> {
+            self.encode_header_block_checked(stream_id, &[Header::new(name, value)], &[])
+        }
+
+        // A field list, asserting the block is what its declared representations predict and
+        // that it decodes back to the fields that went in.
+        pub fn encode_fields(
+            &mut self,
+            stream_id: StreamId,
+            fields: Fields,
+            inst: &[u8],
+        ) -> Vec<u8> {
+            let expected = expected_block(fields, self.encoder.use_huffman);
+            let block = self.encode_block(stream_id, &headers(fields));
+            assert_eq!(block, expected);
+            self.send_instructions(inst);
+            assert_round_trips(&block, fields);
+            block
+        }
+
+        // One field, asserting the Insert With Literal Name the encoder writes for it.
+        pub fn encode_field_inserting(
+            &mut self,
+            stream_id: StreamId,
+            name: &str,
+            value: &str,
+        ) -> Vec<u8> {
+            assert!(!self.encoder.use_huffman, "expectation assumes no Huffman");
+            self.encode_header_block_checked(
+                stream_id,
+                &[Header::new(name, value)],
+                &insert_with_name_literal(name, value),
+            )
         }
 
         pub fn send_instructions(&mut self, encoder_instruction: &[u8]) {
@@ -632,17 +688,29 @@ mod tests {
             let out = self.conn.process_output(now());
             let out2 = self.peer_conn.process(out.dgram(), now());
             drop(self.conn.process(out2.dgram(), now()));
-            let mut buf = [0_u8; 100];
-            let (amount, fin) = self
-                .peer_conn
-                .stream_recv(self.send_stream_id, &mut buf)
-                .unwrap();
-            assert!(!fin);
-            assert_eq!(buf[..amount], encoder_instruction[..]);
+            // Drain the stream; a batch over one datagram would need more round trips.
+            let mut received = Vec::new();
+            let mut buf = [0_u8; 4096];
+            loop {
+                let (amount, fin) = self
+                    .peer_conn
+                    .stream_recv(self.send_stream_id, &mut buf)
+                    .unwrap();
+                assert!(!fin);
+                if amount == 0 {
+                    break;
+                }
+                received.extend_from_slice(&buf[..amount]);
+            }
+            assert_eq!(received, encoder_instruction);
         }
     }
 
-    fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
+    fn connect_generic(
+        huffman: bool,
+        max_data: Option<u64>,
+        max_table_size_encoder: u64,
+    ) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = max_data.map_or_else(default_server, |max| {
             new_server::<CountingConnectionIdGenerator, &str>(
@@ -662,7 +730,7 @@ mod tests {
         // create an encoder
         let mut encoder = Encoder::new(
             &Settings {
-                max_table_size_encoder: 1500,
+                max_table_size_encoder,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
                 max_tracked_streams: 4096,
@@ -680,12 +748,32 @@ mod tests {
         }
     }
 
+    const TEST_MAX_TABLE_SIZE: u64 = 1500;
+    // `network.http.http3.default-qpack-table-size` and `..default-max-stream-blocked`.
+    const FIREFOX_MAX_TABLE_SIZE: u64 = 65536;
+    const FIREFOX_MAX_BLOCKED_STREAMS: u64 = 20;
+
     fn connect(huffman: bool) -> TestEncoder {
-        connect_generic(huffman, None)
+        connect_generic(huffman, None, TEST_MAX_TABLE_SIZE)
     }
 
     fn connect_flow_control(max_data: u64) -> TestEncoder {
-        connect_generic(true, Some(max_data))
+        connect_generic(true, Some(max_data), TEST_MAX_TABLE_SIZE)
+    }
+
+    // An encoder provisioned the way Firefox provisions one.
+    fn connect_firefox(huffman: bool) -> TestEncoder {
+        let mut encoder = connect_generic(huffman, None, FIREFOX_MAX_TABLE_SIZE);
+        encoder
+            .encoder
+            .set_max_blocked_streams(FIREFOX_MAX_BLOCKED_STREAMS)
+            .unwrap();
+        encoder
+            .encoder
+            .set_max_capacity(FIREFOX_MAX_TABLE_SIZE)
+            .unwrap();
+        encoder.send_instructions(CAP_INSTRUCTION_65536);
+        encoder
     }
 
     fn recv_instruction(encoder: &mut TestEncoder, decoder_instruction: &[u8], now: Instant) {
@@ -704,6 +792,8 @@ mod tests {
     }
 
     const CAP_INSTRUCTION_200: &[u8] = &[0x02, 0x3f, 0xa9, 0x01];
+    const CAP_INSTRUCTION_220: &[u8] = &[0x02, 0x3f, 0xbd, 0x01]; // RFC 9204 B.2's `3fbd01`
+    const CAP_INSTRUCTION_65536: &[u8] = &[0x02, 0x3f, 0xe1, 0xff, 0x03];
     const CAP_INSTRUCTION_60: &[u8] = &[0x02, 0x3f, 0x1d];
     const CAP_INSTRUCTION_1000: &[u8] = &[0x02, 0x3f, 0xc9, 0x07];
     const CAP_INSTRUCTION_1500: &[u8] = &[0x02, 0x3f, 0xbd, 0x0b];
@@ -723,6 +813,64 @@ mod tests {
         0x4e, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x2d, 0x6c, 0x65, 0x6e, 0x67, 0x74, 0x68,
         0x05, 0x31, 0x32, 0x33, 0x34, 0x35,
     ];
+
+    // A prefixed integer, per RFC 7541 section 5.1. `prefix_len` is the bits the prefix owns.
+    fn push_prefixed_int(buf: &mut Vec<u8>, prefix: u8, prefix_len: u32, mut val: u64) {
+        // Equivalent to `(1 << (8 - prefix_len)) - 1`, but defined at `prefix_len == 0` too.
+        let first_byte_max = 0xff_u8 >> prefix_len;
+        if val < u64::from(first_byte_max) {
+            buf.push((prefix & !first_byte_max) | u8::try_from(val).unwrap());
+            return;
+        }
+        buf.push(prefix | first_byte_max);
+        val -= u64::from(first_byte_max);
+        loop {
+            let mut b = u8::try_from(val & 0x7f).unwrap();
+            val >>= 7;
+            if val > 0 {
+                b |= 0x80;
+            }
+            buf.push(b);
+            if val == 0 {
+                return;
+            }
+        }
+    }
+
+    // A string literal, `prefix` and `prefix_len` as in `prefix.rs`; the prefix gains the
+    // Huffman bit and the length one bit less room.
+    fn push_literal(buf: &mut Vec<u8>, prefix: u8, prefix_len: u32, value: &str, huffman: bool) {
+        let encoded = if huffman {
+            crate::huffman::encode(value.as_bytes())
+        } else {
+            value.as_bytes().to_vec()
+        };
+        let prefix = if huffman {
+            prefix | (0x80_u8 >> prefix_len)
+        } else {
+            prefix
+        };
+        push_prefixed_int(
+            buf,
+            prefix,
+            prefix_len + 1,
+            u64::try_from(encoded.len()).unwrap(),
+        );
+        buf.extend_from_slice(&encoded);
+    }
+
+    // A field value, which carries no prefix of its own.
+    fn push_string(buf: &mut Vec<u8>, value: &str, huffman: bool) {
+        push_literal(buf, 0x00, 0, value, huffman);
+    }
+
+    // `name: value` as an Insert With Literal Name instruction, without Huffman coding.
+    fn insert_with_name_literal(name: &str, value: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        push_literal(&mut buf, 0x40, 2, name, false);
+        push_string(&mut buf, value, false);
+        buf
+    }
 
     // Indexed Header Field that refers to the first entry in the dynamic table.
     const ENCODE_INDEXED_REF_DYNAMIC: &[u8] = &[0x02, 0x00, 0x80];
@@ -847,11 +995,7 @@ mod tests {
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
         for t in &test_cases {
-            let buf = encoder
-                .encoder
-                .encode_header_block(&mut encoder.conn, &t.headers, STREAM_1);
-            assert_eq!(buf.as_ref(), t.header_block);
-            encoder.send_instructions(t.encoder_inst);
+            encoder.encode_header_block(STREAM_1, &t.headers, t.header_block, t.encoder_inst);
         }
     }
 
@@ -921,12 +1065,417 @@ mod tests {
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
         for t in &test_cases {
-            let buf = encoder
-                .encoder
-                .encode_header_block(&mut encoder.conn, &t.headers, STREAM_1);
-            assert_eq!(buf.as_ref(), t.header_block);
-            encoder.send_instructions(t.encoder_inst);
+            encoder.encode_header_block(STREAM_1, &t.headers, t.header_block, t.encoder_inst);
         }
+    }
+
+    // Pins the builders against expectations that were written out by hand, here and in
+    // `header_block_encoder_non`, so that a bug in both cannot cancel out.
+    #[test]
+    fn builders_match_hand_written_vectors() {
+        assert_eq!(
+            insert_with_name_literal("content-length", "1234"),
+            HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL
+        );
+        assert_eq!(
+            insert_with_name_literal("content-length", "12345"),
+            HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL
+        );
+        assert_eq!(
+            expected_block(&[(":method", "GET", Repr::Indexed(17))], false),
+            [0x00, 0x00, 0xd1]
+        );
+        assert_eq!(
+            expected_block(&[(":path", "/somewhere", Repr::NameRef(1))], false),
+            [&[0x00, 0x00, 0x51, 0x0a], b"/somewhere".as_slice()].concat()
+        );
+    }
+
+    // RFC 9204 B.1: Literal Field Line with Name Reference. `:path` is static index 1 and its
+    // value does not match, so a name-only match produces the RFC's bytes as-is.
+    #[test]
+    fn rfc9204_b1_literal_field_line_with_name_reference() {
+        let mut encoder = connect(false);
+
+        encoder.encode_header_block(
+            STREAM_1,
+            &[Header::new(":path", "/index.html")],
+            &[&[0x00, 0x00, 0x51, 0x0b], b"/index.html".as_slice()].concat(),
+            &[0x02], // The encoder stream type byte, sent on the first flush.
+        );
+    }
+
+    // RFC 9204 B.2's Set Dynamic Table Capacity=220, the only part of that example the
+    // encoder emits; the rest is in `encoder_instructions.rs` and `header_block.rs`.
+    #[test]
+    fn rfc9204_b2_set_dynamic_table_capacity() {
+        let mut encoder = connect(false);
+
+        encoder.encoder.set_max_capacity(220).unwrap();
+        encoder.send_instructions(CAP_INSTRUCTION_220);
+    }
+
+    // RFC 9204 B.3's Insert With Literal Name. `custom-key` misses both tables, so this is the
+    // one insert the encoder makes. B.3 is titled "Speculative Insert", which neqo does not
+    // do: `send_and_insert` always references what it inserted. Only the encoding matches.
+    #[test]
+    fn rfc9204_b3_insert_with_literal_name() {
+        let mut encoder = connect(false);
+
+        encoder.encoder.set_max_capacity(220).unwrap();
+        encoder.send_instructions(CAP_INSTRUCTION_220);
+
+        encoder.insert(
+            b"custom-key",
+            b"custom-value",
+            &[&[0x4a], b"custom-key".as_slice(), &[0x0c], b"custom-value"].concat(),
+        );
+    }
+
+    // How the encoder represents one field, and the static table index it used.
+    enum Repr {
+        // Indexed Field Line: name and value both matched.
+        Indexed(u64),
+        // Literal Field Line With Name Reference, then the value in full.
+        NameRef(u64),
+        // Literal Field Line With Literal Name: no name matched, and nothing was inserted.
+        Literal,
+    }
+
+    // A Firefox request list; every `NameRef` could have been inserted and referenced instead.
+    // From the tp6 recording `mitm12-windows-firefox-amazon.zip` (2026-03-11, Firefox 150),
+    // <https://tooltool.mozilla-releng.net/sha512/11840c4009f53264412e8fe1c0c6ba459480ee0421fa0e68f3aa99911955c3ebe0300522bd9756bea94570c1ff5a16bdd0d8df3e5d30c2646b781d187ca024e1>.
+    // `:path` and `cookie` are shortened to one-byte lengths; the recording is HTTP/2, so its
+    // Cookie is crumbled, whereas HTTP/3 joins them as here.
+    const FIREFOX_REQUEST: Fields = &[
+        (":method", "GET", Repr::Indexed(17)),
+        (":scheme", "https", Repr::Indexed(23)),
+        (":authority", "www.amazon.com", Repr::NameRef(0)),
+        (
+            ":path",
+            "/Acer-A515-46-R14K/dp/B08VKNVDDR",
+            Repr::NameRef(1),
+        ),
+        (
+            "user-agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:150.0) Gecko/20100101 Firefox/150.0",
+            Repr::NameRef(95),
+        ),
+        (
+            "accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            Repr::NameRef(29),
+        ),
+        ("accept-language", "en-US,en;q=0.9", Repr::NameRef(72)),
+        // Entry 31's value is `gzip, deflate, br`, so the name matches but the value does not.
+        (
+            "accept-encoding",
+            "gzip, deflate, br, zstd",
+            Repr::NameRef(31),
+        ),
+        ("upgrade-insecure-requests", "1", Repr::Indexed(94)),
+        ("cookie", FIREFOX_COOKIE, Repr::NameRef(5)),
+    ];
+
+    // Several crumbs in one field, as HTTP/3 delivers them.
+    const FIREFOX_COOKIE: &str = "session-id=131-1031258-0190419; lc-main=en_US";
+
+    type Fields = &'static [(&'static str, &'static str, Repr)];
+
+    fn headers(fields: Fields) -> Vec<Header> {
+        fields
+            .iter()
+            .map(|(name, value, _)| Header::new(*name, *value))
+            .collect()
+    }
+
+    // Decoding is what keeps `expected_block` honest: it and the encoder both write, so only a
+    // reader can catch bytes they agree on but that are wrong.
+    fn assert_round_trips(block: &[u8], fields: Fields) {
+        // Only the modulus for the Required Insert Count, which is 0 in these blocks.
+        const MAX_ENTRIES: u64 = 1000;
+
+        let table = HeaderTable::new(false);
+        let mut decoder = HeaderDecoder::new(block);
+        let HeaderDecoderResult::Headers(round_tripped) =
+            decoder.decode_header_block(&table, MAX_ENTRIES, 0).unwrap()
+        else {
+            panic!("blocked on an empty dynamic table");
+        };
+        assert_eq!(round_tripped, headers(fields));
+    }
+
+    // The block the encoder produces for `fields` while the dynamic table stays empty.
+    fn expected_block(fields: Fields, huffman: bool) -> Vec<u8> {
+        // Required Insert Count = 0, Base = 0: no dynamic table references.
+        let mut buf = vec![0x00, 0x00];
+        for (name, value, repr) in fields {
+            match *repr {
+                Repr::Indexed(index) => push_prefixed_int(&mut buf, 0xc0, 2, index),
+                Repr::NameRef(index) => {
+                    push_prefixed_int(&mut buf, 0x50, 4, index);
+                    push_string(&mut buf, value, huffman);
+                }
+                Repr::Literal => {
+                    push_literal(&mut buf, 0x20, 4, name, huffman);
+                    push_string(&mut buf, value, huffman);
+                }
+            }
+        }
+        buf
+    }
+
+    // Every name in the list is in the static table, so the total-name-miss condition never
+    // fires and the table stays empty.
+    #[test]
+    fn firefox_request_is_all_literals() {
+        for huffman in [false, true] {
+            let mut encoder = connect_firefox(huffman);
+
+            encoder.encode_fields(STREAM_1, FIREFOX_REQUEST, &[]);
+            assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
+            assert!(encoder.encoder.unacked_header_blocks.is_empty());
+        }
+    }
+
+    // A second request is not one byte shorter than the first. Asserts the defect: the
+    // equality is meant to be replaced, not rebaselined, once the encoder inserts on a
+    // name-only match.
+    #[test]
+    fn firefox_request_repeated_is_not_shorter() {
+        for huffman in [false, true] {
+            let mut encoder = connect_firefox(huffman);
+
+            let first = encoder.encode_fields(STREAM_1, FIREFOX_REQUEST, &[]);
+            // Not `encode_fields`: comparing both against the same expectation would make the
+            // equality below follow from the helper rather than from the encoder.
+            let second =
+                encoder.encode_header_block_checked(STREAM_2, &headers(FIREFOX_REQUEST), &[]);
+
+            assert_eq!(first, second);
+        }
+    }
+
+    // A response from the same recording, which is what the encoder sees as a server. Note
+    // `access-control-allow-methods` matches by name only because static entry 76 is `get`.
+    const FIREFOX_RESPONSE: Fields = &[
+        (":status", "204", Repr::Indexed(64)),
+        ("date", "Wed, 11 Mar 2026 14:08:46 GMT", Repr::NameRef(6)),
+        (
+            "x-amzn-requestid",
+            "d2cbe11f-6b20-4cfc-a404-06d9ad4b352b",
+            Repr::Literal,
+        ),
+        ("access-control-allow-origin", "*", Repr::Indexed(35)),
+        ("cache-control", "no-store", Repr::Indexed(40)),
+        ("expires", "0", Repr::Literal),
+        ("access-control-allow-methods", "GET", Repr::NameRef(76)),
+        ("pragma", "no-cache", Repr::Literal),
+    ];
+
+    // `connect` leaves `max_blocked_streams` at 0, so `can_block` is false and the fields with
+    // no name match stay literal rather than being inserted. Capacity never comes into it.
+    #[test]
+    fn firefox_response_is_all_literals() {
+        for huffman in [false, true] {
+            connect(huffman).encode_fields(STREAM_1, FIREFOX_RESPONSE, &[0x02]);
+        }
+    }
+
+    // A real `:path`, long enough that its literal length needs a continuation byte.
+    const LONG_PATH: Fields = &[(
+        ":path",
+        "/iu3?d=amazon.com&slot=navFooter&a2=0101d565d97cc0c951acb831c49305a0fd57282ce9c4758059\
+         5eead319dcfeeb4ddd&old_oo=0&ts=1773238125160&s=AdSXd664bnqAVojhbN8bZBxeDK1XB5D4ttU89pI\
+         Dm9C1&gdpr_consent=&gdpr_consent_avl=&cb=1773238125160&dcc=t",
+        Repr::NameRef(1),
+    )];
+
+    #[test]
+    fn long_value_length_spans_two_bytes() {
+        let (_, value, _) = LONG_PATH[0];
+        assert_eq!(value.len(), 232);
+
+        let block = connect(false).encode_fields(STREAM_1, LONG_PATH, &[0x02]);
+        // Name reference, then `7f 69`: 127 plus a continuation byte of 232 - 127.
+        assert_eq!(block[2..5], [0x51, 0x7f, 0x69]);
+        assert_eq!(block.len(), 2 + 1 + 2 + value.len());
+    }
+
+    // `expected_block` has to produce decodable bytes on its own, with no encoder output to
+    // agree with, or it is just a restatement of whatever the encoder did.
+    #[test]
+    fn expected_blocks_decode_independently() {
+        for fields in [FIREFOX_REQUEST, FIREFOX_RESPONSE, LONG_PATH] {
+            for huffman in [false, true] {
+                assert_round_trips(&expected_block(fields, huffman), fields);
+            }
+        }
+    }
+
+    // Guards the guard: a length that is wrong by one must not survive the round trip. If
+    // `assert_round_trips` ever stopped discriminating, this would start passing vacuously.
+    #[test]
+    fn round_trip_rejects_a_wrong_length() {
+        let mut block = connect(false).encode_fields(STREAM_1, LONG_PATH, &[0x02]);
+        assert_eq!(block[3..5], [0x7f, 0x69]);
+        block[4] -= 1; // claim 231 bytes, not 232
+
+        let table = HeaderTable::new(false);
+        let decoded = HeaderDecoder::new(&block).decode_header_block(&table, 1000, 0);
+        assert!(!matches!(
+            &decoded,
+            Ok(HeaderDecoderResult::Headers(h)) if *h == headers(LONG_PATH)
+        ));
+    }
+
+    // A real name that is absent from the static table and too long for the five bits the
+    // insert instruction leaves for a name length.
+    #[test]
+    fn long_name_insert_length_spans_two_bytes() {
+        const NAME: &str = "content-security-policy-report-only";
+        const VALUE: &str = "default-src 'none'";
+
+        assert_eq!(NAME.len(), 35);
+        // `5f 04`: 31 plus a continuation byte of 35 - 31.
+        assert_eq!(insert_with_name_literal(NAME, VALUE)[..2], [0x5f, 0x04]);
+
+        let block = connect_firefox(false).encode_field_inserting(STREAM_1, NAME, VALUE);
+        assert_is_index_to_dynamic_post(&block);
+    }
+
+    // The contrast: `sec-fetch-dest` is not in the static table, so it is inserted, referenced
+    // and reused. The dynamic table works; the encoder just will not reach it for a name the
+    // static table carries.
+    #[test]
+    fn firefox_name_missing_from_static_table_is_indexed_and_reused() {
+        let mut encoder = connect_firefox(false);
+
+        let first = encoder.encode_field_inserting(STREAM_1, "sec-fetch-dest", "document");
+        assert_is_index_to_dynamic_post(&first);
+
+        // Acknowledging is not what lets the next request reference the entry; it is what
+        // stops that reference from blocking the stream.
+        recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
+
+        let second = encoder.encode_field(STREAM_2, "sec-fetch-dest", "document");
+        assert_is_index_to_dynamic(&second);
+
+        // Both are a two-byte prefix plus a one-byte index; only the first paid for the insert.
+        assert_eq!(first.len(), 3);
+        assert_eq!(second.len(), 3);
+    }
+
+    // An empty value is a length of zero, not an absent length.
+    const EMPTY_VALUE: Fields = &[("akamai-grn", "", Repr::Literal)];
+
+    #[test]
+    fn empty_value_encodes_a_zero_length() {
+        for huffman in [false, true] {
+            let block = connect(huffman).encode_fields(STREAM_1, EMPTY_VALUE, &[0x02]);
+            if !huffman {
+                // `27 03` is a ten-byte literal name; the trailing `00` is the value length.
+                assert_eq!(block[2..4], [0x27, 0x03]);
+                assert_eq!(*block.last().unwrap(), 0x00);
+                assert_eq!(block.len(), 2 + 2 + 10 + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn empty_value_inserts_with_a_zero_length() {
+        let insert = insert_with_name_literal("akamai-grn", "");
+        assert_eq!(
+            insert,
+            [&[0x4a], b"akamai-grn".as_slice(), &[0x00]].concat()
+        );
+
+        let block = connect_firefox(false).encode_field_inserting(STREAM_1, "akamai-grn", "");
+        assert_is_index_to_dynamic_post(&block);
+    }
+
+    // A repeated field name, which HTTP/3 does not join. `Origin` misses entry 60,
+    // `vary: origin`, on case, so all three take entry 59 as a name-only match.
+    const REPEATED_VARY: Fields = &[
+        ("vary", "Origin", Repr::NameRef(59)),
+        ("vary", "X-Origin", Repr::NameRef(59)),
+        ("vary", "Referer", Repr::NameRef(59)),
+    ];
+
+    #[test]
+    fn repeated_field_name_is_encoded_in_full_each_time() {
+        for huffman in [false, true] {
+            let block = connect(huffman).encode_fields(STREAM_1, REPEATED_VARY, &[0x02]);
+            if !huffman {
+                // Three times: a two-byte name reference, a length, and the value.
+                assert_eq!(block.len(), 2 + 3 * 3 + 6 + 8 + 7);
+            }
+        }
+    }
+
+    // Inserting while the table is not empty, the only case where the Base Delta is not
+    // computed from `base == 0`. The two requests follow the recording.
+    #[test]
+    fn insert_while_base_is_non_zero() {
+        const FIRST: &[(&str, &str)] = &[
+            ("sec-fetch-dest", "document"),
+            ("sec-fetch-mode", "navigate"),
+            ("sec-fetch-site", "same-origin"),
+            ("priority", "u=0, i"),
+            ("te", "trailers"),
+        ];
+        const LATER: (&str, &str) = ("idempotency-key", "\"802864581076151075\"");
+
+        let mut encoder = connect_firefox(false);
+
+        let inserts: Vec<u8> = FIRST
+            .iter()
+            .flat_map(|(n, v)| insert_with_name_literal(n, v))
+            .collect();
+        let fields: Vec<Header> = FIRST.iter().map(|(n, v)| Header::new(*n, *v)).collect();
+
+        // Insert count 5 encodes as 6, delta `5 - 0 - 1`, then five post-base indices.
+        encoder.encode_header_block(
+            STREAM_1,
+            &fields,
+            &[0x06, 0x84, 0x10, 0x11, 0x12, 0x13, 0x14],
+            &inserts,
+        );
+
+        // Base is 5 now, so the delta is 0 only because it is `6 - 5 - 1`; adding would give 10.
+        let block = encoder.encode_field_inserting(STREAM_2, LATER.0, LATER.1);
+        assert_eq!(block, [0x07, 0x80, 0x10]);
+    }
+
+    // Cookie arrives as one field on HTTP/3, unlike HTTP/2 where Firefox crumbles it, and is
+    // emitted as one literal covering every crumb.
+    #[test]
+    fn firefox_cookie_is_one_literal_per_field() {
+        const COOKIE_FIELD: Fields = &[("cookie", FIREFOX_COOKIE, Repr::NameRef(5))];
+
+        let block = connect_firefox(false).encode_fields(STREAM_1, COOKIE_FIELD, &[]);
+        // Prefix, one name reference byte, one length byte, then every crumb.
+        assert_eq!(block.len(), 2 + 1 + 1 + FIREFOX_COOKIE.len());
+    }
+
+    // Every character below has a 15- to 19-bit Huffman code, so Huffman makes the block
+    // bigger and is used anyway. See `qpack_send_buf::tests::encode_literal_huffman_can_inflate`.
+    #[test]
+    fn huffman_can_inflate_a_header_block() {
+        let headers = [Header::new("x-label", r"\\<<{{``")];
+
+        let mut raw = connect(false);
+        let raw_block = raw.encode_header_block_checked(STREAM_1, &headers, &[0x02]);
+
+        let mut huffman = connect(true);
+        let huffman_block = huffman.encode_header_block_checked(STREAM_1, &headers, &[0x02]);
+
+        assert!(
+            huffman_block.len() > raw_block.len(),
+            "Huffman turned {} bytes into {}, and was used anyway",
+            raw_block.len(),
+            huffman_block.len()
+        );
     }
 
     // Test inserts block on waiting for an insert count increment.
@@ -991,13 +1540,12 @@ mod tests {
         recv_instruction(&mut encoder, &[0x01], now());
 
         // send a header block
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
+        encoder.encode_header_block(
             STREAM_1,
+            &[Header::new("content-length", "1234")],
+            ENCODE_INDEXED_REF_DYNAMIC,
+            &[],
         );
-        assert_eq!(buf.as_ref(), ENCODE_INDEXED_REF_DYNAMIC);
-        encoder.send_instructions(&[]);
 
         // insert "content-length: 12345 which will fail because the entry in the table cannot be
         // evicted
@@ -1117,35 +1665,20 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(1).unwrap();
 
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "1234");
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
-        encoder.send_instructions(&[]);
-
         // The next one will not use the dynamic entry because it is exceeding the
         // max_blocked_streams limit.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            StreamId::new(2),
-        );
+        let buf = encoder.encode_field(StreamId::new(2), "content-length", "1234");
         assert_is_index_to_static_name_only(&buf);
 
-        encoder.send_instructions(&[]);
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // another header block to already blocked stream can still use the entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "1234");
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1181,22 +1714,14 @@ mod tests {
         encoder.encoder.set_max_blocked_streams(1).unwrap();
 
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "1234");
         assert_is_index_to_dynamic(&buf);
 
         // encode another header block for the same stream that will refer to the second entry
         // in the dynamic table.
         // This should work because the stream is already a blocked stream
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "12345")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "12345");
         assert_is_index_to_dynamic(&buf);
     }
 
@@ -1214,32 +1739,20 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // send a header block, that creates an new entry and refers to it.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // The next one will not create a new entry because the encoder is on max_blocked_streams
         // limit.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name2", "value2")],
-            STREAM_2,
-        );
+        let buf = encoder.encode_field(STREAM_2, "name2", "value2");
         assert_is_literal_value_literal_name(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // another header block to already blocked stream can still create a new entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name2", "value2")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name2", "value2");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1259,21 +1772,13 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // send a header block, that creates an new entry and refers to it.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // another header block to already blocked stream can still create a new entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name2", "value2")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name2", "value2");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1299,21 +1804,13 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // send a header block, that creates an new entry and refers to it.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // another header block to already blocked stream can still create a new entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
@@ -1339,21 +1836,13 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // send a header block, that creates an new entry and refers to it.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // header block for the next stream will create an new entry as well.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name2", "value2")],
-            STREAM_2,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_2, "name2", "value2");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1379,21 +1868,13 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // send a header block, that creates an new entry and refers to it.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // header block for the next stream will create an new entry as well.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_2,
-        );
+        let buf = encoder.encode_field(STREAM_2, "name1", "value1");
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1421,31 +1902,19 @@ mod tests {
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // send a header block, that creates an new entry and refers to it.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
 
         // header block for the next stream will refer to the same entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_2,
-        );
+        let buf = encoder.encode_field(STREAM_2, "name1", "value1");
         assert_is_index_to_dynamic(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
 
         // send another header block on stream 1.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name2", "value2")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name2", "value2");
         assert_is_index_to_dynamic_post(&buf);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 2);
@@ -1479,11 +1948,7 @@ mod tests {
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "1234");
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed.
@@ -1523,11 +1988,7 @@ mod tests {
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "1234");
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed.
@@ -1597,11 +2058,7 @@ mod tests {
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
         // send a header block, it refers to unacked entry.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("content-length", "1234")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field(STREAM_1, "content-length", "1234");
         assert_is_index_to_dynamic(&buf);
 
         // trying to evict the entry will failed. The stream is still referring to it and
@@ -1632,6 +2089,9 @@ mod tests {
         assert!(encoder.encoder.set_max_capacity(1000).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_1000);
 
+        // Driven by hand: `encode_header_block_checked` exchanges a datagram per block, which
+        // would deliver the flow control update withheld between the first two.
+        //
         // Encode a header block with 2 headers. The first header will be added to the dynamic
         // table. The second will not be added to the dynamic table, because the
         // corresponding instruction cannot be written immediately due to the flow control
@@ -1722,6 +2182,9 @@ mod tests {
 
         // The first header will use the table entry and the second will use the literal
         // encoding because the first entry is referred to and cannot be evicted.
+        //
+        // Driven by hand: the assertion below is that no datagram is produced at all, which is
+        // stronger than the helper's, and the helper would consume the datagram.
         assert_eq!(
             encoder
                 .encoder
@@ -1809,14 +2272,7 @@ mod tests {
         // acked entry and is then reset via STOP_SENDING, but the peer never sends a
         // Header Ack or Stream Cancellation instruction for it.
         for i in 0..CAP + 10 {
-            let buf = encoder.encoder.encode_header_block(
-                &mut encoder.conn,
-                &[Header::new(
-                    String::from_utf8_lossy(HEADER_CONTENT_LENGTH),
-                    VALUE_1,
-                )],
-                StreamId::new(i * 4),
-            );
+            let buf = encoder.encode_field(StreamId::new(i * 4), "content-length", "1234");
             // Dynamic entries are used up to the cap.
             if i < CAP {
                 assert_is_index_to_dynamic(&buf);
@@ -1847,30 +2303,18 @@ mod tests {
 
         // STREAM_1 inserts and references a new, unacknowledged entry: it becomes a
         // blocking stream and fills the single tracked-stream slot.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name1", "value1")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name1", "value1");
         assert_is_index_to_dynamic_post(&buf);
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
         assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
 
         // A brand-new stream is now over the cap and must fall back to a literal.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name2", "value2")],
-            STREAM_2,
-        );
+        let buf = encoder.encode_field(STREAM_2, "name2", "value2");
         assert_is_literal_value_literal_name(&buf);
         assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
 
         // An already-tracked STREAM_1 is not affected by the cap.
-        let buf = encoder.encoder.encode_header_block(
-            &mut encoder.conn,
-            &[Header::new("name3", "value3")],
-            STREAM_1,
-        );
+        let buf = encoder.encode_field_inserting(STREAM_1, "name3", "value3");
         assert_is_index_to_dynamic_post(&buf);
         assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);

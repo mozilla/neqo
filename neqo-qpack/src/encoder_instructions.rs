@@ -326,6 +326,69 @@ mod test {
         );
     }
 
+    // Segments are kept apart so the prefix bytes stay legible next to the ASCII they carry.
+    fn assert_marshals_to(instruction: &EncoderInstruction, segments: &[&[u8]]) {
+        let mut buf = neqo_common::Encoder::default();
+        instruction.marshal(&mut buf, false);
+        assert_eq!(buf.as_ref(), segments.concat());
+    }
+
+    // RFC 9204 Appendix B's encoder stream instructions, against the bytes printed in the RFC.
+    // B.2's Insert With Name Reference pair, B.4 and B.5 are here rather than end to end
+    // because those variants are `#[cfg(test)]`-gated. B.2's Set Dynamic Table Capacity is not
+    // gated, and `encoder::tests::rfc9204_b2_set_dynamic_table_capacity` covers it end to end.
+    #[test]
+    fn rfc9204_appendix_b_instructions() {
+        const AUTHORITY: &[u8] = b"www.example.com";
+        const PATH: &[u8] = b"/sample/path";
+        const KEY: &[u8] = b"custom-key";
+        const VALUE: &[u8] = b"custom-value";
+        const VALUE2: &[u8] = b"custom-value2";
+
+        // B.2: Set Dynamic Table Capacity=220.
+        assert_marshals_to(
+            &EncoderInstruction::Capacity { value: 220 },
+            &[&[0x3f, 0xbd, 0x01]],
+        );
+        // B.2: Insert With Name Reference, static index 0 (`:authority=www.example.com`).
+        assert_marshals_to(
+            &EncoderInstruction::InsertWithNameRefStatic {
+                index: 0,
+                value: AUTHORITY,
+            },
+            &[&[0xc0, 0x0f], AUTHORITY],
+        );
+        // B.2: Insert With Name Reference, static index 1 (`:path=/sample/path`).
+        assert_marshals_to(
+            &EncoderInstruction::InsertWithNameRefStatic {
+                index: 1,
+                value: PATH,
+            },
+            &[&[0xc1, 0x0c], PATH],
+        );
+        // B.3: Insert With Literal Name (`custom-key=custom-value`). The shipping encoder
+        // does emit this one; `encoder::tests::rfc9204_b3_insert_with_literal_name` covers it
+        // end to end.
+        assert_marshals_to(
+            &EncoderInstruction::InsertWithNameLiteral {
+                name: KEY,
+                value: VALUE,
+            },
+            &[&[0x4a], KEY, &[0x0c], VALUE],
+        );
+        // B.4: Duplicate, relative index 2 (absolute index 0).
+        assert_marshals_to(&EncoderInstruction::Duplicate { index: 2 }, &[&[0x02]]);
+        // B.5: Insert With Name Reference, dynamic relative index 1
+        // (`custom-key=custom-value2`).
+        assert_marshals_to(
+            &EncoderInstruction::InsertWithNameRefDynamic {
+                index: 1,
+                value: VALUE2,
+            },
+            &[&[0x81, 0x0d], VALUE2],
+        );
+    }
+
     #[test]
     fn encoding_decoding_instructions() {
         test_encoding_decoding(&EncoderInstruction::Capacity { value: 1 }, false);
