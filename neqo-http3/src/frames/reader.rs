@@ -52,10 +52,15 @@ pub trait StreamReader {
     fn read_data(&mut self, buf: &mut [u8], now: Instant) -> Res<(usize, bool)>;
 }
 
-#[derive(derive_more::Constructor)]
 pub struct StreamReaderConnectionWrapper<'a> {
     conn: &'a mut Connection,
     stream_id: StreamId,
+}
+
+impl<'a> StreamReaderConnectionWrapper<'a> {
+    pub const fn new(conn: &'a mut Connection, stream_id: StreamId) -> Self {
+        Self { conn, stream_id }
+    }
 }
 
 impl StreamReader for StreamReaderConnectionWrapper<'_> {

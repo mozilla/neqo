@@ -9,8 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Debug, Clone, derive_more::Constructor)]
-#[must_use]
+#[derive(Debug, Clone)]
 pub struct Scone {
     updated: Instant,
     rate: Bitrate,
@@ -18,6 +17,11 @@ pub struct Scone {
 
 impl Scone {
     pub(crate) const PERIOD: Duration = Duration::from_secs(67);
+
+    #[must_use]
+    pub const fn new(updated: Instant, rate: Bitrate) -> Self {
+        Self { updated, rate }
+    }
 
     /// Determine if the advice has expired.
     #[must_use]

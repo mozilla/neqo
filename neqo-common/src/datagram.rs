@@ -155,7 +155,7 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-#[derive(Clone, PartialEq, Eq, derive_more::Constructor)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Batch {
     src: SocketAddr,
     dst: SocketAddr,
@@ -192,6 +192,23 @@ impl From<Datagram<Vec<u8>>> for Batch {
 }
 
 impl Batch {
+    #[must_use]
+    pub const fn new(
+        src: SocketAddr,
+        dst: SocketAddr,
+        tos: Tos,
+        datagram_size: NonZeroUsize,
+        d: Vec<u8>,
+    ) -> Self {
+        Self {
+            src,
+            dst,
+            tos,
+            datagram_size,
+            d,
+        }
+    }
+
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
         self.src

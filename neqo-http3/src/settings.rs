@@ -54,11 +54,20 @@ const fn hsetting_default(setting_type: HSettingType) -> u64 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::Constructor)]
-#[must_use]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HSetting {
     pub setting_type: HSettingType,
     pub value: u64,
+}
+
+impl HSetting {
+    #[must_use]
+    pub const fn new(setting_type: HSettingType, value: u64) -> Self {
+        Self {
+            setting_type,
+            value,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, derive_more::Deref)]
@@ -233,14 +242,18 @@ impl From<&Http3Parameters> for HSettings {
     }
 }
 
-/// Right now we only have QPACK settings, so that is all this holds.
-#[derive(Debug, derive_more::Constructor)]
-#[must_use]
+#[derive(Debug)]
 pub struct HttpZeroRttChecker {
     settings: Http3Parameters,
 }
 
 impl HttpZeroRttChecker {
+    /// Right now we only have QPACK settings, so that is all this takes.
+    #[must_use]
+    pub const fn new(settings: Http3Parameters) -> Self {
+        Self { settings }
+    }
+
     /// Save the settings that matter for 0-RTT.
     #[must_use]
     pub fn save(settings: &Http3Parameters) -> Vec<u8> {

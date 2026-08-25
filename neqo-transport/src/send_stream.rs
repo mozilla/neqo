@@ -39,7 +39,8 @@ use crate::{
 };
 
 /// The priority that is assigned to sending data for the stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, strum::VariantArray)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
+#[cfg_attr(test, derive(strum::VariantArray))]
 pub enum TransmissionPriority {
     /// This stream is more important than the functioning of the connection.
     /// Don't use this priority unless the stream really is that important.
@@ -678,8 +679,7 @@ impl State {
 }
 
 // See https://www.w3.org/TR/webtransport/#send-stream-stats.
-#[derive(Debug, Clone, Copy, derive_more::Constructor)]
-#[must_use]
+#[derive(Debug, Clone, Copy)]
 pub struct Stats {
     // The total number of bytes the consumer has successfully written to
     // this stream. This number can only increase.
@@ -698,6 +698,15 @@ pub struct Stats {
 }
 
 impl Stats {
+    #[must_use]
+    pub const fn new(written: u64, sent: u64, acked: u64) -> Self {
+        Self {
+            written,
+            sent,
+            acked,
+        }
+    }
+
     #[must_use]
     pub const fn bytes_written(&self) -> u64 {
         self.written
@@ -871,6 +880,7 @@ impl SendStream {
         }
     }
 
+    #[must_use]
     pub fn stats(&self) -> Stats {
         Stats::new(self.bytes_written(), self.bytes_sent, self.bytes_acked())
     }

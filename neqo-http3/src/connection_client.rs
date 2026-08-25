@@ -5,13 +5,7 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell,
-    fmt::Display,
-    iter,
-    net::SocketAddr,
-    num::NonZeroUsize,
-    rc::Rc,
-    time::Instant,
+    cell::RefCell, fmt::Display, iter, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Instant,
 };
 
 use neqo_common::{

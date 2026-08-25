@@ -188,10 +188,15 @@ impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
 /// An `RandomConnectionIdGenerator` produces connection IDs of
 /// a fixed length and random content.  No effort is made to
 /// prevent collisions.
-#[derive(derive_more::Constructor)]
-#[must_use]
 pub struct RandomConnectionIdGenerator {
     len: usize,
+}
+
+impl RandomConnectionIdGenerator {
+    #[must_use]
+    pub const fn new(len: usize) -> Self {
+        Self { len }
+    }
 }
 
 impl ConnectionIdDecoder for RandomConnectionIdGenerator {
@@ -219,7 +224,7 @@ impl ConnectionIdGenerator for RandomConnectionIdGenerator {
 /// A single connection ID, as saved from `NEW_CONNECTION_ID`.
 /// This is templated so that the connection ID entries from a peer can be
 /// saved with a stateless reset token.  Local entries don't need that.
-#[derive(Debug, PartialEq, Eq, Clone, derive_more::Constructor)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ConnectionIdEntry<SRT: Clone + PartialEq> {
     /// The sequence number.
     seqno: u64,
@@ -300,6 +305,10 @@ impl ConnectionIdEntry<()> {
 }
 
 impl<SRT: Clone + PartialEq> ConnectionIdEntry<SRT> {
+    pub const fn new(seqno: u64, cid: ConnectionId, srt: SRT) -> Self {
+        Self { seqno, cid, srt }
+    }
+
     /// Update the stateless reset token.  This panics if the sequence number is non-zero.
     pub fn set_stateless_reset_token(&mut self, srt: SRT) {
         assert_eq!(self.seqno, Self::SEQNO_INITIAL);

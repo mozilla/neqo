@@ -12,12 +12,19 @@ use neqo_transport::Output;
 use super::{Node, Rng};
 
 /// Drops all datagrams larger than the configured MTU.
-///
-/// The limit includes IP and UDP header size.
-#[derive(Debug, derive_more::Constructor)]
-#[must_use]
+#[derive(Debug)]
 pub struct Mtu {
     mtu: usize,
+}
+
+impl Mtu {
+    /// Creates new [`Mtu`].
+    ///
+    /// Limit includes IP and UDP header size.
+    #[must_use]
+    pub const fn new(mtu: usize) -> Self {
+        Self { mtu }
+    }
 }
 
 impl Node for Mtu {

@@ -228,10 +228,17 @@ impl Debug for Node {
 }
 
 /// A target for a connection that involves reaching a given connection state.
-#[derive(Debug, Clone, derive_more::Constructor)]
-#[must_use]
+#[derive(Debug, Clone)]
 pub struct ReachState {
     target: Http3State,
+}
+
+impl ReachState {
+    /// Create a new instance that intends to reach the indicated state.
+    #[must_use]
+    pub const fn new(target: Http3State) -> Self {
+        Self { target }
+    }
 }
 
 impl Goal for ReachState {
