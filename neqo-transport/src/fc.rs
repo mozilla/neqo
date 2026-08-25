@@ -46,11 +46,11 @@ const WINDOW_INCREASE_MULTIPLIER: u64 = 4;
 
 /// Subject for flow control auto-tuning, used to avoid heap allocations
 /// when logging.
-#[derive(Debug, Clone, Copy, displaydoc::Display)]
+#[derive(Debug, Clone, Copy, strum::Display)]
 enum AutoTuneSubject {
-    #[displaydoc("connection")]
+    #[strum(to_string = "connection")]
     Connection,
-    #[displaydoc("stream {0}")]
+    #[strum(to_string = "stream {0}")]
     Stream(StreamId),
 }
 
