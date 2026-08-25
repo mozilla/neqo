@@ -79,8 +79,6 @@ impl PeriodSet {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use std::ptr::addr_of_mut;
-
     use libc::{pthread_mach_thread_np, pthread_self};
     pub use mach2::thread_policy::thread_time_constraint_policy;
     use mach2::{
@@ -97,7 +95,7 @@ mod mac {
             thread_policy_set(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
-                addr_of_mut!(policy).cast(), // horror!
+                (&raw mut policy).cast(), // horror!
                 THREAD_TIME_CONSTRAINT_POLICY_COUNT,
             )
         };
@@ -142,7 +140,7 @@ mod mac {
             thread_policy_get(
                 pthread_mach_thread_np(pthread_self()),
                 THREAD_TIME_CONSTRAINT_POLICY,
-                addr_of_mut!(policy).cast(), // horror!
+                (&raw mut policy).cast(), // horror!
                 &raw mut count,
                 &raw mut get_default,
             )

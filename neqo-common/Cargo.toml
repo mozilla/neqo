@@ -29,7 +29,7 @@ thiserror = { workspace = true }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 libc = { workspace = true }
-mach2 = { version = "0.4", default-features = false }
+mach2 = { version = "0.4.1", default-features = false } # 0.4.1 adds `thread_policy`.
 
 [target."cfg(windows)".dependencies]
 windows = { workspace = true, features = ["Win32_Media"] }
