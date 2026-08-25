@@ -588,7 +588,10 @@ mod tests {
         new_server, now,
     };
 
-    use super::{Connection, Encoder, EncoderInstruction, Error, Header, HeaderTable, Res};
+    use super::{
+        ADDITIONAL_TABLE_ENTRY_SIZE, Connection, Encoder, EncoderInstruction, Error, Header,
+        HeaderTable, Res,
+    };
     use crate::{
         Settings,
         header_block::{HeaderDecoder, HeaderDecoderResult, HeaderEncoder},
@@ -682,18 +685,18 @@ mod tests {
             self.encoder.send_encoder_updates(&mut self.conn).unwrap();
             let mut received = Vec::new();
             let mut buf = [0_u8; 4096];
+            // Both directions: a dropped reply loses bytes no PTO will resend.
+            let mut dgram = self.conn.process_output(now()).dgram();
             loop {
-                let dgram = self.conn.process_output(now()).dgram();
-                let has_dgram = dgram.is_some();
-                let out2 = self.peer_conn.process(dgram, now());
-                drop(self.conn.process(out2.dgram(), now()));
+                let from_peer = self.peer_conn.process(dgram.take(), now()).dgram();
                 let (amount, fin) = self
                     .peer_conn
                     .stream_recv(self.send_stream_id, &mut buf)
                     .unwrap();
                 assert!(!fin);
                 received.extend_from_slice(&buf[..amount]);
-                if amount == 0 && !has_dgram {
+                dgram = self.conn.process(from_peer, now()).dgram();
+                if dgram.is_none() && amount == 0 {
                     break;
                 }
             }
@@ -756,7 +759,7 @@ mod tests {
         connect_generic(true, Some(max_data), TEST_MAX_TABLE_SIZE)
     }
 
-    // An encoder provisioned the way Firefox provisions one.
+    // An encoder facing a Firefox decoder: both limits come from the peer's SETTINGS.
     fn connect_firefox(huffman: bool) -> TestEncoder {
         let mut encoder = connect_generic(huffman, None, FIREFOX_MAX_TABLE_SIZE);
         encoder
@@ -797,8 +800,8 @@ mod tests {
     const VALUE_1: &[u8] = b"1234";
     const VALUE_2: &[u8] = b"12345";
 
-    // Only the Required Insert Count modulus, and that is 0 in every block decoded here.
-    const DECODE_MAX_ENTRIES: u64 = 1000;
+    // The Required Insert Count modulus; encoder and decoder must use the same one.
+    const TEST_MAX_ENTRIES: u64 = FIREFOX_MAX_TABLE_SIZE / ADDITIONAL_TABLE_ENTRY_SIZE as u64;
 
     // HEADER_CONTENT_LENGTH and VALUE_1 encoded by instruction insert_with_name_literal.
     const HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL: &[u8] = &[
@@ -1138,12 +1141,21 @@ mod tests {
         let table = HeaderTable::new(false);
         let mut decoder = HeaderDecoder::new(block);
         let HeaderDecoderResult::Headers(round_tripped) = decoder
-            .decode_header_block(&table, DECODE_MAX_ENTRIES, 0)
+            .decode_header_block(&table, TEST_MAX_ENTRIES, 0)
             .unwrap()
         else {
             panic!("blocked on an empty dynamic table");
         };
         assert_eq!(round_tripped, headers(fields));
+    }
+
+    // Inserts for the names `fields` lacks in the static table.
+    fn expected_inserts(fields: Fields) -> Vec<u8> {
+        fields
+            .iter()
+            .filter(|(_, _, repr)| matches!(repr, Repr::Literal))
+            .flat_map(|(name, value, _)| insert_with_name_literal(name, value))
+            .collect()
     }
 
     // What the encoder should emit for `fields`. `inserting` says whether a name the static
@@ -1154,7 +1166,7 @@ mod tests {
     // encodes to the right bytes is pinned separately, against the RFC's own bytes in
     // `rfc9204_*` and by decoding in `assert_round_trips`.
     fn expected_block(fields: Fields, huffman: bool, inserting: bool) -> Vec<u8> {
-        let mut block = HeaderEncoder::new(0, huffman, FIREFOX_MAX_TABLE_SIZE / 32);
+        let mut block = HeaderEncoder::new(0, huffman, TEST_MAX_ENTRIES);
         let mut next_index = 0;
         for (name, value, repr) in fields {
             match *repr {
@@ -1230,20 +1242,12 @@ mod tests {
     // are inserted instead.
     #[test]
     fn firefox_response_inserts_names_absent_from_static_table() {
-        let mut encoder = connect_firefox(false);
-
-        let inserts: Vec<u8> = FIREFOX_RESPONSE
-            .iter()
-            .filter(|(_, _, repr)| matches!(repr, Repr::Literal))
-            .flat_map(|(name, value, _)| insert_with_name_literal(name, value))
-            .collect();
-
         // Required Insert Count 3 encodes as 4; Base 0 is below it, so the delta is `3 - 0 - 1`.
-        encoder.encode_header_block(
+        connect_firefox(false).encode_header_block(
             STREAM_1,
             &headers(FIREFOX_RESPONSE),
             &expected_block(FIREFOX_RESPONSE, false, true),
-            &inserts,
+            &expected_inserts(FIREFOX_RESPONSE),
         );
     }
 
@@ -1269,7 +1273,13 @@ mod tests {
     // `expected_block` has to produce decodable bytes on its own.
     #[test]
     fn expected_blocks_decode_independently() {
-        for fields in [FIREFOX_REQUEST, FIREFOX_RESPONSE, LONG_PATH] {
+        for fields in [
+            FIREFOX_REQUEST,
+            FIREFOX_RESPONSE,
+            LONG_PATH,
+            EMPTY_VALUE,
+            REPEATED_VARY,
+        ] {
             for huffman in [false, true] {
                 assert_round_trips(&expected_block(fields, huffman, false), fields);
             }
@@ -1277,17 +1287,15 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_rejects_a_wrong_length() {
+    fn round_trip_rejects_a_corrupted_block() {
         let mut block = connect(false).encode_fields(STREAM_1, LONG_PATH, &[0x02]);
         assert_eq!(block[3..5], [0x7f, 0x69]);
         block[4] -= 1; // claim 231 bytes, not 232
 
         let table = HeaderTable::new(false);
-        let decoded = HeaderDecoder::new(&block).decode_header_block(&table, DECODE_MAX_ENTRIES, 0);
-        assert!(!matches!(
-            &decoded,
-            Ok(HeaderDecoderResult::Headers(h)) if *h == headers(LONG_PATH)
-        ));
+        // The orphaned `t` parses as a name reference, so the decoder overruns.
+        let decoded = HeaderDecoder::new(&block).decode_header_block(&table, TEST_MAX_ENTRIES, 0);
+        assert!(decoded.is_err());
     }
 
     #[test]
@@ -1312,10 +1320,13 @@ mod tests {
 
         // Acknowledging is not what lets the next request reference the entry; it is what
         // stops that reference from blocking the stream.
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
         recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         let second = encoder.encode_field(STREAM_2, "sec-fetch-dest", "document");
         assert_is_index_to_dynamic(&second);
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
         // Both are a two-byte prefix plus a one-byte index; only the first paid for the insert.
         assert_eq!(first.len(), 3);
@@ -1371,29 +1382,23 @@ mod tests {
 
     #[test]
     fn insert_while_base_is_non_zero() {
-        const FIRST: &[(&str, &str)] = &[
-            ("sec-fetch-dest", "document"),
-            ("sec-fetch-mode", "navigate"),
-            ("sec-fetch-site", "same-origin"),
-            ("priority", "u=0, i"),
-            ("te", "trailers"),
+        const FIRST: Fields = &[
+            ("sec-fetch-dest", "document", Repr::Literal),
+            ("sec-fetch-mode", "navigate", Repr::Literal),
+            ("sec-fetch-site", "same-origin", Repr::Literal),
+            ("priority", "u=0, i", Repr::Literal),
+            ("te", "trailers", Repr::Literal),
         ];
         const LATER: (&str, &str) = ("idempotency-key", "\"802864581076151075\"");
 
         let mut encoder = connect_firefox(false);
 
-        let inserts: Vec<u8> = FIRST
-            .iter()
-            .flat_map(|(n, v)| insert_with_name_literal(n, v))
-            .collect();
-        let fields: Vec<Header> = FIRST.iter().map(|(n, v)| Header::new(*n, *v)).collect();
-
         // Insert count 5 encodes as 6, delta `5 - 0 - 1`, then five post-base indices.
         encoder.encode_header_block(
             STREAM_1,
-            &fields,
+            &headers(FIRST),
             &[0x06, 0x84, 0x10, 0x11, 0x12, 0x13, 0x14],
-            &inserts,
+            &expected_inserts(FIRST),
         );
 
         // Base is 5 now, so the delta is 0 only because it is `6 - 5 - 1`; adding would give 10.
