@@ -48,6 +48,7 @@ mod migration;
 mod null;
 mod pmtud;
 mod priority;
+mod qlog;
 mod recovery;
 mod reset_stream_at;
 mod resumption;
@@ -142,8 +143,12 @@ fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Conne
 }
 
 pub fn new_server(params: ConnectionParameters) -> Connection {
+    new_server_with_qlog(params).0
+}
+
+fn new_server_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
     fixture_init();
-    let (log, _contents) = new_neqo_qlog();
+    let (log, contents) = new_neqo_qlog();
     let mut c = Connection::new_server(
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
@@ -154,7 +159,7 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
     c.set_qlog(log);
     c.server_enable_0rtt(&test_fixture::anti_replay(), AllowZeroRtt {})
         .expect("enable 0-RTT");
-    c
+    (c, contents)
 }
 pub fn default_server() -> Connection {
     new_server(ConnectionParameters::default())
