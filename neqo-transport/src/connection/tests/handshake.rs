@@ -14,7 +14,7 @@ use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 #[cfg(not(feature = "disable-encryption"))]
@@ -31,9 +31,10 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State},
-    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, DEFAULT_STREAM_DATA, assert_error,
-    connect, connect_force_idle, connect_with_rtt, default_client, default_server, get_tokens,
-    handshake, maybe_authenticate, resumed_server, send_something, zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
+    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
+    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, resumed_server,
+    send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
@@ -2025,31 +2026,48 @@ fn export_keying_material_after_closed() {
     ));
 }
 
+/// The Initial that `c` sends first, as bytes.
+#[cfg(not(feature = "disable-encryption"))]
+fn client_initial(c: &mut Connection) -> Vec<u8> {
+    c.process_output(now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec()
+}
+
+/// Read the DCID and SCID from the client's Initial, past the first byte and the 4-byte version.
+#[cfg(not(feature = "disable-encryption"))]
+fn initial_cids(initial: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let mut dec = Decoder::from(&initial[5..]);
+    let dcid = dec.decode_vec(1).expect("client DCID").to_vec();
+    let scid = dec.decode_vec(1).expect("client SCID").to_vec();
+    assert!(!dcid.is_empty(), "client DCID is non-empty");
+    assert!(!scid.is_empty(), "client SCID is non-empty");
+    (dcid, scid)
+}
+
+/// Build a Retry that the client which sent `initial` will accept.
+#[cfg(not(feature = "disable-encryption"))]
+fn retry_for(initial: &[u8]) -> Datagram {
+    let (dcid, scid) = initial_cids(initial);
+    let mut server_scid = dcid.clone();
+    server_scid[0] ^= 0xff;
+    datagram(
+        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+            .expect("build retry"),
+    )
+}
+
 /// RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet whose Source
 /// Connection ID is identical to the Destination Connection ID of its Initial. A
 /// Retry with a distinct Source Connection ID is still processed.
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn retry_scid_matching_initial_dcid() {
-    // Read the connection IDs carried in the client's Initial: skip the first byte
-    // and the 4-byte version, then two length-prefixed connection IDs (DCID, SCID).
-    fn initial_cids(initial: &[u8]) -> (Vec<u8>, Vec<u8>) {
-        let mut dec = Decoder::from(&initial[5..]);
-        let dcid = dec.decode_vec(1).expect("client DCID").to_vec();
-        let scid = dec.decode_vec(1).expect("client SCID").to_vec();
-        assert!(!dcid.is_empty(), "client DCID is non-empty");
-        assert!(!scid.is_empty(), "client SCID is non-empty");
-        (dcid, scid)
-    }
-
     // A Retry whose Source Connection ID equals our Initial's Destination
     // Connection ID is dropped, leaving the client in its initial state.
     let mut client = default_client();
-    let initial = client
-        .process_output(now())
-        .dgram()
-        .expect("a datagram")
-        .to_vec();
+    let initial = client_initial(&mut client);
     let (dcid, scid) = initial_cids(&initial);
     let retry = crate::packet::Builder::retry(
         Version::default(),
@@ -2065,18 +2083,8 @@ fn retry_scid_matching_initial_dcid() {
 
     // The same Retry with a distinct Source Connection ID is accepted.
     let mut client = default_client();
-    let initial = client
-        .process_output(now())
-        .dgram()
-        .expect("a datagram")
-        .to_vec();
-    let (dcid, scid) = initial_cids(&initial);
-    let mut server_scid = dcid.clone();
-    server_scid[0] ^= 0xff;
-    let retry =
-        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
-            .expect("build retry");
-    drop(client.process(Some(datagram(retry)), now()));
+    let initial = client_initial(&mut client);
+    drop(client.process(Some(retry_for(&initial)), now()));
     assert_eq!(client.stats().dropped_rx, 0);
 }
 
@@ -2141,4 +2149,127 @@ fn client_initial_with_token() {
     let dropped = client.stats().dropped_rx;
     client.process_input(datagram(server_initial(&ci, &[0x01])), now());
     assert_eq!(client.stats().dropped_rx, dropped + 1);
+}
+
+/// Produce a datagram with one byte of CRYPTO at offset 0, added to every packet in it. Whether
+/// that is a duplicate depends on what the receiver already holds. Waits out any pacing delay.
+fn make_dummy_crypto(c: &mut Connection, now: &mut Instant) -> Datagram {
+    loop {
+        match c.test_write_frames(CryptoWriter {}, *now) {
+            Output::Datagram(d) => return d,
+            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
+            o => panic!("no datagram to carry the dummy CRYPTO frame: {o:?}"),
+        }
+    }
+}
+
+/// Deliver `dgram` to `c` and return how many CRYPTO frames it sends in response.
+fn crypto_sent_for(c: &mut Connection, dgram: Datagram, now: &mut Instant) -> usize {
+    let before = c.stats().frame_tx.crypto;
+    c.process_input(dgram, *now);
+    drop_flight(c, now);
+    c.stats().frame_tx.crypto - before
+}
+
+/// Duplicate CRYPTO in an Initial makes an endpoint resend its own unacknowledged CRYPTO ahead of
+/// the PTO, per Section 6.2.3 of RFC 9002 -- but only once per connection.
+#[test]
+fn crypto_resent_at_most_once() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // The server gets the whole ClientHello and answers, leaving its own CRYPTO unacknowledged.
+    flush_to(&mut client, &mut server, &mut now);
+    drop_flight(&mut server, &mut now);
+
+    // The first duplicate resends the server's flight.
+    now += DEFAULT_RTT;
+    let dup = make_dummy_crypto(&mut client, &mut now);
+    assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
+
+    // The second changes nothing.
+    now += DEFAULT_RTT;
+    let dup = make_dummy_crypto(&mut client, &mut now);
+    assert_eq!(crypto_sent_for(&mut server, dup, &mut now), 0);
+}
+
+/// Only duplicate CRYPTO in an *Initial* is a sign of loss, per Section 6.2.3 of RFC 9002.
+#[test]
+fn crypto_resent_only_for_initial() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // Bring the client to Handshake keys and flush its Finished without delivering it.
+    flush_to(&mut client, &mut server, &mut now);
+    flush_to(&mut server, &mut client, &mut now);
+    assert!(maybe_authenticate(&mut client));
+    drop_flight(&mut client, &mut now);
+
+    // The server repeats CRYPTO the client already has. Deliver only the Handshake packet of that
+    // datagram: the coalesced Initial would be the very trigger under test, and in the coalesced
+    // 1-RTT packet the offset is one the client has *not* received, so that copy is not a
+    // duplicate at all. The client has nothing to learn from the Handshake packet and must not
+    // resend its Finished.
+    let dup = make_dummy_crypto(&mut server, &mut now);
+    let (_initial, rest) = split_datagram(&dup);
+    let (handshake, _short) = split_datagram(&rest.expect("a coalesced Handshake packet"));
+    assert_handshake(&handshake);
+    assert_eq!(crypto_sent_for(&mut client, handshake, &mut now), 0);
+}
+
+/// A Retry restarts the connection process, so the allowance is available again for the new flight.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn retry_restores_resend_allowance() {
+    let mut client = default_client();
+    let initial = client_initial(&mut client);
+    let retry = retry_for(&initial);
+
+    client.crypto.resend_unacked_early();
+    assert!(client.crypto.early_resend_used(), "allowance spent");
+    client.process_input(retry, now());
+    assert!(!client.crypto.early_resend_used(), "and available again");
+
+    // ...and the re-sent ClientHello is something to spend it on.
+    assert!(
+        client.process_output(now()).dgram().is_some(),
+        "a new Initial"
+    );
+    client.crypto.resend_unacked_early();
+    assert!(
+        client.crypto.early_resend_used(),
+        "spendable on the new flight"
+    );
+}
+
+/// A duplicate that arrives while nothing is outstanding has nothing to resend, so it must not use
+/// up the one allowance an endpoint gets to resend ahead of the PTO.
+#[test]
+fn crypto_resend_chance_survives_useless_duplicate() {
+    fixture_init();
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+
+    // Only the first ClientHello datagram; SNI slicing puts offset 0 in it, but not the rest.
+    let ch1 = client.process_output(now).dgram().expect("a datagram");
+    let ch2 = client.process_output(now).dgram().expect("a datagram");
+    server.process_input(ch1, now);
+
+    // The dummy byte at offset 0 is therefore a duplicate, and finds nothing to resend.
+    let dup = make_dummy_crypto(&mut client, &mut now);
+    assert_eq!(crypto_sent_for(&mut server, dup, &mut now), 0);
+
+    // Complete the ClientHello and drop the server's answer, leaving its CRYPTO unacknowledged.
+    server.process_input(ch2, now);
+    drop_flight(&mut server, &mut now);
+
+    // The allowance was not used above, so this duplicate resends the whole flight.
+    now += DEFAULT_RTT;
+    let dup = make_dummy_crypto(&mut client, &mut now);
+    assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
 }

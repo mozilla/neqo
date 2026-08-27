@@ -14,17 +14,13 @@ use test_fixture::{
 
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
-    connect, connect_fail, default_client, default_server, exchange_ticket, new_client, new_server,
-    send_something,
+    CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
+    new_client, new_server, send_something,
 };
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
-    connection::{
-        test_internal,
-        tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
-    },
-    frame::FrameType,
-    packet::{self},
+    connection::tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
+    packet,
     tparams::{TransportParameter, TransportParameterId::*},
 };
 
@@ -588,18 +584,6 @@ fn server_initial_versions() {
 /// packet receipt correctly.
 #[test]
 fn client_initial_versions() {
-    pub struct CryptoWriter {}
-
-    impl test_internal::FrameWriter for CryptoWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
-            // A first byte of 2 is the byte that indicates a ServerHello.
-            builder.encode_varint(FrameType::Crypto);
-            builder.encode_varint(0_u64); // Offset
-            builder.encode_varint(1_u64); // Length
-            builder.encode_byte(2);
-        }
-    }
-
     let mut client = new_client(ConnectionParameters::default().versions(
         Version::Version1,
         vec![Version::Version2, Version::Version1],

@@ -1383,6 +1383,7 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry(&path, now);
         self.handle_lost_packets(&lost_packets);
 
+        self.crypto.reset_early_resend();
         self.crypto.states_mut().init(
             self.conn_params.get_versions().compatible(),
             self.role,
@@ -1634,17 +1635,15 @@ impl Connection {
             }
             (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
                 // This packet can't be processed now, but it could be a sign
-                // that Initial packets were lost.
-                // Resend Initial CRYPTO frames immediately a few times just
-                // in case.  As we don't have an RTT estimate yet, this helps
+                // that Initial packets were lost. Resend CRYPTO frames immediately
+                // just in case.  As we don't have an RTT estimate yet, this helps
                 // when there is a short RTT and losses. Also mark all 0-RTT
-                // data as lost.
+                // data as lost. See Section 6.2.3 of RFC 9002 and `Crypto::resend_unacked_early`.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
                 => {
-                    qtrace!("Resending Initial in response to an undecryptable packet");
-                    self.crypto.resend_unacked(PacketNumberSpace::Initial);
+                    self.crypto.resend_unacked_early();
                     self.resend_0rtt(now);
                 }
             (
@@ -3393,7 +3392,8 @@ impl Connection {
                     d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto
+                let duplicate = self
+                    .crypto
                     .streams_mut()
                     .inbound_frame(space, offset, data)?;
 
@@ -3413,14 +3413,9 @@ impl Connection {
                 {
                     self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
-                } else {
-                    // If we get a useless CRYPTO frame send outstanding CRYPTO frames and 0-RTT
-                    // data again.
-                    self.crypto.resend_unacked(space);
-                    if space == PacketNumberSpace::Initial {
-                        self.crypto.resend_unacked(PacketNumberSpace::Handshake);
-                        self.resend_0rtt(now);
-                    }
+                } else if duplicate && space == PacketNumberSpace::Initial {
+                    self.crypto.resend_unacked_early(); // See Section 6.2.3 of RFC 9002.
+                    self.resend_0rtt(now);
                 }
             }
             Frame::NewToken { token } => {
