@@ -617,6 +617,33 @@ mod tests {
         }
     }
 
+    // `max_entries` for RFC 9204 Appendix B's dynamic table capacity of 220.
+    const B_MAX_ENTRIES: u64 = 220 / ADDITIONAL_TABLE_ENTRY_SIZE as u64;
+
+    // RFC 9204 B.2's and B.4's header blocks. Checked at this layer because the encoder cannot
+    // populate the dynamic tables they reference, though it can emit the blocks themselves.
+    // B.1 needs no dynamic table, so `encoder::tests` covers it end to end instead.
+    #[test]
+    fn rfc9204_appendix_b_header_blocks() {
+        // B.2, stream 4: Required Insert Count = 2, Base = 0, then two Indexed Field Lines
+        // with Post-Base Index, absolute 0 (`:authority`) and 1 (`:path`).
+        let mut encoded_h = HeaderEncoder::new(0, false, B_MAX_ENTRIES);
+        encoded_h.encode_indexed_dynamic(0);
+        encoded_h.encode_indexed_dynamic(1);
+        encoded_h.encode_header_block_prefix();
+        assert_eq!(&&*encoded_h, &[0x03, 0x81, 0x10, 0x11]);
+
+        // B.4, stream 8: Required Insert Count = 4, Base = 4, then Indexed Field Line
+        // dynamic absolute 3 (`:authority`), Indexed Field Line static 1 (`:path=/`), and
+        // Indexed Field Line dynamic absolute 2 (`custom-key`).
+        let mut encoded_h = HeaderEncoder::new(4, false, B_MAX_ENTRIES);
+        encoded_h.encode_indexed_dynamic(3);
+        encoded_h.encode_indexed_static(1);
+        encoded_h.encode_indexed_dynamic(2);
+        encoded_h.encode_header_block_prefix();
+        assert_eq!(&&*encoded_h, &[0x05, 0x00, 0x80, 0xc1, 0x81]);
+    }
+
     #[test]
     fn encode_indexed_dynamic_post() {
         for (index, result, _, _) in INDEX_DYNAMIC_POST_TEST {
