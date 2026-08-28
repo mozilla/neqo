@@ -462,7 +462,8 @@ mod tests {
     use crate::{
         CloseType, Error, Http3StreamInfo, Http3StreamType, ReceiveOutput, RecvStream, Res, Stream,
         features::extended_connect::{
-            CloseReason, ExtendedConnectEvents, ExtendedConnectType, datagram_queue::DatagramOutcome,
+            CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+            datagram_queue::DatagramOutcome,
         },
         frames::WebTransportFrame,
     };

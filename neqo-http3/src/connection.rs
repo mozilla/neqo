@@ -2098,7 +2098,8 @@ impl Http3Connection {
         qdebug!("[{self}] Handle SETTINGS frame");
         let prereqs = TransportPrerequisites::new(
             conn.remote_datagram_size() > 0,
-            conn.peer_supports_reliable_stream_reset(),
+            conn.peer_supports_reliable_stream_reset()
+                || self.local_params.webtransport_assumes_peer_reliable_reset(),
         );
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
