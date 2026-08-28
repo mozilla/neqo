@@ -13,7 +13,37 @@ use std::{
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::DEFAULT_INITIAL_RTT;
 
-pub const DEFAULT_HARD_LIMIT: usize = 1000;
+/// Byte-budget memory backstop for the outgoing datagram queue.
+///
+/// A datagram *count* bound does not bound memory - a flood of tiny
+/// datagrams would fit comfortably under a count sized for average-sized
+/// ones, while a fixed count sized for a burst of large datagrams standing
+/// at a much smaller size is needless bufferbloat (mxinden: a 1000-datagram
+/// limit at ~1200B/datagram is ~1.2MB of pending, potentially outdated data).
+/// A byte budget scales with what is actually queued either way, and is a
+/// backstop only: `outgoingMaxAge` is what actually bounds delay in the
+/// common case, by shedding stale datagrams before this budget is ever
+/// reached.
+///
+/// 256KB is one [`DEFAULT_MAX_AGE_FLOOR`] (20ms) window at 100 Mbps, so
+/// anything deeper would expire before it could plausibly be sent; it is also
+/// ~213 datagrams at a 1200B MTU-sized payload, comfortably above the
+/// 64-datagram GSO-batch floor a single `sendmmsg` call can amortize.
+pub const DEFAULT_MAX_QUEUED_BYTES: usize = 256 * 1024;
+
+/// Conservative per-datagram bookkeeping overhead charged in addition to
+/// payload bytes when accounting against [`DEFAULT_MAX_QUEUED_BYTES`], so a
+/// flood of tiny datagrams is bounded by the same budget as large ones
+/// instead of needing a separate count cap. Approximates the queue's own
+/// per-entry cost (the [`QueuedDatagram`] struct plus its slot in the group's
+/// `VecDeque`/`BTreeMap`), not wire overhead.
+pub const PER_DATAGRAM_OVERHEAD: usize = 64;
+
+/// The byte charge against [`DEFAULT_MAX_QUEUED_BYTES`] for a datagram whose
+/// payload is `len` bytes: the payload itself plus [`PER_DATAGRAM_OVERHEAD`].
+const fn charge(len: usize) -> usize {
+    len + PER_DATAGRAM_OVERHEAD
+}
 
 /// Numerator/denominator of the multiplier applied to the path's minimum RTT
 /// by [`default_max_age`]. Kept as an integer ratio rather than a float so the
@@ -99,17 +129,19 @@ impl DatagramOutcome {
 
 /// The state of the queue after accepting a datagram, which is what the
 /// application needs in order to apply backpressure.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DatagramQueueOutcome {
     /// The queue was below the high water mark.
     Ok,
     /// The queue had space, but it was at or above the high water mark.
     AboveWatermark,
-    /// The queue was full, so the oldest datagram was dropped to make room.
-    /// If it was tracked, a [`DatagramOutcome::Dropped`] event is reported
-    /// for it separately; the tracking ID isn't carried here too, to avoid
-    /// reporting the same eviction twice.
-    Overflowed,
+    /// The byte budget was exceeded, so one or more of the lowest-priority
+    /// datagrams were dropped to make room - a single incoming datagram can
+    /// be larger than what any one eviction frees. Always non-empty. Each
+    /// entry is a dropped datagram's tracking ID, or `None` if it was sent
+    /// untracked; the caller reports a [`DatagramOutcome::Dropped`] event for
+    /// each tracked one separately, to avoid reporting the same eviction twice.
+    Overflowed { dropped: Vec<Option<DatagramId>> },
 }
 
 #[derive(Debug)]
@@ -180,8 +212,10 @@ impl GroupQueue {
         self.pop_front(self.lowest_order()?)
     }
 
-    /// Expire all datagrams older than `max_age`. Returns their IDs.
-    fn expire_old(&mut self, now: Instant, max_age: Duration) -> Vec<Option<DatagramId>> {
+    /// Expire all datagrams older than `max_age`. Returns the expired
+    /// datagrams themselves (not just their IDs), so the caller can also
+    /// account for their bytes.
+    fn expire_old(&mut self, now: Instant, max_age: Duration) -> Vec<QueuedDatagram> {
         let mut expired = Vec::new();
         let mut empty_orders = Vec::new();
         for (&order, queue) in &mut self.by_order {
@@ -191,7 +225,7 @@ impl GroupQueue {
                 }
                 let Some(d) = queue.pop_front() else { break };
                 self.count -= 1;
-                expired.push(d.id);
+                expired.push(d);
             }
             if queue.is_empty() {
                 empty_orders.push(order);
@@ -263,7 +297,10 @@ pub struct DatagramQueue {
     rr_next: u64,
     /// Total datagram count across all groups.
     total_count: usize,
-    hard_limit: usize,
+    /// Total charged bytes across all groups: the sum of each queued
+    /// datagram's payload length plus [`PER_DATAGRAM_OVERHEAD`].
+    total_bytes: usize,
+    max_queued_bytes: usize,
     high_water_mark: Option<usize>,
     /// The application's `outgoingMaxAge`, or `None` if it never set one, in
     /// which case [`default_max_age`] applies. Which of the two is in force is
@@ -279,20 +316,16 @@ impl DatagramQueue {
             groups: BTreeMap::new(),
             rr_next: 0,
             total_count: 0,
-            hard_limit: DEFAULT_HARD_LIMIT,
+            total_bytes: 0,
+            max_queued_bytes: DEFAULT_MAX_QUEUED_BYTES,
             high_water_mark: None,
             max_age: None,
         }
     }
 
-    /// Clamped to [`Self::hard_limit`]: a watermark above it would never be
-    /// reached, since the queue never grows past the hard limit, leaving
-    /// [`DatagramQueueOutcome::AboveWatermark`] permanently unreachable and
-    /// the caller with no warning before [`DatagramQueueOutcome::Overflowed`].
     pub fn set_high_water_mark(&mut self, mark: Option<usize>) {
-        let clamped = mark.map(|m| m.min(self.hard_limit));
-        qtrace!("Setting high water mark to {mark:?} (clamped: {clamped:?})");
-        self.high_water_mark = clamped;
+        qtrace!("Setting high water mark to {mark:?}");
+        self.high_water_mark = mark;
     }
 
     /// `None` means the application has not set `outgoingMaxAge`, in which case
@@ -337,7 +370,11 @@ impl DatagramQueue {
             !group.is_empty()
         });
         self.total_count -= all_expired.len();
-        all_expired
+        self.total_bytes -= all_expired
+            .iter()
+            .map(|d| charge(d.data.len()))
+            .sum::<usize>();
+        all_expired.into_iter().map(|d| d.id).collect()
     }
 
     /// The `(send_order, group_id)` key of the globally lowest-priority
@@ -374,9 +411,11 @@ impl DatagramQueue {
             (dgram, group.is_empty())
         };
         self.total_count -= 1;
+        self.total_bytes -= charge(dgram.data.len());
         qdebug!(
-            "Queue at hard limit ({}), dropping datagram {:?} from group {group_id}",
-            self.hard_limit,
+            "Queue at byte budget ({}/{}), dropping datagram {:?} from group {group_id}",
+            self.total_bytes,
+            self.max_queued_bytes,
             dgram.id,
         );
         if group_empty {
@@ -385,10 +424,9 @@ impl DatagramQueue {
         Some(dgram)
     }
 
-    /// Returns the outcome for the caller to apply backpressure with, and,
-    /// on [`DatagramQueueOutcome::Overflowed`], the tracking ID of the
-    /// evicted datagram (`None` if it was untracked) for the caller to
-    /// report a [`DatagramOutcome::Dropped`] event for separately.
+    /// Returns the outcome for the caller to apply backpressure with. On
+    /// [`DatagramQueueOutcome::Overflowed`] the caller reports a
+    /// [`DatagramOutcome::Dropped`] event for each tracked ID in `dropped`.
     ///
     /// `send_group_id` is a raw `u64`; `0` means no group (null sendGroup).
     /// Note: `0` is intentionally not a valid `SendGroupId`, but is used here
@@ -401,9 +439,9 @@ impl DatagramQueue {
         now: Instant,
         send_group_id: u64,
         send_order: i64,
-    ) -> (DatagramQueueOutcome, Option<DatagramId>) {
-        let at_hard_limit = self.total_count >= self.hard_limit;
-        if at_hard_limit
+    ) -> DatagramQueueOutcome {
+        let new_charge = charge(data.len());
+        if self.total_bytes + new_charge > self.max_queued_bytes
             && self
                 .lowest_priority_key()
                 .is_some_and(|victim| (send_order, send_group_id) < victim)
@@ -412,43 +450,55 @@ impl DatagramQueue {
             // queue, including everything already queued: drop it instead of
             // evicting something that outranks it.
             qdebug!(
-                "Queue at hard limit ({}), dropping incoming datagram {id:?} \
+                "Queue at byte budget ({}/{}), dropping incoming datagram {id:?} \
                  (group={send_group_id}, order={send_order}): lower priority than everything queued",
-                self.hard_limit
+                self.total_bytes,
+                self.max_queued_bytes
             );
-            return (DatagramQueueOutcome::Overflowed, id);
+            return DatagramQueueOutcome::Overflowed { dropped: vec![id] };
         }
-        // `evict_lowest_priority` returns `None` rather than panicking when
-        // there is nothing to evict, so this degrades gracefully even if
-        // `hard_limit` were ever 0 - see `hard_limit_zero_does_not_panic`.
-        // It already logs the eviction, so there is no separate qdebug here.
-        let evicted = at_hard_limit
-            .then(|| self.evict_lowest_priority())
-            .flatten();
+        // A single incoming datagram can be larger than what any one eviction
+        // frees, so evict until there is room rather than at most once. If
+        // eviction empties the queue and the datagram alone still exceeds the
+        // budget, let it in anyway: refusing it would need a new error path,
+        // and the next enqueue evicts it immediately in turn.
+        let mut dropped = Vec::new();
+        while self.total_bytes + new_charge > self.max_queued_bytes {
+            let Some(dgram) = self.evict_lowest_priority() else {
+                break;
+            };
+            dropped.push(dgram.id);
+        }
 
         self.groups
             .entry(send_group_id)
             .or_default()
             .push(send_order, QueuedDatagram::new(data, id, now));
         self.total_count += 1;
+        self.total_bytes += new_charge;
 
         let below_watermark = self
             .high_water_mark
             .is_none_or(|mark| self.total_count < mark);
         // An overflowing queue is full, so backpressure applies regardless of where
         // the high water mark sits.
-        let (outcome, dropped) = match (evicted, below_watermark) {
-            (Some(oldest), _) => (DatagramQueueOutcome::Overflowed, oldest.id),
-            (None, true) => (DatagramQueueOutcome::Ok, None),
-            (None, false) => (DatagramQueueOutcome::AboveWatermark, None),
+        let outcome = if dropped.is_empty() {
+            if below_watermark {
+                DatagramQueueOutcome::Ok
+            } else {
+                DatagramQueueOutcome::AboveWatermark
+            }
+        } else {
+            DatagramQueueOutcome::Overflowed { dropped }
         };
         qtrace!(
             "Enqueued datagram {id:?} (group={send_group_id}, order={send_order}), \
-             total={}, outcome: {outcome:?}",
-            self.total_count
+             total={} ({} bytes), outcome: {outcome:?}",
+            self.total_count,
+            self.total_bytes,
         );
 
-        (outcome, dropped)
+        outcome
     }
 
     /// Drain up to `budget` datagrams, expiring old ones first and returning
@@ -530,6 +580,7 @@ impl DatagramQueue {
             self.rr_next = group_id.wrapping_add(1);
         }
         self.total_count -= to_send.len();
+        self.total_bytes -= to_send.iter().map(|d| charge(d.data.len())).sum::<usize>();
 
         (expired, to_send)
     }
@@ -609,7 +660,7 @@ mod tests {
         let t = now();
 
         let outcome = q.enqueue(vec![1, 2, 3], Some(1), t, 0, 0);
-        assert_eq!(outcome, (DatagramQueueOutcome::Ok, None));
+        assert_eq!(outcome, DatagramQueueOutcome::Ok);
         assert_eq!(q.len(), 1);
     }
 
@@ -621,33 +672,17 @@ mod tests {
 
         assert_eq!(
             q.enqueue(vec![1], Some(1), t, 0, 0),
-            (DatagramQueueOutcome::Ok, None)
+            DatagramQueueOutcome::Ok
         );
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, 0, 0),
-            (DatagramQueueOutcome::AboveWatermark, None)
+            DatagramQueueOutcome::AboveWatermark
         );
         assert_eq!(
             q.enqueue(vec![3], Some(3), t, 0, 0),
-            (DatagramQueueOutcome::AboveWatermark, None)
+            DatagramQueueOutcome::AboveWatermark
         );
         assert_eq!(q.len(), 3);
-    }
-
-    #[test]
-    fn high_water_mark_above_hard_limit_is_clamped() {
-        let mut queue = DatagramQueue::new();
-        queue.hard_limit = 3;
-        queue.set_high_water_mark(Some(10));
-        let t = now();
-
-        queue.enqueue(vec![1], Some(1), t, 0, 0);
-        queue.enqueue(vec![2], Some(2), t, 0, 0);
-        assert_eq!(
-            queue.enqueue(vec![3], Some(3), t, 0, 0),
-            (DatagramQueueOutcome::AboveWatermark, None),
-            "a watermark above hard_limit must not be silently unreachable"
-        );
     }
 
     #[test]
@@ -670,33 +705,37 @@ mod tests {
     fn hard_limit_untracked_datagram_drops_silently() {
         let mut queue = DatagramQueue::new();
         let t = now();
-        queue.hard_limit = 1;
+        queue.max_queued_bytes = charge(1); // room for exactly one 1-byte datagram
 
         queue.enqueue(vec![1], None, t, 0, 0);
 
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t, 0, 0),
-            (DatagramQueueOutcome::Overflowed, None),
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![None]
+            },
             "an untracked datagram must not be reported with an ID"
         );
         assert_eq!(queue.len(), 1);
     }
 
     #[test]
-    fn hard_limit_zero_does_not_panic() {
+    fn byte_budget_zero_does_not_panic() {
         let mut queue = DatagramQueue::new();
-        queue.hard_limit = 0;
+        queue.max_queued_bytes = 0;
         let t = now();
 
         // Nothing queued yet to evict, so the first datagram is accepted
         // for free rather than panicking on an empty evict_lowest_priority.
         assert_eq!(
             queue.enqueue(vec![1], Some(1), t, 0, 0),
-            (DatagramQueueOutcome::Ok, None)
+            DatagramQueueOutcome::Ok
         );
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t, 0, 0),
-            (DatagramQueueOutcome::Overflowed, Some(1))
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![Some(1)]
+            }
         );
     }
 
@@ -833,18 +872,18 @@ mod tests {
 
         assert_eq!(
             q.enqueue(vec![1], Some(1), t, 0, 0),
-            (DatagramQueueOutcome::Ok, None)
+            DatagramQueueOutcome::Ok
         );
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, 0, 0),
-            (DatagramQueueOutcome::AboveWatermark, None)
+            DatagramQueueOutcome::AboveWatermark
         );
 
         drop(q.drain(t, usize::MAX, NO_DEFAULT));
 
         assert_eq!(
             q.enqueue(vec![3], Some(3), t, 0, 0),
-            (DatagramQueueOutcome::Ok, None),
+            DatagramQueueOutcome::Ok,
             "draining the queue must put it back below the high water mark"
         );
     }
@@ -1170,12 +1209,12 @@ mod tests {
         assert!(q.is_empty());
     }
 
-    // ── Hard-limit eviction ────────────────────────────────────────────────────
+    // ── Byte-budget eviction ───────────────────────────────────────────────────
 
     #[test]
-    fn hard_limit_evicts_lowest_priority() {
+    fn byte_budget_evicts_lowest_priority() {
         let mut q = DatagramQueue::new();
-        q.hard_limit = 3;
+        q.max_queued_bytes = 3 * charge(2); // room for exactly three 2-byte datagrams
 
         // Fill with order-0 datagrams.
         let t = now();
@@ -1187,7 +1226,9 @@ mod tests {
         // Adding a higher-priority datagram should evict the lowest-priority one (id=1, order 0).
         assert_eq!(
             q.enqueue(vec![0, 4], Some(4), t, 0, 10),
-            (DatagramQueueOutcome::Overflowed, Some(1))
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![Some(1)]
+            }
         );
         assert_eq!(q.len(), 3);
 
@@ -1197,10 +1238,10 @@ mod tests {
     }
 
     #[test]
-    fn hard_limit_evicts_across_groups() {
+    fn byte_budget_evicts_across_groups() {
         let mut q = DatagramQueue::new();
         let t = now();
-        q.hard_limit = 2;
+        q.max_queued_bytes = 2 * charge(2); // room for exactly two 2-byte datagrams
 
         // Group 0 has order 5, group 1 has order 1 (lower priority).
         q.enqueue(vec![0, 1], Some(1), t, 0, 5);
@@ -1209,15 +1250,17 @@ mod tests {
         // Adding a third datagram evicts the globally lowest-priority one (id=2, order 1).
         assert_eq!(
             q.enqueue(vec![0, 3], Some(3), t, 0, 5),
-            (DatagramQueueOutcome::Overflowed, Some(2))
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![Some(2)]
+            }
         );
         assert_eq!(q.len(), 2);
     }
 
     #[test]
-    fn hard_limit_rejects_lower_priority_newcomer() {
+    fn byte_budget_rejects_lower_priority_newcomer() {
         let mut q = DatagramQueue::new();
-        q.hard_limit = 3;
+        q.max_queued_bytes = 3 * charge(2); // room for exactly three 2-byte datagrams
 
         // Fill with high-priority (order 10) datagrams.
         let t = now();
@@ -1230,7 +1273,9 @@ mod tests {
         // datagrams already queued: it is the one that gets dropped.
         assert_eq!(
             q.enqueue(vec![0, 4], Some(4), t, 0, 0),
-            (DatagramQueueOutcome::Overflowed, Some(4))
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![Some(4)]
+            }
         );
         assert_eq!(q.len(), 3);
         assert_eq!(
@@ -1241,10 +1286,10 @@ mod tests {
     }
 
     #[test]
-    fn hard_limit_rejects_lower_priority_newcomer_across_groups() {
+    fn byte_budget_rejects_lower_priority_newcomer_across_groups() {
         let mut q = DatagramQueue::new();
         let t = now();
-        q.hard_limit = 2;
+        q.max_queued_bytes = 2 * charge(2); // room for exactly two 2-byte datagrams
 
         // Group 0 has order 5, group 1 has order 1 (lower priority already queued).
         q.enqueue(vec![0, 1], Some(1), t, 0, 5);
@@ -1254,17 +1299,46 @@ mod tests {
         // (group 1, order 1) must be dropped itself, not evict group 1's datagram.
         assert_eq!(
             q.enqueue(vec![0, 3], Some(3), t, 2, 0),
-            (DatagramQueueOutcome::Overflowed, Some(3))
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![Some(3)]
+            }
         );
         assert_eq!(q.len(), 2);
     }
 
     #[test]
-    fn hard_limit_same_count() {
+    fn byte_budget_evicts_multiple_datagrams_for_one_large_one() {
+        // A single incoming datagram can be larger than what any one eviction
+        // frees, so eviction must loop rather than run at most once.
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.max_queued_bytes = 4 * charge(1); // room for exactly four 1-byte datagrams
+
+        q.enqueue(vec![1], Some(1), t, 0, 0);
+        q.enqueue(vec![2], Some(2), t, 0, 0);
+        q.enqueue(vec![3], Some(3), t, 0, 0);
+        q.enqueue(vec![4], Some(4), t, 0, 0);
+        assert_eq!(q.len(), 4);
+
+        // A 67-byte datagram (charge 131) needs to evict three of the
+        // existing 1-byte ones (each freeing only 65) before it fits: after
+        // evicting two, 130 bytes are free, and 130 + 131 still exceeds the
+        // 260-byte budget.
+        assert_eq!(
+            q.enqueue(vec![9; 67], Some(5), t, 0, 0),
+            DatagramQueueOutcome::Overflowed {
+                dropped: vec![Some(1), Some(2), Some(3)]
+            }
+        );
+        assert_eq!(q.len(), 2);
+    }
+
+    #[test]
+    fn byte_budget_same_count() {
         // Backwards-compatibility: with one group and equal priorities, behaves like before.
         let mut q = DatagramQueue::new();
         let t = now();
-        q.hard_limit = 3;
+        q.max_queued_bytes = 3 * charge(1); // room for exactly three 1-byte datagrams
         q.enqueue(vec![1], Some(1), t, 0, 0);
         q.enqueue(vec![2], Some(2), t, 0, 0);
         q.enqueue(vec![3], Some(3), t, 0, 0);

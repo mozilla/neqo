@@ -14,7 +14,6 @@ use crate::{
     Http3ClientEvent, Http3ServerEvent, WebTransportEvent,
     features::extended_connect::{
         DatagramOutcome, DatagramQueueOutcome,
-        datagram_queue::DEFAULT_HARD_LIMIT,
         tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
     },
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
@@ -107,45 +106,56 @@ fn datagram_high_water_mark_reported_via_send_datagram() {
 
 #[test]
 fn datagram_hard_limit_overflow_reports_outcome() {
+    // Drive the queue until the byte budget is actually hit, rather than
+    // pre-computing an iteration count: the wire-encoded datagram (session-id
+    // varint prefix + protocol prefix + payload) is larger than DGRAM alone,
+    // so the exact count depends on encoding details this test shouldn't need
+    // to know.
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
-    for id in 0..limit {
+    for id in 0.. {
         let outcome = wt
             .client
             .webtransport_send_datagram(session_id, DGRAM, Some(id), now(), 0, 0)
             .unwrap();
-        assert_eq!(outcome, DatagramQueueOutcome::Ok);
+        match outcome {
+            DatagramQueueOutcome::Ok => {}
+            DatagramQueueOutcome::Overflowed { dropped } => {
+                assert_eq!(
+                    dropped,
+                    vec![Some(0)],
+                    "the oldest (lowest-priority) datagram is evicted first"
+                );
+                // The synchronous `Overflowed` return value carries the
+                // evicted id too, but a consumer reconciling ids purely
+                // through the event stream must also see it there.
+                let dropped_event = |e| {
+                    matches!(
+                        e,
+                        Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                            session_id: sid,
+                            outcome: DatagramOutcome::Dropped(0),
+                        }) if sid == session_id
+                    )
+                };
+                assert!(wt.client.events().any(dropped_event));
+                assert_eq!(
+                    wt.client
+                        .webtransport_session_stats(session_id)
+                        .unwrap()
+                        .datagrams_dropped_outgoing,
+                    1
+                );
+                return;
+            }
+            other @ DatagramQueueOutcome::AboveWatermark => {
+                panic!("unexpected outcome before the byte budget is hit: {other:?}")
+            }
+        }
+        assert!(id < 1_000_000, "byte budget should have been hit by now");
     }
-
-    let outcome = wt
-        .client
-        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now(), 0, 0)
-        .unwrap();
-    assert_eq!(outcome, DatagramQueueOutcome::Overflowed);
-
-    // The synchronous `Overflowed` return value no longer carries the
-    // evicted id (to avoid reporting the same eviction twice): a consumer
-    // reconciling ids must get it from this event instead.
-    let dropped_event = |e| {
-        matches!(
-            e,
-            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
-                session_id: sid,
-                outcome: DatagramOutcome::Dropped(0),
-            }) if sid == session_id
-        )
-    };
-    assert!(wt.client.events().any(dropped_event));
-    assert_eq!(
-        wt.client
-            .webtransport_session_stats(session_id)
-            .unwrap()
-            .datagrams_dropped_outgoing,
-        1
-    );
 }
 
 /// `datagrams_dropped_outgoing` must count every eviction, tracked or not:
@@ -157,15 +167,16 @@ fn datagram_hard_limit_overflow_counts_untracked_drops() {
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
 
-    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
-    for _ in 0..limit {
-        wt.client
+    for id in 0.. {
+        let outcome = wt
+            .client
             .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
             .unwrap();
+        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+            break;
+        }
+        assert!(id < 1_000_000, "byte budget should have been hit by now");
     }
-    wt.client
-        .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
-        .unwrap();
 
     assert_eq!(
         wt.client

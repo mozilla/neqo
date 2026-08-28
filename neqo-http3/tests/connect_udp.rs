@@ -801,13 +801,13 @@ fn connect_udp_datagram_outcome_uses_connect_udp_event() {
 fn connect_udp_server_send_datagram_reports_backpressure() {
     let (_client, _proxy, _session_id, proxy_session) = establish_new_session();
 
-    // `DEFAULT_HARD_LIMIT` (1000) is crate-private, so drive the queue to its
-    // hard limit directly rather than importing it.
-    for _ in 0..1000 {
-        proxy_session.send_datagram(PING, None, now()).unwrap();
+    // Drive the queue until the byte budget is actually hit, rather than
+    // pre-computing an iteration count.
+    for i in 0.. {
+        let outcome = proxy_session.send_datagram(PING, None, now()).unwrap();
+        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+            return;
+        }
+        assert!(i < 1_000_000, "byte budget should have been hit by now");
     }
-    assert_eq!(
-        proxy_session.send_datagram(PING, None, now()),
-        Ok(DatagramQueueOutcome::Overflowed)
-    );
 }
