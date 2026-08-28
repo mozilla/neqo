@@ -144,6 +144,24 @@ pub enum DatagramQueueOutcome {
     Overflowed { dropped: Vec<Option<DatagramId>> },
 }
 
+/// A snapshot of this session's outgoing-datagram queue state, meant for
+/// driving a content-process credit grant (see [`DatagramQueue::capacity`]).
+///
+/// This deliberately does not come from
+/// [`Connection::remaining_datagram_queue_capacity`][neqo_transport::Connection::remaining_datagram_queue_capacity]:
+/// that reflects the small, constantly-refilled 10-slot transport FIFO,
+/// which tracks nothing meaningful about the connection's real send rate. A
+/// grant meant to be cwnd-shaped should track *this* queue instead - its
+/// byte budget is drained by [`DatagramQueue::drain`] only as fast as the
+/// transport can actually take datagrams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DatagramQueueCapacity {
+    /// Bytes free before [`DEFAULT_MAX_QUEUED_BYTES`] is reached.
+    pub remaining_bytes: usize,
+    /// Datagrams currently queued here, awaiting a drain.
+    pub queued_datagrams: usize,
+}
+
 #[derive(Debug)]
 pub struct QueuedDatagram {
     pub data: Vec<u8>,
@@ -596,16 +614,16 @@ impl DatagramQueue {
             .collect()
     }
 
-    /// The instant at which the oldest queued datagram crosses `max_age`, if
-    /// any datagram is queued. The caller uses this to schedule a wakeup so
-    /// that expiry is not left to whichever unrelated timer happens to fire
-    /// next (see `Http3Connection::next_datagram_expiry`).
+    /// The instant at which the oldest queued datagram crosses the
+    /// effective max-age, if any datagram is queued. The caller uses this to
+    /// schedule a wakeup so that expiry is not left to whichever unrelated
+    /// timer happens to fire next (see `Http3Connection::next_datagram_expiry`).
     ///
-    /// `max_age` is applied uniformly across the whole queue at expiry time,
-    /// so the next datagram to expire is always whichever one has been
-    /// queued the longest - not necessarily the next one `drain` would send,
-    /// since scheduling is priority-, not age-, ordered. `None` if the queue
-    /// is empty.
+    /// `max_age` is applied uniformly across the whole queue at expiry time
+    /// (see [`Self::expire_old_datagrams`]), so the next datagram to expire
+    /// is always whichever one has been queued the longest - not
+    /// necessarily the next one [`Self::drain`] would send, since scheduling
+    /// is priority-, not age-, ordered. `None` if the queue is empty.
     #[must_use]
     pub fn next_expiry(&self, default_max_age: Duration) -> Option<Instant> {
         let max_age = self.max_age.unwrap_or(default_max_age);
@@ -614,6 +632,15 @@ impl DatagramQueue {
             .filter_map(GroupQueue::oldest_timestamp)
             .min()?
             .checked_add(max_age)
+    }
+
+    /// See [`DatagramQueueCapacity`].
+    #[must_use]
+    pub const fn capacity(&self) -> DatagramQueueCapacity {
+        DatagramQueueCapacity {
+            remaining_bytes: self.max_queued_bytes.saturating_sub(self.total_bytes),
+            queued_datagrams: self.total_count,
+        }
     }
     #[cfg(test)]
     #[must_use]
@@ -662,6 +689,40 @@ mod tests {
         let outcome = q.enqueue(vec![1, 2, 3], Some(1), t, 0, 0);
         assert_eq!(outcome, DatagramQueueOutcome::Ok);
         assert_eq!(q.len(), 1);
+    }
+
+    #[test]
+    fn capacity_tracks_bytes_and_count() {
+        let mut q = DatagramQueue::new();
+        q.max_queued_bytes = 3 * charge(2); // room for exactly three 2-byte datagrams
+        let t = now();
+
+        assert_eq!(
+            q.capacity(),
+            DatagramQueueCapacity {
+                remaining_bytes: 3 * charge(2),
+                queued_datagrams: 0,
+            }
+        );
+
+        q.enqueue(vec![0, 1], Some(1), t, 0, 0);
+        assert_eq!(
+            q.capacity(),
+            DatagramQueueCapacity {
+                remaining_bytes: 2 * charge(2),
+                queued_datagrams: 1,
+            }
+        );
+
+        // Draining frees capacity back up.
+        q.drain(t, usize::MAX, NO_DEFAULT);
+        assert_eq!(
+            q.capacity(),
+            DatagramQueueCapacity {
+                remaining_bytes: 3 * charge(2),
+                queued_datagrams: 0,
+            }
+        );
     }
 
     #[test]

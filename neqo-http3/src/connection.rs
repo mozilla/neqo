@@ -1921,6 +1921,19 @@ impl Http3Connection {
     /// # Errors
     /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
     /// session.
+    pub fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::DatagramQueueCapacity> {
+        Ok(self
+            .webtransport_session(session_id)?
+            .borrow()
+            .datagram_queue_capacity())
+    }
+
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
     pub fn webtransport_set_datagram_max_age(
         &self,
         session_id: StreamId,

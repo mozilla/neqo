@@ -76,6 +76,18 @@ pub trait ClientSession {
         high_water_mark: Option<usize>,
     ) -> Res<()>;
 
+    /// A snapshot of this session's outgoing-datagram queue state, for
+    /// driving a content-process credit grant. See
+    /// [`extended_connect::DatagramQueueCapacity`].
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::DatagramQueueCapacity>;
+
     /// [`Duration::MAX`] means no limit, as does the default.
     ///
     /// # Errors
@@ -295,6 +307,14 @@ impl ClientSession for Http3Client {
     ) -> Res<()> {
         self.handler()
             .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<extended_connect::DatagramQueueCapacity> {
+        self.handler()
+            .webtransport_datagram_queue_capacity(session_id)
     }
 
     fn webtransport_set_datagram_max_age(
