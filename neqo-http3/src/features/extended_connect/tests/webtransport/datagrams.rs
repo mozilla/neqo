@@ -104,6 +104,55 @@ fn datagram_high_water_mark_reported_via_send_datagram() {
     assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
 }
 
+/// `SessionStats::datagrams_sent_outgoing` must count a datagram sent
+/// without a tracking id -- an aggregate delta covering untracked sends is
+/// the whole point of counting it here instead of only via per-datagram
+/// `DatagramOutcome` events.
+#[test]
+fn untracked_datagram_sent_is_counted_in_aggregate_stats() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    assert_eq!(
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
+            .unwrap(),
+        DatagramQueueOutcome::Ok
+    );
+    wt.exchange_packets();
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.datagrams_sent_outgoing, 1);
+    assert_eq!(stats.datagrams_dropped_outgoing, 0);
+}
+
+/// `SessionStats::datagrams_dropped_outgoing` must count a datagram evicted
+/// from the queue to make room under the byte budget, even without a
+/// tracking id -- mirrors `datagram_hard_limit_overflow_reports_outcome`,
+/// but for the untracked case that test's per-datagram assertion can't
+/// cover.
+#[test]
+fn untracked_datagram_eviction_is_counted_in_aggregate_stats() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    for sent in 0.. {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, None, now(), 0, 0)
+            .unwrap();
+        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+            break;
+        }
+        assert!(sent < 1_000_000, "byte budget should have been hit by now");
+    }
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.datagrams_dropped_outgoing, 1);
+}
+
 /// [`Http3Client::webtransport_datagram_queue_capacity`] must reflect the
 /// http3-level queue (which a content-process credit grant should track),
 /// not the small transport-level FIFO.

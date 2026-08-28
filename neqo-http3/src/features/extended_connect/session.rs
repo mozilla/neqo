@@ -498,6 +498,7 @@ impl Session {
                 self.report_datagram_outcome(DatagramOutcome::Dropped(*id));
             }
         }
+
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
         Ok(outcome)
     }
@@ -581,16 +582,28 @@ impl Session {
             // A datagram the QUIC layer refuses is gone: `drain` already removed it
             // from the queue. Report it so the application isn't left waiting, and
             // keep going, since a later datagram may still be small enough to fit.
-            let outcome = match conn.send_datagram(dgram.data, tracking) {
-                Ok(()) => DatagramOutcome::Sent,
+            let sent = match conn.send_datagram(dgram.data, tracking) {
+                Ok(()) => true,
                 Err(e) => {
                     qdebug!("[{self}] QUIC layer refused datagram {:?}: {e}", dgram.id);
-                    self.count_dropped_outgoing(1);
-                    DatagramOutcome::Dropped
+                    false
                 }
             };
+            // Counted regardless of tracking, unlike the outcomes pushed
+            // below: these feed an aggregate delta, not a per-datagram event.
+            if let Some(stats) = self.protocol.stats_mut() {
+                if sent {
+                    stats.datagrams_sent_outgoing += 1;
+                } else {
+                    stats.datagrams_dropped_outgoing += 1;
+                }
+            }
             if let Some(id) = dgram.id {
-                self.report_datagram_outcome(outcome(id));
+                self.report_datagram_outcome(if sent {
+                    DatagramOutcome::Sent(id)
+                } else {
+                    DatagramOutcome::Dropped(id)
+                });
             }
         }
     }

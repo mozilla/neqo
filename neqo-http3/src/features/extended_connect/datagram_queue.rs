@@ -12,7 +12,6 @@ use std::{
 
 use neqo_common::{qdebug, qtrace};
 use neqo_transport::DEFAULT_INITIAL_RTT;
-
 /// Byte-budget memory backstop for the outgoing datagram queue.
 ///
 /// A datagram *count* bound does not bound memory - a flood of tiny
@@ -758,6 +757,7 @@ mod tests {
     }
 
     #[test]
+
     fn drain_basic() {
         let mut q = DatagramQueue::new();
         let t = now();

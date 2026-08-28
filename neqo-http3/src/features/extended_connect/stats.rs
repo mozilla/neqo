@@ -22,14 +22,21 @@
     clippy::module_name_repetitions,
     reason = "stats::SessionStats is clearer than stats::Session"
 )]
+#[expect(
+    clippy::struct_field_names,
+    reason = "the shared `datagrams_` prefix matches the WebIDL getStats() \
+              field names this struct feeds"
+)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionStats {
     /// Outgoing datagrams that expired before being sent.
     pub datagrams_expired_outgoing: u64,
-    /// Outgoing datagrams discarded without being sent and without expiring:
-    /// evicted at the queue's hard limit, refused by the QUIC layer, or
-    /// still queued when the session closed. Counts tracked and untracked
-    /// datagrams alike, unlike the `DatagramOutcome::Dropped` event, which
-    /// only fires for tracked ones.
+    /// Outgoing datagrams successfully handed to the QUIC layer.
+    pub datagrams_sent_outgoing: u64,
+    /// Outgoing datagrams dropped: evicted from the queue to make room under
+    /// its byte budget, or refused by the QUIC layer at handoff. Counted
+    /// regardless of whether the datagram was sent with a tracking id, since
+    /// this is meant to feed an aggregate delta rather than per-datagram
+    /// outcomes.
     pub datagrams_dropped_outgoing: u64,
 }
