@@ -772,3 +772,65 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
         );
     }
 }
+
+/// Two sessions on the same connection must share the transport's 10-slot
+/// datagram capacity fairly - one datagram at a time, round-robin - rather
+/// than one session draining it dry before the other gets a turn.
+#[test]
+fn datagram_queues_share_transport_capacity_fairly_across_sessions() {
+    // More than the transport's 10-slot queue can hold from either session
+    // alone, so a fair split requires interleaving.
+    const PER_SESSION: u8 = 8;
+
+    let mut wt = WtTest::new();
+    let session_a = wt.create_wt_session();
+    let session_b = wt.create_wt_session();
+    let id_a = session_a.stream_id();
+    let id_b = session_b.stream_id();
+
+    for i in 0..PER_SESSION {
+        wt.client
+            .webtransport_send_datagram(id_a, &[0, i], Some(u64::from(i)), now(), 0, 0)
+            .unwrap();
+        wt.client
+            .webtransport_send_datagram(id_b, &[0, i], Some(u64::from(i) + 1000), now(), 0, 0)
+            .unwrap();
+    }
+
+    // A single processing step - not a full exchange, which would eventually
+    // deliver everything regardless of fairness - is what exercises exactly
+    // one process_all_datagram_queues round against the transport's
+    // still-fresh 10-slot capacity.
+    wt.client.process_output(now());
+
+    let events: Vec<_> = wt.client.events().collect();
+    let sent_count = |session_id| {
+        events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                        session_id: sid,
+                        outcome: DatagramOutcome::Sent(_),
+                    }) if *sid == session_id
+                )
+            })
+            .count()
+    };
+
+    let sent_a = sent_count(id_a);
+    let sent_b = sent_count(id_b);
+    assert!(
+        sent_a > 0,
+        "session A must get at least one datagram through"
+    );
+    assert!(
+        sent_b > 0,
+        "session B must get at least one datagram through"
+    );
+    assert!(
+        sent_a.abs_diff(sent_b) <= 1,
+        "capacity must split ~evenly across sessions in one round, got A={sent_a} B={sent_b}"
+    );
+}

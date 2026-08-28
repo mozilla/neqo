@@ -556,10 +556,15 @@ impl Session {
 
     /// Drain the per-session datagram queue and hand datagrams to the QUIC layer.
     ///
-    /// Only as many datagrams as the QUIC layer can currently hold are handed
-    /// over; the rest stay queued for a later call, so that a burst is paced
-    /// against what the connection can send instead of overflowing the QUIC
-    /// layer's fixed-size queue. See [`DatagramQueue::drain`].
+    /// `budget` bounds how many datagrams are handed over this call; the rest
+    /// stay queued for a later call, so that a burst is paced against what
+    /// the connection can send instead of overflowing the QUIC layer's
+    /// fixed-size queue. See [`DatagramQueue::drain`]. The caller - which may
+    /// be sharing the connection's transport-level capacity fairly across
+    /// several sessions - is responsible for choosing `budget`; this does
+    /// not clamp it against
+    /// [`Connection::remaining_datagram_queue_capacity`][neqo_transport::Connection::remaining_datagram_queue_capacity]
+    /// itself.
     ///
     /// A no-op once the session is no longer `Active`: nothing enqueues new
     /// datagrams past that point, and any already queued are dropped and
@@ -570,16 +575,19 @@ impl Session {
     /// `connect_type`, rather than returned to the caller, so a connect-udp
     /// session's outcomes can't be mis-tagged as `WebTransport` by a caller
     /// that only knows about `WebTransport`.
-    pub(crate) fn process_datagram_queue(&mut self, conn: &mut Connection, now: Instant) {
+    pub(crate) fn process_datagram_queue(
+        &mut self,
+        conn: &mut Connection,
+        now: Instant,
+        budget: usize,
+    ) {
         if self.state != State::Active {
             return;
         }
 
-        let (expired, to_send) = self.datagram_queue.drain(
-            now,
-            conn.remaining_datagram_queue_capacity(),
-            default_max_age(conn.stats().min_rtt),
-        );
+        let (expired, to_send) =
+            self.datagram_queue
+                .drain(now, budget, default_max_age(conn.stats().min_rtt));
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
