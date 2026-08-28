@@ -17,8 +17,14 @@ const HTTP3_DATAGRAM_DEFAULT: bool = true;
 const WT_INITIAL_MAX_DATA_DEFAULT: Option<u64> = None;
 const WT_INITIAL_MAX_STREAMS_UNI_DEFAULT: Option<u64> = None;
 const WT_INITIAL_MAX_STREAMS_BIDI_DEFAULT: Option<u64> = None;
+const WEBTRANSPORT_ASSUME_PEER_RELIABLE_RESET_DEFAULT: bool = false;
 
 #[derive(Debug, Clone)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each flag is an independent, unrelated knob; a builder pattern already avoids \
+              boolean-argument confusion at call sites"
+)]
 pub struct Http3Parameters {
     conn_params: ConnectionParameters,
     qpack_settings: qpack::Settings,
@@ -38,6 +44,8 @@ pub struct Http3Parameters {
     /// HTTP Extended CONNECT
     connect: bool,
     http3_datagram: bool,
+    /// See [`Self::webtransport_assume_peer_reliable_reset_for_testing`].
+    webtransport_assume_peer_reliable_reset: bool,
 }
 
 impl Default for Http3Parameters {
@@ -51,6 +59,8 @@ impl Default for Http3Parameters {
             wt_initial_max_streams_bidi: WT_INITIAL_MAX_STREAMS_BIDI_DEFAULT,
             connect: CONNECT_DEFAULT,
             http3_datagram: HTTP3_DATAGRAM_DEFAULT,
+            webtransport_assume_peer_reliable_reset:
+                WEBTRANSPORT_ASSUME_PEER_RELIABLE_RESET_DEFAULT,
         }
     }
 }
@@ -157,6 +167,34 @@ impl Http3Parameters {
             return false;
         }
         true
+    }
+
+    /// Skip checking whether the peer actually advertised reliable stream
+    /// reset support when negotiating WebTransport, treating it as present
+    /// regardless.
+    ///
+    /// This exists *only* for testing against QUIC server implementations
+    /// that do not yet implement `reset_stream_at` (e.g. aioquic, as used by
+    /// WPT's HTTP/3 test server as of this writing) but are otherwise usable
+    /// for exercising WebTransport features - such as datagrams - that do
+    /// not themselves depend on reliable stream reset. Do not enable this
+    /// against a production peer: WebTransport streams genuinely need
+    /// reliable reset to deliver headers after a reset, and a peer that
+    /// doesn't support it will behave incorrectly once actually used for
+    /// that.
+    #[must_use]
+    pub const fn webtransport_assume_peer_reliable_reset_for_testing(
+        mut self,
+        assume: bool,
+    ) -> Self {
+        self.webtransport_assume_peer_reliable_reset = assume;
+        self
+    }
+
+    /// See [`Self::webtransport_assume_peer_reliable_reset_for_testing`].
+    #[must_use]
+    pub const fn webtransport_assumes_peer_reliable_reset(&self) -> bool {
+        self.webtransport_assume_peer_reliable_reset
     }
 
     /// Set the per-session initial max data advertised to the peer. Pass
@@ -309,6 +347,29 @@ mod tests {
             !Http3Parameters::default()
                 .connection_parameters(ConnectionParameters::default().reliable_stream_reset(false))
                 .webtransport(true)
+                .webtransport_enabled()
+        );
+    }
+
+    #[test]
+    fn webtransport_assume_peer_reliable_reset_for_testing() {
+        assert!(
+            !Http3Parameters::default().webtransport_assumes_peer_reliable_reset(),
+            "off by default, so production behavior is unaffected"
+        );
+        assert!(
+            Http3Parameters::default()
+                .webtransport_assume_peer_reliable_reset_for_testing(true)
+                .webtransport_assumes_peer_reliable_reset()
+        );
+        // This is purely a peer-side override: it must not affect the local
+        // prerequisite check, which is unrelated (see
+        // webtransport_requires_datagrams_and_reliable_reset above).
+        assert!(
+            !Http3Parameters::default()
+                .connection_parameters(ConnectionParameters::default().reliable_stream_reset(false))
+                .webtransport(true)
+                .webtransport_assume_peer_reliable_reset_for_testing(true)
                 .webtransport_enabled()
         );
     }

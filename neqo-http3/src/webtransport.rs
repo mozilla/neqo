@@ -1047,12 +1047,15 @@ impl ServerSession {
     /// Returns error if the session is no longer active.
     pub fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
-        self.stream_handler.handler.borrow_mut().webtransport_set_datagram_max_age(
-            &mut self.stream_handler.conn.borrow_mut(),
-            session_id,
-            max_age,
-            now,
-        )
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .webtransport_set_datagram_max_age(
+                &mut self.stream_handler.conn.borrow_mut(),
+                session_id,
+                max_age,
+                now,
+            )
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.

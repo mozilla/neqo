@@ -550,7 +550,9 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     for _ in 0..15 {
         wt_session.send_datagram(DGRAM, None, now(), 0, 0).unwrap();
     }
-    wt_session.send_datagram(DGRAM, Some(77u64), now(), 0, 0).unwrap();
+    wt_session
+        .send_datagram(DGRAM, Some(77u64), now(), 0, 0)
+        .unwrap();
 
     let t0 = now();
     wt.server.process_output(t0);
