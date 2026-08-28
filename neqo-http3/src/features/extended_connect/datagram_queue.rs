@@ -160,6 +160,13 @@ pub struct DatagramQueueCapacity {
     pub remaining_bytes: usize,
     /// Datagrams currently queued here, awaiting a drain.
     pub queued_datagrams: usize,
+    /// The queue's byte budget itself, i.e. `remaining_bytes` when empty.
+    /// Exposed so a caller deriving a windowed credit grant from
+    /// `remaining_bytes` (e.g. a cumulative, `MAX_DATA`-style grant) has the
+    /// window size to dedupe updates against, without duplicating
+    /// [`DEFAULT_MAX_QUEUED_BYTES`] on the other side of the FFI boundary -
+    /// this can differ from the default in tests, which override it.
+    pub max_queued_bytes: usize,
 }
 
 #[derive(Debug)]
@@ -640,6 +647,7 @@ impl DatagramQueue {
         DatagramQueueCapacity {
             remaining_bytes: self.max_queued_bytes.saturating_sub(self.total_bytes),
             queued_datagrams: self.total_count,
+            max_queued_bytes: self.max_queued_bytes,
         }
     }
     #[cfg(test)]
@@ -702,6 +710,7 @@ mod tests {
             DatagramQueueCapacity {
                 remaining_bytes: 3 * charge(2),
                 queued_datagrams: 0,
+                max_queued_bytes: 3 * charge(2),
             }
         );
 
@@ -711,6 +720,7 @@ mod tests {
             DatagramQueueCapacity {
                 remaining_bytes: 2 * charge(2),
                 queued_datagrams: 1,
+                max_queued_bytes: 3 * charge(2),
             }
         );
 
@@ -721,6 +731,7 @@ mod tests {
             DatagramQueueCapacity {
                 remaining_bytes: 3 * charge(2),
                 queued_datagrams: 0,
+                max_queued_bytes: 3 * charge(2),
             }
         );
     }
