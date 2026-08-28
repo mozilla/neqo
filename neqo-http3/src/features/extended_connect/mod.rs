@@ -13,7 +13,9 @@ pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
 // Re-export DatagramOutcome for FFI access
-pub use datagram_queue::{DatagramId, DatagramOutcome, DatagramQueueOutcome};
+pub use datagram_queue::{
+    DatagramId, DatagramOutcome, DatagramQueueCapacity, DatagramQueueOutcome,
+};
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
