@@ -63,6 +63,16 @@ pub fn default_max_age(min_rtt: Duration) -> Duration {
     )
 }
 
+/// Floor applied to an explicit `outgoingMaxAge`. Below this, the value stops
+/// bounding anything meaningful relative to our own timer granularity.
+const EXPLICIT_MAX_AGE_FLOOR: Duration = Duration::from_millis(1);
+
+/// The minimum ceiling applied to an explicit `outgoingMaxAge`, used only when
+/// it would otherwise exceed [`default_max_age`] for the path (see
+/// [`DatagramQueue::set_max_age`] for why the ceiling tracks the default
+/// rather than being fixed).
+const EXPLICIT_MAX_AGE_CEILING_FLOOR: Duration = Duration::from_millis(100);
+
 /// Caller-supplied identifier used to report the fate of a tracked datagram.
 pub type DatagramId = u64;
 
@@ -289,6 +299,13 @@ impl DatagramQueue {
     /// [`DEFAULT_MAX_AGE`] applies. The distinction is not observable from
     /// script: the attribute reports the application's value, which stays null.
     ///
+    /// An explicit value is clamped to `[1ms, max(100ms, default_max_age)]`.
+    /// The 1ms floor is a timer-granularity bound. The ceiling is *at least*
+    /// 100ms, but never less than what the application would get by leaving
+    /// `outgoingMaxAge` unset on this path: an app that explicitly asks for
+    /// more buffering than the default must not end up bounded tighter than
+    /// an app that asks for nothing at all.
+    ///
     /// Returns one entry per expired datagram, `Some(id)` for tracked ones.
     /// The caller reports outcomes for the tracked ones and counts them all.
     pub fn set_max_age(
@@ -297,8 +314,14 @@ impl DatagramQueue {
         now: Instant,
         default_max_age: Duration,
     ) -> Vec<Option<DatagramId>> {
-        qtrace!("Setting max age to {max_age:?}");
-        self.max_age = max_age;
+        let clamped = max_age.map(|v| {
+            v.clamp(
+                EXPLICIT_MAX_AGE_FLOOR,
+                max(default_max_age, EXPLICIT_MAX_AGE_CEILING_FLOOR),
+            )
+        });
+        qtrace!("Setting max age to {max_age:?} (clamped: {clamped:?})");
+        self.max_age = clamped;
         self.expire_old_datagrams(now, default_max_age)
     }
 
@@ -989,6 +1012,58 @@ mod tests {
 
         let (expired, _) = q.drain(t0 + Duration::from_millis(50), 10, default);
         assert_eq!(expired, vec![Some(1)], "the default is back in force");
+    }
+
+    #[test]
+    fn explicit_max_age_is_clamped_to_the_1ms_floor() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        let default = Duration::from_millis(20);
+        q.set_max_age(Some(Duration::from_micros(1)), t0, default);
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let (expired, to_send) = q.drain(t0 + Duration::from_micros(500), 10, default);
+        assert!(
+            expired.is_empty(),
+            "clamped to the 1ms floor, so 500us old is not yet expired"
+        );
+        assert_eq!(to_send.len(), 1);
+    }
+
+    #[test]
+    fn explicit_max_age_ceiling_floor_on_low_rtt_paths() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        // A low-RTT path: the default is well under the 100ms ceiling floor.
+        let default = Duration::from_millis(20);
+        q.set_max_age(Some(Duration::from_millis(300)), t0, default);
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let (expired, _) = q.drain(t0 + Duration::from_millis(150), 10, default);
+        assert_eq!(
+            expired,
+            vec![Some(1)],
+            "300ms must be clamped to the 100ms ceiling floor even though the default is 20ms"
+        );
+    }
+
+    #[test]
+    fn explicit_max_age_ceiling_tracks_a_higher_default() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        // A high-RTT path (e.g. ~200ms min_rtt): the default already exceeds
+        // the 100ms ceiling floor, so the ceiling must track it up rather than
+        // clamping down to 100ms.
+        let default = Duration::from_millis(250);
+        q.set_max_age(Some(Duration::from_millis(300)), t0, default);
+        q.enqueue(vec![1], Some(1), t0, 0, 0);
+
+        let (expired, _) = q.drain(t0 + Duration::from_millis(270), 10, default);
+        assert_eq!(
+            expired,
+            vec![Some(1)],
+            "an explicit value above a 250ms default must be clamped to 250ms, not to 100ms"
+        );
     }
 
     // ── Budgeted drain ─────────────────────────────────────────────────────────
