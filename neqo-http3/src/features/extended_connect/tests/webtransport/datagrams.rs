@@ -607,3 +607,101 @@ fn datagram_expires_during_a_normal_process_output_drain() {
     };
     assert!(wt.client.events().any(wt_expired_event));
 }
+
+/// A burst exceeding the byte budget, with a mix of send-order priorities,
+/// must evict low-priority datagrams to make room for high-priority ones -
+/// verified through the real `Http3Client` API and a live connection, not
+/// just on a bare `DatagramQueue` in isolation.
+#[test]
+fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connection() {
+    // Each must evict a low-priority one (the oldest, lowest send_order
+    // present) rather than each other.
+    const HIGH_PRIORITY_COUNT: usize = 5;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Fill the byte budget with low-priority (order=0) datagrams, without
+    // draining, until eviction starts - i.e. until the budget is full.
+    let mut low_priority_ids = Vec::new();
+    let mut next_id = 0u64;
+    loop {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(next_id), now(), 0, 0)
+            .unwrap();
+        match outcome {
+            DatagramQueueOutcome::Ok => {
+                low_priority_ids.push(next_id);
+                next_id += 1;
+            }
+            DatagramQueueOutcome::Overflowed { dropped } => {
+                // enqueue() always accepts: this datagram itself got in,
+                // evicting `dropped` (the oldest) to make room for it.
+                for id in dropped.into_iter().flatten() {
+                    low_priority_ids.retain(|&x| x != id);
+                }
+                low_priority_ids.push(next_id);
+                break;
+            }
+            DatagramQueueOutcome::AboveWatermark => {
+                panic!("unexpected AboveWatermark before the byte budget is hit")
+            }
+        }
+        assert!(
+            next_id < 1_000_000,
+            "byte budget should have been hit by now"
+        );
+    }
+
+    // Now send a few high-priority datagrams.
+    let high_priority_ids: Vec<u64> = (0..to_u64(HIGH_PRIORITY_COUNT))
+        .map(|i| next_id + i)
+        .collect();
+    let mut evicted = Vec::new();
+    for &id in &high_priority_ids {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now(), 0, 10)
+            .unwrap();
+        match outcome {
+            DatagramQueueOutcome::Overflowed { dropped } => evicted.extend(dropped),
+            other => panic!("expected an eviction for the high-priority datagram: {other:?}"),
+        }
+    }
+    assert_eq!(
+        evicted,
+        low_priority_ids[..HIGH_PRIORITY_COUNT]
+            .iter()
+            .map(|&id| Some(id))
+            .collect::<Vec<_>>(),
+        "eviction must take the oldest low-priority datagrams first, never the high-priority ones"
+    );
+
+    wt.exchange_packets();
+
+    let events: Vec<_> = wt.client.events().collect();
+    let was_sent = |id: u64| {
+        events.iter().any(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                    session_id: sid,
+                    outcome: DatagramOutcome::Sent(sent_id),
+                }) if *sid == session_id && *sent_id == id
+            )
+        })
+    };
+
+    for &id in &high_priority_ids {
+        assert!(was_sent(id), "high-priority datagram {id} must be sent");
+    }
+    for dropped in &evicted {
+        let id = dropped.expect("test datagrams are tracked");
+        assert!(
+            !was_sent(id),
+            "evicted low-priority datagram {id} must not be sent"
+        );
+    }
+}
