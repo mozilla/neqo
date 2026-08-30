@@ -18,7 +18,6 @@ use enumset::{EnumSet, EnumSetType};
 use log::{Level, log_enabled};
 use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn, to_u64};
 use nss::Epoch;
-use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
@@ -451,7 +450,7 @@ impl RecvdPackets {
             .filter(|r| r.ack_needed())
             .take(max_ranges)
             .cloned()
-            .collect::<SmallVec<[_; MAX_TRACKED_RANGES]>>();
+            .collect::<Vec<_>>();
         if ranges.is_empty() {
             return;
         }
