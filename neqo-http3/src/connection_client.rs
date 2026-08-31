@@ -1016,7 +1016,7 @@ impl Http3Client {
             Http3State::Closing(..) | Http3State::Closed(..)
         ) {
             for session_id in self.base_handler.drain_webtransport_sessions() {
-                self.events.insert(Http3ClientEvent::WebTransport(
+                self.events.push(Http3ClientEvent::WebTransport(
                     WebTransportEvent::Draining {
                         stream_id: session_id,
                     },
