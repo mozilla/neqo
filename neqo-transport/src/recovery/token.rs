@@ -61,7 +61,7 @@ pub enum Token {
         reason = "This is how it is called in the spec."
     )]
     NewToken(usize),
-    NewConnectionId(ConnectionIdEntry<Srt>),
+    NewConnectionId(Box<ConnectionIdEntry<Srt>>), // Boxed, because largest by far & rarely used.
     RetireConnectionId(u64),
     AckFrequency(AckRate),
     Datagram(DatagramTracking),
