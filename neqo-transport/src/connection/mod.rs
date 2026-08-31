@@ -3563,16 +3563,17 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[sent::Packet]) {
         for lost in lost_packets {
+            let space = lost.space();
             for token in lost.tokens() {
                 qdebug!("[{self}] Lost: {token:?}");
                 match token {
-                    recovery::Token::Ack(ack_token) => {
+                    recovery::Token::Ack(_) => {
                         // If we lost an ACK frame during the handshake, send another one.
-                        if ack_token.space() != PacketNumberSpace::ApplicationData {
-                            self.acks.immediate_ack(ack_token.space(), lost.time_sent());
+                        if space != PacketNumberSpace::ApplicationData {
+                            self.acks.immediate_ack(space, lost.time_sent());
                         }
                     }
-                    recovery::Token::Crypto(ct) => self.crypto.lost(ct),
+                    recovery::Token::Crypto(ct) => self.crypto.lost(space, ct),
                     recovery::Token::HandshakeDone => self.state_signaling.handshake_done(),
                     recovery::Token::NewToken(seqno) => self.new_token.lost(*seqno),
                     recovery::Token::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
@@ -3647,8 +3648,8 @@ impl Connection {
             for token in acked.tokens() {
                 match token {
                     recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
-                    recovery::Token::Ack(at) => self.acks.acked(at),
-                    recovery::Token::Crypto(ct) => self.crypto.acked(ct),
+                    recovery::Token::Ack(at) => self.acks.acked(space, at),
+                    recovery::Token::Crypto(ct) => self.crypto.acked(space, ct),
                     recovery::Token::NewToken(seqno) => self.new_token.acked(*seqno),
                     recovery::Token::NewConnectionId(entry) => self.cid_manager.acked(entry),
                     recovery::Token::RetireConnectionId(seqno) => {
