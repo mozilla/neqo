@@ -16,7 +16,6 @@ use nss::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
 };
-use smallvec::SmallVec;
 use static_assertions::const_assert;
 
 use crate::{
@@ -282,13 +281,12 @@ impl AddressValidation {
     }
 }
 
-#[expect(clippy::large_enum_variant, reason = "No way around it.")]
 pub enum NewTokenState {
     Client {
         /// Tokens that haven't been taken yet.
-        pending: SmallVec<[Vec<u8>; MAX_NEW_TOKEN]>,
+        pending: Vec<Vec<u8>>,
         /// Tokens that have been taken, saved so that we can discard duplicates.
-        old: SmallVec<[Vec<u8>; MAX_SAVED_TOKENS]>,
+        old: Vec<Vec<u8>>,
     },
     Server(NewTokenSender),
 }
@@ -297,15 +295,15 @@ impl NewTokenState {
     pub fn new(role: Role) -> Self {
         match role {
             Role::Client => Self::Client {
-                pending: SmallVec::<[_; MAX_NEW_TOKEN]>::new(),
-                old: SmallVec::<[_; MAX_SAVED_TOKENS]>::new(),
+                pending: Vec::new(),
+                old: Vec::new(),
             },
             Role::Server => Self::Server(NewTokenSender::default()),
         }
     }
 
     /// Is there a token available?
-    pub fn has_token(&self) -> bool {
+    pub const fn has_token(&self) -> bool {
         match self {
             Self::Client { pending, .. } => !pending.is_empty(),
             Self::Server(..) => false,
