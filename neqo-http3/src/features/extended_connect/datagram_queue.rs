@@ -318,6 +318,17 @@ impl DatagramQueue {
         all_expired
     }
 
+    /// The `(send_order, group_id)` key of the globally lowest-priority
+    /// occupied bucket: lowest `send_order` across all groups, ties broken by
+    /// `group_id` (lowest first) for determinism.
+    fn lowest_priority_key(&self) -> Option<(i64, u64)> {
+        self.groups
+            .iter()
+            .filter(|(_, g)| !g.is_empty())
+            .map(|(gid, g)| (g.lowest_order().unwrap_or(i64::MAX), *gid))
+            .min()
+    }
+
     /// Evict the oldest datagram from the globally lowest-priority bucket.
     ///
     /// "Lowest priority" means the lowest `send_order` across all groups. Ties
@@ -325,16 +336,11 @@ impl DatagramQueue {
     ///
     /// Returns the evicted datagram, or `None` if there was nothing to evict.
     fn evict_lowest_priority(&mut self) -> Option<QueuedDatagram> {
-        let group_id = self
-            .groups
-            .iter()
-            .filter(|(_, g)| !g.is_empty())
-            .min_by_key(|(gid, g)| (g.lowest_order().unwrap_or(i64::MAX), **gid))
-            .map(|(gid, _)| *gid)?;
+        let (_, group_id) = self.lowest_priority_key()?;
 
         let (dgram, group_empty) = {
             let Some(group) = self.groups.get_mut(&group_id) else {
-                unreachable!("group_id from min_by_key must exist")
+                unreachable!("group_id from lowest_priority_key must exist")
             };
             let dgram = group.evict_lowest()?;
             (dgram, group.is_empty())
@@ -376,11 +382,27 @@ impl DatagramQueue {
         send_group_id: u64,
         send_order: i64,
     ) -> (DatagramQueueOutcome, Option<DatagramId>) {
+        let at_hard_limit = self.total_count >= self.hard_limit;
+        if at_hard_limit
+            && self
+                .lowest_priority_key()
+                .is_some_and(|victim| (send_order, send_group_id) < victim)
+        {
+            // The incoming datagram is itself the lowest-priority one in the
+            // queue, including everything already queued: drop it instead of
+            // evicting something that outranks it.
+            qdebug!(
+                "Queue at hard limit ({}), dropping incoming datagram {id:?} \
+                 (group={send_group_id}, order={send_order}): lower priority than everything queued",
+                self.hard_limit
+            );
+            return (DatagramQueueOutcome::Overflowed, id);
+        }
         // `evict_lowest_priority` returns `None` rather than panicking when
         // there is nothing to evict, so this degrades gracefully even if
         // `hard_limit` were ever 0 - see `hard_limit_zero_does_not_panic`.
         // It already logs the eviction, so there is no separate qdebug here.
-        let evicted = (self.total_count >= self.hard_limit)
+        let evicted = at_hard_limit
             .then(|| self.evict_lowest_priority())
             .flatten();
 
@@ -943,6 +965,51 @@ mod tests {
         assert_eq!(
             q.enqueue(vec![0, 3], Some(3), t, 0, 5),
             (DatagramQueueOutcome::Overflowed, Some(2))
+        );
+        assert_eq!(q.len(), 2);
+    }
+
+    #[test]
+    fn hard_limit_rejects_lower_priority_newcomer() {
+        let mut q = DatagramQueue::new();
+        q.hard_limit = 3;
+
+        // Fill with high-priority (order 10) datagrams.
+        let t = now();
+        q.enqueue(vec![0, 1], Some(1), t, 0, 10);
+        q.enqueue(vec![0, 2], Some(2), t, 0, 10);
+        q.enqueue(vec![0, 3], Some(3), t, 0, 10);
+        assert_eq!(q.len(), 3);
+
+        // A lower-priority newcomer must not evict any of the higher-priority
+        // datagrams already queued: it is the one that gets dropped.
+        assert_eq!(
+            q.enqueue(vec![0, 4], Some(4), t, 0, 0),
+            (DatagramQueueOutcome::Overflowed, Some(4))
+        );
+        assert_eq!(q.len(), 3);
+        assert_eq!(
+            drain_ids(&mut q),
+            vec![1, 2, 3],
+            "the queued high-priority datagrams are untouched"
+        );
+    }
+
+    #[test]
+    fn hard_limit_rejects_lower_priority_newcomer_across_groups() {
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.hard_limit = 2;
+
+        // Group 0 has order 5, group 1 has order 1 (lower priority already queued).
+        q.enqueue(vec![0, 1], Some(1), t, 0, 5);
+        q.enqueue(vec![0, 2], Some(2), t, 1, 1);
+
+        // A newcomer with a lower priority than the current global lowest
+        // (group 1, order 1) must be dropped itself, not evict group 1's datagram.
+        assert_eq!(
+            q.enqueue(vec![0, 3], Some(3), t, 2, 0),
+            (DatagramQueueOutcome::Overflowed, Some(3))
         );
         assert_eq!(q.len(), 2);
     }
