@@ -174,17 +174,11 @@ const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
 /// A structure that tracks what was included in an ACK.
+///
+/// Does not record the packet number space, that can be derived from packet types
 #[derive(Debug, Clone)]
 pub struct AckToken {
-    space: PacketNumberSpace,
     ranges: Box<[PacketRange]>,
-}
-
-impl AckToken {
-    /// Get the space for this token.
-    pub const fn space(&self) -> PacketNumberSpace {
-        self.space
-    }
 }
 
 /// A structure that tracks what packets have been received,
@@ -505,7 +499,6 @@ impl RecvdPackets {
         self.unacknowledged_count = 0;
 
         tokens.push(recovery::Token::Ack(AckToken {
-            space: self.space,
             ranges: ranges.into_boxed_slice(),
         }));
     }
@@ -586,8 +579,8 @@ impl AckTracker {
             .min()
     }
 
-    pub fn acked(&mut self, token: &AckToken) {
-        if let Some(space) = self.get_mut(token.space) {
+    pub fn acked(&mut self, pn_space: PacketNumberSpace, token: &AckToken) {
+        if let Some(space) = self.get_mut(pn_space) {
             space.acknowledged(&token.ranges);
         }
     }
@@ -989,7 +982,7 @@ mod tests {
         );
         assert_eq!(frame_stats.ack, 1);
         if let recovery::Token::Ack(tok) = &tokens[0] {
-            tracker.acked(tok); // Should be a noop.
+            tracker.acked(PacketNumberSpace::Initial, tok); // Should be a noop.
         } else {
             panic!("not an ACK token");
         }
