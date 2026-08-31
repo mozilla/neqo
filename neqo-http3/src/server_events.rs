@@ -299,7 +299,7 @@ impl Http3ServerEvents {
 
     /// Whether there is request pending.
     pub fn has_events(&self) -> bool {
-        self.events.has_events()
+        !self.events.is_empty()
     }
 
     /// Take the next event if present.

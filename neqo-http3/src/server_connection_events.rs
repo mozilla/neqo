@@ -242,7 +242,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
 
 impl Http3ServerConnEvents {
     pub fn has_events(&self) -> bool {
-        self.events.has_events()
+        !self.events.is_empty()
     }
 
     pub fn next_event(&self) -> Option<Http3ServerConnEvent> {

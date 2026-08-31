@@ -403,7 +403,7 @@ impl EventProvider for Http3ClientEvents {
 
     /// Check if there is any event present.
     fn has_events(&self) -> bool {
-        self.events.has_events()
+        !self.events.is_empty()
     }
 
     /// Take the first event.

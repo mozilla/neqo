@@ -71,10 +71,10 @@ impl<T> Queue<T> {
         self.events.borrow_mut().clear();
     }
 
-    /// Determine whether there are pending events.
+    /// Determine whether the queue is empty.
     #[must_use]
-    pub fn has_events(&self) -> bool {
-        !self.events.borrow().is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.events.borrow().is_empty()
     }
 
     /// Take the first event.
@@ -185,13 +185,13 @@ mod tests {
         q.push(2);
         q.push(3);
         q.remove_matching(|e| *e == 2);
-        assert!(q.has_events());
+        assert!(!q.is_empty());
         assert_eq!(q.next_event(), Some(1));
         assert_eq!(q.next_event(), Some(3));
         assert_eq!(q.next_event(), None);
         q.push(4);
         q.clear();
-        assert!(!q.has_events());
+        assert!(q.is_empty());
     }
 
     #[test]

@@ -228,7 +228,7 @@ impl EventProvider for ConnectionEvents {
     type Event = ConnectionEvent;
 
     fn has_events(&self) -> bool {
-        self.events.has_events()
+        !self.events.is_empty()
     }
 
     fn next_event(&mut self) -> Option<Self::Event> {
