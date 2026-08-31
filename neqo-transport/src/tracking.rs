@@ -175,7 +175,7 @@ const MAX_ACKS_PER_FRAME: usize = 32;
 
 /// A structure that tracks what was included in an ACK.
 ///
-/// Does not record the packet number space, that can be derived from packet types
+/// The packet number space is not recorded because it can be derived from the carrying packet's type.
 #[derive(Debug, Clone)]
 pub struct AckToken {
     ranges: Box<[PacketRange]>,
