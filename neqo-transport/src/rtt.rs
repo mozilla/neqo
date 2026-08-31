@@ -198,11 +198,11 @@ impl RttEstimate {
         self.ack_delay.write_frames(builder, tokens, stats);
     }
 
-    pub const fn frame_lost(&mut self, lost: &AckRate) {
+    pub const fn frame_lost(&mut self, lost: AckRate) {
         self.ack_delay.frame_lost(lost);
     }
 
-    pub fn frame_acked(&mut self, acked: &AckRate) {
+    pub const fn frame_acked(&mut self, acked: AckRate) {
         self.ack_delay.frame_acked(acked);
     }
 }

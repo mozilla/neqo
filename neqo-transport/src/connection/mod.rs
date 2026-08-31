@@ -3579,7 +3579,7 @@ impl Connection {
                     recovery::Token::RetireConnectionId(seqno) => {
                         self.paths.lost_retire_cid(*seqno);
                     }
-                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
+                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(*rate),
                     recovery::Token::KeepAlive => self.idle_timeout.lost_keep_alive(),
                     recovery::Token::Stream(stream_token) => self.streams.lost(stream_token),
                     recovery::Token::Datagram(dgram_tracker) => {
@@ -3654,7 +3654,7 @@ impl Connection {
                     recovery::Token::RetireConnectionId(seqno) => {
                         self.paths.acked_retire_cid(*seqno);
                     }
-                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
+                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(*rate),
                     recovery::Token::KeepAlive => self.idle_timeout.ack_keep_alive(),
                     recovery::Token::Datagram(dgram_tracker) => self
                         .events
