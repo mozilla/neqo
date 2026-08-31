@@ -40,7 +40,9 @@ impl AckRate {
         let packets = cwnd * PACKET_RATIO / mtu / usize::from(ratio);
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
         let delay = rtt * RTT_RATIO / u32::from(ratio);
-        let delay = delay.clamp(minimum, MAX_DELAY);
+        // `minimum` can exceed `MAX_DELAY`, and asking for less than it is invalid:
+        // <https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-14#section-4>
+        let delay = delay.min(MAX_DELAY).max(minimum);
         qtrace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
         Self { packets, delay }
     }
@@ -207,5 +209,19 @@ impl PeerAckDelay {
 impl Default for PeerAckDelay {
     fn default() -> Self {
         Self::fixed(DEFAULT_REMOTE_ACK_DELAY)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::AckRate;
+
+    #[test]
+    fn min_ack_delay_above_cap() {
+        const MINIMUM: Duration = Duration::from_millis(60);
+        let rate = AckRate::new(MINIMUM, 4, 10_000, 1500, Duration::from_millis(10));
+        assert_eq!(rate.delay, MINIMUM);
     }
 }
