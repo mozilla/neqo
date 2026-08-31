@@ -1780,7 +1780,8 @@ impl Default for CryptoStreams {
     }
 }
 
-/// The packet number space is not recorded because it can be derived from the carrying packet's type.
+/// The packet number space is not recorded because it can be derived from the carrying packet's
+/// type.
 #[derive(Debug, Clone)]
 pub struct CryptoRecoveryToken {
     offset: u64,

@@ -173,14 +173,6 @@ pub const DEFAULT_ACK_PACKET_TOLERANCE: packet::Number = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
 
-/// A structure that tracks what was included in an ACK.
-///
-/// The packet number space is not recorded because it can be derived from the carrying packet's type.
-#[derive(Debug, Clone)]
-pub struct AckToken {
-    ranges: Box<[PacketRange]>,
-}
-
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
 #[derive(Debug)]
@@ -498,9 +490,7 @@ impl RecvdPackets {
         self.last_ack_time = Some(now);
         self.unacknowledged_count = 0;
 
-        tokens.push(recovery::Token::Ack(AckToken {
-            ranges: ranges.into_boxed_slice(),
-        }));
+        tokens.push(recovery::Token::Ack(ranges.into_boxed_slice()));
     }
 }
 
@@ -579,9 +569,9 @@ impl AckTracker {
             .min()
     }
 
-    pub fn acked(&mut self, pn_space: PacketNumberSpace, token: &AckToken) {
+    pub fn acked(&mut self, pn_space: PacketNumberSpace, acked: &[PacketRange]) {
         if let Some(space) = self.get_mut(pn_space) {
-            space.acknowledged(&token.ranges);
+            space.acknowledged(acked);
         }
     }
 

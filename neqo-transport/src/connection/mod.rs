@@ -3563,7 +3563,7 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[sent::Packet]) {
         for lost in lost_packets {
-            let space = PacketNumberSpace::from(lost.packet_type());
+            let space = lost.space();
             for token in lost.tokens() {
                 qdebug!("[{self}] Lost: {token:?}");
                 match token {
