@@ -8,7 +8,7 @@
 
 use std::{cmp::max, time::Duration};
 
-use neqo_common::{Buffer, qtrace, to_u64};
+use neqo_common::{Buffer, qtrace};
 
 use crate::{
     connection::params::ConnectionParameters,
@@ -19,15 +19,19 @@ use crate::{
     tracking::DEFAULT_REMOTE_ACK_DELAY,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AckRate {
     /// The maximum number of packets that can be received without sending an ACK.
-    packets: usize,
-    /// The maximum delay before sending an ACK.
-    delay: Duration,
+    packets: u16,
+    /// The maximum delay before sending an ACK, in microseconds.
+    delay: u32,
 }
 
 impl AckRate {
+    fn delay_us(delay: Duration) -> u32 {
+        u32::try_from(delay.as_micros()).unwrap_or(u32::MAX)
+    }
+
     pub fn new(minimum: Duration, ratio: u8, cwnd: usize, mtu: usize, rtt: Duration) -> Self {
         const PACKET_RATIO: usize = ConnectionParameters::ACK_RATIO_SCALE as usize;
         // At worst, ask for an ACK for every other packet.
@@ -38,32 +42,36 @@ impl AckRate {
         const MAX_DELAY: Duration = Duration::from_millis(50);
 
         let packets = cwnd * PACKET_RATIO / mtu / usize::from(ratio);
-        let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS) - 1;
+        let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS);
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         let delay = delay.clamp(minimum, MAX_DELAY);
         qtrace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
-        Self { packets, delay }
+        Self {
+            packets: u16::try_from(packets).expect("clamped to MAX_PACKETS"),
+            delay: Self::delay_us(delay),
+        }
     }
 
-    pub fn write_frame<B: Buffer>(&self, builder: &mut packet::Builder<B>, seqno: u64) -> bool {
+    pub fn write_frame<B: Buffer>(self, builder: &mut packet::Builder<B>, seqno: u64) -> bool {
         builder.write_varint_frame(&[
             u64::from(FrameType::AckFrequency),
             seqno,
-            to_u64(self.packets + 1),
-            u64::try_from(self.delay.as_micros()).unwrap_or(u64::MAX),
+            u64::from(self.packets),
+            u64::from(self.delay),
             0,
         ])
     }
 
     /// Determine whether to send an update frame.
-    pub fn needs_update(&self, target: &Self) -> bool {
+    pub const fn needs_update(self, target: Self) -> bool {
         if self.packets != target.packets {
             return true;
         }
         // Allow more flexibility for delays, as those can change
         // by small amounts fairly easily.
         let delta = target.delay / 4;
-        target.delay + delta < self.delay || target.delay > self.delay + delta
+        target.delay.saturating_add(delta) < self.delay
+            || target.delay > self.delay.saturating_add(delta)
     }
 }
 
@@ -90,8 +98,8 @@ impl FlexibleAckRate {
         let ratio = max(ConnectionParameters::ACK_RATIO_SCALE, ratio); // clamp it
         Self {
             current: AckRate {
-                packets: 1,
-                delay: max_ack_delay,
+                packets: 2, // The default behaviour is to acknowledge every second packet.
+                delay: AckRate::delay_us(max_ack_delay),
             },
             target: AckRate::new(min_ack_delay, ratio, cwnd, mtu, rtt),
             next_frame_seqno: 0,
@@ -108,23 +116,23 @@ impl FlexibleAckRate {
         stats: &mut FrameStats,
     ) {
         if !self.frame_outstanding
-            && self.current.needs_update(&self.target)
+            && self.current.needs_update(self.target)
             && self.target.write_frame(builder, self.next_frame_seqno)
         {
             qtrace!("FlexibleAckRate: write frame {:?}", self.target);
             self.frame_outstanding = true;
             self.next_frame_seqno += 1;
-            tokens.push(recovery::Token::AckFrequency(self.target.clone()));
+            tokens.push(recovery::Token::AckFrequency(self.target));
             stats.ack_frequency += 1;
         }
     }
 
-    fn frame_acked(&mut self, acked: &AckRate) {
+    const fn frame_acked(&mut self, acked: AckRate) {
         self.frame_outstanding = false;
-        self.current = acked.clone();
+        self.current = acked;
     }
 
-    const fn frame_lost(&mut self, _lost: &AckRate) {
+    const fn frame_lost(&mut self, _lost: AckRate) {
         self.frame_outstanding = false;
     }
 
@@ -134,7 +142,7 @@ impl FlexibleAckRate {
     }
 
     fn peer_ack_delay(&self) -> Duration {
-        max(self.current.delay, self.target.delay)
+        Duration::from_micros(u64::from(max(self.current.delay, self.target.delay)))
     }
 }
 
@@ -178,13 +186,13 @@ impl PeerAckDelay {
         }
     }
 
-    pub fn frame_acked(&mut self, r: &AckRate) {
+    pub const fn frame_acked(&mut self, r: AckRate) {
         if let Self::Flexible(rate) = self {
             rate.frame_acked(r);
         }
     }
 
-    pub const fn frame_lost(&mut self, r: &AckRate) {
+    pub const fn frame_lost(&mut self, r: AckRate) {
         if let Self::Flexible(rate) = self {
             rate.frame_lost(r);
         }
