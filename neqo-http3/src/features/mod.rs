@@ -216,6 +216,28 @@ mod tests {
         ));
     }
 
+    /// WebTransport negotiates whether or not the peer advertises the `reset_stream_at`
+    /// transport parameter (reliable reset). The draft (Section 4.4) requires reliable reset,
+    /// but the extension is new and rarely deployed, so neqo tolerates peers without it,
+    /// resetting such streams with a plain `RESET_STREAM` rather than refusing WebTransport.
+    #[test]
+    fn webtransport_ignores_peer_reliable_reset() {
+        let full = HSettings::new(&[
+            HSetting::new(HSettingType::EnableWebTransport, 1),
+            HSetting::new(HSettingType::EnableH3Datagram, 1),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ]);
+        for reliable_reset in [false, true] {
+            let mut f =
+                ExtendedConnectFeature::new(ExtendedConnectType::WebTransport, Role::Client, true);
+            f.handle_settings(&full, &TransportPrerequisites::new(true, reliable_reset));
+            assert!(
+                f.enabled(),
+                "WebTransport must negotiate regardless of peer reliable reset support"
+            );
+        }
+    }
+
     /// Confirm that the necessary features for `CONNECT_UDP` are validated.
     #[test]
     fn connect_udp_feature_checks() {
