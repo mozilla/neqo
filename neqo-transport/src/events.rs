@@ -8,7 +8,7 @@
 
 use std::{net::SocketAddr, num::NonZeroU64};
 
-use neqo_common::event::{Provider as EventProvider, Queue};
+use neqo_common::event::{Provider as EventProvider, Queue as EventQueue};
 use nss::ResumptionToken;
 
 use crate::{
@@ -90,13 +90,12 @@ pub enum ConnectionEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct ConnectionEvents {
-    events: Queue<ConnectionEvent>,
+    events: EventQueue<ConnectionEvent>,
 }
 
 impl ConnectionEvents {
     pub fn authentication_needed(&self) {
-        self.events
-            .push_unique(ConnectionEvent::AuthenticationNeeded);
+        self.events.push(ConnectionEvent::AuthenticationNeeded);
     }
 
     pub fn ech_fallback_authentication_needed(&self, public_name: String) {
@@ -105,8 +104,7 @@ impl ConnectionEvents {
     }
 
     pub fn new_stream(&self, stream_id: StreamId) {
-        self.events
-            .push_unique(ConnectionEvent::NewStream { stream_id });
+        self.events.push(ConnectionEvent::NewStream { stream_id });
     }
 
     pub fn recv_stream_readable(&self, stream_id: StreamId) {
@@ -157,12 +155,13 @@ impl ConnectionEvents {
         self.events.remove_matching(|evt| {
             matches!(evt,
                 ConnectionEvent::SendStreamWritable { stream_id: x } |
-                ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+                ConnectionEvent::SendStreamStopSending { stream_id: x, .. } |
+                ConnectionEvent::SendStreamComplete { stream_id: x }
                 if *x == stream_id)
         });
 
         self.events
-            .push_unique(ConnectionEvent::SendStreamComplete { stream_id });
+            .push(ConnectionEvent::SendStreamComplete { stream_id });
     }
 
     pub fn send_stream_creatable(&self, stream_type: StreamType) {
@@ -180,15 +179,14 @@ impl ConnectionEvents {
     }
 
     pub fn client_resumption_token(&self, token: ResumptionToken) {
-        self.events
-            .push_unique(ConnectionEvent::ResumptionToken(token));
+        self.events.push(ConnectionEvent::ResumptionToken(token));
     }
 
     pub fn client_0rtt_rejected(&self) {
         // If 0rtt rejected, must start over and existing events are no longer
         // relevant.
         self.events.clear();
-        self.events.push_unique(ConnectionEvent::ZeroRttRejected);
+        self.events.push(ConnectionEvent::ZeroRttRejected);
     }
 
     pub fn recv_stream_complete(&self, stream_id: StreamId) {
@@ -220,7 +218,7 @@ impl ConnectionEvents {
 
     pub fn path_migrated(&self, local: SocketAddr, remote: SocketAddr) {
         self.events
-            .push_unique(ConnectionEvent::PathMigrated { local, remote });
+            .push(ConnectionEvent::PathMigrated { local, remote });
     }
 }
 
@@ -253,10 +251,6 @@ mod tests {
         evts.client_0rtt_rejected();
         assert_eq!(evts.events().count(), 1);
         assert_eq!(evts.events().count(), 0);
-
-        evts.new_stream(4.into());
-        evts.new_stream(4.into());
-        assert_eq!(evts.events().count(), 1);
 
         evts.recv_stream_readable(6.into());
         evts.recv_stream_reset(6.into(), 66);

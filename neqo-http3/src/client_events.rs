@@ -6,7 +6,7 @@
 
 use neqo_common::{
     Bytes, Header,
-    event::{Provider as EventProvider, Queue},
+    event::{Provider as EventProvider, Queue as EventQueue},
     qtrace,
 };
 use neqo_transport::{AppError, StreamId, StreamType};
@@ -119,7 +119,7 @@ pub enum Http3ClientEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ClientEvents {
-    events: Queue<Http3ClientEvent>,
+    events: EventQueue<Http3ClientEvent>,
 }
 
 impl RecvStreamEvents for Http3ClientEvents {

@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Header, event::Queue, qdebug};
+use neqo_common::{Header, event::Queue as EventQueue, qdebug};
 use neqo_transport::{AppError, Connection, StreamId, server::ConnectionRef};
 
 use crate::{
@@ -283,7 +283,7 @@ pub enum Http3ServerEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerEvents {
-    events: Queue<Http3ServerEvent>,
+    events: EventQueue<Http3ServerEvent>,
 }
 
 impl Http3ServerEvents {

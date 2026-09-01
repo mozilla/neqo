@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Bytes, Header, event::Queue, header::HeadersExt as _};
+use neqo_common::{Bytes, Header, event::Queue as EventQueue, header::HeadersExt as _};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
@@ -85,7 +85,7 @@ pub enum ConnectUdpEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerConnEvents {
-    events: Queue<Http3ServerConnEvent>,
+    events: EventQueue<Http3ServerConnEvent>,
 }
 
 impl SendStreamEvents for Http3ServerConnEvents {
