@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
-
-use neqo_common::{Bytes, Header, event::Provider as EventProvider, qtrace};
+use neqo_common::{
+    Bytes, Header,
+    event::{Provider as EventProvider, Queue as EventQueue},
+    qtrace,
+};
 use neqo_transport::{AppError, StreamId, StreamType};
 use nss::ResumptionToken;
 
@@ -117,13 +119,13 @@ pub enum Http3ClientEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ClientEvents {
-    events: Rc<RefCell<VecDeque<Http3ClientEvent>>>,
+    events: EventQueue<Http3ClientEvent>,
 }
 
 impl RecvStreamEvents for Http3ClientEvents {
     /// Add a new `DataReadable` event
     fn data_readable(&self, stream_info: &Http3StreamInfo) {
-        self.insert(Http3ClientEvent::DataReadable {
+        self.events.push(Http3ClientEvent::DataReadable {
             stream_id: stream_info.stream_id(),
         });
     }
@@ -148,7 +150,7 @@ impl RecvStreamEvents for Http3ClientEvents {
             }
         };
 
-        self.insert(Http3ClientEvent::Reset {
+        self.events.push(Http3ClientEvent::Reset {
             stream_id,
             error,
             local,
@@ -165,7 +167,7 @@ impl HttpRecvStreamEvents for Http3ClientEvents {
         interim: bool,
         fin: bool,
     ) {
-        self.insert(Http3ClientEvent::HeaderReady {
+        self.events.push(Http3ClientEvent::HeaderReady {
             stream_id: stream_info.stream_id(),
             headers,
             interim,
@@ -177,7 +179,7 @@ impl HttpRecvStreamEvents for Http3ClientEvents {
 impl SendStreamEvents for Http3ClientEvents {
     /// Add a new `DataWritable` event.
     fn data_writable(&self, stream_info: &Http3StreamInfo) {
-        self.insert(Http3ClientEvent::DataWritable {
+        self.events.push(Http3ClientEvent::DataWritable {
             stream_id: stream_info.stream_id(),
         });
     }
@@ -186,7 +188,8 @@ impl SendStreamEvents for Http3ClientEvents {
         let stream_id = stream_info.stream_id();
         self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
-            self.insert(Http3ClientEvent::StopSending { stream_id, error });
+            self.events
+                .push(Http3ClientEvent::StopSending { stream_id, error });
         }
     }
 }
@@ -201,7 +204,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
     ) {
         match connect_type {
             ExtendedConnectType::WebTransport => {
-                self.insert(Http3ClientEvent::WebTransport(
+                self.events.push(Http3ClientEvent::WebTransport(
                     WebTransportEvent::NewSession {
                         stream_id,
                         status,
@@ -210,11 +213,12 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 ));
             }
             ExtendedConnectType::ConnectUdp => {
-                self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession {
-                    stream_id,
-                    status,
-                    headers,
-                }));
+                self.events
+                    .push(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession {
+                        stream_id,
+                        status,
+                        headers,
+                    }));
             }
         }
     }
@@ -242,7 +246,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 })
             }
         };
-        self.insert(event);
+        self.events.push(event);
     }
 
     fn extended_connect_new_stream(
@@ -250,14 +254,14 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         stream_info: Http3StreamInfo,
         emit_readable: bool,
     ) -> Res<()> {
-        self.insert(Http3ClientEvent::WebTransport(
+        self.events.push(Http3ClientEvent::WebTransport(
             WebTransportEvent::NewStream {
                 stream_id: stream_info.stream_id(),
                 session_id: stream_info.session_id().ok_or(Error::Internal)?,
             },
         ));
         if emit_readable {
-            self.insert(Http3ClientEvent::DataReadable {
+            self.events.push(Http3ClientEvent::DataReadable {
                 stream_id: stream_info.stream_id(),
             });
         }
@@ -284,7 +288,7 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 })
             }
         };
-        self.insert(event);
+        self.events.push(event);
     }
 }
 
@@ -292,60 +296,56 @@ impl Http3ClientEvents {
     /// Add a new `RequestCreatable` event
     pub(crate) fn new_requests_creatable(&self, stream_type: StreamType) {
         if stream_type == StreamType::BiDi {
-            self.insert(Http3ClientEvent::RequestsCreatable);
+            self.events.push(Http3ClientEvent::RequestsCreatable);
         }
     }
 
     /// Add a new `AuthenticationNeeded` event
     pub(crate) fn authentication_needed(&self) {
-        self.insert(Http3ClientEvent::AuthenticationNeeded);
+        self.events.push(Http3ClientEvent::AuthenticationNeeded);
     }
 
     /// Add a new `AuthenticationNeeded` event
     pub(crate) fn ech_fallback_authentication_needed(&self, public_name: String) {
-        self.insert(Http3ClientEvent::EchFallbackAuthenticationNeeded { public_name });
+        self.events
+            .push(Http3ClientEvent::EchFallbackAuthenticationNeeded { public_name });
     }
 
     /// Add a new resumption token event.
     pub(crate) fn resumption_token(&self, token: ResumptionToken) {
-        self.insert(Http3ClientEvent::ResumptionToken(token));
+        self.events.push(Http3ClientEvent::ResumptionToken(token));
     }
 
     /// Add a new `ZeroRttRejected` event.
     pub(crate) fn zero_rtt_rejected(&self) {
-        self.insert(Http3ClientEvent::ZeroRttRejected);
+        self.events.push(Http3ClientEvent::ZeroRttRejected);
     }
 
     /// Add a new `GoawayReceived` event.
     pub(crate) fn goaway_received(&self) {
-        self.remove(|evt| matches!(evt, Http3ClientEvent::RequestsCreatable));
-        self.insert(Http3ClientEvent::GoawayReceived);
+        self.events
+            .remove_matching(|evt| matches!(evt, Http3ClientEvent::RequestsCreatable));
+        self.events.push(Http3ClientEvent::GoawayReceived);
     }
 
-    pub fn insert(&self, event: Http3ClientEvent) {
-        self.events.borrow_mut().push_back(event);
-    }
-
-    fn remove<F>(&self, f: F)
-    where
-        F: Fn(&Http3ClientEvent) -> bool,
-    {
-        self.events.borrow_mut().retain(|evt| !f(evt));
+    /// Append an event, allowing duplicates.
+    pub(crate) fn push(&self, event: Http3ClientEvent) {
+        self.events.push(event);
     }
 
     /// Add a new `StateChange` event.
     pub(crate) fn connection_state_change(&self, state: Http3State) {
         match state {
             // If closing, existing events no longer relevant.
-            Http3State::Closing { .. } | Http3State::Closed(_) => self.events.borrow_mut().clear(),
+            Http3State::Closing { .. } | Http3State::Closed(_) => self.events.clear(),
             Http3State::Connected => {
-                self.remove(|evt| {
+                self.events.remove_matching(|evt| {
                     matches!(evt, Http3ClientEvent::StateChange(Http3State::ZeroRtt))
                 });
             }
             _ => (),
         }
-        self.insert(Http3ClientEvent::StateChange(state));
+        self.events.push(Http3ClientEvent::StateChange(state));
     }
 
     /// Remove events for a stream that is being torn down.
@@ -358,7 +358,7 @@ impl Http3ClientEvents {
     /// transport will delay delivery of the reset event, so the only case where we get
     /// a reset is where existing data is not intended to be reliably delivered.
     fn remove_recv_stream_events(&self, stream_id: StreamId, keep_header_ready: bool) {
-        self.remove(|evt| match evt {
+        self.events.remove_matching(|evt| match evt {
             Http3ClientEvent::HeaderReady { stream_id: x, .. } if *x == stream_id => {
                 !keep_header_ready
             }
@@ -373,7 +373,7 @@ impl Http3ClientEvents {
     }
 
     fn remove_send_stream_events(&self, stream_id: StreamId) {
-        self.remove(|evt| {
+        self.events.remove_matching(|evt| {
             matches!(evt,
                 Http3ClientEvent::DataWritable { stream_id: x }
                 | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
@@ -383,14 +383,15 @@ impl Http3ClientEvents {
     pub fn negotiation_done(&self, feature_type: HSettingType, succeeded: bool) {
         match feature_type {
             HSettingType::EnableWebTransport => {
-                self.insert(Http3ClientEvent::WebTransport(
+                self.events.push(Http3ClientEvent::WebTransport(
                     WebTransportEvent::Negotiated(succeeded),
                 ));
             }
             HSettingType::EnableConnect => {
-                self.insert(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Negotiated(
-                    succeeded,
-                )));
+                self.events
+                    .push(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Negotiated(
+                        succeeded,
+                    )));
             }
             _ => qtrace!("HSetting {feature_type:?} {succeeded} not handled"),
         }
@@ -402,12 +403,12 @@ impl EventProvider for Http3ClientEvents {
 
     /// Check if there is any event present.
     fn has_events(&self) -> bool {
-        !self.events.borrow().is_empty()
+        !self.events.is_empty()
     }
 
     /// Take the first event.
     fn next_event(&mut self) -> Option<Self::Event> {
-        self.events.borrow_mut().pop_front()
+        self.events.next_event()
     }
 }
 
@@ -422,7 +423,7 @@ mod tests {
     fn has_events() {
         let events = Http3ClientEvents::default();
         assert!(!events.has_events());
-        events.insert(Http3ClientEvent::GoawayReceived);
+        events.push(Http3ClientEvent::GoawayReceived);
         assert!(events.has_events());
     }
 }
