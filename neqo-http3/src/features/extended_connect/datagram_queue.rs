@@ -187,6 +187,10 @@ impl GroupQueue {
 /// * **Within a group** — the datagram with the highest `send_order` is always sent first.
 ///   Equal-order datagrams are served FIFO.
 ///
+/// This queue is scheduled independently of `neqo-transport`'s stream scheduler. A
+/// [`crate::SendGroupId`] shared between a `WebTransportSendStream` and a datagram writable does
+/// not get cross-type starvation avoidance, as the WebTransport spec's send-order rules require.
+///
 /// ## Lifecycle
 ///
 /// Datagrams are enqueued by `send_datagram()` and drained into the QUIC layer
@@ -205,7 +209,7 @@ impl GroupQueue {
 pub struct DatagramQueue {
     /// Send groups, keyed by a raw `u64` group ID. `0` is the sentinel for the
     /// null sendGroup (datagrams with no group assigned), and is intentionally
-    /// not a valid [`SendGroupId`] value. This differs from the stream
+    /// not a valid [`crate::SendGroupId`] value. This differs from the stream
     /// scheduling path, which uses `SendGroupId` directly.
     ///
     /// Ordered by group ID so that round-robin is deterministic. A group is
