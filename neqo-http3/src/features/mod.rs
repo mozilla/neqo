@@ -137,8 +137,8 @@ mod tests {
     }
 
     /// A WebTransport client only negotiates when the server advertises everything it needs
-    /// (extended CONNECT, HTTP/3 datagrams, and the datagram/reliable-reset transport
-    /// parameters); a server has no such requirements on the peer.
+    /// (extended CONNECT, HTTP/3 datagrams, and the datagram transport parameter); a server
+    /// has no such requirements on the peer.
     #[test]
     fn webtransport_feature_checks() {
         // Everything the server must advertise via SETTINGS for a client to use WebTransport.
