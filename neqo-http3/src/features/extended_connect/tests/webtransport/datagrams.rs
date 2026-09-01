@@ -184,6 +184,99 @@ fn datagram_max_age_expiry_reports_client_event() {
     assert!(wt.client.events().any(wt_expired_event));
 }
 
+/// A datagram still sitting in the queue when its session closes must be
+/// reported as `Dropped`, not silently discarded: a consumer tracking ids
+/// through the event stream would otherwise wait forever for an outcome
+/// that will never arrive.
+#[test]
+fn datagram_dropped_on_session_close_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Enqueued but not yet drained: no `process_output`/`exchange_packets`
+    // call happens between this and the cancellation below.
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now())
+        .unwrap();
+
+    wt.cancel_session_client(session_id);
+
+    let dropped_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Dropped(42),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(dropped_event));
+}
+
+/// `ServerSession::set_datagram_high_water_mark` is new public API introduced
+/// alongside its client-side counterpart (see
+/// `datagram_high_water_mark_reported_via_send_datagram`), but had no test of
+/// its own.
+#[test]
+fn server_datagram_high_water_mark_reported_via_send_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    wt_session.set_datagram_high_water_mark(Some(2)).unwrap();
+
+    let send = || wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    assert_eq!(send(), DatagramQueueOutcome::Ok);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+}
+
+/// `ServerSession::set_datagram_max_age` and `ServerEvent::DatagramOutcome`
+/// are new public API introduced alongside their client-side counterparts,
+/// but had no test of their own.
+#[test]
+fn server_datagram_sent_and_max_age_expiry_report_server_event() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session.send_datagram(DGRAM, Some(1u64), now()).unwrap();
+    wt.exchange_packets();
+
+    let sent_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Sent(1),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(sent_event));
+
+    let t0 = now();
+    wt_session.send_datagram(DGRAM, Some(2u64), t0).unwrap();
+    let t1 = t0 + Duration::from_millis(200);
+    wt_session
+        .set_datagram_max_age(Duration::from_millis(100), t1)
+        .unwrap();
+    // `set_datagram_max_age` only pushes the expiry onto the per-connection
+    // handler's event queue; a `process_*` call is what drains that into the
+    // top-level `Http3Server`'s own event queue `wt.server.events()` reads.
+    wt.server.process_output(t1);
+
+    let expired_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Expired(2),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(expired_event));
+}
+
 /// A datagram queued on the server must still expire once its max-age
 /// passes, even when nothing else - no other data to send, no other
 /// events, no explicit `set_datagram_max_age` call - would otherwise cause

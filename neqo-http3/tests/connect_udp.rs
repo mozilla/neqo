@@ -12,8 +12,9 @@ use http::Uri;
 use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _, qinfo};
 use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, Priority, SessionAcceptAction,
+    Http3ServerEvent, Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
+    features::extended_connect::DatagramOutcome,
     webtransport::ClientSession as _,
 };
 use neqo_transport::{ConnectionParameters, StreamType};
@@ -742,5 +743,47 @@ fn connect_udp_session_rejected_by_webtransport_set_datagram_max_age() {
     assert_eq!(
         client.webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), now()),
         Err(Error::InvalidStreamId)
+    );
+}
+
+/// A connect-udp session's datagram outcomes must arrive as
+/// `ConnectUdpEvent::DatagramOutcome`, not `WebTransportEvent::DatagramOutcome`:
+/// both protocols share the same outgoing-datagram-queue machinery, and a
+/// consumer that only knows about one of them must not be handed the other's
+/// event.
+#[test]
+fn connect_udp_datagram_outcome_uses_connect_udp_event() {
+    let (mut client, mut proxy, session_id, _proxy_session) = establish_new_session();
+
+    client
+        .connect_udp_send_datagram(session_id, PING, Some(1u64), now())
+        .unwrap();
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let events: Vec<_> = client.events().collect();
+
+    let sent_as_connect_udp = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Sent(1),
+            }) if *sid == session_id
+        )
+    });
+    assert!(
+        sent_as_connect_udp,
+        "connect-udp datagram outcome must be reported as a ConnectUdpEvent"
+    );
+
+    let mistagged_as_webtransport = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome { .. })
+        )
+    });
+    assert!(
+        !mistagged_as_webtransport,
+        "a connect-udp session's datagram outcome must never be reported as a WebTransportEvent"
     );
 }
