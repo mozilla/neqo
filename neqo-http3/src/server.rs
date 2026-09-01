@@ -141,14 +141,29 @@ impl Http3Server {
         let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
+        if let OutputBatch::DatagramBatch(d) = out {
+            qtrace!("[{self}] Send packet: {d:?}");
+            return OutputBatch::DatagramBatch(d);
+        }
+        let out = self
+            .server
+            .process_multiple(Option::<Datagram>::None, now, max_datagrams);
+        // The transport layer's callback delay has no notion of an
+        // http3-layer datagram queue's max-age deadline; clamp it the same
+        // way `Http3Client::process_multiple_output` does, so an
+        // otherwise-idle connection still wakes up in time to expire a
+        // stale queued datagram.
         match out {
-            OutputBatch::DatagramBatch(d) => {
-                qtrace!("[{self}] Send packet: {d:?}");
-                OutputBatch::DatagramBatch(d)
-            }
-            _ => self
-                .server
-                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
+            OutputBatch::Callback(delay) => OutputBatch::Callback(
+                self.http3_handlers
+                    .values()
+                    .filter_map(|h| h.borrow().next_datagram_expiry())
+                    .filter(|expiry| *expiry > now)
+                    .map(|expiry| expiry - now)
+                    .min()
+                    .map_or(delay, |max_age_delay| delay.min(max_age_delay)),
+            ),
+            out => out,
         }
     }
 
@@ -163,7 +178,7 @@ impl Http3Server {
         active_conns.extend(
             self.http3_handlers
                 .iter()
-                .filter(|(_, handler)| handler.borrow_mut().should_be_processed())
+                .filter(|(_, handler)| handler.borrow_mut().should_be_processed(now))
                 .map(|(c, _)| c)
                 .cloned(),
         );
@@ -326,6 +341,28 @@ impl Http3Server {
                                 session_id,
                             ),
                             datagram,
+                        );
+                    }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                        session_id,
+                        outcome,
+                    }) => {
+                        self.events.webtransport_datagram_outcome(
+                            ServerSession::new(conn.clone(), Rc::clone(handler), session_id),
+                            outcome,
+                        );
+                    }
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                        session_id,
+                        outcome,
+                    }) => {
+                        self.events.connect_udp_datagram_outcome(
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ),
+                            outcome,
                         );
                     }
                 }

@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
     ops::Deref,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
@@ -19,8 +19,8 @@ use neqo_transport::{
 };
 
 use crate::{
-    Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
-    Http3StreamType, Res, SendGroupId, SessionAcceptAction,
+    Error, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3ServerEvent, Http3State,
+    Http3StreamInfo, Http3StreamType, Res, SendGroupId, SessionAcceptAction, WebTransportEvent,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
@@ -61,6 +61,31 @@ pub trait ClientSession {
     ///
     /// This cannot panic. The max varint length is 8.
     fn webtransport_max_datagram_size(&self, session_id: StreamId) -> Res<u64>;
+
+    /// `None` means no limit. The caller is responsible for mapping the
+    /// `unrestricted double` `outgoingHighWaterMark` onto this, including NaN
+    /// and the infinities.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: Option<usize>,
+    ) -> Res<()>;
+
+    /// [`Duration::MAX`] means no limit, as does the default.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: Duration,
+        now: Instant,
+    ) -> Res<()>;
 
     /// Sets the `SendOrder` for a given stream
     ///
@@ -184,6 +209,15 @@ pub trait ClientSession {
 
     /// Send a `WebTransport` datagram.
     ///
+    /// This enqueues the datagram into a per-session queue. The datagram is
+    /// not actually sent until `process_output()` (or `process()`) is called,
+    /// which drains the queue into the QUIC layer and assembles outgoing
+    /// packets. The caller must call `process_output()` after this to ensure
+    /// timely delivery.
+    ///
+    /// Returns the state of the queue after the datagram was accepted, so the
+    /// caller can apply backpressure (see [`extended_connect::DatagramQueueOutcome`]).
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -195,7 +229,7 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl ClientSession for Http3Client {
@@ -213,6 +247,35 @@ impl ClientSession for Http3Client {
             .connection()
             .max_datagram_size()?
             .saturating_sub(to_u64(qsid_len)))
+    }
+
+    fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: Option<usize>,
+    ) -> Res<()> {
+        self.handler()
+            .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: Duration,
+        now: Instant,
+    ) -> Res<()> {
+        let expired = self
+            .handler()
+            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
+        for outcome in expired {
+            self.client_events().push(Http3ClientEvent::WebTransport(
+                WebTransportEvent::DatagramOutcome {
+                    session_id,
+                    outcome,
+                },
+            ));
+        }
+        Ok(())
     }
 
     fn webtransport_set_sendorder(
@@ -337,7 +400,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_send_datagram(session_id, conn, buf, id, now)
@@ -421,7 +484,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl Handler for Http3Connection {
@@ -502,7 +565,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -539,6 +602,31 @@ pub(crate) trait ServerHandler {
         session_id: StreamId,
         buf: &[u8],
         id: I,
+        now: Instant,
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
+
+    /// `None` means no limit. The caller is responsible for mapping the
+    /// `unrestricted double` `outgoingHighWaterMark` onto this, including NaN
+    /// and the infinities.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: Option<usize>,
+    ) -> Res<()>;
+
+    /// [`Duration::MAX`] means no limit, as does the default.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: Duration,
         now: Instant,
     ) -> Res<()>;
 }
@@ -595,10 +683,35 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .webtransport_send_datagram(session_id, conn, buf, id, now)
+    }
+
+    fn webtransport_set_datagram_high_water_mark(
+        &mut self,
+        session_id: StreamId,
+        high_water_mark: Option<usize>,
+    ) -> Res<()> {
+        self.base_handler_mut()
+            .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    fn webtransport_set_datagram_max_age(
+        &mut self,
+        session_id: StreamId,
+        max_age: Duration,
+        now: Instant,
+    ) -> Res<()> {
+        let expired = self
+            .base_handler_mut()
+            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
+        for outcome in expired {
+            self.server_events()
+                .webtransport_datagram_outcome(session_id, outcome);
+        }
+        Ok(())
     }
 }
 
@@ -707,6 +820,9 @@ impl ServerSession {
 
     /// Send `WebTransport` datagram.
     ///
+    /// Returns the state of the queue after the datagram was accepted, so the
+    /// caller can apply backpressure (see [`extended_connect::DatagramQueueOutcome`]).
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -717,7 +833,7 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -729,6 +845,34 @@ impl ServerSession {
                 id,
                 now,
             )
+    }
+
+    /// `None` means no limit. The caller is responsible for mapping the
+    /// `unrestricted double` `outgoingHighWaterMark` onto this, including NaN
+    /// and the infinities.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session is no longer active.
+    pub fn set_datagram_high_water_mark(&self, high_water_mark: Option<usize>) -> Res<()> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .webtransport_set_datagram_high_water_mark(session_id, high_water_mark)
+    }
+
+    /// [`Duration::MAX`] means no limit, as does the default.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session is no longer active.
+    pub fn set_datagram_max_age(&self, max_age: Duration, now: Instant) -> Res<()> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .webtransport_set_datagram_max_age(session_id, max_age, now)
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
@@ -803,6 +947,10 @@ pub enum ServerEvent {
         session: ServerSession,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -815,6 +963,11 @@ pub(crate) trait ServerEvents {
     );
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream);
     fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes);
+    fn webtransport_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    );
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -849,5 +1002,15 @@ impl ServerEvents for Http3ServerEvents {
             session,
             datagram,
         }));
+    }
+
+    fn webtransport_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    ) {
+        self.push(Http3ServerEvent::WebTransport(
+            ServerEvent::DatagramOutcome { session, outcome },
+        ));
     }
 }

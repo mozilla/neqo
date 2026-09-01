@@ -4,15 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Encoder, to_u64};
+use std::time::Duration;
+
+use neqo_common::{Encoder, event::Provider as _, to_u64};
 use neqo_transport::ConnectionParameters;
 use test_fixture::now;
 
 use crate::{
-    features::extended_connect::tests::webtransport::{
-        DATAGRAM_SIZE, WtTest, wt_default_parameters,
+    Http3ClientEvent, Http3ServerEvent, WebTransportEvent,
+    features::extended_connect::{
+        DatagramOutcome, DatagramQueueOutcome,
+        datagram_queue::DEFAULT_HARD_LIMIT,
+        tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
     },
-    webtransport::ServerSession,
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
 const DGRAM: &[u8] = &[0, 100];
@@ -27,7 +32,10 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
         Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
 
     wt.exchange_packets();
@@ -74,4 +82,151 @@ fn max_datagram_size_smaller_than_session_prefix() {
 
     assert_eq!(wt_session.max_datagram_size(), Ok(0));
     assert_eq!(wt.max_datagram_size(wt_session.stream_id()), Ok(0));
+}
+
+#[test]
+fn datagram_high_water_mark_reported_via_send_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .webtransport_set_datagram_high_water_mark(session_id, Some(2))
+        .unwrap();
+
+    let mut send = || {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, now())
+            .unwrap()
+    };
+
+    assert_eq!(send(), DatagramQueueOutcome::Ok);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+}
+
+#[test]
+fn datagram_hard_limit_overflow_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for id in 0..limit {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now())
+            .unwrap();
+        assert_eq!(outcome, DatagramQueueOutcome::Ok);
+    }
+
+    let outcome = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now())
+        .unwrap();
+    assert_eq!(
+        outcome,
+        DatagramQueueOutcome::Overflowed { dropped: Some(0) }
+    );
+}
+
+#[test]
+fn datagram_sent_reports_client_event() {
+    // The `Sent` outcome is what tells the application its datagram actually
+    // reached the QUIC layer; it is only produced when the queue is drained
+    // during `process_output()`.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now())
+        .unwrap();
+    wt.exchange_packets();
+
+    let wt_sent_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Sent(9),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_sent_event));
+}
+
+#[test]
+fn datagram_max_age_expiry_reports_client_event() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0)
+        .unwrap();
+
+    let t1 = t0 + Duration::from_millis(200);
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), t1)
+        .unwrap();
+
+    let wt_expired_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(7),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_expired_event));
+}
+
+/// A datagram queued on the server must still expire once its max-age
+/// passes, even when nothing else - no other data to send, no other
+/// events, no explicit `set_datagram_max_age` call - would otherwise cause
+/// that connection to be processed. Without `should_be_processed` checking
+/// the pending expiry itself, the connection is skipped indefinitely and
+/// the datagram is never expired.
+#[test]
+fn server_datagram_expires_on_an_otherwise_idle_connection() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session
+        .set_datagram_max_age(Duration::from_millis(30), now())
+        .unwrap();
+
+    // Enough filler datagrams to exhaust the transport's 10-slot queue on
+    // the first (needs-processing-triggered) drain below, so the tracked
+    // datagram is left stuck in the http3-level queue rather than sent
+    // immediately.
+    for _ in 0..15 {
+        wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    }
+    wt_session
+        .send_datagram(DGRAM, Some(77u64), now())
+        .unwrap();
+
+    let t0 = now();
+    wt.server.process_output(t0);
+
+    // Otherwise idle: nothing else happens between here and the deadline,
+    // so only `should_be_processed`'s datagram-expiry check can trigger
+    // the drain that actually expires it.
+    wt.server.process_output(t0 + Duration::from_millis(35));
+
+    let expired_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Expired(77),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(expired_event));
 }

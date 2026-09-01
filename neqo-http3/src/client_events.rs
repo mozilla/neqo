@@ -47,6 +47,10 @@ pub enum WebTransportEvent {
         session_id: StreamId,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session_id: StreamId,
+        outcome: extended_connect::DatagramOutcome,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -68,6 +72,10 @@ pub enum ConnectUdpEvent {
     Datagram {
         session_id: StreamId,
         datagram: Bytes,
+    },
+    DatagramOutcome {
+        session_id: StreamId,
+        outcome: extended_connect::DatagramOutcome,
     },
 }
 
@@ -285,6 +293,29 @@ impl ExtendedConnectEvents for Http3ClientEvents {
                 Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram {
                     session_id,
                     datagram,
+                })
+            }
+        };
+        self.events.push(event);
+    }
+
+    fn datagram_outcome(
+        &self,
+        session_id: StreamId,
+        outcome: extended_connect::DatagramOutcome,
+        connect_type: ExtendedConnectType,
+    ) {
+        let event = match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                    session_id,
+                    outcome,
+                })
+            }
+            ExtendedConnectType::ConnectUdp => {
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                    session_id,
+                    outcome,
                 })
             }
         };

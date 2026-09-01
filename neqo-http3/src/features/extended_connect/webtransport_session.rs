@@ -247,6 +247,10 @@ impl Protocol for Session {
         Some(&self.stats)
     }
 
+    fn stats_mut(&mut self) -> Option<&mut SessionStats> {
+        Some(&mut self.stats)
+    }
+
     fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
         Self::register_send_group(self, id)
     }

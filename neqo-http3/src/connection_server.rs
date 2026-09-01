@@ -54,6 +54,11 @@ impl Http3ServerHandler {
         &mut self.base_handler
     }
 
+    /// See [`Http3Connection::next_datagram_expiry`].
+    pub(crate) const fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.base_handler.next_datagram_expiry()
+    }
+
     pub(crate) const fn server_events(&self) -> &Http3ServerConnEvents {
         &self.events
     }
@@ -199,6 +204,9 @@ impl Http3ServerHandler {
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn, now);
             self.check_result(conn, now, &res);
+
+            // Process datagram queues to send any queued datagrams
+            self.base_handler.process_all_datagram_queues(conn, now);
         }
     }
 
@@ -214,13 +222,19 @@ impl Http3ServerHandler {
         self.needs_processing = true;
     }
 
-    /// Whether this connection has events to process or data to send.
-    pub(crate) fn should_be_processed(&mut self) -> bool {
+    /// Whether this connection has events to process, data to send, or a
+    /// queued datagram past its max-age: without the last check, a
+    /// connection whose only pending work is an expired datagram is never
+    /// processed, so it never expires and `set_datagram_max_age` has no
+    /// effect on an otherwise-idle connection.
+    pub(crate) fn should_be_processed(&mut self, now: Instant) -> bool {
         if self.needs_processing {
             self.needs_processing = false;
             return true;
         }
-        self.base_handler.has_data_to_send() || self.events.has_events()
+        self.base_handler.has_data_to_send()
+            || self.events.has_events()
+            || self.next_datagram_expiry().is_some_and(|e| e <= now)
     }
 
     // This function takes the provided result and check for an error.

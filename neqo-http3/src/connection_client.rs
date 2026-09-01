@@ -752,6 +752,14 @@ impl Http3Client {
                 }
                 let res = self.base_handler.process_sending(&mut self.conn, now);
                 self.check_result(now, &res);
+
+                // Drain per-session datagram queues into the QUIC layer.
+                // Datagrams are enqueued by webtransport_send_datagram() and only
+                // moved to the QUIC send queue here, during process_http3(). This
+                // is called from process_output()/process(), so datagrams are sent
+                // on the next outgoing packet after the caller triggers processing.
+                self.base_handler
+                    .process_all_datagram_queues(&mut self.conn, now);
             }
             Http3State::Closed { .. } => {}
             _ => {
@@ -794,6 +802,12 @@ impl Http3Client {
     ///    state-change event.
     ///  - Therefore the HTTP/3 layer processing (`process_http3`) is called again.
     ///
+    /// The returned [`OutputBatch::Callback`] duration is also clamped to any
+    /// pending WebTransport datagram-queue max-age deadline
+    /// (`Http3Connection::next_datagram_expiry`), so a session with a queued
+    /// datagram and no other timer pending still gets `process_output`
+    /// called again in time to expire it.
+    ///
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
@@ -812,7 +826,20 @@ impl Http3Client {
         // Update H3 for any transport state changes and events
         self.process_http3(now);
 
-        out
+        // `self.conn`'s callback delay only accounts for transport-layer
+        // timers; it has no notion of an http3-layer datagram queue's
+        // max-age deadline. Clamp it so an otherwise-idle connection still
+        // wakes up in time to expire a stale queued datagram, instead of
+        // waiting on whatever unrelated timer happens to fire next.
+        match out {
+            OutputBatch::Callback(delay) => OutputBatch::Callback(
+                self.base_handler
+                    .next_datagram_expiry()
+                    .filter(|expiry| *expiry > now)
+                    .map_or(delay, |expiry| delay.min(expiry - now)),
+            ),
+            out => out,
+        }
     }
 
     /// This function takes the provided result and check for an error.

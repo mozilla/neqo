@@ -73,7 +73,7 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl ClientSession for Http3Client {
@@ -118,7 +118,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -160,7 +160,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl Handler for Http3Connection {
@@ -232,7 +232,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -304,6 +304,7 @@ impl ServerHandler for Http3ServerHandler {
         self.mark_needs_processing();
         self.base_handler_mut()
             .connect_udp_send_datagram(conn, session_id, buf, id, now)
+            .map(|_| ())
     }
 }
 
@@ -439,6 +440,10 @@ pub enum ServerEvent {
         session: ServerSession,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -450,6 +455,11 @@ pub(crate) trait ServerEvents {
         headers: Option<Vec<Header>>,
     );
     fn connect_udp_datagram(&self, session: ServerSession, datagram: Bytes);
+    fn connect_udp_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    );
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -477,6 +487,17 @@ impl ServerEvents for Http3ServerEvents {
         self.push(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
             session,
             datagram,
+        }));
+    }
+
+    fn connect_udp_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    ) {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::DatagramOutcome {
+            session,
+            outcome,
         }));
     }
 }

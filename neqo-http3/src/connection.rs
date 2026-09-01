@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{
@@ -300,6 +300,10 @@ pub struct Http3Connection {
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
     send_group_generator: SendGroupGenerator,
+    /// Cached result of the last [`Self::process_all_datagram_queues`] call,
+    /// read by [`Self::next_datagram_expiry`] instead of re-walking
+    /// `recv_streams`.
+    datagram_next_expiry: Option<Instant>,
 }
 
 impl Display for Http3Connection {
@@ -338,6 +342,7 @@ impl Http3Connection {
             recv_streams: HashMap::default(),
             send_group_generator: SendGroupGenerator::default(),
             role,
+            datagram_next_expiry: None,
         }
     }
 
@@ -1637,10 +1642,73 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .send_datagram(conn, buf, id, now)
+    }
+
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub fn webtransport_set_datagram_high_water_mark(
+        &self,
+        session_id: StreamId,
+        mark: Option<usize>,
+    ) -> Res<()> {
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .set_datagram_high_water_mark(mark);
+        Ok(())
+    }
+
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub fn webtransport_set_datagram_max_age(
+        &self,
+        session_id: StreamId,
+        max_age: Duration,
+        now: Instant,
+    ) -> Res<Vec<extended_connect::DatagramOutcome>> {
+        Ok(self
+            .webtransport_session(session_id)?
+            .borrow_mut()
+            .set_datagram_max_age(max_age, now))
+    }
+
+    /// Drain every session's datagram queue into the QUIC layer.
+    ///
+    /// Applies to every extended-CONNECT protocol, not just `WebTransport`: connect-udp
+    /// sessions queue their datagrams the same way. Each session reports its own
+    /// outcomes through its own `events`/`connect_type`, so there is no per-outcome
+    /// callback here for a caller to mis-tag by protocol.
+    ///
+    /// Also refreshes the cache [`Self::next_datagram_expiry`] reads, using
+    /// the same `recv_streams` walk this already has to do rather than
+    /// paying for a second one.
+    pub(crate) fn process_all_datagram_queues(&mut self, conn: &mut Connection, now: Instant) {
+        self.datagram_next_expiry = self
+            .recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter_map(|session| {
+                session.borrow_mut().process_datagram_queue(conn, now);
+                session.borrow().next_datagram_expiry()
+            })
+            .min();
+    }
+
+    /// The earliest instant at which any session's outgoing datagram queue
+    /// needs [`Self::process_all_datagram_queues`] called again to expire a
+    /// stale datagram, even if nothing else - no packets to send or receive,
+    /// no other timer - would otherwise trigger it. `None` if no session has
+    /// a datagram queued with an expiry pending.
+    ///
+    /// Reads the cache [`Self::process_all_datagram_queues`] refreshes,
+    /// instead of walking `recv_streams` a second time.
+    pub(crate) const fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.datagram_next_expiry
     }
 
     /// Frames whose handling is specific to the client and server (`Goaway`,
