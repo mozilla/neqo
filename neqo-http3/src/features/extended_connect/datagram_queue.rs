@@ -130,13 +130,7 @@ impl GroupQueue {
 
     /// Evict the oldest datagram from the lowest-priority bucket.
     fn evict_lowest(&mut self) -> Option<QueuedDatagram> {
-        let mut entry = self.by_order.first_entry()?;
-        let dgram = entry.get_mut().pop_front()?;
-        self.count -= 1;
-        if entry.get().is_empty() {
-            entry.remove();
-        }
-        Some(dgram)
+        self.pop_front(self.lowest_order()?)
     }
 
     /// Expire all datagrams older than `max_age`. Returns their IDs.
@@ -282,7 +276,13 @@ impl DatagramQueue {
         self.groups
             .iter()
             .filter(|(_, g)| !g.is_empty())
-            .map(|(gid, g)| (g.lowest_order().unwrap_or(i64::MAX), *gid))
+            .map(|(gid, g)| {
+                (
+                    g.lowest_order()
+                        .expect("filtered groups are non-empty, so have a lowest order"),
+                    *gid,
+                )
+            })
             .min()
     }
 
