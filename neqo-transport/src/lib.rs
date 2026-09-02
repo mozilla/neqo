@@ -72,7 +72,7 @@ pub use self::{
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
     pmtud::Pmtud,
-    quic_datagrams::DatagramTracking,
+    quic_datagrams::{BufferedDatagramSource, DatagramTracking, OutgoingDatagramSource},
     rtt::DEFAULT_INITIAL_RTT,
     sni::find_sni,
     stateless_reset::Token,

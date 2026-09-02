@@ -49,7 +49,9 @@ use crate::{
     packet::{self},
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
+    quic_datagrams::{
+        DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, OutgoingDatagramSource, QuicDatagrams,
+    },
     recovery::{self, SendProfile, sent},
     recv_stream,
     rtt::{GRANULARITY, RttEstimate},
@@ -313,6 +315,10 @@ pub struct Connection {
     /// This is responsible for the `QuicDatagrams`' handling:
     /// <https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram>
     quic_datagrams: QuicDatagrams,
+    /// An external source [`Self::write_appdata_frames`] pulls outgoing
+    /// datagrams from instead of `quic_datagrams`'s own default buffer, set
+    /// via [`Self::set_outgoing_datagram_source`].
+    outgoing_datagram_source: Option<Rc<RefCell<dyn OutgoingDatagramSource>>>,
 
     crypto: Crypto,
     acks: AckTracker,
@@ -477,6 +483,7 @@ impl Connection {
             conn_params,
             hrtime: hrtime::Time::get(Self::LOOSE_TIMER_RESOLUTION),
             quic_datagrams,
+            outgoing_datagram_source: None,
             #[cfg(any(test, feature = "build-fuzzing-corpus"))]
             test_frame_writer: None,
         };
@@ -2439,7 +2446,18 @@ impl Connection {
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
         // Skip datagrams in PMTUD probe packets to avoid losing user data when probes are lost
         if !is_pmtud_probe {
-            self.quic_datagrams.write_frames(builder, tokens, stats);
+            if let Some(source) = self.outgoing_datagram_source.clone() {
+                self.quic_datagrams.write_frames(
+                    Some(&mut *source.borrow_mut()),
+                    builder,
+                    tokens,
+                    stats,
+                    now,
+                );
+            } else {
+                self.quic_datagrams
+                    .write_frames(None, builder, tokens, stats, now);
+            }
             if builder.is_full() {
                 return;
             }
@@ -4140,6 +4158,18 @@ impl Connection {
     pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<()> {
         self.quic_datagrams
             .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
+    }
+
+    /// Register an external source that outgoing datagrams are pulled from
+    /// at packet-build time, instead of the small buffer that
+    /// [`Self::send_datagram`] enqueues into by default. Passing `None`
+    /// reverts to that default buffer. Idempotent: re-registering the same
+    /// source is safe and cheap.
+    pub fn set_outgoing_datagram_source(
+        &mut self,
+        source: Option<Rc<RefCell<dyn OutgoingDatagramSource>>>,
+    ) {
+        self.outgoing_datagram_source = source;
     }
 
     /// Return the PLMTU of the primary path.
