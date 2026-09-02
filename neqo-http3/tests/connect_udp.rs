@@ -14,7 +14,7 @@ use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
-    features::extended_connect::DatagramOutcome,
+    features::extended_connect::{DatagramOutcome, DatagramQueueOutcome},
     webtransport::ClientSession as _,
 };
 use neqo_transport::{ConnectionParameters, StreamType};
@@ -786,4 +786,24 @@ fn connect_udp_datagram_outcome_uses_connect_udp_event() {
         !mistagged_as_webtransport,
         "a connect-udp session's datagram outcome must never be reported as a WebTransportEvent"
     );
+}
+
+/// The server-side connect-udp `send_datagram` must surface the queue's
+/// `DatagramQueueOutcome`, same as its client-side counterpart and as
+/// `ServerHandler::webtransport_send_datagram` on the WebTransport side:
+/// without this, a connect-udp server has a queue but no backpressure
+/// signal telling it the queue is full.
+#[test]
+fn connect_udp_server_send_datagram_reports_backpressure() {
+    let (_client, _proxy, _session_id, proxy_session) = establish_new_session();
+
+    // `DEFAULT_HARD_LIMIT` (1000) is crate-private, so drive the queue to its
+    // hard limit directly rather than importing it.
+    for _ in 0..1000 {
+        proxy_session.send_datagram(PING, None, now()).unwrap();
+    }
+    assert!(matches!(
+        proxy_session.send_datagram(PING, None, now()),
+        Ok(DatagramQueueOutcome::Overflowed { .. })
+    ));
 }
