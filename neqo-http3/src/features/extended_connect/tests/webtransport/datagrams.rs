@@ -393,9 +393,7 @@ fn server_datagram_expires_on_an_otherwise_idle_connection() {
     for _ in 0..15 {
         wt_session.send_datagram(DGRAM, None, now()).unwrap();
     }
-    wt_session
-        .send_datagram(DGRAM, Some(77u64), now())
-        .unwrap();
+    wt_session.send_datagram(DGRAM, Some(77u64), now()).unwrap();
 
     let t0 = now();
     wt.server.process_output(t0);
@@ -440,9 +438,7 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     for _ in 0..15 {
         wt_session.send_datagram(DGRAM, None, now()).unwrap();
     }
-    wt_session
-        .send_datagram(DGRAM, Some(77u64), now())
-        .unwrap();
+    wt_session.send_datagram(DGRAM, Some(77u64), now()).unwrap();
 
     let t0 = now();
     wt.server.process_output(t0);

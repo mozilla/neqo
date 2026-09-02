@@ -21,9 +21,7 @@ use crate::{
     SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
-        datagram_queue::{
-            DatagramId, DatagramOutcome, DatagramQueueOutcome, WebTransportDatagramQueue,
-        },
+        datagram_queue::{DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome},
         stats::SessionStats,
     },
     frames::HFrame,
@@ -67,7 +65,7 @@ pub(crate) struct Session {
     draining: bool,
     /// Outgoing datagrams awaiting handover to the QUIC layer. Shared by every
     /// extended-CONNECT protocol; the queue itself is protocol-agnostic.
-    datagram_queue: WebTransportDatagramQueue,
+    datagram_queue: DatagramQueue,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -127,7 +125,7 @@ impl Session {
             events,
             protocol,
             draining: false,
-            datagram_queue: WebTransportDatagramQueue::new(),
+            datagram_queue: DatagramQueue::new(),
         }
     }
 
@@ -158,7 +156,7 @@ impl Session {
             events,
             protocol,
             draining: false,
-            datagram_queue: WebTransportDatagramQueue::new(),
+            datagram_queue: DatagramQueue::new(),
         })
     }
 
@@ -470,9 +468,9 @@ impl Session {
             DatagramTracking::None => None,
         };
 
-        let (outcome, dropped) = self
-            .datagram_queue
-            .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);
+        let (outcome, dropped) =
+            self.datagram_queue
+                .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);
         if outcome == DatagramQueueOutcome::Overflowed {
             self.count_dropped_outgoing(1);
         }
@@ -522,7 +520,7 @@ impl Session {
     /// Only as many datagrams as the QUIC layer can currently accept are handed
     /// over; the rest stay queued for a later call, so that a burst is paced
     /// against what the connection can send instead of overflowing the QUIC
-    /// layer's fixed-size queue. See [`WebTransportDatagramQueue::drain`].
+    /// layer's fixed-size queue. See [`DatagramQueue::drain`].
     ///
     /// A no-op once the session is no longer `Active`: nothing enqueues new
     /// datagrams past that point, and any already queued are dropped and
@@ -580,7 +578,7 @@ impl Session {
 
     /// The instant at which this session's datagram queue next needs
     /// [`Self::process_datagram_queue`] called to expire a stale datagram.
-    /// See [`WebTransportDatagramQueue::next_expiry`].
+    /// See [`DatagramQueue::next_expiry`].
     pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
         self.datagram_queue.next_expiry()
     }
