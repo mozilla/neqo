@@ -63,8 +63,17 @@ Dependencies are managed via `test/pyproject.toml` and resolved automatically by
 uv run --project test compare-lockfile
 ```
 
-Fetches Gecko's `Cargo.lock` and reports which packages match, which differ,
-and whether mismatches are production-affecting or dev/build-only.
+Fetches Gecko's `Cargo.lock` and checks that ours is aligned with it. Hard
+violations are duplicate versions Gecko doesn't itself carry, and shared
+dependencies sitting on a version other than Gecko's. Everything else is
+advisory: deps ahead of Gecko that the next vendor picks up, deps on a semver
+range Gecko doesn't carry, and pins another crate's version requirement rules
+out. Mismatches are labelled production-affecting or dev/build-only.
+
+Exit status is `0` when every invariant holds, `1` when there are hard
+violations, and `2` if the check could not run (no `Cargo.lock`, `cargo` or
+network failure) — so a broken environment is distinguishable from a real
+violation.
 
 ### Update versions
 
@@ -72,12 +81,27 @@ and whether mismatches are production-affecting or dev/build-only.
 uv run --project test update-lockfile
 ```
 
-Aligns shared dependencies with Gecko's pinned versions and updates packages
-Gecko doesn't depend on (dev/build tools and neqo-exclusive packages) to their
-latest available versions.
+Pins every dependency Gecko carries to Gecko's exact version, dev- and
+build-dependencies included, staying as close to Gecko as cargo allows. Where a
+requirement rules Gecko's version out, the version is left alone rather than
+bumped to latest. Packages Gecko has no version of, and packages only neqo uses
+within Gecko, are bumped to their newest compatible version.
 
-Set `GITHUB_TOKEN` (or `GITHUB_API_TOKEN`) in the environment to avoid GitHub
-API rate limits when fetching Gecko metadata.
+Drift is only a hard violation for packages whose version can reach a Gecko build
+of neqo — those reachable via normal or build edges from the crates Gecko vendors.
+For the rest, matching Gecko is preferred but harmless to miss.
+
+Both commands end with the same markdown block, `Why each version differs from
+Gecko`, explaining per package why its version is what it is and why that is
+safe. `update-lockfile` prefixes it with `Lockfile changes`, a before → after
+list of what that run moved. Both are paste-ready for a commit message or PR
+description. `Cargo.lock` itself cannot carry the rationale: cargo reserializes
+the file on every write and drops any hand-added comments.
+
+Both need a working `cargo` (they read the resolved dependency graph via `cargo
+metadata --locked`). Setting `GITHUB_TOKEN` (or `GITHUB_API_TOKEN`) is optional
+and only raises GitHub's rate limit for the one API call that lists Gecko's
+`netwerk/` crates.
 
 ### Linting and type checking
 
