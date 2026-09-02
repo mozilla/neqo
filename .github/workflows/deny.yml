@@ -13,4 +13,4 @@ permissions:
 
 jobs:
   deny:
-    uses: mozilla/actions/.github/workflows/deny.yml@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+    uses: mozilla/actions/.github/workflows/deny.yml@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
