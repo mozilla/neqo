@@ -85,14 +85,14 @@ impl QueuedDatagram {
 /// `StreamHasDataToWrite()` -> `ForceSend()`, which asynchronously dispatches
 /// `SendData()` -> `ProcessOutput()` on the next event loop cycle.
 #[derive(Debug)]
-pub struct WebTransportDatagramQueue {
+pub struct DatagramQueue {
     queue: VecDeque<QueuedDatagram>,
     hard_limit: usize,
     high_water_mark: Option<usize>,
     max_age: Duration,
 }
 
-impl WebTransportDatagramQueue {
+impl DatagramQueue {
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -247,7 +247,7 @@ impl WebTransportDatagramQueue {
     }
 }
 
-impl Default for WebTransportDatagramQueue {
+impl Default for DatagramQueue {
     fn default() -> Self {
         Self::new()
     }
@@ -261,7 +261,7 @@ mod tests {
 
     #[test]
     fn queue_basic() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
 
         let (outcome, dropped) = queue.enqueue(vec![1, 2, 3], Some(1), t);
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn high_water_mark() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.set_high_water_mark(Some(2));
 
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn high_water_mark_above_hard_limit_is_clamped() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         queue.hard_limit = 3;
         queue.set_high_water_mark(Some(10));
         let t = now();
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn hard_limit() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.hard_limit = 3;
 
@@ -327,7 +327,7 @@ mod tests {
 
     #[test]
     fn hard_limit_untracked_datagram_drops_silently() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.hard_limit = 1;
 
@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn hard_limit_zero_does_not_panic() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         queue.hard_limit = 0;
         let t = now();
 
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn max_age_expiration() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(Duration::from_millis(100), t0);
 
@@ -378,7 +378,7 @@ mod tests {
 
     #[test]
     fn max_age_expiration_untracked_datagram_reports_nothing() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(Duration::from_millis(100), t0);
 
@@ -392,13 +392,13 @@ mod tests {
 
     #[test]
     fn next_expiry_is_none_when_empty() {
-        let queue = WebTransportDatagramQueue::new();
+        let queue = DatagramQueue::new();
         assert_eq!(queue.next_expiry(), None);
     }
 
     #[test]
     fn next_expiry_is_none_without_a_max_age() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.enqueue(vec![1], Some(1), t);
         assert_eq!(queue.next_expiry(), None);
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn next_expiry_tracks_the_oldest_datagram() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(Duration::from_millis(50), t0);
 
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn next_expiry_advances_once_the_oldest_datagram_is_gone() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(Duration::from_millis(50), t0);
 
@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn drain() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
 
         queue.enqueue(vec![0, 1], Some(1), t);
@@ -453,7 +453,7 @@ mod tests {
     fn drain_reports_every_expired_datagram() {
         // Untracked datagrams produce no outcome, but the caller still has to be
         // able to count them, so `drain` reports one entry per expired datagram.
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(Duration::from_millis(50), t0);
 
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn below_watermark_recovers_after_drain() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.set_high_water_mark(Some(2));
 
@@ -491,7 +491,7 @@ mod tests {
 
     #[test]
     fn drain_stops_at_budget() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         for i in 1..=5 {
             queue.enqueue(vec![0, i], Some(u64::from(i)), t);
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn drain_budget_zero_keeps_everything() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         queue.enqueue(vec![1], Some(1), t);
 
@@ -521,7 +521,7 @@ mod tests {
     fn budgeted_drain_expires_even_with_no_budget() {
         // Expiry is not a send, so it must not be gated on the QUIC layer
         // having room; otherwise stale datagrams pile up while it is full.
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t0 = now();
         queue.set_max_age(Duration::from_millis(50), t0);
         queue.enqueue(vec![1], Some(1), t0);
@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn partial_drain_leaves_remainder_for_a_later_call() {
-        let mut queue = WebTransportDatagramQueue::new();
+        let mut queue = DatagramQueue::new();
         let t = now();
         for i in 1..=3 {
             queue.enqueue(vec![0, i], Some(u64::from(i)), t);
