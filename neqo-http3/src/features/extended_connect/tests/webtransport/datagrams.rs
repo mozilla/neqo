@@ -757,14 +757,18 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
     }
 }
 
-/// Two sessions on the same connection must share the transport's 10-slot
-/// datagram capacity fairly - one datagram at a time, round-robin - rather
-/// than one session draining it dry before the other gets a turn.
+/// Two sessions on the same connection must share one packet's worth of
+/// space fairly - one datagram at a time, round-robin via
+/// `SessionDatagramSources` - rather than one session draining it dry
+/// before the other gets a turn. There is no separate transport-side queue
+/// to be fair *about*: `neqo_transport::Connection` pulls straight from
+/// whichever session's turn it is as it builds the packet.
 #[test]
 fn datagram_queues_share_transport_capacity_fairly_across_sessions() {
-    // More than the transport's 10-slot queue can hold from either session
-    // alone, so a fair split requires interleaving.
-    const PER_SESSION: u8 = 8;
+    // Comfortably more than fits in a single packet from either session
+    // alone, so a fair split requires interleaving, and some must be left
+    // over after just one `process_output` call.
+    const PER_SESSION: u16 = 500;
 
     let mut wt = WtTest::new();
     let session_a = wt.create_wt_session();
@@ -774,17 +778,16 @@ fn datagram_queues_share_transport_capacity_fairly_across_sessions() {
 
     for i in 0..PER_SESSION {
         wt.client
-            .webtransport_send_datagram(id_a, &[0, i], Some(u64::from(i)), now(), 0, 0)
+            .webtransport_send_datagram(id_a, DGRAM, Some(u64::from(i)), now(), 0, 0)
             .unwrap();
         wt.client
-            .webtransport_send_datagram(id_b, &[0, i], Some(u64::from(i) + 1000), now(), 0, 0)
+            .webtransport_send_datagram(id_b, DGRAM, Some(u64::from(i) + 100_000), now(), 0, 0)
             .unwrap();
     }
 
     // A single processing step - not a full exchange, which would eventually
     // deliver everything regardless of fairness - is what exercises exactly
-    // one process_all_datagram_queues round against the transport's
-    // still-fresh 10-slot capacity.
+    // one round of pulls against one packet's worth of space.
     wt.client.process_output(now());
 
     let events: Vec<_> = wt.client.events().collect();
@@ -816,5 +819,9 @@ fn datagram_queues_share_transport_capacity_fairly_across_sessions() {
     assert!(
         sent_a.abs_diff(sent_b) <= 1,
         "capacity must split ~evenly across sessions in one round, got A={sent_a} B={sent_b}"
+    );
+    assert!(
+        sent_a + sent_b < 2 * usize::from(PER_SESSION),
+        "one packet must not have room for the whole burst, or this isn't testing a partial round"
     );
 }

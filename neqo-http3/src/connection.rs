@@ -311,16 +311,17 @@ pub struct Http3Connection {
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
     send_group_generator: SendGroupGenerator,
-    /// Cached result of the last [`Self::process_all_datagram_queues`] call,
-    /// read by [`Self::next_datagram_expiry`] instead of re-walking
-    /// `recv_streams`.
+    /// Cached result of the last [`Self::expire_datagram_queues`] call, read
+    /// by [`Self::next_datagram_expiry`] instead of re-walking every
+    /// session.
     datagram_next_expiry: Option<Instant>,
-    /// Session at which the next [`Self::process_all_datagram_queues`] round
-    /// should start, so a session skipped this call (out of transport
-    /// capacity) gets priority next time rather than the same session
-    /// always winning. Mirrors [`DatagramQueue`][extended_connect::datagram_queue::DatagramQueue]'s
-    /// own `rr_next`, one level up.
-    datagram_session_rr_next: Option<StreamId>,
+    /// The source [`neqo_transport::Connection::set_outgoing_datagram_source`]
+    /// pulls outgoing datagrams from, registered at session-creation time
+    /// (both [`Self::extended_connect_create_session`] and
+    /// [`Self::do_accept_extended_connect`] have `&mut Connection` in scope
+    /// then). Shared across however many extended-CONNECT sessions this
+    /// connection has, so they round-robin fairly for packet space.
+    datagram_sources: Rc<RefCell<extended_connect::datagram_source::SessionDatagramSources>>,
 }
 
 impl Display for Http3Connection {
@@ -358,9 +359,9 @@ impl Http3Connection {
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
             send_group_generator: SendGroupGenerator::default(),
-            datagram_session_rr_next: None,
             role,
             datagram_next_expiry: None,
+            datagram_sources: Rc::default(),
         }
     }
 
@@ -1247,6 +1248,7 @@ impl Http3Connection {
             Rc::clone(&self.qpack_decoder),
             connect_type,
         )));
+        self.register_datagram_source(conn, &extended_conn);
         self.add_streams(
             id,
             Box::new(Rc::clone(&extended_conn)),
@@ -1357,6 +1359,7 @@ impl Http3Connection {
                     connect_type,
                 )?,
             ));
+            self.register_datagram_source(conn, &extended_conn);
             self.add_streams(
                 stream_id,
                 Box::new(Rc::clone(&extended_conn)),
@@ -1961,77 +1964,56 @@ impl Http3Connection {
     /// outcomes through its own `events`/`connect_type`, so there is no per-outcome
     /// callback here for a caller to mis-tag by protocol.
     ///
-    /// Expiry runs unconditionally for every session first, since it is not a
-    /// send and must not be gated on transport capacity: otherwise a session
-    /// starved of capacity this round would pile up stale datagrams instead
-    /// of shedding them. Sending then proceeds one datagram per session per
-    /// round - mirroring the send-group round-robin within a single
-    /// session's own queue - so one session with plenty queued cannot drain
-    /// the whole transport-level budget before another session, sharing the
-    /// same connection, gets a turn. `recv_streams` iterates in an
-    /// unspecified order, so a persistent cursor picks up where the last
-    /// call left off, rather than always favouring whichever session that
-    /// order happens to visit first.
+    /// Expiry is not a send and must not be gated on transport capacity:
+    /// otherwise a session starved of capacity this round would pile up
+    /// stale datagrams instead of shedding them. Actually sending is
+    /// [`neqo_transport::Connection`]'s job now: it pulls from
+    /// [`Self::datagram_sources`], which round-robins across sessions itself,
+    /// once it has room for a datagram in the packet it is building - see
+    /// [`neqo_transport::Connection::set_outgoing_datagram_source`].
     ///
-    /// Also refreshes the cache [`Self::next_datagram_expiry`] reads, using
-    /// the same `recv_streams` walk this already has to do rather than
-    /// paying for a second one.
-    pub(crate) fn process_all_datagram_queues(&mut self, conn: &mut Connection, now: Instant) {
-        let mut sessions: Vec<(StreamId, Rc<RefCell<extended_connect::session::Session>>)> = self
-            .recv_streams
-            .iter()
-            .filter_map(|(id, s)| s.extended_connect_session().map(|sess| (*id, sess)))
-            .collect();
-        self.datagram_next_expiry = sessions
-            .iter()
-            .filter_map(|(_, session)| session.borrow().next_datagram_expiry(conn))
-            .min();
-        if sessions.is_empty() {
-            return;
-        }
-        sessions.sort_unstable_by_key(|(id, _)| *id);
-        let start = self
-            .datagram_session_rr_next
-            .and_then(|cursor| sessions.iter().position(|(id, _)| *id >= cursor))
-            .unwrap_or(0);
-        sessions.rotate_left(start);
-
-        for (_, session) in &sessions {
-            session.borrow_mut().process_datagram_queue(conn, now, 0);
-        }
-
-        loop {
-            let mut any_had_data = false;
-            for (_, session) in &sessions {
-                if conn.remaining_datagram_queue_capacity() == 0 {
-                    break;
-                }
-                if session.borrow().datagram_queue_capacity().queued_datagrams == 0 {
-                    continue;
-                }
-                any_had_data = true;
-                session.borrow_mut().process_datagram_queue(conn, now, 1);
-            }
-            if !any_had_data {
-                break;
-            }
-        }
-
-        self.datagram_session_rr_next = sessions.first().map(|(id, _)| *id);
+    /// Refreshes the cache [`Self::next_datagram_expiry`] reads.
+    ///
+    /// `default_max_age` depends on `conn.stats().min_rtt`, which a pulled-
+    /// from [`neqo_transport::OutgoingDatagramSource`] has no access to;
+    /// this computes it once, here, where `conn` is in scope, rather than
+    /// inside the pull itself.
+    pub(crate) fn expire_datagram_queues(&mut self, conn: &Connection, now: Instant) {
+        let default_max_age = extended_connect::datagram_queue::default_max_age(
+            conn.stats().min_rtt,
+        );
+        self.datagram_next_expiry = self
+            .datagram_sources
+            .borrow_mut()
+            .expire_all(now, default_max_age);
     }
 
     /// The earliest instant at which any session's outgoing datagram queue
-    /// needs [`Self::process_all_datagram_queues`] called again to expire a
-    /// stale datagram, even if nothing else - no packets to send or receive,
-    /// no other timer - would otherwise trigger it. `None` if no session has
-    /// a datagram queued with an expiry pending.
-    /// Applies to every extended-CONNECT protocol, not just `WebTransport`,
-    /// same as [`Self::process_all_datagram_queues`].
+    /// needs [`Self::expire_datagram_queues`] called again to expire a stale
+    /// datagram, even if nothing else - no packets to send or receive, no
+    /// other timer - would otherwise trigger it. `None` if no session has a
+    /// datagram queued with an expiry pending. Applies to every
+    /// extended-CONNECT protocol, not just `WebTransport`, same as
+    /// [`Self::expire_datagram_queues`].
     ///
-    /// Reads the cache [`Self::process_all_datagram_queues`] refreshes,
-    /// instead of walking `recv_streams` a second time.
+    /// Reads the cache [`Self::expire_datagram_queues`] refreshes, instead
+    /// of walking every session a second time.
     pub(crate) const fn next_datagram_expiry(&self) -> Option<Instant> {
         self.datagram_next_expiry
+    }
+
+    /// Register `session` with [`Self::datagram_sources`] and, if this is
+    /// the first session on this connection, wire that registry up as
+    /// `conn`'s [`neqo_transport::OutgoingDatagramSource`]. Idempotent:
+    /// safe to call at every session-creation call site regardless of how
+    /// many sessions already exist.
+    fn register_datagram_source(
+        &self,
+        conn: &mut Connection,
+        session: &Rc<RefCell<extended_connect::session::Session>>,
+    ) {
+        self.datagram_sources.borrow_mut().register(session);
+        conn.set_outgoing_datagram_source(Some(Rc::clone(&self.datagram_sources) as _));
     }
 
     /// Frames whose handling is specific to the client and server (`Goaway`,

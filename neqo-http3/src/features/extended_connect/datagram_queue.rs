@@ -266,6 +266,12 @@ impl GroupQueue {
         self.by_order.keys().next_back().copied()
     }
 
+    /// The datagram [`Self::pop_front`] would currently remove: the front
+    /// of the highest-`send_order` bucket.
+    fn peek_highest(&self) -> Option<&QueuedDatagram> {
+        self.by_order.get(&self.highest_order()?)?.front()
+    }
+
     /// The timestamp of the longest-queued datagram in this group, across
     /// all `send_order` buckets. Each bucket is FIFO, so its front is its
     /// oldest.
@@ -298,10 +304,12 @@ impl GroupQueue {
 ///
 /// ## Lifecycle
 ///
-/// Datagrams are enqueued by `send_datagram()` and drained into the QUIC layer
-/// by `process_queue()`, called during `process_http3()` as part of
-/// `process_output()`. The caller must invoke `process_output()` after enqueuing
-/// to ensure transmission. In Gecko this happens via
+/// Datagrams are enqueued by `send_datagram()`. They are pulled out one at a
+/// time - not pre-drained into the QUIC layer - by
+/// [`neqo_transport::Connection`] itself, at the instant it has room for one
+/// in the packet being built; see [`Self::peek_len`]/[`Self::pop_next`]. The
+/// caller must still invoke `process_output()` after enqueuing to give the
+/// QUIC layer a chance to pull. In Gecko this happens via
 /// `StreamHasDataToWrite()` → `ForceSend()` → `SendData()` → `ProcessOutput()`.
 #[derive(Debug)]
 pub struct DatagramQueue {
@@ -313,11 +321,10 @@ pub struct DatagramQueue {
     /// Ordered by group ID so that round-robin is deterministic. A group is
     /// removed as soon as it becomes empty, so every entry here is non-empty.
     groups: BTreeMap<u64, GroupQueue>,
-    /// Group ID at which the next round-robin round starts. Persisted across
-    /// [`Self::drain`] calls so a drain that stops on its budget resumes at the
-    /// group after the last one served; restarting at the lowest group ID every
-    /// time would starve higher-numbered groups whenever the budget is smaller
-    /// than the number of groups.
+    /// Group ID at which the next [`Self::pop_next`] round-robin round
+    /// starts. Persisted across calls so pulling one datagram at a time
+    /// still rotates through every group instead of always starting at the
+    /// lowest group ID.
     rr_next: u64,
     /// Total datagram count across all groups.
     total_count: usize,
@@ -379,14 +386,22 @@ impl DatagramQueue {
         });
         qtrace!("Setting max age to {max_age:?} (clamped: {clamped:?})");
         self.max_age = clamped;
-        self.expire_old_datagrams(now, default_max_age)
+        self.expire(now, default_max_age)
     }
 
-    fn expire_old_datagrams(
-        &mut self,
-        now: Instant,
-        default_max_age: Duration,
-    ) -> Vec<Option<DatagramId>> {
+    /// Expire every datagram older than the effective max age (the
+    /// application's explicit value if one was set via [`Self::set_max_age`],
+    /// otherwise `default_max_age`).
+    ///
+    /// Callers pulling one datagram at a time via [`Self::peek_len`]/
+    /// [`Self::pop_next`] are expected to call this once per processing tick,
+    /// before any pulls, rather than on every pull: expiry is not a send, so
+    /// it must not be gated on how many datagrams get pulled that tick, and
+    /// nothing queued becomes stale *during* a single tick.
+    ///
+    /// Returns one entry per expired datagram (`Some(id)` for tracked ones),
+    /// for the caller to report and count.
+    pub fn expire(&mut self, now: Instant, default_max_age: Duration) -> Vec<Option<DatagramId>> {
         let max_age = self.max_age.unwrap_or(default_max_age);
         let mut all_expired = Vec::new();
         self.groups.retain(|_, group| {
@@ -525,92 +540,79 @@ impl DatagramQueue {
         outcome
     }
 
-    /// Drain up to `budget` datagrams, expiring old ones first and returning
-    /// ready-to-send ones in scheduling order.
-    ///
-    /// `budget` is how many datagrams the QUIC layer can currently accept, i.e.
-    /// [`Connection::remaining_datagram_queue_capacity`][neqo_transport::Connection::remaining_datagram_queue_capacity].
-    /// Whatever exceeds it stays queued here, where eviction honours
-    /// `send_order` and `max_age`, rather than being handed to the QUIC layer's
-    /// fixed-size FIFO only to be head-dropped there — which would discard the
-    /// *highest*-priority datagrams of a burst, since they are drained first.
-    /// Later drains pick the remainder up as that queue empties, which paces
-    /// the handover to what the connection can actually send.
-    ///
-    /// **Scheduling:** groups are served round-robin; within each group the
-    /// highest `send_order` is sent first; equal-order datagrams are FIFO. The
-    /// round-robin cursor persists across calls (see [`Self::rr_next`]), so a
-    /// drain cut short by its budget resumes at the next group instead of
-    /// always starting at the same one.
-    ///
-    /// Returns `(expired, datagrams_to_send)`, where `expired` has one entry per
-    /// expired datagram (`Some(id)` for tracked ones). The caller is responsible
-    /// for passing each returned [`QueuedDatagram`] to
-    /// [`Connection::send_datagram`][neqo_transport::Connection::send_datagram],
-    /// which enqueues it in the QUIC layer's own outgoing queue. Congestion
-    /// control and MTU checks happen later at packet creation time, not during
-    /// [`Connection::send_datagram`][neqo_transport::Connection::send_datagram],
-    /// so the only error that call can produce is
-    /// [`neqo_transport::Error::TooMuchData`] (datagram exceeds the peer's
-    /// `max_datagram_frame_size` transport parameter). Since
-    /// [`Session::send_datagram`][super::session::Session::send_datagram]
-    /// already validates size before calling [`Self::enqueue`], this error should
-    /// not occur in practice.
-    pub fn drain(
-        &mut self,
-        now: Instant,
-        budget: usize,
-        default_max_age: Duration,
-    ) -> (Vec<Option<DatagramId>>, Vec<QueuedDatagram>) {
-        // Expiry runs once, up front: after this every remaining datagram is fresh.
-        // It is not gated on `budget`, since expiry is not a send: otherwise stale
-        // datagrams would pile up while the QUIC layer's queue is full.
-        let expired = self.expire_old_datagrams(now, default_max_age);
-        let count = budget.min(self.total_count);
-        let mut to_send = Vec::with_capacity(count);
+    /// The group id that [`Self::pop_round_robin`] would currently pop from,
+    /// if any: resuming at `rr_next` and wrapping back to the lowest group
+    /// ID. A group is removed as soon as it runs dry, so this only ever
+    /// names a non-empty group.
+    fn next_round_robin_group(&self) -> Option<u64> {
+        self.groups
+            .range(self.rr_next..)
+            .chain(self.groups.iter())
+            .map(|(id, _)| *id)
+            .next()
+    }
 
-        // Round-robin drain: one datagram per group per round, resuming at
-        // `rr_next` and wrapping back to the lowest group ID, until the budget
-        // is spent. A group is removed as soon as it runs dry, so the next
-        // round only visits groups that still have something to send.
-        while to_send.len() < count {
-            let group_id = self
-                .groups
-                .range(self.rr_next..)
-                .chain(self.groups.iter())
-                .map(|(id, _)| *id)
-                .next()
-                .expect("a queue with datagrams left has a non-empty group");
-
-            let group = self
-                .groups
-                .get_mut(&group_id)
-                .expect("group_id was just read from this map");
-            let order = group
-                .highest_order()
-                .expect("an empty group is removed as soon as it drains");
-            let dgram = group
-                .pop_front(order)
-                .expect("the highest-order bucket is non-empty");
-            let drained = group.is_empty();
-            qtrace!(
-                "Datagram {:?} drained (group={group_id}, order={order})",
-                dgram.id
-            );
-            to_send.push(dgram);
-            if drained {
-                self.groups.remove(&group_id);
-            }
-            self.rr_next = group_id.wrapping_add(1);
+    /// Remove and return the datagram [`Self::peek_len`] most recently
+    /// described: the highest-`send_order` entry of whichever group
+    /// [`Self::next_round_robin_group`] currently names, advancing the
+    /// round-robin cursor past it.
+    fn pop_round_robin(&mut self) -> Option<QueuedDatagram> {
+        let group_id = self.next_round_robin_group()?;
+        let (dgram, group_empty) = {
+            let Some(group) = self.groups.get_mut(&group_id) else {
+                unreachable!("group_id was just read from this map")
+            };
+            let Some(order) = group.highest_order() else {
+                unreachable!("an empty group is removed as soon as it drains")
+            };
+            let Some(dgram) = group.pop_front(order) else {
+                unreachable!("the highest-order bucket is non-empty")
+            };
+            (dgram, group.is_empty())
+        };
+        if group_empty {
+            self.groups.remove(&group_id);
         }
-        self.total_count -= to_send.len();
-        self.total_bytes -= to_send.iter().map(|d| charge(d.data.len())).sum::<usize>();
+        self.rr_next = group_id.wrapping_add(1);
+        self.total_count -= 1;
+        self.total_bytes -= charge(dgram.data.len());
+        qtrace!(
+            "Datagram {:?} popped (group={group_id}), total={} ({} bytes)",
+            dgram.id,
+            self.total_count,
+            self.total_bytes,
+        );
+        Some(dgram)
+    }
 
-        (expired, to_send)
+    /// The length of the datagram [`Self::pop_next`] would currently remove,
+    /// if any: the highest-priority entry across groups, in the same
+    /// send-group round-robin / within-group send-order scheduling order
+    /// [`Self::pop_next`] uses. Does not run expiry; callers pull one
+    /// datagram at a time via this and [`Self::pop_next`] within a single
+    /// processing tick, after calling [`Self::expire`] once up front (see
+    /// its doc for why).
+    #[must_use]
+    pub fn peek_len(&self) -> Option<usize> {
+        let group_id = self.next_round_robin_group()?;
+        self.groups
+            .get(&group_id)?
+            .peek_highest()
+            .map(|d| d.data.len())
+    }
+
+    /// Remove and return the datagram [`Self::peek_len`] most recently
+    /// described, in scheduling order: groups are served round-robin, and
+    /// within a group the highest `send_order` is sent first (equal-order
+    /// datagrams FIFO). The round-robin cursor persists across calls, so
+    /// pulling one at a time still rotates fairly across groups rather than
+    /// always favouring the lowest group ID.
+    pub fn pop_next(&mut self) -> Option<QueuedDatagram> {
+        self.pop_round_robin()
     }
 
     /// Every remaining queued datagram, regardless of age. Used when the
-    /// session is closing and nothing will call [`Self::drain`] again.
+    /// session is closing and nothing will call [`Self::pop_next`] again.
     pub fn take_all(&mut self) -> Vec<QueuedDatagram> {
         self.total_count = 0;
         self.rr_next = 0;
@@ -626,10 +628,10 @@ impl DatagramQueue {
     /// timer happens to fire next (see `Http3Connection::next_datagram_expiry`).
     ///
     /// `max_age` is applied uniformly across the whole queue at expiry time
-    /// (see [`Self::expire_old_datagrams`]), so the next datagram to expire
-    /// is always whichever one has been queued the longest - not
-    /// necessarily the next one [`Self::drain`] would send, since scheduling
-    /// is priority-, not age-, ordered. `None` if the queue is empty.
+    /// (see [`Self::expire`]), so the next datagram to expire is always
+    /// whichever one has been queued the longest - not necessarily the next
+    /// one [`Self::pop_next`] would send, since scheduling is priority-, not
+    /// age-, ordered. `None` if the queue is empty.
     #[must_use]
     pub fn next_expiry(&self, default_max_age: Duration) -> Option<Instant> {
         let max_age = self.max_age.unwrap_or(default_max_age);
@@ -665,6 +667,28 @@ impl DatagramQueue {
 impl Default for DatagramQueue {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+impl DatagramQueue {
+    /// Test-only convenience built from [`Self::expire`] and
+    /// [`Self::pop_next`], reproducing the pre-pull `drain` API so existing
+    /// tests can exercise the new primitives without being rewritten one by
+    /// one: expire, then pop up to `budget` datagrams.
+    fn drain(
+        &mut self,
+        now: Instant,
+        budget: usize,
+        default_max_age: Duration,
+    ) -> (Vec<Option<DatagramId>>, Vec<QueuedDatagram>) {
+        let expired = self.expire(now, default_max_age);
+        let mut to_send = Vec::new();
+        while to_send.len() < budget {
+            let Some(dgram) = self.pop_next() else { break };
+            to_send.push(dgram);
+        }
+        (expired, to_send)
     }
 }
 
@@ -821,7 +845,7 @@ mod tests {
         // Advance time by 150 ms without sleeping.
         let t1 = t0 + Duration::from_millis(150);
 
-        let expired = queue.expire_old_datagrams(t1, NO_DEFAULT);
+        let expired = queue.expire(t1, NO_DEFAULT);
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0], Some(1));
         assert!(queue.is_empty());
@@ -836,7 +860,7 @@ mod tests {
         queue.enqueue(vec![1], None, t0, 0, 0);
 
         let t1 = t0 + Duration::from_millis(150);
-        let expired = queue.expire_old_datagrams(t1, NO_DEFAULT);
+        let expired = queue.expire(t1, NO_DEFAULT);
         assert_eq!(expired, vec![None]);
         assert!(queue.is_empty());
     }
@@ -1499,6 +1523,82 @@ mod tests {
             served,
             vec![100, 110, 120, 101, 111, 121],
             "group 2 gets its first turn in round 2, not pushed back to round 3"
+        );
+        assert!(q.is_empty());
+    }
+
+    // ── peek_len / pop_next (pull primitives) ──────────────────────────────────
+
+    #[test]
+    fn peek_len_is_none_when_empty() {
+        let q = DatagramQueue::new();
+        assert_eq!(q.peek_len(), None);
+    }
+
+    #[test]
+    fn pop_next_is_none_when_empty() {
+        let mut q = DatagramQueue::new();
+        assert!(q.pop_next().is_none());
+    }
+
+    #[test]
+    fn peek_len_matches_what_pop_next_removes() {
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.enqueue(vec![0, 1, 2], Some(1), t, 0, 10);
+        q.enqueue(vec![0, 1], Some(2), t, 1, 20);
+
+        let peeked = q.peek_len().expect("something is queued");
+        let popped = q.pop_next().expect("something is queued");
+        assert_eq!(peeked, popped.data.len());
+        assert_eq!(popped.id, Some(1), "highest send_order across groups first");
+    }
+
+    #[test]
+    fn peek_len_does_not_mutate_the_queue() {
+        // Calling peek_len repeatedly must keep describing the same
+        // datagram, not advance the round-robin cursor or remove anything.
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.enqueue(vec![0, 1], Some(1), t, 0, 0);
+        q.enqueue(vec![0, 1, 2], Some(2), t, 1, 0);
+
+        let first = q.peek_len();
+        let second = q.peek_len();
+        assert_eq!(first, second);
+        assert_eq!(q.len(), 2, "peeking must not remove anything");
+    }
+
+    #[test]
+    fn pop_next_round_robins_like_drain() {
+        let mut q = DatagramQueue::new();
+        let t = now();
+        q.enqueue(vec![0, 1], Some(1), t, 0, 0); // group A
+        q.enqueue(vec![0, 2], Some(2), t, 1, 0); // group B
+        q.enqueue(vec![0, 3], Some(3), t, 0, 0); // group A
+
+        let mut served = Vec::new();
+        while let Some(d) = q.pop_next() {
+            served.push(d.id);
+        }
+        assert_eq!(served, vec![Some(1), Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn expire_then_pop_next_skips_stale_datagrams() {
+        let mut q = DatagramQueue::new();
+        let t0 = now();
+        q.set_max_age(Some(Duration::from_millis(50)), t0, NO_DEFAULT);
+        q.enqueue(vec![0, 1], Some(1), t0, 0, 100); // high priority, will expire
+        let t1 = t0 + Duration::from_millis(80);
+        q.enqueue(vec![0, 2], Some(2), t1, 0, 1); // low priority, fresh
+
+        let expired = q.expire(t1, NO_DEFAULT);
+        assert_eq!(expired, vec![Some(1)]);
+        assert_eq!(
+            q.pop_next().and_then(|d| d.id),
+            Some(2),
+            "the expired high-priority datagram must be gone, not just skipped"
         );
         assert!(q.is_empty());
     }

@@ -25,7 +25,7 @@ use crate::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
         datagram_queue::{
             DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueCapacity,
-            DatagramQueueOutcome, default_max_age,
+            DatagramQueueOutcome,
         },
         stats::SessionStats,
     },
@@ -537,81 +537,63 @@ impl Session {
         }
     }
 
-    /// Drain the per-session datagram queue and hand datagrams to the QUIC layer.
+    /// Expire every datagram queued past its max age. Called once per
+    /// processing tick, before [`Self::next_datagram_len`]/
+    /// [`Self::take_next_datagram`] pull anything that tick, so nothing
+    /// queued goes stale *during* a tick's pulls (see [`DatagramQueue::expire`]).
     ///
-    /// `budget` bounds how many datagrams are handed over this call; the rest
-    /// stay queued for a later call, so that a burst is paced against what
-    /// the connection can send instead of overflowing the QUIC layer's
-    /// fixed-size queue. See [`DatagramQueue::drain`]. The caller - which may
-    /// be sharing the connection's transport-level capacity fairly across
-    /// several sessions - is responsible for choosing `budget`; this does
-    /// not clamp it against
-    /// [`Connection::remaining_datagram_queue_capacity`][neqo_transport::Connection::remaining_datagram_queue_capacity]
-    /// itself.
-    ///
-    /// A no-op once the session is no longer `Active`: nothing enqueues new
-    /// datagrams past that point, and any already queued are dropped and
-    /// reported by [`Self::close`]/[`Self::close_session`], not handed to a
-    /// `conn.send_datagram()` the peer has already been told is closed.
-    ///
-    /// Outcomes are reported directly through this session's own `events` and
-    /// `connect_type`, rather than returned to the caller, so a connect-udp
-    /// session's outcomes can't be mis-tagged as `WebTransport` by a caller
-    /// that only knows about `WebTransport`.
-    pub(crate) fn process_datagram_queue(
-        &mut self,
-        conn: &mut Connection,
-        now: Instant,
-        budget: usize,
-    ) {
+    /// A no-op once the session is no longer `Active`: whatever is still
+    /// queued at that point is dropped and reported by
+    /// [`Self::close`]/[`Self::close_session`] instead.
+    pub(crate) fn expire_datagrams(&mut self, now: Instant, default_max_age: Duration) {
         if self.state != State::Active {
             return;
         }
-
-        let (expired, to_send) =
-            self.datagram_queue
-                .drain(now, budget, default_max_age(conn.stats().min_rtt));
+        let expired = self.datagram_queue.expire(now, default_max_age);
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
+    }
 
-        for dgram in to_send {
-            let tracking = dgram
-                .id
-                .map_or(DatagramTracking::None, DatagramTracking::Id);
-            // A datagram the QUIC layer refuses is gone: `drain` already removed it
-            // from the queue. Report it so the application isn't left waiting, and
-            // keep going, since a later datagram may still be small enough to fit.
-            let sent = match conn.send_datagram(dgram.data, tracking) {
-                Ok(()) => true,
-                Err(e) => {
-                    qdebug!("[{self}] QUIC layer refused datagram {:?}: {e}", dgram.id);
-                    false
-                }
-            };
-            // Counted regardless of tracking, unlike the outcomes pushed
-            // below: these feed an aggregate delta, not a per-datagram event.
-            if let Some(stats) = self.protocol.stats_mut() {
-                if sent {
-                    stats.datagrams_sent_outgoing += 1;
-                } else {
-                    stats.datagrams_dropped_outgoing += 1;
-                }
-            }
-            if let Some(id) = dgram.id {
-                self.report_datagram_outcome(if sent {
-                    DatagramOutcome::Sent(id)
-                } else {
-                    DatagramOutcome::Dropped(id)
-                });
-            }
+    /// The length of the datagram [`Self::take_next_datagram`] would
+    /// currently remove, if any. `None` once the session is no longer
+    /// `Active`, matching [`Self::expire_datagrams`]'s no-op: nothing
+    /// enqueues new datagrams past that point.
+    pub(crate) fn next_datagram_len(&self, _now: Instant) -> Option<usize> {
+        if self.state != State::Active {
+            return None;
         }
+        self.datagram_queue.peek_len()
+    }
+
+    /// Remove and return the datagram [`Self::next_datagram_len`] most
+    /// recently described, reporting it `Sent`.
+    ///
+    /// Unlike the old design's `conn.send_datagram()` hand-off, which could
+    /// fail with `TooMuchData`, a pulled datagram cannot: [`Self::send_datagram`]
+    /// already validates size against the peer's `max_datagram_frame_size`
+    /// before it is ever queued.
+    pub(crate) fn take_next_datagram(
+        &mut self,
+        _now: Instant,
+    ) -> Option<(Vec<u8>, DatagramTracking)> {
+        let dgram = self.datagram_queue.pop_next()?;
+        let tracking = dgram
+            .id
+            .map_or(DatagramTracking::None, DatagramTracking::Id);
+        if let Some(stats) = self.protocol.stats_mut() {
+            stats.datagrams_sent_outgoing += 1;
+        }
+        if let Some(id) = dgram.id {
+            self.report_datagram_outcome(DatagramOutcome::Sent(id));
+        }
+        Some((dgram.data, tracking))
     }
 
     /// Drop every datagram still queued when the session closes, reporting
     /// each tracked one so the application isn't left waiting for an outcome
     /// that will never come once nothing will call
-    /// [`Self::process_datagram_queue`] again.
+    /// [`Self::expire_datagrams`] again.
     fn drop_queued_datagrams(&mut self) {
         let dropped = self.datagram_queue.take_all();
         self.count_dropped_outgoing(to_u64(dropped.len()));
@@ -621,11 +603,10 @@ impl Session {
     }
 
     /// The instant at which this session's datagram queue next needs
-    /// [`Self::process_datagram_queue`] called to expire a stale datagram.
+    /// [`Self::expire_datagrams`] called to expire a stale datagram.
     /// See [`DatagramQueue::next_expiry`].
-    pub(crate) fn next_datagram_expiry(&self, conn: &Connection) -> Option<Instant> {
-        self.datagram_queue
-            .next_expiry(default_max_age(conn.stats().min_rtt))
+    pub(crate) fn next_datagram_expiry(&self, default_max_age: Duration) -> Option<Instant> {
+        self.datagram_queue.next_expiry(default_max_age)
     }
     pub(crate) fn set_datagram_high_water_mark(&mut self, mark: Option<usize>) {
         self.datagram_queue.set_high_water_mark(mark);
