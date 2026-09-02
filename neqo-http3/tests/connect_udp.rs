@@ -802,8 +802,8 @@ fn connect_udp_server_send_datagram_reports_backpressure() {
     for _ in 0..1000 {
         proxy_session.send_datagram(PING, None, now()).unwrap();
     }
-    assert!(matches!(
+    assert_eq!(
         proxy_session.send_datagram(PING, None, now()),
-        Ok(DatagramQueueOutcome::Overflowed { .. })
-    ));
+        Ok(DatagramQueueOutcome::Overflowed)
+    );
 }

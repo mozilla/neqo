@@ -47,8 +47,10 @@ pub enum DatagramQueueOutcome {
     /// The queue had space, but it was at or above the high water mark.
     AboveWatermark,
     /// The queue was full, so the oldest datagram was dropped to make room.
-    /// `dropped` is its tracking ID, or `None` if it was sent untracked.
-    Overflowed { dropped: Option<DatagramId> },
+    /// If it was tracked, a [`DatagramOutcome::Dropped`] event is reported
+    /// for it separately; the tracking ID isn't carried here too, to avoid
+    /// reporting the same eviction twice.
+    Overflowed,
 }
 
 #[derive(Debug)]
@@ -131,28 +133,31 @@ impl WebTransportDatagramQueue {
         expired
     }
 
+    /// Returns the outcome for the caller to apply backpressure with, and,
+    /// on [`DatagramQueueOutcome::Overflowed`], the tracking ID of the
+    /// evicted datagram (`None` if it was untracked) for the caller to
+    /// report a [`DatagramOutcome::Dropped`] event for separately.
     pub fn enqueue(
         &mut self,
         data: Vec<u8>,
         id: Option<DatagramId>,
         now: Instant,
-    ) -> DatagramQueueOutcome {
+    ) -> (DatagramQueueOutcome, Option<DatagramId>) {
         // `hard_limit` is a fixed constant today, always > 0, so
         // `pop_front` always finds something to evict here. But nothing
         // enforces that invariant, so degrade to no eviction if it were
         // ever violated (e.g. `hard_limit` made configurable down to 0)
         // rather than panic on an empty queue.
-        let overflowed = (self.queue.len() >= self.hard_limit)
+        let evicted = (self.queue.len() >= self.hard_limit)
             .then(|| self.queue.pop_front())
-            .flatten()
-            .map(|oldest| {
-                qdebug!(
-                    "Queue at hard limit ({}), dropping oldest datagram {:?}",
-                    self.hard_limit,
-                    oldest.id
-                );
+            .flatten();
+        if let Some(oldest) = &evicted {
+            qdebug!(
+                "Queue at hard limit ({}), dropping oldest datagram {:?}",
+                self.hard_limit,
                 oldest.id
-            });
+            );
+        }
 
         self.queue.push_back(QueuedDatagram::new(data, id, now));
 
@@ -161,17 +166,17 @@ impl WebTransportDatagramQueue {
             .is_none_or(|mark| self.queue.len() < mark);
         // An overflowing queue is full, so backpressure applies regardless of where
         // the high water mark sits.
-        let outcome = match (overflowed, below_watermark) {
-            (Some(dropped), _) => DatagramQueueOutcome::Overflowed { dropped },
-            (None, true) => DatagramQueueOutcome::Ok,
-            (None, false) => DatagramQueueOutcome::AboveWatermark,
+        let (outcome, dropped) = match (evicted, below_watermark) {
+            (Some(oldest), _) => (DatagramQueueOutcome::Overflowed, oldest.id),
+            (None, true) => (DatagramQueueOutcome::Ok, None),
+            (None, false) => (DatagramQueueOutcome::AboveWatermark, None),
         };
         qtrace!(
             "Enqueued datagram {id:?}, queue size: {}, outcome: {outcome:?}",
             self.queue.len()
         );
 
-        outcome
+        (outcome, dropped)
     }
 
     /// Drain up to `budget` datagrams, expiring old ones first and returning
@@ -259,8 +264,9 @@ mod tests {
         let mut queue = WebTransportDatagramQueue::new();
         let t = now();
 
-        let outcome = queue.enqueue(vec![1, 2, 3], Some(1), t);
+        let (outcome, dropped) = queue.enqueue(vec![1, 2, 3], Some(1), t);
         assert_eq!(outcome, DatagramQueueOutcome::Ok);
+        assert_eq!(dropped, None);
         assert_eq!(queue.len(), 1);
     }
 
@@ -270,14 +276,17 @@ mod tests {
         let t = now();
         queue.set_high_water_mark(Some(2));
 
-        assert_eq!(queue.enqueue(vec![1], Some(1), t), DatagramQueueOutcome::Ok);
+        assert_eq!(
+            queue.enqueue(vec![1], Some(1), t),
+            (DatagramQueueOutcome::Ok, None)
+        );
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t),
-            DatagramQueueOutcome::AboveWatermark
+            (DatagramQueueOutcome::AboveWatermark, None)
         );
         assert_eq!(
             queue.enqueue(vec![3], Some(3), t),
-            DatagramQueueOutcome::AboveWatermark
+            (DatagramQueueOutcome::AboveWatermark, None)
         );
 
         assert_eq!(queue.len(), 3);
@@ -294,7 +303,7 @@ mod tests {
         queue.enqueue(vec![2], Some(2), t);
         assert_eq!(
             queue.enqueue(vec![3], Some(3), t),
-            DatagramQueueOutcome::AboveWatermark,
+            (DatagramQueueOutcome::AboveWatermark, None),
             "a watermark above hard_limit must not be silently unreachable"
         );
     }
@@ -310,7 +319,7 @@ mod tests {
         queue.enqueue(vec![3], Some(3), t);
         assert_eq!(
             queue.enqueue(vec![4], Some(4), t),
-            DatagramQueueOutcome::Overflowed { dropped: Some(1) }
+            (DatagramQueueOutcome::Overflowed, Some(1))
         );
 
         assert_eq!(queue.len(), 3);
@@ -326,7 +335,7 @@ mod tests {
 
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t),
-            DatagramQueueOutcome::Overflowed { dropped: None },
+            (DatagramQueueOutcome::Overflowed, None),
             "an untracked datagram must not be reported with an ID"
         );
         assert_eq!(queue.len(), 1);
@@ -340,10 +349,13 @@ mod tests {
 
         // Nothing queued yet to evict, so the first datagram is accepted
         // for free rather than panicking on an empty pop_front.
-        assert_eq!(queue.enqueue(vec![1], Some(1), t), DatagramQueueOutcome::Ok);
+        assert_eq!(
+            queue.enqueue(vec![1], Some(1), t),
+            (DatagramQueueOutcome::Ok, None)
+        );
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t),
-            DatagramQueueOutcome::Overflowed { dropped: Some(1) }
+            (DatagramQueueOutcome::Overflowed, Some(1))
         );
     }
 
@@ -459,17 +471,20 @@ mod tests {
         let t = now();
         queue.set_high_water_mark(Some(2));
 
-        assert_eq!(queue.enqueue(vec![1], Some(1), t), DatagramQueueOutcome::Ok);
+        assert_eq!(
+            queue.enqueue(vec![1], Some(1), t),
+            (DatagramQueueOutcome::Ok, None)
+        );
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t),
-            DatagramQueueOutcome::AboveWatermark
+            (DatagramQueueOutcome::AboveWatermark, None)
         );
 
         drop(queue.drain(t, usize::MAX));
 
         assert_eq!(
             queue.enqueue(vec![3], Some(3), t),
-            DatagramQueueOutcome::Ok,
+            (DatagramQueueOutcome::Ok, None),
             "draining the queue must put it back below the high water mark"
         );
     }

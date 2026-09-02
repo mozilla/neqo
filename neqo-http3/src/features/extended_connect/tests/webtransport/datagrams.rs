@@ -124,10 +124,21 @@ fn datagram_hard_limit_overflow_reports_outcome() {
         .client
         .webtransport_send_datagram(session_id, DGRAM, Some(limit), now())
         .unwrap();
-    assert_eq!(
-        outcome,
-        DatagramQueueOutcome::Overflowed { dropped: Some(0) }
-    );
+    assert_eq!(outcome, DatagramQueueOutcome::Overflowed);
+
+    // The synchronous `Overflowed` return value no longer carries the
+    // evicted id (to avoid reporting the same eviction twice): a consumer
+    // reconciling ids must get it from this event instead.
+    let dropped_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Dropped(0),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(dropped_event));
 }
 
 #[test]
