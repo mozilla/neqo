@@ -470,10 +470,10 @@ impl Session {
             DatagramTracking::None => None,
         };
 
-        let outcome = self
+        let (outcome, dropped) = self
             .datagram_queue
             .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);
-        if let DatagramQueueOutcome::Overflowed { dropped: Some(id) } = outcome {
+        if let Some(id) = dropped {
             self.report_datagram_outcome(DatagramOutcome::Dropped(id));
         }
         qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
