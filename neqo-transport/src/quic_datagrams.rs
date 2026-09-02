@@ -8,7 +8,7 @@
 
 use std::{cmp::min, collections::VecDeque, fmt::Debug, time::Instant};
 
-use neqo_common::{Buffer, Encoder, qdebug, to_u64};
+use neqo_common::{Buffer, Encoder, qdebug, qwarn, to_u64};
 
 use crate::{
     ConnectionEvents, Error, Res, Stats,
@@ -79,11 +79,17 @@ impl AsRef<[u8]> for QuicDatagram {
     }
 }
 
-/// The default [`OutgoingDatagramSource`].
+/// A simple [`OutgoingDatagramSource`]: a FIFO with head-drop eviction once
+/// `max_queued` datagrams are pending.
 ///
-/// A small FIFO with head-drop eviction once `max_queued` datagrams are
-/// pending. This is what [`QuicDatagrams::add_datagram`] enqueues into when
-/// no external source has been registered.
+/// Not used by [`QuicDatagrams`] itself - there is no default source, so a
+/// connection with none registered simply has nothing to pull. This exists
+/// as an off-the-shelf option for a caller (e.g. a test, or a consumer with
+/// no priority/age policy of its own) that wants *some* queue without
+/// writing one, via [`crate::Connection::set_outgoing_datagram_source`].
+/// Eviction reports nothing on its own: it hands the evicted datagram back
+/// to [`Self::push`]'s caller, which decides what, if anything, to do with
+/// it.
 #[derive(Debug)]
 pub struct BufferedDatagramSource {
     max_queued: usize,
@@ -106,30 +112,21 @@ impl BufferedDatagramSource {
         self.max_queued.saturating_sub(self.datagrams.len())
     }
 
-    /// Queue a datagram, head-dropping the oldest queued datagram first if
-    /// the queue is already at `max_queued`.
-    ///
-    /// # Errors
-    ///
-    /// Never fails in practice; the only error path is an internal
-    /// invariant (the queue reporting itself full but yielding nothing to
-    /// drop) that cannot occur.
+    /// Queue a datagram, head-dropping and returning the oldest queued
+    /// datagram first if the queue is already at `max_queued`.
     pub fn push(
         &mut self,
         data: Vec<u8>,
         tracking: DatagramTracking,
-        stats: &mut Stats,
-        conn_events: &ConnectionEvents,
-    ) -> Res<()> {
-        if self.datagrams.len() == self.max_queued {
+    ) -> Option<(Vec<u8>, DatagramTracking)> {
+        let evicted = if self.datagrams.len() == self.max_queued {
             qdebug!("QUIC datagram queue full, dropping first datagram in queue (head-drop).");
-            let dropped = self.datagrams.pop_front().ok_or(Error::Internal)?;
-            conn_events
-                .datagram_outcome(&dropped.tracking, OutgoingDatagramOutcome::DroppedQueueFull);
-            stats.datagram_tx.dropped_queue_full += 1;
-        }
+            self.datagrams.pop_front().map(|d| (d.data, d.tracking))
+        } else {
+            None
+        };
         self.datagrams.push_back(QuicDatagram { data, tracking });
-        Ok(())
+        evicted
     }
 }
 
@@ -148,23 +145,14 @@ pub struct QuicDatagrams {
     local_datagram_size: u64,
     /// The max size of a datagram that would be acceptable by the peer.
     remote_datagram_size: u64,
-    /// Where datagrams passed to [`Self::add_datagram`] end up, and what
-    /// [`Self::write_frames`] pulls from when no external source is passed
-    /// in.
-    default_source: BufferedDatagramSource,
     conn_events: ConnectionEvents,
 }
 
 impl QuicDatagrams {
-    pub fn new(
-        local_datagram_size: u64,
-        max_queued_outgoing_datagrams: usize,
-        conn_events: ConnectionEvents,
-    ) -> Self {
+    pub const fn new(local_datagram_size: u64, conn_events: ConnectionEvents) -> Self {
         Self {
             local_datagram_size,
             remote_datagram_size: 0,
-            default_source: BufferedDatagramSource::new(max_queued_outgoing_datagrams),
             conn_events,
         }
     }
@@ -177,61 +165,37 @@ impl QuicDatagrams {
         self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
-    /// How many more datagrams can be queued before [`Self::add_datagram`]
-    /// starts evicting datagrams that are already queued.
-    pub fn remaining_capacity(&self) -> usize {
-        self.default_source.remaining_capacity()
-    }
-
-    /// Pull datagrams from `external` (or, if `None`, from the default
-    /// buffered source) and write them into the packet being built. If a
-    /// datagram does not fit and the packet is otherwise empty, the
-    /// datagram is dropped and a [`OutgoingDatagramOutcome::DroppedTooBig`]
-    /// event is posted.
+    /// Pull datagrams from `source` and write them into the packet being
+    /// built. If a datagram does not fit and the packet is otherwise empty,
+    /// the datagram is dropped and a
+    /// [`OutgoingDatagramOutcome::DroppedTooBig`] event is posted.
     pub fn write_frames<B: Buffer>(
-        &mut self,
-        external: Option<&mut dyn OutgoingDatagramSource>,
-        builder: &mut packet::Builder<B>,
-        tokens: &mut recovery::Tokens,
-        stats: &mut Stats,
-        now: Instant,
-    ) {
-        match external {
-            Some(source) => {
-                Self::pull_frames(source, builder, tokens, stats, &self.conn_events, now);
-            }
-            None => {
-                Self::pull_frames(
-                    &mut self.default_source,
-                    builder,
-                    tokens,
-                    stats,
-                    &self.conn_events,
-                    now,
-                );
-            }
-        }
-    }
-
-    fn pull_frames<B: Buffer>(
+        &self,
         source: &mut dyn OutgoingDatagramSource,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut Stats,
-        conn_events: &ConnectionEvents,
         now: Instant,
     ) {
         while let Some(len) = source.next_datagram_len(now) {
             if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
                 // The datagram fits into the packet.
                 let Some((data, tracking)) = source.take_next_datagram(now) else {
-                    debug_assert!(
-                        false,
+                    // A misbehaving source: it said it had one, then didn't.
+                    // Nothing was written, so just stop for this packet
+                    // rather than risk looping on a source that keeps
+                    // claiming to have data it can't actually hand over.
+                    qwarn!(
                         "OutgoingDatagramSource::take_next_datagram returned None right after \
                          next_datagram_len returned Some"
                     );
                     return;
                 };
+                debug_assert_eq!(
+                    data.len(),
+                    len,
+                    "OutgoingDatagramSource::take_next_datagram's length did not match next_datagram_len's"
+                );
                 let length_len = Encoder::varint_len(to_u64(data.len()));
                 // Include a length if there is space for another frame after this one.
                 if builder.remaining()
@@ -257,15 +221,15 @@ impl QuicDatagrams {
                 // datagram cannot fit, drop it.
                 // Also continue trying to write the next datagram.
                 let Some((data, tracking)) = source.take_next_datagram(now) else {
-                    debug_assert!(
-                        false,
+                    qwarn!(
                         "OutgoingDatagramSource::take_next_datagram returned None right after \
                          next_datagram_len returned Some"
                     );
                     return;
                 };
                 qdebug!("QUIC datagram ({}) does not fit MTU.", data.len());
-                conn_events.datagram_outcome(&tracking, OutgoingDatagramOutcome::DroppedTooBig);
+                self.conn_events
+                    .datagram_outcome(&tracking, OutgoingDatagramOutcome::DroppedTooBig);
                 stats.datagram_tx.dropped_too_big += 1;
             } else {
                 // Try later on an empty packet. Nothing was taken, so the
@@ -273,32 +237,6 @@ impl QuicDatagrams {
                 return;
             }
         }
-    }
-
-    /// Add a datagram to the default send queue.
-    ///
-    /// # Error
-    ///
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The function does not check if the
-    /// datagram can fit into a packet (i.e. MTU limit). This is checked during
-    /// creation of an actual packet and the datagram will be dropped if it does
-    /// not fit into the packet.
-    pub fn add_datagram(
-        &mut self,
-        data: Vec<u8>,
-        tracking: DatagramTracking,
-        stats: &mut Stats,
-    ) -> Res<()> {
-        if to_u64(data.len()) > self.remote_datagram_size {
-            qdebug!(
-                "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
-                data.len(),
-                self.remote_datagram_size
-            );
-            return Err(Error::TooMuchData);
-        }
-        self.default_source.push(data, tracking, stats, &self.conn_events)
     }
 
     pub fn handle_datagram(&self, data: &[u8]) -> Res<()> {
@@ -310,5 +248,74 @@ impl QuicDatagrams {
         }
         self.conn_events.add_datagram(data);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use test_fixture::now;
+
+    use super::{BufferedDatagramSource, DatagramTracking, OutgoingDatagramSource as _};
+
+    #[test]
+    fn empty_source_returns_none() {
+        let mut source = BufferedDatagramSource::new(2);
+        assert!(source.next_datagram_len(now()).is_none());
+        assert!(source.take_next_datagram(now()).is_none());
+    }
+
+    #[test]
+    fn peek_len_matches_take_next_datagram() {
+        let mut source = BufferedDatagramSource::new(2);
+        assert!(
+            source
+                .push(vec![1, 2, 3], DatagramTracking::Id(1))
+                .is_none()
+        );
+
+        let peeked = source
+            .next_datagram_len(now())
+            .expect("something is queued");
+        let (data, tracking) = source
+            .take_next_datagram(now())
+            .expect("something is queued");
+        assert_eq!(peeked, data.len());
+        assert!(matches!(tracking, DatagramTracking::Id(1)));
+    }
+
+    #[test]
+    fn push_then_take_is_fifo() {
+        let mut source = BufferedDatagramSource::new(3);
+        source.push(vec![1], DatagramTracking::Id(1));
+        source.push(vec![2], DatagramTracking::Id(2));
+        source.push(vec![3], DatagramTracking::Id(3));
+
+        let mut ids = Vec::new();
+        while let Some((_, DatagramTracking::Id(id))) = source.take_next_datagram(now()) {
+            ids.push(id);
+        }
+        assert_eq!(ids, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn push_evicts_oldest_when_full() {
+        let mut source = BufferedDatagramSource::new(2);
+        assert!(source.push(vec![1], DatagramTracking::Id(1)).is_none());
+        assert!(source.push(vec![2], DatagramTracking::Id(2)).is_none());
+
+        let evicted = source
+            .push(vec![3], DatagramTracking::Id(3))
+            .expect("queue is full, so this must evict");
+        assert!(matches!(evicted.1, DatagramTracking::Id(1)));
+
+        let mut ids = Vec::new();
+        while let Some((_, DatagramTracking::Id(id))) = source.take_next_datagram(now()) {
+            ids.push(id);
+        }
+        assert_eq!(
+            ids,
+            vec![2, 3],
+            "the evicted datagram must not still be queued"
+        );
     }
 }

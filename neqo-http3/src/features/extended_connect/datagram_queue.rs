@@ -146,13 +146,11 @@ pub enum DatagramQueueOutcome {
 /// A snapshot of this session's outgoing-datagram queue state, meant for
 /// driving a content-process credit grant (see [`DatagramQueue::capacity`]).
 ///
-/// This deliberately does not come from
-/// [`Connection::remaining_datagram_queue_capacity`][neqo_transport::Connection::remaining_datagram_queue_capacity]:
-/// that reflects the small, constantly-refilled 10-slot transport FIFO,
-/// which tracks nothing meaningful about the connection's real send rate. A
-/// grant meant to be cwnd-shaped should track *this* queue instead - its
-/// byte budget is drained by [`DatagramQueue::drain`] only as fast as the
-/// transport can actually take datagrams.
+/// Transport has no outgoing-datagram queue of its own to compare against
+/// any more: it pulls straight from here, one at a time, at packet-build
+/// time. A grant meant to be cwnd-shaped should track this queue's byte
+/// budget, which drains only as fast as [`DatagramQueue::pop_next`] is
+/// actually called.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DatagramQueueCapacity {
     /// Bytes free before [`DEFAULT_MAX_QUEUED_BYTES`] is reached.

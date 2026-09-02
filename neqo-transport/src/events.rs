@@ -22,7 +22,6 @@ use crate::{
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum OutgoingDatagramOutcome {
     DroppedTooBig,
-    DroppedQueueFull,
     Lost,
     Acked,
 }
