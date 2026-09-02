@@ -26,4 +26,10 @@
 pub struct SessionStats {
     /// Outgoing datagrams that expired before being sent.
     pub datagrams_expired_outgoing: u64,
+    /// Outgoing datagrams discarded without being sent and without expiring:
+    /// evicted at the queue's hard limit, refused by the QUIC layer, or
+    /// still queued when the session closed. Counts tracked and untracked
+    /// datagrams alike, unlike the `DatagramOutcome::Dropped` event, which
+    /// only fires for tracked ones.
+    pub datagrams_dropped_outgoing: u64,
 }
