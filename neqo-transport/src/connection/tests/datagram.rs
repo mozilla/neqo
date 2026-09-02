@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_common::{event::Provider as _, to_u64};
 use static_assertions::const_assert;
@@ -14,13 +14,15 @@ use super::{
     new_client, new_server, now,
 };
 use crate::{
-    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud, Res,
     StreamType,
     connection::tests::DEFAULT_ADDR,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
-    quic_datagrams::QuicDatagram,
+    quic_datagrams::{
+        BufferedDatagramSource, DatagramTracking, OutgoingDatagramSource, QuicDatagram,
+    },
     send_stream::{RetransmissionPriority, TransmissionPriority},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
@@ -66,21 +68,51 @@ impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
     }
 }
 
+/// Test-only stand-in for the old `Connection::send_datagram`: registers a
+/// [`BufferedDatagramSource`] on `conn` and pushes into it.
+///
+/// The peer-size check `Connection::send_datagram` used to do is no longer
+/// transport's job - `BufferedDatagramSource` is a plain FIFO with no
+/// opinion on it - so this replicates it the same way
+/// `Session::send_datagram` does in the real WebTransport/connect-udp
+/// pipeline: at the point of enqueue, by whoever owns the queue.
+struct DatagramSender {
+    source: Rc<RefCell<BufferedDatagramSource>>,
+}
+
+impl DatagramSender {
+    fn new(conn: &mut Connection, max_queued: usize) -> Self {
+        let source = Rc::new(RefCell::new(BufferedDatagramSource::new(max_queued)));
+        conn.set_outgoing_datagram_source(Some(Rc::clone(&source) as _));
+        Self { source }
+    }
+
+    fn send_datagram(&self, conn: &Connection, data: Vec<u8>, id: Option<u64>) -> Res<()> {
+        if to_u64(data.len()) > conn.remote_datagram_size() {
+            return Err(Error::TooMuchData);
+        }
+        self.source.borrow_mut().push(data, id.into());
+        Ok(())
+    }
+}
+
 #[test]
 fn datagram_disabled_both() {
     let mut client = new_client(ConnectionParameters::default().datagram_size(0));
     let mut server = new_server(ConnectionParameters::default().datagram_size(0));
     connect_force_idle(&mut client, &mut server);
+    let client_ds = DatagramSender::new(&mut client, OUTGOING_QUEUE);
+    let server_ds = DatagramSender::new(&mut server, OUTGOING_QUEUE);
 
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), None),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), None),
         Err(Error::TooMuchData)
     );
     assert_eq!(server.stats().frame_tx.datagram, 0);
     assert_eq!(
-        server.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), None),
+        server_ds.send_datagram(&server, DATA_SMALLER_THAN_MTU.to_vec(), None),
         Err(Error::TooMuchData)
     );
     assert_eq!(server.stats().frame_tx.datagram, 0);
@@ -92,6 +124,8 @@ fn datagram_enabled_on_client() {
         new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
     let mut server = new_server(ConnectionParameters::default().datagram_size(0));
     connect_force_idle(&mut client, &mut server);
+    let client_ds = DatagramSender::new(&mut client, OUTGOING_QUEUE);
+    let server_ds = DatagramSender::new(&mut server, OUTGOING_QUEUE);
 
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
@@ -99,12 +133,12 @@ fn datagram_enabled_on_client() {
         Ok(DATAGRAM_LEN_SMALLER_THAN_MTU)
     );
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Err(Error::TooMuchData)
     );
     let dgram_sent = server.stats().frame_tx.datagram;
     assert_eq!(
-        server.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        server_ds.send_datagram(&server, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     let out = server.process_output(now()).dgram().unwrap();
@@ -123,6 +157,8 @@ fn datagram_enabled_on_server() {
     let mut server =
         new_server(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
     connect_force_idle(&mut client, &mut server);
+    let client_ds = DatagramSender::new(&mut client, OUTGOING_QUEUE);
+    let server_ds = DatagramSender::new(&mut server, OUTGOING_QUEUE);
 
     assert_eq!(
         client.max_datagram_size(),
@@ -130,12 +166,12 @@ fn datagram_enabled_on_server() {
     );
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
-        server.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        server_ds.send_datagram(&server, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Err(Error::TooMuchData)
     );
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     let out = client.process_output(now()).dgram().unwrap();
@@ -148,21 +184,20 @@ fn datagram_enabled_on_server() {
     ));
 }
 
-fn connect_datagram() -> (Connection, Connection) {
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .datagram_size(QuicDatagram::MAX_SIZE)
-            .outgoing_datagram_queue(OUTGOING_QUEUE),
-    );
+fn connect_datagram() -> (Connection, DatagramSender, Connection, DatagramSender) {
+    let mut client =
+        new_client(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
     let mut server =
         new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
     connect_force_idle(&mut client, &mut server);
-    (client, server)
+    let client_ds = DatagramSender::new(&mut client, OUTGOING_QUEUE);
+    let server_ds = DatagramSender::new(&mut server, OUTGOING_QUEUE);
+    (client, client_ds, server, server_ds)
 }
 
 #[test]
 fn mtu_limit() {
-    let (client, server) = connect_datagram();
+    let (client, _, server, _) = connect_datagram();
 
     assert_eq!(
         client.max_datagram_size(),
@@ -176,12 +211,12 @@ fn mtu_limit() {
 
 #[test]
 fn limit_data_size() {
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, server_ds) = connect_datagram();
 
     // Datagram can be queued because they are smaller than allowed by the peer,
     // but they cannot be sent.
     assert_eq!(
-        server.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
+        server_ds.send_datagram(&server, DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
 
@@ -200,7 +235,7 @@ fn limit_data_size() {
 
     // The same test for the client side.
     assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     let dgram_sent_c = client.stats().frame_tx.datagram;
@@ -214,16 +249,16 @@ fn limit_data_size() {
 
 #[test]
 fn after_dgram_dropped_continue_writing_frames() {
-    let (mut client, _) = connect_datagram();
+    let (mut client, client_ds, _, _) = connect_datagram();
 
     // Datagram can be queued because they are smaller than allowed by the peer,
     // but they cannot be sent.
     assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(2)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(2)),
         Ok(())
     );
 
@@ -247,11 +282,11 @@ fn after_dgram_dropped_continue_writing_frames() {
 
 #[test]
 fn datagram_acked() {
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, _) = connect_datagram();
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     let out = client.process_output(now()).dgram();
@@ -302,11 +337,14 @@ fn send_packet_and_get_server_event(
 /// normal priority stream data is sent first.
 #[test]
 fn datagram_after_stream_data() {
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, _) = connect_datagram();
 
     // Write a datagram first.
     let dgram_sent = client.stats().frame_tx.datagram;
-    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(1)), Ok(()));
+    assert_eq!(
+        client_ds.send_datagram(&client, DATA_MTU.to_vec(), Some(1)),
+        Ok(())
+    );
 
     // Create a stream with normal priority and send some data.
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
@@ -331,7 +369,7 @@ fn datagram_after_stream_data() {
 
 #[test]
 fn datagram_before_stream_data() {
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, _) = connect_datagram();
 
     // Create a stream with low priority and send some data before datagram.
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
@@ -348,7 +386,10 @@ fn datagram_before_stream_data() {
 
     // Write a datagram.
     let dgram_sent = client.stats().frame_tx.datagram;
-    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(1)), Ok(()));
+    assert_eq!(
+        client_ds.send_datagram(&client, DATA_MTU.to_vec(), Some(1)),
+        Ok(())
+    );
 
     if let ConnectionEvent::Datagram(data) =
         &send_packet_and_get_server_event(&mut client, &mut server)
@@ -367,11 +408,11 @@ fn datagram_before_stream_data() {
 
 #[test]
 fn datagram_lost() {
-    let (mut client, _) = connect_datagram();
+    let (mut client, client_ds, _, _) = connect_datagram();
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     let _out = client.process_output(now()).dgram(); // This packet will be lost.
@@ -397,11 +438,11 @@ fn datagram_lost() {
 
 #[test]
 fn datagram_sent_once() {
-    let (mut client, _) = connect_datagram();
+    let (mut client, client_ds, _, _) = connect_datagram();
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     let _out = client.process_output(now()).dgram();
@@ -445,31 +486,30 @@ fn dgram_unsupported() {
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
 }
 
+/// Head-drop eviction (the outgoing queue reaching its `max_queued` limit)
+/// happens entirely inside the caller-owned [`BufferedDatagramSource`] now;
+/// see `quic_datagrams::tests::push_evicts_oldest_when_full` for that
+/// contract in isolation. This only checks the end-to-end effect through a
+/// live connection: the evicted datagram never arrives.
 #[test]
 fn outgoing_datagram_queue_full() {
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, _) = connect_datagram();
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
         Ok(())
     );
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
         Ok(())
     );
 
     // The outgoing datagram queue limit is 2, therefore the datagram with id 1
-    // will be dropped after adding one more datagram.
-    let dgram_dropped = client.stats().datagram_tx.dropped_queue_full;
-    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(3)), Ok(()));
-    assert!(matches!(
-        client.next_event().unwrap(),
-        ConnectionEvent::OutgoingDatagramOutcome { id, outcome } if id == 1 && outcome == OutgoingDatagramOutcome::DroppedQueueFull
-    ));
+    // is evicted (head-drop) when a third is pushed.
     assert_eq!(
-        client.stats().datagram_tx.dropped_queue_full,
-        dgram_dropped + 1
+        client_ds.send_datagram(&client, DATA_MTU.to_vec(), Some(3)),
+        Ok(())
     );
 
     // Send DATA_SMALLER_THAN_MTU_2 datagram
@@ -481,7 +521,7 @@ fn outgoing_datagram_queue_full() {
         ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU_2
     ));
 
-    // Send DATA_SMALLER_THAN_MTU_2 datagram
+    // Send DATA_MTU datagram
     let dgram_sent2 = client.stats().frame_tx.datagram;
     let out = client.process_output(now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent2 + 1);
@@ -490,11 +530,19 @@ fn outgoing_datagram_queue_full() {
         server.next_event().unwrap(),
         ConnectionEvent::Datagram(data) if data == DATA_MTU
     ));
+
+    // The evicted datagram (id 1) never arrives.
+    assert!(server.next_event().is_none());
 }
 
-fn send_datagram(sender: &mut Connection, receiver: &mut Connection, data: Vec<u8>) {
+fn send_datagram(
+    sender: &mut Connection,
+    sender_ds: &DatagramSender,
+    receiver: &mut Connection,
+    data: Vec<u8>,
+) {
     let dgram_sent = sender.stats().frame_tx.datagram;
-    assert_eq!(sender.send_datagram(data, Some(1)), Ok(()));
+    assert_eq!(sender_ds.send_datagram(sender, data, Some(1)), Ok(()));
     let out = sender.process_output(now()).dgram().unwrap();
     assert_eq!(sender.stats().frame_tx.datagram, dgram_sent + 1);
 
@@ -514,10 +562,26 @@ fn multiple_datagram_events() {
     let mut client = new_client(ConnectionParameters::default().datagram_size(to_u64(DATA_SIZE)));
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
+    let server_ds = DatagramSender::new(&mut server, OUTGOING_QUEUE);
 
-    send_datagram(&mut server, &mut client, FIRST_DATAGRAM.to_vec());
-    send_datagram(&mut server, &mut client, SECOND_DATAGRAM.to_vec());
-    send_datagram(&mut server, &mut client, THIRD_DATAGRAM.to_vec());
+    send_datagram(
+        &mut server,
+        &server_ds,
+        &mut client,
+        FIRST_DATAGRAM.to_vec(),
+    );
+    send_datagram(
+        &mut server,
+        &server_ds,
+        &mut client,
+        SECOND_DATAGRAM.to_vec(),
+    );
+    send_datagram(
+        &mut server,
+        &server_ds,
+        &mut client,
+        THIRD_DATAGRAM.to_vec(),
+    );
 
     let mut datagrams = client.events().filter_map(|evt| {
         if let ConnectionEvent::Datagram(d) = evt {
@@ -532,7 +596,12 @@ fn multiple_datagram_events() {
     assert!(datagrams.next().is_none());
 
     // New events can be queued.
-    send_datagram(&mut server, &mut client, FOURTH_DATAGRAM.to_vec());
+    send_datagram(
+        &mut server,
+        &server_ds,
+        &mut client,
+        FOURTH_DATAGRAM.to_vec(),
+    );
     let mut datagrams = client.events().filter_map(|evt| {
         if let ConnectionEvent::Datagram(d) = evt {
             Some(d)
@@ -546,16 +615,16 @@ fn multiple_datagram_events() {
 
 #[test]
 fn multiple_quic_datagrams_in_one_packet() {
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, _) = connect_datagram();
 
     let dgram_sent = client.stats().frame_tx.datagram;
     // Enqueue 2 datagrams that can fit in a single packet.
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(1)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU_2.to_vec(), Some(1)),
         Ok(())
     );
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
+        client_ds.send_datagram(&client, DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
         Ok(())
     );
 
@@ -569,7 +638,12 @@ fn multiple_quic_datagrams_in_one_packet() {
 /// Datagrams that are close to the capacity of the packet need special
 /// handling.  They need to use the packet-filling frame type and
 /// they cannot allow other frames to follow.
-fn datagram_overfill(client: &mut Connection, server: &mut Connection, gap: usize) {
+fn datagram_overfill(
+    client: &mut Connection,
+    client_ds: &DatagramSender,
+    server: &mut Connection,
+    gap: usize,
+) {
     /// This `FrameWriter` should not be invoked.
     struct PanickingFrameWriter {}
     impl crate::connection::test_internal::FrameWriter for PanickingFrameWriter {
@@ -597,35 +671,35 @@ fn datagram_overfill(client: &mut Connection, server: &mut Connection, gap: usiz
     }
 
     // This will completely fill available space, so the packet is completely full.
-    send_datagram(client, server, vec![9; space - gap]);
+    send_datagram(client, client_ds, server, vec![9; space - gap]);
 }
 
 #[test]
 #[should_panic(expected = "test_frame_writer set on full packet")]
 fn datagram_fill_gap0() {
-    let (mut client, mut server) = connect_datagram();
-    datagram_overfill(&mut client, &mut server, 0);
+    let (mut client, client_ds, mut server, _) = connect_datagram();
+    datagram_overfill(&mut client, &client_ds, &mut server, 0);
 }
 
 #[test]
 #[should_panic(expected = "test_frame_writer set on full packet")]
 fn datagram_fill_gap1() {
-    let (mut client, mut server) = connect_datagram();
-    datagram_overfill(&mut client, &mut server, 1);
+    let (mut client, client_ds, mut server, _) = connect_datagram();
+    datagram_overfill(&mut client, &client_ds, &mut server, 1);
 }
 
 #[test]
 #[should_panic(expected = "test_frame_writer set on full packet")]
 fn datagram_fill_gap2() {
-    let (mut client, mut server) = connect_datagram();
-    datagram_overfill(&mut client, &mut server, 2);
+    let (mut client, client_ds, mut server, _) = connect_datagram();
+    datagram_overfill(&mut client, &client_ds, &mut server, 2);
 }
 
 #[test]
 #[should_panic(expected = "test_frame_writer set on full packet")]
 fn datagram_fill_gap3() {
-    let (mut client, mut server) = connect_datagram();
-    datagram_overfill(&mut client, &mut server, 3);
+    let (mut client, client_ds, mut server, _) = connect_datagram();
+    datagram_overfill(&mut client, &client_ds, &mut server, 3);
 }
 
 #[test]
@@ -640,31 +714,35 @@ fn datagram_fill_gap4() {
         }
     }
 
-    let (mut client, mut server) = connect_datagram();
+    let (mut client, client_ds, mut server, _) = connect_datagram();
 
     // Four bytes free is enough space for another frame.
     let called = Rc::new(RefCell::new(false));
     client.test_frame_writer = Some(Box::new(TrackingFrameWriter {
         called: Rc::clone(&called),
     }));
-    datagram_overfill(&mut client, &mut server, 4);
+    datagram_overfill(&mut client, &client_ds, &mut server, 4);
     assert!(*called.borrow());
 }
 
 /// Verifies that datagrams are not included in PMTUD probe packets.
 /// Since lost datagrams cannot be retried, they must not be sent in probe packets
 /// that may be silently dropped by middleboxes enforcing a lower path MTU.
+///
+/// This also exercises the pull side of that guard directly: the registered
+/// source is simply never polled while a PMTUD probe is being built, since
+/// `Connection::write_appdata_frames` skips the pull entirely in that case.
 #[test]
 fn datagram_not_in_pmtud_probe() {
     let mut client = new_client(
         ConnectionParameters::default()
             .pmtud(true)
-            .datagram_size(QuicDatagram::MAX_SIZE)
-            .outgoing_datagram_queue(OUTGOING_QUEUE),
+            .datagram_size(QuicDatagram::MAX_SIZE),
     );
     let mut server =
         new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
     connect(&mut client, &mut server);
+    let client_ds = DatagramSender::new(&mut client, OUTGOING_QUEUE);
 
     // After connect, the client has sent the first PMTUD probe (probe_state = Sent).
     // The server received the probe at the end of connect() and will ACK it after
@@ -672,15 +750,15 @@ fn datagram_not_in_pmtud_probe() {
     // collect the ACK via process_input only — deliberately NOT calling
     // client.process_output yet, so the datagram queue stays empty.
     // Delivering the ACK to the client will advance PMTUD: probe_state → Needed.
-    let ack_time = now() + DEFAULT_LOCAL_ACK_DELAY + Duration::from_millis(10);
+    let ack_time = now() + DEFAULT_LOCAL_ACK_DELAY + std::time::Duration::from_millis(10);
     while let Some(d) = server.process_output(ack_time).dgram() {
         client.process_input(d, ack_time);
     }
 
     // Queue a datagram now, while probe_state = Needed.
     // It must NOT be included in the PMTUD probe that process_output is about to send.
-    client
-        .send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1))
+    client_ds
+        .send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1))
         .unwrap();
 
     let pmtud_before = client.stats().pmtud_tx;
@@ -731,9 +809,9 @@ fn datagram_sent_in_coalesced_confirmation_packet() {
     let mut server = new_server(
         ConnectionParameters::default()
             .pmtud(true)
-            .datagram_size(QuicDatagram::MAX_SIZE)
-            .outgoing_datagram_queue(OUTGOING_QUEUE),
+            .datagram_size(QuicDatagram::MAX_SIZE),
     );
+    let server_ds = DatagramSender::new(&mut server, OUTGOING_QUEUE);
     let now = now();
 
     // Drive the handshake up to, but not including, the server's first
@@ -765,7 +843,9 @@ fn datagram_sent_in_coalesced_confirmation_packet() {
     // Queue a small datagram now, before the server's first post-confirmation
     // output: small enough to fit easily in a normal packet, but this packet
     // gets padded out to full PMTUD probe size regardless.
-    server.send_datagram(vec![0; 16], Some(1)).unwrap();
+    server_ds
+        .send_datagram(&server, vec![0; 16], Some(1))
+        .unwrap();
 
     let pmtud_before = server.stats().pmtud_tx;
     let dgram_before = server.stats().frame_tx.datagram;
@@ -799,4 +879,79 @@ fn datagram_sent_in_coalesced_confirmation_packet() {
         "packet was padded to full PMTUD probe size ({}) even though it is not a real probe (coalesced)",
         out.len()
     );
+}
+
+/// A datagram sits in the registered source between being enqueued and
+/// `process_output` actually building a packet: it is pulled at that
+/// instant, not pre-drained into transport the moment it is enqueued.
+#[test]
+fn datagram_pulled_at_packet_build_time() {
+    let (mut client, client_ds, mut server, _) = connect_datagram();
+
+    client_ds
+        .send_datagram(&client, DATA_SMALLER_THAN_MTU.to_vec(), Some(1))
+        .unwrap();
+
+    // Still sitting in the source: nothing has pulled from it yet.
+    assert!(
+        client_ds
+            .source
+            .borrow_mut()
+            .next_datagram_len(now())
+            .is_some()
+    );
+    assert_eq!(client.stats().frame_tx.datagram, 0);
+
+    let out = client.process_output(now()).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.datagram, 1);
+    assert!(
+        client_ds
+            .source
+            .borrow_mut()
+            .next_datagram_len(now())
+            .is_none(),
+        "process_output must have pulled it out of the source"
+    );
+
+    server.process_input(out, now());
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
+    ));
+}
+
+/// A source that claims to have a datagram (`next_datagram_len` returns
+/// `Some`) but then fails to produce one (`take_next_datagram` returns
+/// `None`) is a contract violation, but must not panic or otherwise wedge
+/// the connection - see `QuicDatagrams::write_frames`.
+#[derive(Debug, Default)]
+struct LyingSource {
+    handed_out: bool,
+}
+
+impl OutgoingDatagramSource for LyingSource {
+    fn next_datagram_len(&mut self, _now: Instant) -> Option<usize> {
+        if self.handed_out { None } else { Some(4) }
+    }
+
+    fn take_next_datagram(&mut self, _now: Instant) -> Option<(Vec<u8>, DatagramTracking)> {
+        self.handed_out = true;
+        None
+    }
+}
+
+#[test]
+fn datagram_source_len_mismatch_does_not_panic() {
+    let mut client =
+        new_client(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let source = Rc::new(RefCell::new(LyingSource::default()));
+    client.set_outgoing_datagram_source(Some(Rc::clone(&source) as _));
+
+    let dgram_before = client.stats().frame_tx.datagram;
+    // Must not panic, and nothing real gets sent either.
+    _ = client.process_output(now());
+    assert_eq!(client.stats().frame_tx.datagram, dgram_before);
 }

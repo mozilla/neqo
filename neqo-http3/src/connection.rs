@@ -1979,9 +1979,8 @@ impl Http3Connection {
     /// this computes it once, here, where `conn` is in scope, rather than
     /// inside the pull itself.
     pub(crate) fn expire_datagram_queues(&mut self, conn: &Connection, now: Instant) {
-        let default_max_age = extended_connect::datagram_queue::default_max_age(
-            conn.stats().min_rtt,
-        );
+        let default_max_age =
+            extended_connect::datagram_queue::default_max_age(conn.stats().min_rtt);
         self.datagram_next_expiry = self
             .datagram_sources
             .borrow_mut()

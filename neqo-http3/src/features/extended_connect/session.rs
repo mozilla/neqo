@@ -24,8 +24,7 @@ use crate::{
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
         datagram_queue::{
-            DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueCapacity,
-            DatagramQueueOutcome,
+            DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueCapacity, DatagramQueueOutcome,
         },
         stats::SessionStats,
     },

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::to_u64;
 
@@ -88,7 +88,6 @@ pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTO
 
 /// Maximum size of a QUIC DATAGRAM frame, as specified in <https://datatracker.ietf.org/doc/html/rfc9221#section-3-4>.
 pub const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
-const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
 #[derive(Debug, Clone)]
@@ -142,7 +141,6 @@ pub struct ConnectionParameters {
     max_pto: Option<NonZeroUsize>,
     preferred_address: PreferredAddressConfig,
     datagram_size: u64,
-    outgoing_datagram_queue: usize,
     initial_rtt: Duration,
     fast_pto: u8,
     grease: bool,
@@ -186,7 +184,6 @@ impl Default for ConnectionParameters {
             max_pto: None,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: MAX_DATAGRAM_FRAME_SIZE,
-            outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             initial_rtt: DEFAULT_INITIAL_RTT,
             fast_pto: FAST_PTO_SCALE,
             grease: true,
@@ -410,18 +407,6 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn datagram_size(mut self, v: u64) -> Self {
         self.datagram_size = v;
-        self
-    }
-
-    #[must_use]
-    pub const fn get_outgoing_datagram_queue(&self) -> usize {
-        self.outgoing_datagram_queue
-    }
-
-    #[must_use]
-    pub fn outgoing_datagram_queue(mut self, v: usize) -> Self {
-        // The max queue length must be at least 1.
-        self.outgoing_datagram_queue = max(v, 1);
         self
     }
 
