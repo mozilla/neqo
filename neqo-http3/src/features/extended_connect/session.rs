@@ -578,13 +578,11 @@ impl Session {
         self.datagram_queue.set_high_water_mark(mark);
     }
 
-    pub(crate) fn set_datagram_max_age(
-        &mut self,
-        max_age: Duration,
-        now: Instant,
-    ) -> Vec<DatagramOutcome> {
+    pub(crate) fn set_datagram_max_age(&mut self, max_age: Duration, now: Instant) {
         let expired = self.datagram_queue.set_max_age(max_age, now);
-        self.record_expired(expired)
+        for outcome in self.record_expired(expired) {
+            self.report_datagram_outcome(outcome);
+        }
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {

@@ -1670,11 +1670,11 @@ impl Http3Connection {
         session_id: StreamId,
         max_age: Duration,
         now: Instant,
-    ) -> Res<Vec<extended_connect::DatagramOutcome>> {
-        Ok(self
-            .webtransport_session(session_id)?
+    ) -> Res<()> {
+        self.webtransport_session(session_id)?
             .borrow_mut()
-            .set_datagram_max_age(max_age, now))
+            .set_datagram_max_age(max_age, now);
+        Ok(())
     }
 
     /// Drain every session's datagram queue into the QUIC layer.

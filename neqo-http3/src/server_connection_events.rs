@@ -284,19 +284,6 @@ impl Http3ServerConnEvents {
         self.events.push(Http3ServerConnEvent::StateChange(state));
     }
 
-    pub fn webtransport_datagram_outcome(
-        &self,
-        session_id: StreamId,
-        outcome: extended_connect::DatagramOutcome,
-    ) {
-        self.events.push(Http3ServerConnEvent::WebTransport(
-            WebTransportEvent::DatagramOutcome {
-                session_id,
-                outcome,
-            },
-        ));
-    }
-
     pub fn priority_update(&self, stream_id: StreamId, priority: Priority) {
         self.events.push(Http3ServerConnEvent::PriorityUpdate {
             stream_id,
