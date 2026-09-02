@@ -205,8 +205,10 @@ impl Http3ServerHandler {
             let res = self.base_handler.process_sending(conn, now);
             self.check_result(conn, now, &res);
 
-            // Process datagram queues to send any queued datagrams
-            self.base_handler.process_all_datagram_queues(conn, now);
+            // Expire stale per-session outgoing datagrams. Sending itself
+            // happens later, inside conn.process_output(), which pulls
+            // straight from each session's own queue.
+            self.base_handler.expire_datagram_queues(conn, now);
         }
     }
 

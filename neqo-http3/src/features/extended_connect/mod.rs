@@ -6,6 +6,7 @@
 
 pub(crate) mod connect_udp_session;
 pub(crate) mod datagram_queue;
+pub(crate) mod datagram_source;
 pub mod send_group;
 pub mod session;
 pub mod stats;
