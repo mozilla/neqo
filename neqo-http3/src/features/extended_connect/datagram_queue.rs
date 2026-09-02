@@ -144,16 +144,16 @@ pub enum DatagramQueueOutcome {
 }
 
 /// A snapshot of this session's outgoing-datagram queue state, meant for
-/// driving a content-process credit grant (see [`DatagramQueue::capacity`]).
+/// driving a content-process credit grant (see `DatagramQueue::capacity`).
 ///
 /// Transport has no outgoing-datagram queue of its own to compare against
 /// any more: it pulls straight from here, one at a time, at packet-build
 /// time. A grant meant to be cwnd-shaped should track this queue's byte
-/// budget, which drains only as fast as [`DatagramQueue::pop_next`] is
+/// budget, which drains only as fast as `DatagramQueue::pop_next` is
 /// actually called.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DatagramQueueCapacity {
-    /// Bytes free before [`DEFAULT_MAX_QUEUED_BYTES`] is reached.
+    /// Bytes free before `DEFAULT_MAX_QUEUED_BYTES` is reached.
     pub remaining_bytes: usize,
     /// Datagrams currently queued here, awaiting a drain.
     pub queued_datagrams: usize,
@@ -161,7 +161,7 @@ pub struct DatagramQueueCapacity {
     /// Exposed so a caller deriving a windowed credit grant from
     /// `remaining_bytes` (e.g. a cumulative, `MAX_DATA`-style grant) has the
     /// window size to dedupe updates against, without duplicating
-    /// [`DEFAULT_MAX_QUEUED_BYTES`] on the other side of the FFI boundary -
+    /// `DEFAULT_MAX_QUEUED_BYTES` on the other side of the FFI boundary -
     /// this can differ from the default in tests, which override it.
     pub max_queued_bytes: usize,
 }
@@ -358,7 +358,7 @@ impl DatagramQueue {
     }
 
     /// `None` means the application has not set `outgoingMaxAge`, in which case
-    /// [`DEFAULT_MAX_AGE`] applies. The distinction is not observable from
+    /// [`default_max_age`] applies. The distinction is not observable from
     /// script: the attribute reports the application's value, which stays null.
     ///
     /// An explicit value is clamped to `[1ms, max(100ms, default_max_age)]`.
