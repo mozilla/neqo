@@ -19,8 +19,8 @@ use neqo_transport::{
 };
 
 use crate::{
-    Error, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3ServerEvent, Http3State,
-    Http3StreamInfo, Http3StreamType, Res, SendGroupId, SessionAcceptAction, WebTransportEvent,
+    Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
+    Http3StreamType, Res, SendGroupId, SessionAcceptAction,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
     features::extended_connect,
@@ -264,18 +264,8 @@ impl ClientSession for Http3Client {
         max_age: Duration,
         now: Instant,
     ) -> Res<()> {
-        let expired = self
-            .handler()
-            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
-        for outcome in expired {
-            self.client_events().push(Http3ClientEvent::WebTransport(
-                WebTransportEvent::DatagramOutcome {
-                    session_id,
-                    outcome,
-                },
-            ));
-        }
-        Ok(())
+        self.handler()
+            .webtransport_set_datagram_max_age(session_id, max_age, now)
     }
 
     fn webtransport_set_sendorder(
@@ -705,14 +695,8 @@ impl ServerHandler for Http3ServerHandler {
         now: Instant,
     ) -> Res<()> {
         self.mark_needs_processing();
-        let expired = self
-            .base_handler_mut()
-            .webtransport_set_datagram_max_age(session_id, max_age, now)?;
-        for outcome in expired {
-            self.server_events()
-                .webtransport_datagram_outcome(session_id, outcome);
-        }
-        Ok(())
+        self.base_handler_mut()
+            .webtransport_set_datagram_max_age(session_id, max_age, now)
     }
 }
 
