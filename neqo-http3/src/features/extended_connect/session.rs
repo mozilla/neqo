@@ -419,11 +419,11 @@ impl Session {
 
     /// Enqueue a datagram for sending.
     ///
-    /// The datagram is placed into the per-session datagram queue and will be
-    /// moved to the QUIC send queue when `process_datagram_queue()` is called
-    /// (which happens during `process_http3()` as part of `process_output()`).
-    /// The caller must ensure `process_output()` is called afterward to
-    /// actually transmit the datagram.
+    /// The datagram is placed into the per-session datagram queue. The QUIC
+    /// layer pulls from it directly, one at a time, whenever it has room in
+    /// a packet it is building - see [`Self::next_datagram_len`]/
+    /// [`Self::take_next_datagram`]. The caller must ensure `process_output()`
+    /// is called afterward to give it that chance.
     ///
     /// Returns the state of the queue after the datagram was accepted, so the
     /// caller can apply backpressure (see `DatagramQueueOutcome`).

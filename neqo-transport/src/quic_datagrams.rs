@@ -44,8 +44,8 @@ impl From<Option<u64>> for DatagramTracking {
 /// A source of outgoing datagrams, pulled from at packet-build time rather
 /// than pre-queued inside transport.
 ///
-/// [`QuicDatagrams::write_frames`] calls [`Self::next_datagram_len`] to see
-/// whether there is a datagram ready and how big it is, then, once it knows
+/// The QUIC layer calls [`Self::next_datagram_len`] to see whether there is
+/// a datagram ready and how big it is, then, once it knows
 /// the datagram fits (or must be dropped for being oversized), calls
 /// [`Self::take_next_datagram`] to remove exactly what was just peeked. The
 /// two must be called as a strict pair with no other mutation of the source
@@ -82,8 +82,9 @@ impl AsRef<[u8]> for QuicDatagram {
 /// A simple [`OutgoingDatagramSource`]: a FIFO with head-drop eviction once
 /// `max_queued` datagrams are pending.
 ///
-/// Not used by [`QuicDatagrams`] itself - there is no default source, so a
-/// connection with none registered simply has nothing to pull. This exists
+/// Not used internally by the QUIC layer itself - there is no default
+/// source, so a connection with none registered simply has nothing to
+/// pull. This exists
 /// as an off-the-shelf option for a caller (e.g. a test, or a consumer with
 /// no priority/age policy of its own) that wants *some* queue without
 /// writing one, via [`crate::Connection::set_outgoing_datagram_source`].
