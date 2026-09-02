@@ -41,6 +41,11 @@ pub struct Http3Server {
     http3_parameters: Http3Parameters,
     http3_handlers: HashMap<ConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
+    /// The earliest instant at which any handler's outgoing datagram queue
+    /// needs expiring, across every connection. Refreshed by
+    /// [`Self::process_http3`]'s single pass over `http3_handlers`, so
+    /// [`Self::process_multiple`]'s callback clamp doesn't need its own.
+    next_datagram_expiry: Option<Instant>,
 }
 
 impl Display for Http3Server {
@@ -77,6 +82,7 @@ impl Http3Server {
             http3_parameters,
             http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
+            next_datagram_expiry: None,
         })
     }
 
@@ -152,15 +158,14 @@ impl Http3Server {
         // http3-layer datagram queue's max-age deadline; clamp it the same
         // way `Http3Client::process_multiple_output` does, so an
         // otherwise-idle connection still wakes up in time to expire a
-        // stale queued datagram.
+        // stale queued datagram. `next_datagram_expiry` was just refreshed
+        // by `process_http3` above, so this needs no `http3_handlers` walk
+        // of its own.
         match out {
             OutputBatch::Callback(delay) => OutputBatch::Callback(
-                self.http3_handlers
-                    .values()
-                    .filter_map(|h| h.borrow().next_datagram_expiry())
+                self.next_datagram_expiry
                     .filter(|expiry| *expiry > now)
                     .map(|expiry| expiry - now)
-                    .min()
                     .map_or(delay, |max_age_delay| delay.min(max_age_delay)),
             ),
             out => out,
@@ -175,13 +180,17 @@ impl Http3Server {
             reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
         )]
         let mut active_conns = self.server.active_connections();
-        active_conns.extend(
-            self.http3_handlers
-                .iter()
-                .filter(|(_, handler)| handler.borrow_mut().should_be_processed(now))
-                .map(|(c, _)| c)
-                .cloned(),
-        );
+        self.next_datagram_expiry = self
+            .http3_handlers
+            .iter()
+            .filter_map(|(conn, handler)| {
+                let mut handler = handler.borrow_mut();
+                if handler.should_be_processed(now) {
+                    active_conns.insert(conn.clone());
+                }
+                handler.next_datagram_expiry()
+            })
+            .min();
 
         #[expect(
             clippy::iter_over_hash_type,
