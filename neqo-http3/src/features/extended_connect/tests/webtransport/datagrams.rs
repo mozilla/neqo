@@ -370,3 +370,55 @@ fn server_datagram_expires_on_an_otherwise_idle_connection() {
     };
     assert!(wt.server.events().any(expired_event));
 }
+
+/// Shortening `max_age` on an idle server connection must take effect at the
+/// new deadline, not linger until the original one: `set_max_age` only
+/// refreshes `Http3Connection`'s cached `next_datagram_expiry` when the
+/// connection is actually processed, so the setter must mark the connection
+/// as needing processing or an otherwise idle connection is never revisited
+/// to pick up the shorter deadline.
+#[test]
+fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session
+        .set_datagram_max_age(Duration::from_secs(10), now())
+        .unwrap();
+
+    // Enough filler datagrams to exhaust the transport's 10-slot queue on
+    // the first (needs-processing-triggered) drain below, so the tracked
+    // datagram is left stuck in the http3-level queue - and so still
+    // subject to max-age - rather than handed to the QUIC layer immediately.
+    for _ in 0..15 {
+        wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    }
+    wt_session
+        .send_datagram(DGRAM, Some(77u64), now())
+        .unwrap();
+
+    let t0 = now();
+    wt.server.process_output(t0);
+
+    // Shorten the deadline well inside the original one; the datagram is
+    // not yet stale at `t0`, so nothing expires synchronously here.
+    wt_session
+        .set_datagram_max_age(Duration::from_millis(30), t0)
+        .unwrap();
+
+    // Otherwise idle: only the datagram-expiry check in `should_be_processed`
+    // (fed by the refreshed cache) can trigger the drain that expires this.
+    wt.server.process_output(t0 + Duration::from_millis(35));
+
+    let expired_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Expired(77),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(expired_event));
+}

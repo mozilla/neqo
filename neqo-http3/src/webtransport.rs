@@ -704,6 +704,7 @@ impl ServerHandler for Http3ServerHandler {
         max_age: Duration,
         now: Instant,
     ) -> Res<()> {
+        self.mark_needs_processing();
         let expired = self
             .base_handler_mut()
             .webtransport_set_datagram_max_age(session_id, max_age, now)?;
