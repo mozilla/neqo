@@ -363,6 +363,9 @@ impl Session {
             &mut self.control_stream_recv,
             now,
         )? {
+            if new_state.closing_state() {
+                self.drop_queued_datagrams();
+            }
             self.state = new_state;
         }
         Ok(())
