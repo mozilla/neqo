@@ -139,6 +139,41 @@ fn datagram_hard_limit_overflow_reports_outcome() {
         )
     };
     assert!(wt.client.events().any(dropped_event));
+    assert_eq!(
+        wt.client
+            .webtransport_session_stats(session_id)
+            .unwrap()
+            .datagrams_dropped_outgoing,
+        1
+    );
+}
+
+/// `datagrams_dropped_outgoing` must count every eviction, tracked or not:
+/// unlike the `DatagramOutcome::Dropped` event, which only fires for tracked
+/// datagrams, this is the only signal an untracked drop leaves behind.
+#[test]
+fn datagram_hard_limit_overflow_counts_untracked_drops() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for _ in 0..limit {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, now())
+            .unwrap();
+    }
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .unwrap();
+
+    assert_eq!(
+        wt.client
+            .webtransport_session_stats(session_id)
+            .unwrap()
+            .datagrams_dropped_outgoing,
+        1
+    );
 }
 
 #[test]

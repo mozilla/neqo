@@ -473,6 +473,9 @@ impl Session {
         let (outcome, dropped) = self
             .datagram_queue
             .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);
+        if outcome == DatagramQueueOutcome::Overflowed {
+            self.count_dropped_outgoing(1);
+        }
         if let Some(id) = dropped {
             self.report_datagram_outcome(DatagramOutcome::Dropped(id));
         }
@@ -503,6 +506,15 @@ impl Session {
     fn report_datagram_outcome(&self, outcome: DatagramOutcome) {
         self.events
             .datagram_outcome(self.id, outcome, self.protocol.connect_type());
+    }
+
+    /// Count every datagram discarded without being sent and without
+    /// expiring, tracked or not: [`Self::report_datagram_outcome`] only
+    /// fires for tracked ones, but the stat must reflect all of them.
+    fn count_dropped_outgoing(&mut self, n: u64) {
+        if let Some(stats) = self.protocol.stats_mut() {
+            stats.datagrams_dropped_outgoing += n;
+        }
     }
 
     /// Drain the per-session datagram queue and hand datagrams to the QUIC layer.
@@ -544,6 +556,7 @@ impl Session {
                 Ok(()) => DatagramOutcome::Sent,
                 Err(e) => {
                     qdebug!("[{self}] QUIC layer refused datagram {:?}: {e}", dgram.id);
+                    self.count_dropped_outgoing(1);
                     DatagramOutcome::Dropped
                 }
             };
@@ -558,12 +571,9 @@ impl Session {
     /// that will never come once nothing will call
     /// [`Self::process_datagram_queue`] again.
     fn drop_queued_datagrams(&mut self) {
-        for id in self
-            .datagram_queue
-            .take_all()
-            .into_iter()
-            .filter_map(|d| d.id)
-        {
+        let dropped = self.datagram_queue.take_all();
+        self.count_dropped_outgoing(to_u64(dropped.len()));
+        for id in dropped.into_iter().filter_map(|d| d.id) {
             self.report_datagram_outcome(DatagramOutcome::Dropped(id));
         }
     }
