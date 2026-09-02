@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use neqo_common::{Encoder, event::Provider as _, to_u64};
-use neqo_transport::ConnectionParameters;
+use neqo_transport::{ConnectionParameters, Output};
 use test_fixture::now;
 
 use crate::{
@@ -201,6 +201,53 @@ fn datagram_dropped_on_session_close_reports_outcome() {
         .unwrap();
 
     wt.cancel_session_client(session_id);
+
+    let dropped_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Dropped(42),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(dropped_event));
+}
+
+/// A peer-initiated close (the `CLOSE_WEBTRANSPORT_SESSION` capsule, handled
+/// via `read_control_stream`) must drop and report queued datagrams exactly
+/// like the locally-initiated paths above: it is the more common close, and
+/// without this a consumer waits forever for an outcome that never arrives.
+#[test]
+fn datagram_dropped_on_peer_initiated_session_close_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Produce the server's close capsule before the client enqueues its
+    // datagram, so the datagram is still queued (nothing has called
+    // `process_output` on the client yet) when the capsule is delivered.
+    // The pacer can defer the very first packet after the frame is queued,
+    // so retry with time advanced by the requested delay until it ships.
+    WtTest::session_close_frame_server(&wt_session, 0, "");
+    let mut when = now();
+    let close_dgram = loop {
+        match wt.server.process_output(when) {
+            Output::Datagram(d) => break Some(d),
+            Output::Callback(delay) => when += delay,
+            Output::None => break None,
+        }
+    };
+
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now())
+        .unwrap();
+
+    // A single `process` call both reads the close capsule (driving the
+    // session out of `Active` via `read_control_stream`) and attempts to
+    // drain the datagram queue; before drop was wired into that path, the
+    // still-queued datagram was silently abandoned instead of reported.
+    drop(wt.client.process(close_dgram, now()));
 
     let dropped_event = |e| {
         matches!(
