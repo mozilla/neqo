@@ -1693,6 +1693,10 @@ impl Http3Connection {
     /// against [`Self::next_datagram_expiry`] must call this *first*, in the
     /// same processing round, or it clamps against last round's deadline.
     pub(crate) fn process_all_datagram_queues(&mut self, conn: &mut Connection, now: Instant) {
+        if !self.webtransport.enabled() && !self.connect_udp.enabled() {
+            self.datagram_next_expiry = None;
+            return;
+        }
         self.datagram_next_expiry = self
             .recv_streams
             .values()
