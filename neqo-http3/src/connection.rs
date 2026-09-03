@@ -304,6 +304,11 @@ pub struct Http3Connection {
     /// read by [`Self::next_datagram_expiry`] instead of re-walking
     /// `recv_streams`.
     datagram_next_expiry: Option<Instant>,
+    /// The stream id of every extended-CONNECT session's control stream,
+    /// kept in sync with `recv_streams` on session create/remove so
+    /// [`Self::process_all_datagram_queues`] doesn't need to walk every
+    /// stream on the connection to find the handful that are sessions.
+    extended_connect_session_ids: HashSet<StreamId>,
 }
 
 impl Display for Http3Connection {
@@ -343,6 +348,7 @@ impl Http3Connection {
             send_group_generator: SendGroupGenerator::default(),
             role,
             datagram_next_expiry: None,
+            extended_connect_session_ids: HashSet::default(),
         }
     }
 
@@ -662,6 +668,7 @@ impl Http3Connection {
             // TODO: investigate whether this code can automatically retry failed transactions.
             self.send_streams.clear();
             self.recv_streams.clear();
+            self.extended_connect_session_ids.clear();
             Ok(())
         } else {
             debug_assert!(false, "Zero rtt rejected in the wrong state");
@@ -787,6 +794,7 @@ impl Http3Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
+        self.extended_connect_session_ids.clear();
     }
 
     /// This function will not handle the output of the function completely, but only
@@ -1225,6 +1233,7 @@ impl Http3Connection {
             Box::new(Rc::clone(&extended_conn)),
             Box::new(Rc::clone(&extended_conn)),
         );
+        self.extended_connect_session_ids.insert(id);
 
         let final_headers = Self::create_request_headers(&RequestDescription {
             method: "CONNECT",
@@ -1335,6 +1344,7 @@ impl Http3Connection {
                 Box::new(Rc::clone(&extended_conn)),
                 Box::new(extended_conn),
             );
+            self.extended_connect_session_ids.insert(stream_id);
             self.streams_with_pending_data.insert(stream_id);
         } else {
             self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
@@ -1685,8 +1695,10 @@ impl Http3Connection {
     /// callback here for a caller to mis-tag by protocol.
     ///
     /// Also refreshes the cache [`Self::next_datagram_expiry`] reads, using
-    /// the same `recv_streams` walk this already has to do rather than
-    /// paying for a second one.
+    /// [`Self::extended_connect_session_ids`] instead of walking all of
+    /// `recv_streams`: most streams on a connection aren't extended-CONNECT
+    /// sessions at all, and the per-feature check below only helps when the
+    /// feature is off entirely.
     ///
     /// Invariant callers must preserve: the cache is only as fresh as the
     /// last call to this function, so a caller that clamps a callback delay
@@ -1698,8 +1710,9 @@ impl Http3Connection {
             return;
         }
         self.datagram_next_expiry = self
-            .recv_streams
-            .values()
+            .extended_connect_session_ids
+            .iter()
+            .filter_map(|id| self.recv_streams.get(id))
             .filter_map(|s| s.extended_connect_session())
             .filter_map(|session| {
                 session.borrow_mut().process_datagram_queue(conn, now);
@@ -1939,6 +1952,7 @@ impl Http3Connection {
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
         {
+            self.extended_connect_session_ids.remove(&stream_id);
             self.send_streams.remove(&stream_id)?;
             if let Some(wt) = s.extended_connect_session() {
                 self.remove_extended_connect(&wt, conn);
@@ -1955,12 +1969,15 @@ impl Http3Connection {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
-            && let Some(wt) = self
+        {
+            self.extended_connect_session_ids.remove(&stream_id);
+            if let Some(wt) = self
                 .recv_streams
                 .remove(&stream_id)?
                 .extended_connect_session()
-        {
-            self.remove_extended_connect(&wt, conn);
+            {
+                self.remove_extended_connect(&wt, conn);
+            }
         }
         stream
     }
