@@ -14,7 +14,7 @@ use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
-    features::extended_connect::{DatagramOutcome, DatagramQueueOutcome},
+    features::extended_connect::{DEFAULT_HARD_LIMIT, DatagramOutcome, DatagramQueueOutcome},
     webtransport::ClientSession as _,
 };
 use neqo_transport::{ConnectionParameters, StreamType};
@@ -797,9 +797,7 @@ fn connect_udp_datagram_outcome_uses_connect_udp_event() {
 fn connect_udp_server_send_datagram_reports_backpressure() {
     let (_client, _proxy, _session_id, proxy_session) = establish_new_session();
 
-    // `DEFAULT_HARD_LIMIT` (1000) is crate-private, so drive the queue to its
-    // hard limit directly rather than importing it.
-    for _ in 0..1000 {
+    for _ in 0..DEFAULT_HARD_LIMIT {
         proxy_session.send_datagram(PING, None, now()).unwrap();
     }
     assert_eq!(
