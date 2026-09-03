@@ -35,9 +35,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: ./.github/actions/install-build-deps
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
 
       - name: Run network namespace tests
         run: sudo -E env "PATH=$PATH" cargo test --locked --package mtu --test netns -- --nocapture
@@ -92,7 +92,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           working-directory: mtu
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false" # The mtu crate does not need NSS.
 
   check-vm:
     name: Run checks for VM-only platforms
@@ -113,6 +113,7 @@ jobs:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
           bindgen-args: ${{ env.BSD_BINDGEN_ARGS }}
+          nss-version-check: "false"
 
   check-bindings:
     name: Check bindings

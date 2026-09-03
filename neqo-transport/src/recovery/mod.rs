@@ -268,12 +268,20 @@ impl LossRecoverySpace {
             self.remove_packet(p);
             eliciting |= p.ack_eliciting();
             if p.lost() {
-                // A packet declared lost that is subsequently acknowledged was never
-                // really lost, so take it back out of the loss counters. Every packet
-                // marked lost was counted by `count_lost`, so this cannot underflow.
                 stats.late_ack += 1;
-                stats.lost -= 1;
-                stats.bytes_lost -= p.len();
+                if let Some(reduced) = stats.lost.checked_sub(1) {
+                    stats.lost = reduced;
+                } else {
+                    debug_assert!(false, "spurious losses should have been lost already");
+                }
+                if let Some(reduced) = stats.bytes_lost.checked_sub(p.len()) {
+                    stats.bytes_lost = reduced;
+                } else {
+                    debug_assert!(
+                        false,
+                        "spurious lost bytes should have been counted already"
+                    );
+                }
             }
             if p.pto_fired() {
                 stats.pto_ack += 1;
@@ -539,7 +547,7 @@ impl Loss {
     }
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: sent::Packet, now: Instant) {
-        let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
+        let pn_space = sent_packet.space();
         qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(pto) = self.pto_state.as_mut() {
             pto.pto_sent(pn_space);
@@ -1560,7 +1568,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             );
-            let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
+            let pn_space = sent_pkt.space();
             lr.on_packet_sent(sent_pkt, now());
             lr.on_ack_received(
                 pn_space,

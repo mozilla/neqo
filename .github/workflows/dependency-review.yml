@@ -20,4 +20,4 @@ permissions:
 
 jobs:
   dependency-review:
-    uses: mozilla/actions/.github/workflows/dependency-review.yml@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+    uses: mozilla/actions/.github/workflows/dependency-review.yml@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6

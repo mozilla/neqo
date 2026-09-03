@@ -24,7 +24,7 @@ use crate::{
         tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
     },
     frame::FrameType,
-    packet::{self},
+    packet,
     tparams::{TransportParameter, TransportParameterId::*},
 };
 

@@ -235,7 +235,7 @@ impl From<&Http3Parameters> for HSettings {
                 },
                 HSetting {
                     setting_type: HSettingType::EnableWebTransport,
-                    value: u64::from(conn_param.get_webtransport()),
+                    value: u64::from(conn_param.webtransport_enabled()),
                 },
                 HSetting {
                     setting_type: HSettingType::EnableH3Datagram,
@@ -243,7 +243,7 @@ impl From<&Http3Parameters> for HSettings {
                 },
                 HSetting {
                     setting_type: HSettingType::EnableConnect,
-                    value: u64::from(conn_param.get_connect()),
+                    value: u64::from(conn_param.connect_enabled()),
                 },
             ],
         }
@@ -271,7 +271,7 @@ impl HttpZeroRttChecker {
             .encode_varint(settings.get_max_table_size_decoder())
             .encode_varint(SETTINGS_QPACK_BLOCKED_STREAMS)
             .encode_varint(settings.get_max_blocked_streams());
-        if settings.get_webtransport() {
+        if settings.webtransport_enabled() {
             enc.encode_varint(SETTINGS_ENABLE_WEB_TRANSPORT)
                 .encode_varint(true);
         }
@@ -312,7 +312,7 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                     return false;
                 }
                 let value = setting.value == 1;
-                self.settings.get_webtransport() || !value
+                self.settings.webtransport_enabled() || !value
             }
             HSettingType::EnableH3Datagram => {
                 if setting.value > 1 {
@@ -326,7 +326,7 @@ impl ZeroRttChecker for HttpZeroRttChecker {
                     return false;
                 }
                 let value = setting.value == 1;
-                self.settings.get_connect() || !value
+                self.settings.connect_enabled() || !value
             }
             HSettingType::MaxHeaderListSize => true,
         }) {

@@ -4,7 +4,6 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
@@ -13,6 +12,9 @@ env:
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
+  # `--call-graph fp` needs frame pointers, which x86_64 Rust omits by default. build-neqo appends
+  # this itself; the peer implementations built by quic-build need it from here.
+  RUSTFLAGS: -C force-frame-pointers=yes
   BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
@@ -42,7 +44,6 @@ jobs:
 
       - uses: ./neqo/.github/actions/build-neqo
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
 
@@ -58,7 +59,6 @@ jobs:
       - uses: ./.github/actions/quic-build
         with:
           impl: google
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-google
 
   build-quiche:
@@ -73,7 +73,6 @@ jobs:
       - uses: ./.github/actions/quic-build
         with:
           impl: quiche
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-quiche
 
   build-s2n:
@@ -88,7 +87,6 @@ jobs:
       - uses: ./.github/actions/quic-build
         with:
           impl: s2n
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: build-s2n
 
   perfcompare:
@@ -125,12 +123,12 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+        uses: $/.github/actions/install-build-deps
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: hyperfine, inferno, samply
-          token: ${{ secrets.GITHUB_TOKEN }}
-          rust-cache: false
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
+          rust-cache: "false"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -189,14 +187,9 @@ jobs:
           # perfcompare.py runs under sudo nice, so output files are root-owned; fix for post-processing
           sudo chown -R "$(id -u)" ./*.perf hyperfine hyperfine-baseline 2>/dev/null || true
 
-      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
-      - name: Restore machine
-        if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
-        with:
-          mode: restore
-
+      # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
+        timeout-minutes: 30
         run: |
           for f in *.perf; do
             # Convert for profiler.firefox.com
@@ -204,6 +197,13 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
+
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
+      - name: Restore machine
+        if: always()
+        uses: ./neqo/.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Format results as Markdown
         id: results
@@ -246,6 +246,7 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
+            *.syms.json
             binaries
           compression-level: 9
 

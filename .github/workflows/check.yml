@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+        uses: mozilla/actions/toolchains@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -88,17 +88,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: ./.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
           cache-key: ${{ matrix.type }} # Debug and release are different.
-
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run tests and determine coverage
         env:
@@ -124,7 +119,7 @@ jobs:
           fi
           # Run tests across all meaningful feature combinations.
           # shellcheck disable=SC2086
-          cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default
+          cargo hack test $BUILD_TYPE --locked --feature-powerset --tests --exclude-features gecko,ci,build-fuzzing-corpus --mutually-exclusive-features bench,blapi,default,disable-encryption
 
       - name: Run client/server transfer
         run: |
@@ -193,13 +188,13 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: mozilla/actions/crap@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
         with:
           lcov-path: lcov.info
           threshold: "30"
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           sarif_file: crap.sarif
           category: cargo-crap
@@ -212,11 +207,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
       - run: |
           cargo update -w --locked
           cargo hack update -w --locked
@@ -232,14 +227,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
-        with:
-          target: ${{ matrix.target }}
-          token: ${{ secrets.GITHUB_TOKEN }}
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms
@@ -247,14 +237,10 @@ jobs:
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
-    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
-    # Allow them to fail without aborting the merge queue.
-    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:
-        # TODO: NSS package on 'solaris' is too old (3.110).
-        os: [freebsd, netbsd, openbsd]
+        os: [freebsd, netbsd, openbsd, solaris]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

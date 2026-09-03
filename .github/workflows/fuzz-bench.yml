@@ -26,20 +26,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+      - uses: ./.github/actions/install-build-deps
         with:
           version: nightly
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install cargo-fuzz
         if: ${{ matrix.check == 'fuzz' }}
         # cargo-fuzz must be compiled from source so it targets the native toolchain;
         # binstall provides prebuilt binaries that may target a different architecture.
         run: cargo install cargo-fuzz
-
-      - uses: mozilla/nss-rs/install-nss@325e90524dc2983c974abe2ee3543a17fa2ff8d3 # 0.14.5
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - if: ${{ matrix.check == 'fuzz' }}
         env:

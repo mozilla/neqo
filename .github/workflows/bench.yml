@@ -4,7 +4,6 @@ on:
   pull_request:
   workflow_dispatch:
 env:
-  CARGO_PROFILE_BENCH_BUILD_OVERRIDE_DEBUG: true
   CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
@@ -42,7 +41,6 @@ jobs:
 
       - uses: ./neqo/.github/actions/build-neqo
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           artifact-name: bench-build
           benches: "true"
           baseline-ref: origin/${{ env.BASE_REF }}
@@ -81,12 +79,12 @@ jobs:
           echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
-        uses: mozilla/actions/rust@dbead646641c6d53d4d6f98beeb69f8fdec65513 # v2.0.4
+        uses: $/.github/actions/install-build-deps
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
           tools: inferno, samply
-          token: ${{ secrets.GITHUB_TOKEN }}
-          rust-cache: false
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
+          rust-cache: "false"
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -175,14 +173,9 @@ jobs:
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../profiles
 
-      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
-      - name: Restore machine
-        if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
-        with:
-          mode: restore
-
+      # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
+        timeout-minutes: 30
         run: |
           for f in profiles/*/*.perf; do
             # Convert for profiler.firefox.com
@@ -190,6 +183,13 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
           done
+
+      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
+      - name: Restore machine
+        if: always()
+        uses: ./neqo/.github/actions/cpu-tuning
+        with:
+          mode: restore
 
       - name: Format results as Markdown
         id: results
