@@ -4,13 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, to_u64};
 use static_assertions::const_assert;
 
 use super::{
-    AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
+    AT_LEAST_PTO, assert_error, connect, connect_force_idle, default_server, maybe_authenticate,
+    new_client, new_server, now,
 };
 use crate::{
     CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
@@ -21,6 +22,7 @@ use crate::{
     packet,
     quic_datagrams::QuicDatagram,
     send_stream::{RetransmissionPriority, TransmissionPriority},
+    tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
 
 /// Minimum overhead for a short header packet carrying a DATAGRAM frame:
@@ -679,4 +681,154 @@ fn datagram_fill_gap4() {
     }));
     datagram_overfill(&mut client, &mut server, 4);
     assert!(*called.borrow());
+}
+
+/// Verifies that datagrams are not included in PMTUD probe packets.
+/// Since lost datagrams cannot be retried, they must not be sent in probe packets
+/// that may be silently dropped by middleboxes enforcing a lower path MTU.
+#[test]
+fn datagram_not_in_pmtud_probe() {
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(QuicDatagram::MAX_SIZE)
+            .outgoing_datagram_queue(OUTGOING_QUEUE),
+    );
+    let mut server =
+        new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
+    connect(&mut client, &mut server);
+
+    // After connect, the client has sent the first PMTUD probe (probe_state = Sent).
+    // The server received the probe at the end of connect() and will ACK it after
+    // its ACK delay (DEFAULT_LOCAL_ACK_DELAY).  Advance past that delay and
+    // collect the ACK via process_input only — deliberately NOT calling
+    // client.process_output yet, so the datagram queue stays empty.
+    // Delivering the ACK to the client will advance PMTUD: probe_state → Needed.
+    let ack_time = now() + DEFAULT_LOCAL_ACK_DELAY + Duration::from_millis(10);
+    while let Some(d) = server.process_output(ack_time).dgram() {
+        client.process_input(d, ack_time);
+    }
+
+    // Queue a datagram now, while probe_state = Needed.
+    // It must NOT be included in the PMTUD probe that process_output is about to send.
+    client
+        .send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1))
+        .unwrap();
+
+    let pmtud_before = client.stats().pmtud_tx;
+    let dgram_before = client.stats().frame_tx.datagram;
+
+    // This must send the PMTUD probe without including the datagram.
+    let _probe_pkt = client.process_output(ack_time).dgram().unwrap();
+    assert_eq!(
+        client.stats().pmtud_tx,
+        pmtud_before + 1,
+        "PMTUD probe should have been sent"
+    );
+    assert_eq!(
+        client.stats().frame_tx.datagram,
+        dgram_before,
+        "datagram must not be sent in a PMTUD probe packet"
+    );
+
+    // The datagram should be sent in the next (non-probe) packet.
+    let pmtud_before = client.stats().pmtud_tx;
+    _ = client.process_output(ack_time).dgram().unwrap();
+    assert_eq!(
+        client.stats().pmtud_tx,
+        pmtud_before,
+        "this packet must not be a PMTUD probe"
+    );
+    assert_eq!(
+        client.stats().frame_tx.datagram,
+        dgram_before + 1,
+        "datagram should be sent in a non-probe packet"
+    );
+}
+
+/// The server delays discarding Handshake keys until it has sent one more
+/// Handshake-space packet (a final ACK) after becoming `Confirmed`, so that ACK
+/// and the `ApplicationData` packet carrying `HANDSHAKE_DONE` are coalesced into a
+/// single UDP datagram, in the very same [`Connection::process_output`] call
+/// that makes the server `Confirmed`. That packet is not a real PMTUD probe
+/// (it's coalesced), so it must not be padded out to the full probe size, and
+/// a small datagram queued just before that call must still fit in it.
+#[test]
+fn datagram_sent_in_coalesced_confirmation_packet() {
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(QuicDatagram::MAX_SIZE),
+    );
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(QuicDatagram::MAX_SIZE)
+            .outgoing_datagram_queue(OUTGOING_QUEUE),
+    );
+    let now = now();
+
+    // Drive the handshake up to, but not including, the server's first
+    // post-confirmation `process_output`: exchange datagrams until the client has
+    // sent its Finished flight, which the server has not consumed yet. Feeding
+    // that in below is what makes the server `Confirmed`.
+    let mut dgram = None;
+    let mut client_fin = None;
+    for _ in 0..10 {
+        _ = maybe_authenticate(&mut client);
+        let out = client.process(dgram, now).dgram();
+        if *client.state() == crate::State::Connected {
+            client_fin = out;
+            break;
+        }
+        dgram = server.process(out, now).dgram();
+    }
+    let client_fin = client_fin.expect("client should have sent its Finished flight");
+
+    // Feed the server the client's Finished: this alone makes it Confirmed,
+    // without yet generating any output.
+    server.process_input(client_fin, now);
+    assert_eq!(
+        *server.state(),
+        crate::State::Confirmed,
+        "server should be Confirmed after processing the client's Finished"
+    );
+
+    // Queue a small datagram now, before the server's first post-confirmation
+    // output: small enough to fit easily in a normal packet, but this packet
+    // gets padded out to full PMTUD probe size regardless.
+    server.send_datagram(vec![0; 16], Some(1)).unwrap();
+
+    let pmtud_before = server.stats().pmtud_tx;
+    let dgram_before = server.stats().frame_tx.datagram;
+
+    // This is the server's first post-confirmation output: it coalesces the
+    // deferred Handshake ACK with the ApplicationData packet carrying
+    // HANDSHAKE_DONE, so `is_pmtud_probe` is false (coalesced) even though
+    // `needs_probe()` is true -- yet the size/padding decision still treats
+    // this as a full-size PMTUD probe.
+    let out = server.process_output(now).dgram().unwrap();
+
+    assert_eq!(
+        server.stats().pmtud_tx,
+        pmtud_before,
+        "this packet is coalesced, so it must not count as a PMTUD probe"
+    );
+    assert_eq!(
+        server.stats().frame_tx.datagram,
+        dgram_before + 1,
+        "a small datagram should fit in this non-probe packet"
+    );
+    assert!(
+        out.len()
+            < server
+                .paths
+                .primary()
+                .unwrap()
+                .borrow()
+                .pmtud()
+                .probe_size(),
+        "packet was padded to full PMTUD probe size ({}) even though it is not a real probe (coalesced)",
+        out.len()
+    );
 }

@@ -2379,6 +2379,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
         now: Instant,
+        is_pmtud_probe: bool,
     ) {
         let rtt = self.paths.primary().map_or_else(
             || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
@@ -2436,9 +2437,12 @@ impl Connection {
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
-        self.quic_datagrams.write_frames(builder, tokens, stats);
-        if builder.is_full() {
-            return;
+        // Skip datagrams in PMTUD probe packets to avoid losing user data when probes are lost
+        if !is_pmtud_probe {
+            self.quic_datagrams.write_frames(builder, tokens, stats);
+            if builder.is_full() {
+                return;
+            }
         }
 
         // CRYPTO here only includes NewSessionTicket, plus NEW_TOKEN.
@@ -2522,7 +2526,7 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        coalesced: bool, // Whether this packet is coalesced behind another one.
+        is_pmtud_probe: bool,
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
         let mut tokens = recovery::Tokens::new();
@@ -2565,11 +2569,7 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
-                    && path.borrow().pmtud().needs_probe()
-                    && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
+                if is_pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2577,7 +2577,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, now, is_pmtud_probe);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
@@ -2778,9 +2778,23 @@ impl Connection {
             let aead_expansion = tx.expansion();
 
             let header_start = encoder.len();
+            let coalesced = header_start != 0;
+
+            // Only inflate the limit to the PMTUD probe size for a packet that will
+            // actually carry a probe.  Otherwise a packet that is not tracked as a
+            // probe still gets padded out to the full probe size: a coalesced packet
+            // (e.g. the server's Handshake ACK plus `HANDSHAKE_DONE`, sent together
+            // right after becoming `Confirmed`) is padded for no benefit, and a
+            // congestion-limited one would be inflated past what the controller
+            // allows.
+            let is_pmtud_probe = space == PacketNumberSpace::ApplicationData
+                && self.state.connected()
+                && !coalesced
+                && profile.limit() == path.borrow().plpmtu()
+                && path.borrow().pmtud().needs_probe();
 
             // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
+            let limit = if is_pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
                 path.borrow().pmtud().probe_size()
@@ -2829,7 +2843,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, is_pmtud_probe, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
