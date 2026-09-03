@@ -321,6 +321,13 @@ pub struct Http3Connection {
     /// [`Self::process_all_datagram_queues`] doesn't need to walk every
     /// stream on the connection to find the handful that are sessions.
     extended_connect_session_ids: HashSet<StreamId>,
+    /// Session at which the next [`Self::process_all_datagram_queues`] round
+    /// should start, so a session skipped this call (out of transport
+    /// capacity) gets priority next time rather than the same session
+    /// always winning. Mirrors
+    /// [`DatagramQueue`][extended_connect::datagram_queue::DatagramQueue]'s own `rr_next`, one
+    /// level up.
+    datagram_session_rr_next: Option<StreamId>,
 }
 
 impl Display for Http3Connection {
@@ -358,6 +365,7 @@ impl Http3Connection {
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
             send_group_generator: SendGroupGenerator::default(),
+            datagram_session_rr_next: None,
             role,
             datagram_next_expiry: None,
             extended_connect_session_ids: HashSet::default(),
@@ -1965,6 +1973,18 @@ impl Http3Connection {
     /// outcomes through its own `events`/`connect_type`, so there is no per-outcome
     /// callback here for a caller to mis-tag by protocol.
     ///
+    /// Expiry runs unconditionally for every session first, since it is not a
+    /// send and must not be gated on transport capacity: otherwise a session
+    /// starved of capacity this round would pile up stale datagrams instead
+    /// of shedding them. Sending then proceeds one datagram per session per
+    /// round - mirroring the send-group round-robin within a single
+    /// session's own queue - so one session with plenty queued cannot drain
+    /// the whole transport-level budget before another session, sharing the
+    /// same connection, gets a turn. `recv_streams` iterates in an
+    /// unspecified order, so a persistent cursor picks up where the last
+    /// call left off, rather than always favouring whichever session that
+    /// order happens to visit first.
+    ///
     /// Also refreshes the cache [`Self::next_datagram_expiry`] reads, using
     /// [`Self::extended_connect_session_ids`] instead of walking all of
     /// `recv_streams`: most streams on a connection aren't extended-CONNECT
@@ -1980,16 +2000,50 @@ impl Http3Connection {
             self.datagram_next_expiry = None;
             return;
         }
-        self.datagram_next_expiry = self
+        let mut sessions: Vec<(StreamId, Rc<RefCell<extended_connect::session::Session>>)> = self
             .extended_connect_session_ids
             .iter()
-            .filter_map(|id| self.recv_streams.get(id))
-            .filter_map(|s| s.extended_connect_session())
-            .filter_map(|session| {
-                session.borrow_mut().process_datagram_queue(conn, now);
-                session.borrow().next_datagram_expiry(conn)
+            .filter_map(|id| {
+                let sess = self.recv_streams.get(id)?.extended_connect_session()?;
+                Some((*id, sess))
             })
+            .collect();
+        self.datagram_next_expiry = sessions
+            .iter()
+            .filter_map(|(_, session)| session.borrow().next_datagram_expiry(conn))
             .min();
+        if sessions.is_empty() {
+            return;
+        }
+        sessions.sort_unstable_by_key(|(id, _)| *id);
+        let start = self
+            .datagram_session_rr_next
+            .and_then(|cursor| sessions.iter().position(|(id, _)| *id >= cursor))
+            .unwrap_or(0);
+        sessions.rotate_left(start);
+
+        for (_, session) in &sessions {
+            session.borrow_mut().process_datagram_queue(conn, now, 0);
+        }
+
+        loop {
+            let mut any_had_data = false;
+            for (_, session) in &sessions {
+                if conn.remaining_datagram_queue_capacity() == 0 {
+                    break;
+                }
+                if session.borrow().datagram_queue_capacity().queued_datagrams == 0 {
+                    continue;
+                }
+                any_had_data = true;
+                session.borrow_mut().process_datagram_queue(conn, now, 1);
+            }
+            if !any_had_data {
+                break;
+            }
+        }
+
+        self.datagram_session_rr_next = sessions.first().map(|(id, _)| *id);
     }
 
     /// The earliest instant at which any session's outgoing datagram queue
