@@ -218,17 +218,31 @@ pub trait ClientSession {
     /// Returns the state of the queue after the datagram was accepted, so the
     /// caller can apply backpressure (see [`extended_connect::DatagramQueueOutcome`]).
     ///
+    /// The `send_group_id` and `send_order` arguments are application-defined
+    /// values that are forwarded to the underlying transport:
+    ///
+    /// * `send_group_id` can be used to group related datagrams for logging, diagnostics, or
+    ///   scheduling purposes.
+    /// * `send_order` can be used to express the relative sending order within a given group.
+    ///
+    /// Callers that do not care about grouping or ordering can pass `0` for
+    /// both `send_group_id` and `send_order`.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    /// It may also return `NotAvailable` if QUIC datagrams are not enabled
+    /// or otherwise unavailable for this connection.
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
@@ -390,10 +404,22 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        qtrace!(
+            "webtransport_send_datagram session:{session_id:?}, sendGroup:{send_group_id}, sendOrder:{send_order}"
+        );
         let (conn, handler) = self.connection_and_handler();
-        handler.webtransport_send_datagram(session_id, conn, buf, id, now)
+        handler.webtransport_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -467,6 +493,10 @@ trait Handler {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -474,6 +504,8 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
@@ -555,8 +587,18 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        self.extended_connect_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -586,6 +628,10 @@ pub(crate) trait ServerHandler {
         stream_type: StreamType,
     ) -> Res<StreamId>;
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "send_group_id and send_order are required for WebTransport datagram scheduling"
+    )]
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -593,6 +639,8 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome>;
 
     /// `None` means no limit. The caller is responsible for mapping the
@@ -673,10 +721,19 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.mark_needs_processing();
-        self.base_handler_mut()
-            .webtransport_send_datagram(session_id, conn, buf, id, now)
+        self.base_handler_mut().webtransport_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 
     fn webtransport_set_datagram_high_water_mark(
@@ -805,19 +862,31 @@ impl ServerSession {
 
     /// Send `WebTransport` datagram.
     ///
+    /// The `send_group_id` and `send_order` parameters are used to influence
+    /// how datagrams are scheduled for transmission. Datagrams with the same
+    /// `send_group_id` may be scheduled relative to each other using
+    /// `send_order` (higher `send_order` values are sent earlier, subject to
+    /// congestion control and packetization). For default behavior where no
+    /// special scheduling is required, pass `0` for both `send_group_id` and
+    /// `send_order`.
+    ///
     /// Returns the state of the queue after the datagram was accepted, so the
     /// caller can apply backpressure (see [`extended_connect::DatagramQueueOutcome`]).
     ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size.
+    /// The function returns `TooMuchData` if the supplied buffer is bigger
+    /// than the allowed remote datagram size.
+    /// It may return `NotAvailable` if QUIC datagrams are not enabled for the
+    /// connection, even if the supplied buffer would otherwise be acceptable.
     pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<extended_connect::DatagramQueueOutcome> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
@@ -829,6 +898,8 @@ impl ServerSession {
                 buf,
                 id,
                 now,
+                send_group_id,
+                send_order,
             )
     }
 

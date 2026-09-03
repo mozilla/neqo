@@ -73,6 +73,7 @@ pub trait ClientSession {
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    /// The function returns `NotAvailable` if QUIC datagrams are not enabled.
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
@@ -239,7 +240,8 @@ impl Handler for Http3Connection {
         id: I,
         now: Instant,
     ) -> Res<extended_connect::DatagramQueueOutcome> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        // CONNECT-UDP has no send groups or send order: always use the null group.
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now, 0, 0)
     }
 }
 
@@ -385,13 +387,15 @@ impl ServerSession {
         self.stream_handler.stream_id()
     }
 
-    /// Send connect-udp datagram.
+    /// Send CONNECT-UDP datagram.
     ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
+    /// The function returns `TooMuchData` if the supplied buffer is bigger than
     /// the allowed remote datagram size.
+    /// The function may also return `NotAvailable` if QUIC DATAGRAM support is
+    /// not enabled for this connection.
     pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         buf: &[u8],

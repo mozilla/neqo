@@ -436,6 +436,8 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
+        send_group_id: u64,
+        send_order: i64,
     ) -> Res<DatagramQueueOutcome> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
@@ -484,9 +486,13 @@ impl Session {
             self.report_datagram_outcome(outcome);
         }
 
-        let (outcome, dropped) =
-            self.datagram_queue
-                .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);
+        let (outcome, dropped) = self.datagram_queue.enqueue(
+            Vec::<u8>::from(dgram_data),
+            id_opt,
+            now,
+            send_group_id,
+            send_order,
+        );
         if outcome == DatagramQueueOutcome::Overflowed {
             self.count_dropped_outgoing(1);
         }
