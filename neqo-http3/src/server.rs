@@ -245,6 +245,9 @@ impl Http3Server {
                             remove = true;
                         }
                     }
+                    Http3ServerConnEvent::OutgoingDatagramSpaceAvailable => {
+                        self.events.datagram_space_available(conn.clone());
+                    }
                     Http3ServerConnEvent::PriorityUpdate {
                         stream_id,
                         priority,
@@ -1014,6 +1017,7 @@ mod tests {
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. }
                 | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
@@ -1064,6 +1068,7 @@ mod tests {
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. }
                 | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
@@ -1092,6 +1097,7 @@ mod tests {
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. }
                 | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
@@ -1137,6 +1143,7 @@ mod tests {
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. }
                 | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }
@@ -1355,6 +1362,7 @@ mod tests {
                 | Http3ServerEvent::StateChange { .. }
                 | Http3ServerEvent::PriorityUpdate { .. }
                 | Http3ServerEvent::WebTransport(_)
+                | Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. }
                 | Http3ServerEvent::ConnectUdp(_) => {}
             }
         }

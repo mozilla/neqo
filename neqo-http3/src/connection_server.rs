@@ -284,6 +284,9 @@ impl Http3ServerHandler {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => self.base_handler.handle_datagram(dgram),
+                ConnectionEvent::OutgoingDatagramSpaceAvailable => {
+                    self.events.datagram_space_available();
+                }
                 ConnectionEvent::AuthenticationNeeded
                 | ConnectionEvent::EchFallbackAuthenticationNeeded { .. }
                 | ConnectionEvent::ZeroRttRejected

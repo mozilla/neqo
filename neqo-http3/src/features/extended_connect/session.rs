@@ -390,6 +390,17 @@ impl Session {
         self.control_stream_send.send_data(conn, buf, now)
     }
 
+    /// # Returns
+    ///
+    /// `Ok(true)` if the datagram was queued and space remains, or `Ok(false)`
+    /// if it was queued but the outgoing QUIC datagram queue is now full and the
+    /// producer should stop sending until it receives an
+    /// [`OutgoingDatagramSpaceAvailable`] event (backpressure). Datagrams sent as
+    /// HTTP DATAGRAM Capsules always report `Ok(true)`; see
+    /// [`Protocol::write_datagram_capsule`].
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ClientEvent::OutgoingDatagramSpaceAvailable
+    ///
     /// # Errors
     ///
     /// Returns an error if:
@@ -401,7 +412,7 @@ impl Session {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
@@ -411,12 +422,12 @@ impl Session {
 
         if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            return self.protocol.write_datagram_capsule(
-                &mut self.control_stream_send,
-                conn,
-                buf,
-                now,
-            );
+            // The Capsule path does not report backpressure; see
+            // `Protocol::write_datagram_capsule`.
+            return self
+                .protocol
+                .write_datagram_capsule(&mut self.control_stream_send, conn, buf, now)
+                .map(|()| true);
         }
 
         let mut dgram_data = Encoder::default();
@@ -424,9 +435,9 @@ impl Session {
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
-        conn.send_datagram(dgram_data.into(), id)?;
-        qtrace!("[{self}] sent datagram via QUIC datagram");
-        Ok(())
+        let has_space = conn.send_datagram(dgram_data.into(), id)?;
+        qtrace!("[{self}] sent datagram via QUIC datagram, has_space={has_space}");
+        Ok(has_space)
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
@@ -652,6 +663,11 @@ pub(crate) trait Protocol: Debug + Display {
     fn datagram_capsule_support(&self) -> bool;
 
     /// Write a datagram as an HTTP DATAGRAM Capsule to the control stream.
+    ///
+    /// NOTE: On a full control stream this drops the datagram and still reports
+    /// success, so the Capsule path applies no backpressure. Unlike the QUIC
+    /// datagram queue, it neither reports "no space" nor emits a resume event.
+    /// To be fixed in the future.
     fn write_datagram_capsule(
         &self,
         _control_stream_send: &mut Box<dyn SendStream>,
