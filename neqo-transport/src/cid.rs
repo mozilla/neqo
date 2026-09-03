@@ -31,7 +31,9 @@ use crate::{
     stats::FrameStats,
 };
 
-#[derive(Clone, Default, Eq, Hash, PartialEq, derive_more::AsRef, derive_more::Deref)]
+#[derive(
+    Clone, Default, Eq, Hash, PartialEq, derive_more::AsRef, derive_more::Deref, derive_more::From,
+)]
 pub struct ConnectionId {
     #[as_ref([u8])]
     #[deref(forward)]
@@ -69,12 +71,6 @@ impl ConnectionId {
 impl Borrow<[u8]> for ConnectionId {
     fn borrow(&self) -> &[u8] {
         &self.cid
-    }
-}
-
-impl From<SmallVec<[u8; Self::MAX_LEN]>> for ConnectionId {
-    fn from(cid: SmallVec<[u8; Self::MAX_LEN]>) -> Self {
-        Self { cid }
     }
 }
 

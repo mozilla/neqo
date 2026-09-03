@@ -125,10 +125,11 @@ struct BuilderOffsets {
 
 /// A packet builder that can be used to produce short packets and long packets.
 /// This does not produce Retry or Version Negotiation.
-#[derive(derive_more::Deref, derive_more::DerefMut)]
+#[derive(derive_more::Deref, derive_more::DerefMut, derive_more::Into)]
 pub struct Builder<B> {
     #[deref]
     #[deref_mut]
+    #[into]
     encoder: Encoder<B>,
     pn: Number,
     header: Range<usize>,
@@ -540,12 +541,6 @@ impl<B: Buffer> Builder<B> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-}
-
-impl<B> From<Builder<B>> for Encoder<B> {
-    fn from(v: Builder<B>) -> Self {
-        v.encoder
     }
 }
 
