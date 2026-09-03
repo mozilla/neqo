@@ -2,6 +2,8 @@ name: Clippy
 on:
   pull_request:
   merge_group:
+  push:
+    branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 concurrency:
@@ -17,13 +19,20 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
+      cacheable: ${{ steps.cacheable.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        uses: mozilla/actions/toolchains@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+
+      # Nightly never uses a cache, so main runs have no reason to build it.
+      - id: cacheable
+        env:
+          TOOLCHAINS: ${{ steps.toolchains.outputs.toolchains }}
+        run: echo "toolchains=$(jq -c 'map(select(. != "nightly"))' <<<"$TOOLCHAINS")" >> "$GITHUB_OUTPUT"
 
   clippy:
     name: cargo clippy
@@ -32,39 +41,25 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2025]
-        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: ./.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
-        with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Run clippy and tests across all meaningful feature combinations. Using
-      # --all-targets (not --no-dev-deps) ensures test code is also compiled
-      # and linted for each combination. Excluded features are either empty
-      # (ci, test-fixture, gecko), benchmarking-only (bench), or have their
-      # own dedicated workflow (build-fuzzing-corpus).
-      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default -- -D warnings
+      # Run clippy across all meaningful feature combinations.
+      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci --mutually-exclusive-features bench,blapi,build-fuzzing-corpus,default,disable-encryption -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

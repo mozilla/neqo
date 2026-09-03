@@ -4,9 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
-
-use neqo_common::{Bytes, Header, header::HeadersExt as _};
+use neqo_common::{Bytes, Header, event::Queue as EventQueue, header::HeadersExt as _};
 use neqo_transport::{AppError, StreamId};
 
 use crate::{
@@ -87,7 +85,7 @@ pub enum ConnectUdpEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerConnEvents {
-    events: Rc<RefCell<VecDeque<Http3ServerConnEvent>>>,
+    events: EventQueue<Http3ServerConnEvent>,
 }
 
 impl SendStreamEvents for Http3ServerConnEvents {
@@ -95,7 +93,7 @@ impl SendStreamEvents for Http3ServerConnEvents {
         if close_type != CloseType::Done
             && let Some(error) = close_type.error()
         {
-            self.insert(Http3ServerConnEvent::StreamStopSending {
+            self.events.push(Http3ServerConnEvent::StreamStopSending {
                 stream_info: *stream_info,
                 error,
             });
@@ -103,7 +101,7 @@ impl SendStreamEvents for Http3ServerConnEvents {
     }
 
     fn data_writable(&self, stream_info: &Http3StreamInfo) {
-        self.insert(Http3ServerConnEvent::DataWritable {
+        self.events.push(Http3ServerConnEvent::DataWritable {
             stream_info: *stream_info,
         });
     }
@@ -112,7 +110,7 @@ impl SendStreamEvents for Http3ServerConnEvents {
 impl RecvStreamEvents for Http3ServerConnEvents {
     /// Add a new `DataReadable` event
     fn data_readable(&self, stream_info: &Http3StreamInfo) {
-        self.insert(Http3ServerConnEvent::DataReadable {
+        self.events.push(Http3ServerConnEvent::DataReadable {
             stream_info: *stream_info,
         });
     }
@@ -121,7 +119,7 @@ impl RecvStreamEvents for Http3ServerConnEvents {
         if close_type != CloseType::Done {
             self.remove_events_for_stream_id(stream_info);
             if let Some(error) = close_type.error() {
-                self.insert(Http3ServerConnEvent::StreamReset {
+                self.events.push(Http3ServerConnEvent::StreamReset {
                     stream_info: *stream_info,
                     error,
                 });
@@ -139,7 +137,7 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
         _interim: bool,
         fin: bool,
     ) {
-        self.insert(Http3ServerConnEvent::Headers {
+        self.events.push(Http3ServerConnEvent::Headers {
             stream_info: *stream_info,
             headers,
             fin,
@@ -149,15 +147,16 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
     fn extended_connect_new_session(&self, stream_id: StreamId, headers: Vec<Header>) {
         match headers.find_header(":protocol").map(Header::value) {
             Some(b"webtransport") => {
-                self.insert(Http3ServerConnEvent::WebTransport(
+                self.events.push(Http3ServerConnEvent::WebTransport(
                     WebTransportEvent::Session { stream_id, headers },
                 ));
             }
             Some(b"connect-udp") => {
-                self.insert(Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
-                    stream_id,
-                    headers,
-                }));
+                self.events
+                    .push(Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Session {
+                        stream_id,
+                        headers,
+                    }));
             }
             Some(_) => {
                 unimplemented!("Extended connect other than webtransport or connect-udp")
@@ -202,7 +201,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
                 })
             }
         };
-        self.insert(event);
+        self.events.push(event);
     }
 
     fn extended_connect_new_stream(
@@ -211,7 +210,7 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         emit_readable: bool,
     ) -> Res<()> {
         debug_assert!(!emit_readable, "only set by client");
-        self.insert(Http3ServerConnEvent::WebTransport(
+        self.events.push(Http3ServerConnEvent::WebTransport(
             WebTransportEvent::NewStream(stream_info),
         ));
         Ok(())
@@ -237,43 +236,32 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
                 })
             }
         };
-        self.insert(event);
+        self.events.push(event);
     }
 }
 
 impl Http3ServerConnEvents {
-    fn insert(&self, event: Http3ServerConnEvent) {
-        self.events.borrow_mut().push_back(event);
-    }
-
-    fn remove<F>(&self, f: F)
-    where
-        F: Fn(&Http3ServerConnEvent) -> bool,
-    {
-        self.events.borrow_mut().retain(|evt| !f(evt));
-    }
-
     pub fn has_events(&self) -> bool {
-        !self.events.borrow().is_empty()
+        !self.events.is_empty()
     }
 
     pub fn next_event(&self) -> Option<Http3ServerConnEvent> {
-        self.events.borrow_mut().pop_front()
+        self.events.next_event()
     }
 
     pub fn connection_state_change(&self, state: Http3State) {
-        self.insert(Http3ServerConnEvent::StateChange(state));
+        self.events.push(Http3ServerConnEvent::StateChange(state));
     }
 
     pub fn priority_update(&self, stream_id: StreamId, priority: Priority) {
-        self.insert(Http3ServerConnEvent::PriorityUpdate {
+        self.events.push(Http3ServerConnEvent::PriorityUpdate {
             stream_id,
             priority,
         });
     }
 
     fn remove_events_for_stream_id(&self, stream_info: &Http3StreamInfo) {
-        self.remove(|evt| {
+        self.events.remove_matching(|evt| {
             matches!(evt,
                 Http3ServerConnEvent::Headers { stream_info: x, .. } | Http3ServerConnEvent::DataReadable { stream_info: x, .. } if x == stream_info)
         });

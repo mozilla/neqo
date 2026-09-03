@@ -130,9 +130,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfg_aliases"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "ciborium"
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -515,7 +515,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.30.0",
+ "test-fixture 0.31.1",
 ]
 
 [[package]]
@@ -686,6 +686,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "mach2"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -720,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -742,32 +751,34 @@ dependencies = [
  "rustc-hash",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.30.0",
+ "test-fixture 0.31.1",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
  "env_logger",
  "hex",
+ "libc",
  "log",
+ "mach2",
  "qlog",
  "sha1",
  "static_assertions",
  "strum",
- "test-fixture 0.30.0",
+ "test-fixture 0.31.1",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -781,14 +792,15 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "sfv",
+ "static_assertions",
  "strum",
- "test-fixture 0.30.0",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -796,13 +808,13 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.30.0",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -818,13 +830,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.30.0",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -858,8 +870,8 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.13.4"
-source = "git+https://github.com/mozilla/nss-rs#da11b438d142cdcb71a2b152a9c5d13efe59d8b6"
+version = "0.14.6"
+source = "git+https://github.com/mozilla/nss-rs#63c63046208f587573f71bb3885f16d10e0bf4eb"
 dependencies = [
  "bindgen",
  "enum-map",
@@ -1236,7 +1248,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs#da11b438d142cdcb71a2b152a9c5d13efe59d8b6"
+source = "git+https://github.com/mozilla/nss-rs#63c63046208f587573f71bb3885f16d10e0bf4eb"
 dependencies = [
  "log",
  "nss-rs",
@@ -1244,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.30.0"
+version = "0.31.1"
 dependencies = [
  "log",
  "neqo-common",

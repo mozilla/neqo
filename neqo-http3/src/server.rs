@@ -434,18 +434,15 @@ mod tests {
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
     use crate::{Error, HFrame, Header, Http3Parameters, Priority};
 
-    const DEFAULT_SETTINGS: qpack::Settings = qpack::Settings {
-        max_table_size_encoder: 100,
-        max_table_size_decoder: 100,
-        max_blocked_streams: 100,
-        max_tracked_streams: 4096,
-    };
+    fn qpack_defaults() -> qpack::Settings {
+        qpack::Settings::default()
+            .max_table_size_encoder(100)
+            .max_table_size_decoder(100)
+            .max_blocked_streams(100)
+    }
 
     fn http3params(qpack_settings: qpack::Settings) -> Http3Parameters {
-        Http3Parameters::default()
-            .max_table_size_encoder(qpack_settings.max_table_size_encoder)
-            .max_table_size_decoder(qpack_settings.max_table_size_decoder)
-            .max_blocked_streams(qpack_settings.max_blocked_streams)
+        Http3Parameters::default().qpack(qpack_settings)
     }
 
     pub fn create_server(conn_params: Http3Parameters) -> Http3Server {
@@ -464,7 +461,7 @@ mod tests {
 
     /// Create a http3 server with default configuration.
     pub fn default_server() -> Http3Server {
-        create_server(http3params(DEFAULT_SETTINGS))
+        create_server(http3params(qpack_defaults()))
     }
 
     fn assert_closed(hconn: &Http3Server, expected: &Error) {
@@ -659,12 +656,11 @@ mod tests {
         );
         assert_eq!(sent, Ok(9));
         let mut encoder = qpack::Encoder::new(
-            &qpack::Settings {
-                max_table_size_encoder: 100,
-                max_table_size_decoder: 0,
-                max_blocked_streams: 0,
-                max_tracked_streams: 4096,
-            },
+            &qpack::Settings::default()
+                .max_table_size_encoder(100)
+                .max_table_size_decoder(0)
+                .max_blocked_streams(0)
+                .max_tracked_streams(4096),
             true,
         );
         encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
@@ -718,14 +714,14 @@ mod tests {
     }
 
     // Server: test missing SETTINGS frame
-    // (the first frame sent is a MAX_PUSH_ID frame).
+    // (the first frame sent is a GOAWAY frame).
     #[test]
     fn server_missing_settings() {
         let (mut hconn, mut neqo_trans_conn, _token) = connect_and_receive_settings();
         // Create client control stream.
         let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
-        // Send a MAX_PUSH_ID frame instead.
-        let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0xd, 0x1, 0xf]);
+        // Send a GOAWAY frame instead.
+        let sent = neqo_trans_conn.stream_send(control_stream, &[0x0, 0x7, 0x1, 0x5]);
         assert_eq!(sent, Ok(4));
         let out = neqo_trans_conn.process_output(now());
         hconn.process(out.dgram(), now());
@@ -814,10 +810,22 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x1, 0x2, 0x1, 0x2]);
     }
 
-    // send PUSH_PROMISE frame on a control stream
+    // Server push is not supported. A server that does not push has nothing to do with CANCEL_PUSH,
+    // so it is unexpected.
     #[test]
-    fn server_push_promise_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
+    fn server_cancel_push_frame_on_control_stream() {
+        test_wrong_frame_on_control_stream(&[0x03, 0x01, 0x05]);
+    }
+
+    // Server: a server that does not push ignores MAX_PUSH_ID (RFC 9114, Section 7.2.7) rather than
+    // treating it as an error.
+    #[test]
+    fn server_max_push_id_frame_ignored() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn.control_send(&[0x0d, 0x01, 0x05]);
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_not_closed(&hconn);
     }
 
     // Server: receive unknown stream type
@@ -854,17 +862,15 @@ mod tests {
         assert_not_closed(&hconn);
     }
 
-    // Server: receiving a push stream on a server should cause WrongStreamDirection
+    // Server: a push stream (unidirectional type 0x1) is H3_STREAM_CREATION_ERROR
+    // (RFC 9114, Section 6.2.2); a server must never receive one.
     #[test]
     fn server_received_push_stream() {
         let (mut hconn, mut peer_conn) = connect();
-
-        // create a push stream.
-        let push_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
-        _ = peer_conn.stream_send(push_stream_id, &[0x1]).unwrap();
+        let push_stream = peer_conn.stream_create(StreamType::UniDi).unwrap();
+        _ = peer_conn.stream_send(push_stream, &[0x01]).unwrap();
         let out = peer_conn.process_output(now());
-        let out = hconn.process(out.dgram(), now());
-        drop(peer_conn.conn.process(out.dgram(), now()));
+        drop(hconn.process(out.dgram(), now()));
         assert_closed(&hconn, &Error::HttpStreamCreation);
     }
 
@@ -914,45 +920,6 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         assert_not_closed(&hconn);
-
-        // Now test PushPromise
-        sent = peer_conn.stream_send(control_stream, &[0x5]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        sent = peer_conn.stream_send(control_stream, &[0x5]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        sent = peer_conn.stream_send(control_stream, &[0x4]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        sent = peer_conn.stream_send(control_stream, &[0x61]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        sent = peer_conn.stream_send(control_stream, &[0x62]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        sent = peer_conn.stream_send(control_stream, &[0x63]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        sent = peer_conn.stream_send(control_stream, &[0x64]);
-        assert_eq!(sent, Ok(1));
-        let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
-
-        // PUSH_PROMISE on a control stream will cause an error
-        assert_closed(&hconn, &Error::HttpFrameUnexpected);
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one
@@ -1294,17 +1261,17 @@ mod tests {
 
     #[test]
     fn zero_rtt() {
-        zero_rtt_with_settings(http3params(DEFAULT_SETTINGS), ZeroRttState::AcceptedClient);
+        zero_rtt_with_settings(http3params(qpack_defaults()), ZeroRttState::AcceptedClient);
     }
 
     /// A larger QPACK decoder table size isn't an impediment to 0-RTT.
     #[test]
     fn zero_rtt_larger_decoder_table() {
+        let qpack_dflt = qpack_defaults();
         zero_rtt_with_settings(
-            http3params(qpack::Settings {
-                max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder + 1,
-                ..DEFAULT_SETTINGS
-            }),
+            http3params(
+                qpack_dflt.max_table_size_decoder(qpack_dflt.get_max_table_size_decoder() + 1),
+            ),
             ZeroRttState::AcceptedClient,
         );
     }
@@ -1312,11 +1279,11 @@ mod tests {
     /// A smaller QPACK decoder table size prevents 0-RTT.
     #[test]
     fn zero_rtt_smaller_decoder_table() {
+        let qpack_dflt = qpack_defaults();
         zero_rtt_with_settings(
-            http3params(qpack::Settings {
-                max_table_size_decoder: DEFAULT_SETTINGS.max_table_size_decoder - 1,
-                ..DEFAULT_SETTINGS
-            }),
+            http3params(
+                qpack_dflt.max_table_size_decoder(qpack_dflt.get_max_table_size_decoder() - 1),
+            ),
             ZeroRttState::Rejected,
         );
     }
@@ -1324,11 +1291,9 @@ mod tests {
     /// More blocked streams does not prevent 0-RTT.
     #[test]
     fn zero_rtt_more_blocked_streams() {
+        let qpack_dflt = qpack_defaults();
         zero_rtt_with_settings(
-            http3params(qpack::Settings {
-                max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams + 1,
-                ..DEFAULT_SETTINGS
-            }),
+            http3params(qpack_dflt.max_blocked_streams(qpack_dflt.get_max_blocked_streams() + 1)),
             ZeroRttState::AcceptedClient,
         );
     }
@@ -1336,11 +1301,9 @@ mod tests {
     /// A lower number of blocked streams also prevents 0-RTT.
     #[test]
     fn zero_rtt_fewer_blocked_streams() {
+        let qpack_dflt = qpack_defaults();
         zero_rtt_with_settings(
-            http3params(qpack::Settings {
-                max_blocked_streams: DEFAULT_SETTINGS.max_blocked_streams - 1,
-                ..DEFAULT_SETTINGS
-            }),
+            http3params(qpack_dflt.max_blocked_streams(qpack_dflt.get_max_blocked_streams() - 1)),
             ZeroRttState::Rejected,
         );
     }
@@ -1348,11 +1311,11 @@ mod tests {
     /// The size of the encoder table is local and therefore doesn't prevent 0-RTT.
     #[test]
     fn zero_rtt_smaller_encoder_table() {
+        let qpack_dflt = qpack_defaults();
         zero_rtt_with_settings(
-            http3params(qpack::Settings {
-                max_table_size_encoder: DEFAULT_SETTINGS.max_table_size_encoder - 1,
-                ..DEFAULT_SETTINGS
-            }),
+            http3params(
+                qpack_dflt.max_table_size_encoder(qpack_dflt.get_max_table_size_encoder() - 1),
+            ),
             ZeroRttState::AcceptedClient,
         );
     }
@@ -1415,7 +1378,7 @@ mod tests {
             DEFAULT_ALPN,
             anti_replay(),
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-            http3params(DEFAULT_SETTINGS),
+            http3params(qpack_defaults()),
             Some(Box::<RejectZeroRtt>::default()),
         )
         .expect("create a server");

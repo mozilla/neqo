@@ -98,6 +98,42 @@ fn pto_works_full_cwnd() {
     }
 }
 
+/// Basic coverage for the byte/RTT stats fields: they should reflect real
+/// values after a round-tripped transfer, not just their defaults.
+#[test]
+fn stats_populated_after_transfer() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let now = connect_with_rtt(&mut client, &mut server, now(), DEFAULT_RTT);
+
+    let ack = send_and_receive(&mut client, &mut server, now).expect("server should ack");
+    client.process_input(ack, now);
+
+    let client_stats = client.stats();
+    assert!(
+        client_stats.bytes_acked > 0,
+        "sender should have acked bytes"
+    );
+    assert!(
+        client_stats.cc.cwnd > 0,
+        "cwnd snapshot should be populated"
+    );
+    // min_rtt tracks the smallest observed sample, so it can never exceed the
+    // (EWMA-smoothed) rtt estimate.
+    assert!(
+        client_stats.min_rtt <= client_stats.rtt,
+        "min_rtt {:?} should not exceed rtt {:?}",
+        client_stats.min_rtt,
+        client_stats.rtt,
+    );
+
+    let server_stats = server.stats();
+    assert!(
+        server_stats.bytes_rx > 0,
+        "receiver should have counted received bytes"
+    );
+}
+
 #[test]
 fn pto_works_ping() {
     let mut client = default_client();
@@ -156,6 +192,51 @@ fn pto_works_ping() {
     let server_pings = server.stats().frame_rx.ping;
     server.process_input(pkt6.unwrap(), now);
     assert_eq!(server.stats().frame_rx.ping, server_pings + 1);
+}
+
+/// A packet declared lost that is later acknowledged was never really lost, so the
+/// loss counters have to give the bytes and the count back.
+#[test]
+fn spurious_loss_is_taken_back() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now() + Duration::from_secs(10);
+
+    let pkt0 = send_something(&mut client, now);
+    let pkt0_len = pkt0.len();
+    let pkt1 = send_something(&mut client, now);
+    let pkt2 = send_something(&mut client, now);
+    let pkt3 = send_something(&mut client, now);
+
+    // Acknowledge everything except pkt0, so the reordering threshold declares it lost.
+    let srv = server.process(Some(pkt1), now).dgram();
+    assert!(srv.is_some());
+    now += Duration::from_millis(20);
+    server.process_input(pkt2, now);
+    now += Duration::from_millis(20);
+    let srv = server.process(Some(pkt3), now).dgram();
+    client.process_input(srv.unwrap(), now);
+
+    assert_eq!(client.stats().lost, 1);
+    assert_eq!(client.stats().bytes_lost, pkt0_len);
+    assert_eq!(client.stats().late_ack, 0);
+
+    // pkt0 arrives after all, and the acknowledgment comes back.
+    let acked_before = client.stats().bytes_acked;
+    let srv = server.process(Some(pkt0), now).dgram();
+    client.process_input(srv.unwrap(), now);
+
+    assert_eq!(client.stats().late_ack, 1);
+    assert_eq!(client.stats().lost, 0, "packet was not really lost");
+    assert_eq!(client.stats().bytes_lost, 0, "bytes were not really lost");
+    // The bytes moved from the loss counter into the acked counter. Without the
+    // decrement above they would have been counted as both lost and acknowledged.
+    assert_eq!(
+        client.stats().bytes_acked - acked_before,
+        pkt0_len,
+        "late-acked bytes should be counted exactly once"
+    );
 }
 
 #[test]
