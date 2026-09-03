@@ -104,6 +104,43 @@ fn datagram_high_water_mark_reported_via_send_datagram() {
     assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
 }
 
+/// [`Http3Client::webtransport_datagram_queue_capacity`] must reflect the
+/// http3-level queue (which a content-process credit grant should track),
+/// not the small transport-level FIFO.
+#[test]
+fn datagram_queue_capacity_reflects_the_http3_queue_not_the_transport_fifo() {
+    // A burst larger than the 10-slot transport FIFO must still be reflected
+    // faithfully by the http3-level queue's own count, since nothing here is
+    // handed to the transport until the client processes output.
+    const BURST: u8 = 20;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let before = wt
+        .client
+        .webtransport_datagram_queue_capacity(session_id)
+        .unwrap();
+    assert_eq!(before.queued_datagrams, 0);
+
+    for i in 0..BURST {
+        wt.client
+            .webtransport_send_datagram(session_id, &[0, i], Some(u64::from(i)), now(), 0, 0)
+            .unwrap();
+    }
+
+    let after = wt
+        .client
+        .webtransport_datagram_queue_capacity(session_id)
+        .unwrap();
+    assert_eq!(after.queued_datagrams, usize::from(BURST));
+    assert!(
+        after.remaining_bytes < before.remaining_bytes,
+        "enqueuing datagrams must consume some of the byte budget"
+    );
+}
+
 #[test]
 fn datagram_hard_limit_overflow_reports_outcome() {
     // Drive the queue until the byte budget is actually hit, rather than
@@ -150,8 +187,8 @@ fn datagram_hard_limit_overflow_reports_outcome() {
                 );
                 return;
             }
-            other @ DatagramQueueOutcome::AboveWatermark => {
-                panic!("unexpected outcome before the byte budget is hit: {other:?}")
+            DatagramQueueOutcome::AboveWatermark => {
+                panic!("unexpected AboveWatermark outcome before the byte budget is hit")
             }
         }
         assert!(id < 1_000_000, "byte budget should have been hit by now");

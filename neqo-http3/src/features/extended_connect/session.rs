@@ -24,7 +24,8 @@ use crate::{
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
         datagram_queue::{
-            DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome, default_max_age,
+            DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueCapacity,
+            DatagramQueueOutcome, default_max_age,
         },
         stats::SessionStats,
     },
@@ -626,6 +627,10 @@ impl Session {
 
     pub(crate) fn set_datagram_high_water_mark(&mut self, mark: Option<usize>) {
         self.datagram_queue.set_high_water_mark(mark);
+    }
+
+    pub(crate) const fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
+        self.datagram_queue.capacity()
     }
 
     pub(crate) fn set_datagram_max_age(
