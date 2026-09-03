@@ -48,11 +48,11 @@ pub struct Node {
 }
 
 #[expect(clippy::large_enum_variant, reason = "test code only")]
-#[derive(displaydoc::Display)]
+#[derive(strum::Display)]
 pub enum Endpoint {
-    #[displaydoc("{0}")]
+    #[strum(to_string = "{0}")]
     Client(Http3Client),
-    #[displaydoc("{0}")]
+    #[strum(to_string = "{0}")]
     Server(Http3Server),
 }
 

@@ -15,7 +15,6 @@ use neqo_transport::{
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use strum::Display;
 
 use crate::{
     CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
@@ -52,7 +51,7 @@ pub struct RequestDescription<'b, T: RequestTarget> {
 }
 
 /// Possible actions on an HTTP Extended CONNECT session request.
-#[derive(Display)]
+#[derive(strum::Display)]
 pub enum SessionAcceptAction {
     Accept,
     /// Accept the session and include additional headers in the 200 response.

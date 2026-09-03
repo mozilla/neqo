@@ -1297,13 +1297,13 @@ name = "test-fixture"
 version = "0.31.1"
 dependencies = [
  "derive_more",
- "displaydoc",
  "log",
  "neqo-common",
  "neqo-http3",
  "neqo-transport",
  "nss-rs",
  "qlog",
+ "strum",
  "test-fixture 0.1.0",
 ]
 
