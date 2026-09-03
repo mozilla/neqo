@@ -431,6 +431,7 @@ impl ServerSession {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ServerEvent {
     NewSession {
         session: ServerSession,

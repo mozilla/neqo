@@ -21,6 +21,7 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum WebTransportEvent {
     Negotiated(
         /// Whether WebTransport was negotiated.
@@ -54,6 +55,7 @@ pub enum WebTransportEvent {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum ConnectUdpEvent {
     Negotiated(
         /// Whether CONNECT-UDP was negotiated.

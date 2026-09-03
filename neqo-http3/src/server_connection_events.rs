@@ -49,6 +49,7 @@ pub enum Http3ServerConnEvent {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum WebTransportEvent {
     Session {
         stream_id: StreamId,
@@ -71,6 +72,7 @@ pub enum WebTransportEvent {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum ConnectUdpEvent {
     Session {
         stream_id: StreamId,
