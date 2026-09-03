@@ -22,13 +22,13 @@ mod tests;
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{Bytes, Header, Role, qdebug};
-use neqo_transport::StreamId;
+use neqo_transport::{StreamId, StreamType};
 
 use crate::{
     Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
     client_events::Http3ClientEvents,
     features::{
-        NegotiationState,
+        NegotiationState, WebTransportVersion,
         extended_connect::session::{CloseReason, Protocol},
     },
     settings::{HSettingType, HSettings},
@@ -50,6 +50,9 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         headers: Option<Vec<Header>>,
     );
     fn session_draining(&self, connect_type: ExtendedConnectType, stream_id: StreamId);
+    /// The peer raised this session's stream limit, so a caller that was blocked
+    /// on it (e.g. `waitUntilAvailable`) can retry.
+    fn session_stream_creatable(&self, stream_type: StreamType);
     fn extended_connect_new_stream(
         &self,
         stream_info: Http3StreamInfo,
@@ -89,7 +92,7 @@ impl ExtendedConnectType {
 impl From<ExtendedConnectType> for HSettingType {
     fn from(from: ExtendedConnectType) -> Self {
         match from {
-            ExtendedConnectType::WebTransport => Self::EnableWebTransport,
+            ExtendedConnectType::WebTransport => Self::EnableWebTransportDraft15,
             ExtendedConnectType::ConnectUdp => Self::EnableConnect,
         }
     }
@@ -115,6 +118,9 @@ pub(crate) struct ExtendedConnectFeature {
     feature_negotiation: NegotiationState,
     connect_type: ExtendedConnectType,
     role: Role,
+    /// Negotiated WebTransport version; `None` for non-WebTransport features or before
+    /// negotiation.
+    version: Option<WebTransportVersion>,
 }
 
 impl ExtendedConnectFeature {
@@ -124,6 +130,7 @@ impl ExtendedConnectFeature {
             feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
             connect_type,
             role,
+            version: None,
         }
     }
 
@@ -141,11 +148,22 @@ impl ExtendedConnectFeature {
         // yet, so we don't gate on it for now (falls back to RESET_STREAM). See #3917.
         let conditions_met = match self.connect_type {
             ExtendedConnectType::WebTransport => {
+                // Two draft versions are accepted, preferring draft-15. draft-07's setting is
+                // SETTINGS_WEBTRANSPORT_MAX_SESSIONS, a session count rather than a boolean,
+                // so any value > 0 signals support.
+                let draft15 = settings.get(HSettingType::EnableWebTransportDraft15) == 1;
+                let draft07 = settings.get(HSettingType::EnableWebTransportDraft07) > 0;
+                self.version = if draft15 {
+                    Some(WebTransportVersion::Draft15)
+                } else if draft07 {
+                    Some(WebTransportVersion::Draft07)
+                } else {
+                    None
+                };
                 transport_prereqs.datagrams
                     && settings.get(HSettingType::EnableH3Datagram) == 1
                     && (self.role == Role::Server
-                        || (settings.get(HSettingType::EnableConnect) == 1
-                            && settings.get(HSettingType::EnableWebTransport) == 1))
+                        || (settings.get(HSettingType::EnableConnect) == 1 && (draft15 || draft07)))
             }
             ExtendedConnectType::ConnectUdp => {
                 self.role == Role::Server || settings.get(HSettingType::EnableConnect) == 1
@@ -165,6 +183,13 @@ impl ExtendedConnectFeature {
     #[must_use]
     pub const fn enabled(&self) -> bool {
         self.feature_negotiation.enabled()
+    }
+
+    /// Returns the negotiated WebTransport version, or `None` if not yet negotiated
+    /// or if this feature is not WebTransport.
+    #[must_use]
+    pub const fn version(&self) -> Option<WebTransportVersion> {
+        self.version
     }
 }
 
@@ -220,3 +245,76 @@ impl HttpRecvStreamEvents for Rc<RefCell<HeaderListener>> {
 }
 
 impl SendStreamEvents for Rc<RefCell<HeaderListener>> {}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod version_tests {
+    use neqo_common::Role;
+
+    use super::{
+        ExtendedConnectFeature, ExtendedConnectType, TransportPrerequisites, WebTransportVersion,
+    };
+    use crate::settings::{HSetting, HSettingType, HSettings};
+
+    fn negotiate(peer: &[(HSettingType, u64)]) -> ExtendedConnectFeature {
+        let mut feature =
+            ExtendedConnectFeature::new(ExtendedConnectType::WebTransport, Role::Client, true);
+        // Everything other than the WebTransport setting that a client needs from the server.
+        let mut settings = vec![
+            HSetting::new(HSettingType::EnableH3Datagram, 1),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ];
+        settings.extend(peer.iter().map(|&(t, v)| HSetting::new(t, v)));
+        feature.handle_settings(
+            &HSettings::new(&settings),
+            &TransportPrerequisites::new(true, true),
+        );
+        feature
+    }
+
+    #[test]
+    fn draft15_peer_negotiates_draft15() {
+        let feature = negotiate(&[(HSettingType::EnableWebTransportDraft15, 1)]);
+        assert!(feature.enabled());
+        assert_eq!(feature.version(), Some(WebTransportVersion::Draft15));
+    }
+
+    /// A peer that only speaks draft-07 advertises `SETTINGS_WEBTRANSPORT_MAX_SESSIONS`,
+    /// a session count rather than a boolean. Any non-zero value means it supports
+    /// WebTransport, and we then have to use the draft-07 `:protocol` token.
+    #[test]
+    fn draft07_only_peer_negotiates_draft07() {
+        let feature = negotiate(&[(HSettingType::EnableWebTransportDraft07, 5)]);
+        assert!(feature.enabled());
+        assert_eq!(feature.version(), Some(WebTransportVersion::Draft07));
+    }
+
+    #[test]
+    fn draft15_wins_when_the_peer_advertises_both() {
+        let feature = negotiate(&[
+            (HSettingType::EnableWebTransportDraft07, 5),
+            (HSettingType::EnableWebTransportDraft15, 1),
+        ]);
+        assert_eq!(feature.version(), Some(WebTransportVersion::Draft15));
+    }
+
+    /// The `:protocol` token sent on the CONNECT request is derived from the
+    /// negotiated version, so the two must not drift apart.
+    #[test]
+    fn protocol_token_matches_the_negotiated_version() {
+        for (version, expected) in [
+            (Some(WebTransportVersion::Draft15), "webtransport-h3"),
+            (Some(WebTransportVersion::Draft07), "webtransport"),
+            (None, "webtransport-h3"),
+        ] {
+            assert_eq!(WebTransportVersion::protocol_token(version), expected);
+        }
+    }
+
+    #[test]
+    fn peer_without_webtransport_negotiates_nothing() {
+        let feature = negotiate(&[(HSettingType::EnableWebTransportDraft07, 0)]);
+        assert!(!feature.enabled());
+        assert_eq!(feature.version(), None);
+    }
+}
