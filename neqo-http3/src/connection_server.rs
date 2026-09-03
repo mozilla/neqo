@@ -227,6 +227,12 @@ impl Http3ServerHandler {
     /// connection whose only pending work is an expired datagram is never
     /// processed, so it never expires and `set_datagram_max_age` has no
     /// effect on an otherwise-idle connection.
+    ///
+    /// The expiry check is gated on `active()`: once a connection stops
+    /// being processed (see `Http3ServerHandler::process_http3`), nothing
+    /// refreshes its cached expiry, so a stale `Some(t <= now)` left over
+    /// from before it went inactive would otherwise make this return `true`
+    /// forever, spinning the handler until it's finally removed.
     pub(crate) fn should_be_processed(&mut self, now: Instant) -> bool {
         if self.needs_processing {
             self.needs_processing = false;
@@ -234,7 +240,8 @@ impl Http3ServerHandler {
         }
         self.base_handler.has_data_to_send()
             || self.events.has_events()
-            || self.next_datagram_expiry().is_some_and(|e| e <= now)
+            || (self.base_handler.state().active()
+                && self.next_datagram_expiry().is_some_and(|e| e <= now))
     }
 
     // This function takes the provided result and check for an error.
