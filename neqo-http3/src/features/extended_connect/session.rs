@@ -413,6 +413,14 @@ impl Session {
     /// Returns the state of the queue after the datagram was accepted, so the
     /// caller can apply backpressure (see `DatagramQueueOutcome`).
     ///
+    /// When the peer only supports the HTTP DATAGRAM Capsule fallback (no
+    /// QUIC DATAGRAM support), the capsule is written straight to the
+    /// control stream instead of going through the queue: the returned
+    /// `DatagramQueueOutcome` is always `Ok` on that path and carries no
+    /// backpressure signal, and a resulting `DatagramOutcome::Sent` means
+    /// only "written to the control stream", not "accepted by
+    /// `Connection::send_datagram`" as it does on the queued path.
+    ///
     /// # Errors
     ///
     /// Returns an error if:

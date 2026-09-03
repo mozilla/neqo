@@ -22,6 +22,11 @@ pub enum DatagramOutcome {
     /// Handed to the QUIC layer's outgoing queue. Not a delivery or even a
     /// transmission guarantee; the transport reports the eventual fate
     /// separately via `ConnectionEvent::OutgoingDatagramOutcome`.
+    ///
+    /// On the HTTP DATAGRAM Capsule fallback path (`Session::send_datagram`,
+    /// used when the peer has no QUIC DATAGRAM support), this instead means
+    /// "written to the control stream": that path never touches the queue,
+    /// so it carries no transport-level guarantee at all.
     Sent(DatagramId),
     Expired(DatagramId),
     /// Discarded without being sent: either the QUIC layer refused it when it
@@ -43,6 +48,10 @@ impl DatagramOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatagramQueueOutcome {
     /// The queue was below the high water mark.
+    ///
+    /// Also returned, unconditionally, on the HTTP DATAGRAM Capsule
+    /// fallback path (see `DatagramOutcome::Sent`'s docs): that path never
+    /// touches the queue, so this carries no backpressure signal there.
     Ok,
     /// The queue had space, but it was at or above the high water mark.
     AboveWatermark,

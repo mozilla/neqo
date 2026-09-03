@@ -62,6 +62,12 @@ pub trait ClientSession {
 
     /// Send a connect-udp datagram.
     ///
+    /// If the peer has no QUIC DATAGRAM support, this falls back to the HTTP
+    /// DATAGRAM Capsule and bypasses the datagram queue entirely: the
+    /// returned `DatagramQueueOutcome` is always `Ok` on that path and does
+    /// not reflect any real backpressure (see `DatagramOutcome::Sent`'s
+    /// docs).
+    ///
     /// # Errors
     ///
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
