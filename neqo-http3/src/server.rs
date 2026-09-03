@@ -24,7 +24,7 @@ use rustc_hash::FxHashMap as HashMap;
 use crate::{
     Http3Parameters, Http3StreamInfo, Res,
     connect_udp::{self, ServerEvents as _},
-    connection::Http3State,
+    connection::{Http3State, clamp_to_expiry},
     connection_server::Http3ServerHandler,
     server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
     server_events::{Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents},
@@ -162,20 +162,7 @@ impl Http3Server {
         let out = self
             .server
             .process_multiple(Option::<Datagram>::None, now, max_datagrams);
-        // The transport layer's callback delay has no notion of an
-        // http3-layer datagram queue's max-age deadline; clamp it the same
-        // way `Http3Client::process_multiple_output` does, so an
-        // otherwise-idle connection still wakes up in time to expire a
-        // stale queued datagram.
-        match out {
-            OutputBatch::Callback(delay) => OutputBatch::Callback(
-                self.next_datagram_expiry
-                    .filter(|expiry| *expiry > now)
-                    .map(|expiry| expiry - now)
-                    .map_or(delay, |max_age_delay| delay.min(max_age_delay)),
-            ),
-            out => out,
-        }
+        clamp_to_expiry(out, self.next_datagram_expiry, now)
     }
 
     /// Process HTTP3 layer.

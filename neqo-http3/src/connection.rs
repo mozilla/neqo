@@ -17,7 +17,8 @@ use neqo_common::{
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramTracking, OutputBatch, State, StreamId, StreamType,
+    ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -2032,6 +2033,24 @@ impl Http3Connection {
     #[must_use]
     pub fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
         &mut self.recv_streams
+    }
+}
+
+/// Clamp an [`OutputBatch::Callback`]'s delay to `expiry`, if that's sooner:
+/// the transport layer's callback delay has no notion of an http3-layer
+/// datagram queue's max-age deadline, so without this an otherwise-idle
+/// connection with a queued datagram would wait on whatever unrelated timer
+/// happens to fire next instead of waking up in time to expire it. A no-op
+/// on every other [`OutputBatch`] variant, and on an `expiry` that's already
+/// passed or absent.
+pub fn clamp_to_expiry(out: OutputBatch, expiry: Option<Instant>, now: Instant) -> OutputBatch {
+    match out {
+        OutputBatch::Callback(delay) => OutputBatch::Callback(
+            expiry
+                .filter(|expiry| *expiry > now)
+                .map_or(delay, |expiry| delay.min(expiry - now)),
+        ),
+        out => out,
     }
 }
 

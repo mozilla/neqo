@@ -32,7 +32,7 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::Certifi
 use crate::{
     Error, Http3Parameters, NewStreamType, Priority, ReceiveOutput, Res, SendGroupId,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
-    connection::{Http3Connection, Http3State, RequestDescription},
+    connection::{Http3Connection, Http3State, RequestDescription, clamp_to_expiry},
     features::ConnectType,
     frames::HFrame,
     request_target::RequestTarget,
@@ -826,20 +826,7 @@ impl Http3Client {
         // Update H3 for any transport state changes and events
         self.process_http3(now);
 
-        // `self.conn`'s callback delay only accounts for transport-layer
-        // timers; it has no notion of an http3-layer datagram queue's
-        // max-age deadline. Clamp it so an otherwise-idle connection still
-        // wakes up in time to expire a stale queued datagram, instead of
-        // waiting on whatever unrelated timer happens to fire next.
-        match out {
-            OutputBatch::Callback(delay) => OutputBatch::Callback(
-                self.base_handler
-                    .next_datagram_expiry()
-                    .filter(|expiry| *expiry > now)
-                    .map_or(delay, |expiry| delay.min(expiry - now)),
-            ),
-            out => out,
-        }
+        clamp_to_expiry(out, self.base_handler.next_datagram_expiry(), now)
     }
 
     /// This function takes the provided result and check for an error.
