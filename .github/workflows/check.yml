@@ -2,6 +2,8 @@ name: CI
 on:
   pull_request:
   merge_group:
+  push:
+    branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 env:
@@ -30,13 +32,20 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
+      cacheable: ${{ steps.cacheable.outputs.toolchains }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+        uses: mozilla/actions/toolchains@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+
+      # Nightly never uses a cache, so main runs have no reason to build it.
+      - id: cacheable
+        env:
+          TOOLCHAINS: ${{ steps.toolchains.outputs.toolchains }}
+        run: echo "toolchains=$(jq -c 'map(select(. != "nightly"))' <<<"$TOOLCHAINS")" >> "$GITHUB_OUTPUT"
 
   check:
     name: Run checks
@@ -47,7 +56,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
-        rust-toolchain: ${{ fromJSON(needs.toolchains.outputs.toolchains) }}
+        rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
@@ -75,25 +84,16 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: ./.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
           tools: cargo-hack ${{ matrix.rust-toolchain == 'stable' && 'cargo-llvm-cov' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'cargo-careful' || '' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
-        with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
-          token: ${{ secrets.GITHUB_TOKEN }}
+          cache-key: ${{ matrix.type }} # Debug and release are different.
 
       - name: Run tests and determine coverage
         env:
@@ -119,7 +119,7 @@ jobs:
           fi
           # Run tests across all meaningful feature combinations.
           # shellcheck disable=SC2086
-          cargo hack test $BUILD_TYPE --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default
+          cargo hack test $BUILD_TYPE --locked --feature-powerset --tests --exclude-features gecko,ci,build-fuzzing-corpus --mutually-exclusive-features bench,blapi,default,disable-encryption
 
       - name: Run client/server transfer
         run: |
@@ -146,7 +146,7 @@ jobs:
           touch C:/msys64/home/runneradmin/.gitconfig
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug'
+        if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
         with:
           name: lcov-coverage
           path: lcov.info
@@ -161,10 +161,10 @@ jobs:
           flags: ${{ startsWith(matrix.os, 'ubuntu') && 'linux' || startsWith(matrix.os, 'macos') && 'macos' || 'windows' }}
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
-        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable'
+        if: matrix.type == 'debug' && matrix.rust-toolchain == 'stable' && github.event_name != 'push'
 
       - name: Save simulation seeds artifact
-        if: ${{ always() }}
+        if: ${{ always() && github.event_name != 'push' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
@@ -174,13 +174,13 @@ jobs:
   crap:
     name: CRAP analysis
     needs: check
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       security-events: write # for uploading SARIF to code scanning
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -188,68 +188,61 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: mozilla/actions/crap@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
         with:
           lcov-path: lcov.info
           threshold: "30"
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+      - uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4.37.8
         with:
           sarif_file: crap.sarif
           category: cargo-crap
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: ./.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
       - run: |
           cargo update -w --locked
           cargo hack update -w --locked
 
   check-android:
     name: Check Android
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: ["x86_64-linux-android", "aarch64-linux-android"]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
-        with:
-          directory: .
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
-          minimum-nss-version: ${{ steps.nss-version.outputs.minimum }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
 
   check-vm:
     name: Run checks for VM-only platforms
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
-    # OpenBSD, NetBSD and Solaris often have NSS packages that are too old.
-    # Allow them to fail without aborting the merge queue.
-    continue-on-error: ${{ github.event_name == 'merge_group' && matrix.os != 'freebsd' }}
     strategy:
       fail-fast: false
       matrix:
-        # TODO: NSS package on 'solaris' is too old (3.110).
-        os: [freebsd, netbsd, openbsd]
+        os: [freebsd, netbsd, openbsd, solaris]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm

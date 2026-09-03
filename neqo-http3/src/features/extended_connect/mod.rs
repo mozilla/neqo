@@ -7,6 +7,7 @@
 pub(crate) mod connect_udp_session;
 pub mod send_group;
 pub mod session;
+pub mod stats;
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
 
@@ -16,7 +17,7 @@ mod tests;
 
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
-use neqo_common::{Bytes, Header, Role};
+use neqo_common::{Bytes, Header, Role, qdebug};
 use neqo_transport::StreamId;
 
 use crate::{
@@ -83,16 +84,35 @@ impl From<ExtendedConnectType> for HSettingType {
     }
 }
 
+pub(crate) struct TransportPrerequisites {
+    datagrams: bool,
+    reliable_reset: bool,
+}
+
+impl TransportPrerequisites {
+    #[must_use]
+    pub const fn new(datagrams: bool, reliable_reset: bool) -> Self {
+        Self {
+            datagrams,
+            reliable_reset,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ExtendedConnectFeature {
     feature_negotiation: NegotiationState,
+    connect_type: ExtendedConnectType,
+    role: Role,
 }
 
 impl ExtendedConnectFeature {
     #[must_use]
-    pub fn new(connect_type: ExtendedConnectType, enable: bool) -> Self {
+    pub fn new(connect_type: ExtendedConnectType, role: Role, enable: bool) -> Self {
         Self {
             feature_negotiation: NegotiationState::new(enable, HSettingType::from(connect_type)),
+            connect_type,
+            role,
         }
     }
 
@@ -100,8 +120,35 @@ impl ExtendedConnectFeature {
         self.feature_negotiation.set_listener(new_listener);
     }
 
-    pub fn handle_settings(&mut self, settings: &HSettings) {
-        self.feature_negotiation.handle_settings(settings);
+    /// `transport_prereqs` captures the state of transport-level features that might be needed.
+    pub fn handle_settings(
+        &mut self,
+        settings: &HSettings,
+        transport_prereqs: &TransportPrerequisites,
+    ) {
+        // reset_stream_at is also required (draft Section 4.4), but too few servers support it
+        // yet, so we don't gate on it for now (falls back to RESET_STREAM). See #3917.
+        let conditions_met = match self.connect_type {
+            ExtendedConnectType::WebTransport => {
+                transport_prereqs.datagrams
+                    && settings.get(HSettingType::EnableH3Datagram) == 1
+                    && (self.role == Role::Server
+                        || (settings.get(HSettingType::EnableConnect) == 1
+                            && settings.get(HSettingType::EnableWebTransport) == 1))
+            }
+            ExtendedConnectType::ConnectUdp => {
+                self.role == Role::Server || settings.get(HSettingType::EnableConnect) == 1
+            }
+        };
+        self.feature_negotiation.negotiate(conditions_met);
+        if self.connect_type == ExtendedConnectType::WebTransport
+            && self.enabled()
+            && !transport_prereqs.reliable_reset
+        {
+            qdebug!(
+                "WebTransport negotiated without peer reliable reset; stream resets use RESET_STREAM"
+            );
+        }
     }
 
     #[must_use]

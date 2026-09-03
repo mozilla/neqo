@@ -44,8 +44,7 @@ use crate::{
     ConnectionParameters, Error, Res,
     cid::ConnectionIdRef,
     frame::{FrameEncoder as _, FrameType},
-    packet::{self},
-    recovery,
+    packet, recovery,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -349,24 +348,22 @@ impl Crypto {
             .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qdebug!(
-            "Acked crypto frame space={} offset={} length={}",
-            token.space,
+            "Acked crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.acked(token);
+        self.streams.acked(space, token);
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qinfo!(
-            "Lost crypto frame space={} offset={} length={}",
-            token.space,
+            "Lost crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.lost(token);
+        self.streams.lost(space, token);
     }
 
     /// Mark any outstanding frames in the indicated space as "lost" so
@@ -632,6 +629,11 @@ impl CryptoDxState {
         self.epoch & 1 != 1
     }
 
+    #[must_use]
+    pub const fn epoch(&self) -> usize {
+        self.epoch
+    }
+
     /// This is a continuation of a previous, so adjust the range accordingly.
     /// Fail if the two ranges overlap.  Do nothing if the directions don't match.
     pub fn continuation(&mut self, prev: &Self) -> Res<()> {
@@ -868,6 +870,11 @@ pub struct CryptoStates {
     // If this is set, then we have noticed a genuine update.
     // Once this time passes, we should switch in new keys.
     read_update_time: Option<Instant>,
+    // The read epoch of the most recent key update we have responded to.
+    // A duplicate of the packet that carried an update decrypts with the same
+    // keys and would otherwise be detected as that update again; comparing
+    // against this stops us from responding to the same update twice.
+    read_update_epoch: Option<usize>,
 }
 
 impl CryptoStates {
@@ -1307,7 +1314,17 @@ impl CryptoStates {
     /// Prepare to update read keys.  This doesn't happen immediately as
     /// we want to ensure that we can continue to receive any delayed
     /// packets that use the old keys.  So we just set a timer.
-    pub fn key_update_received(&mut self, expiration: Instant) -> Res<()> {
+    pub fn key_update_received(&mut self, epoch: usize, expiration: Instant) -> Res<()> {
+        // Respond to each key update once. A duplicate of the packet that
+        // carried the update decrypts with the same keys and is detected as
+        // the same update again; responding twice would advance the write keys
+        // a second time and trip an assertion in `maybe_update_write`.
+        if self.read_update_epoch.is_some_and(|e| epoch <= e) {
+            qtrace!("[{self}] Ignoring duplicate key update for epoch {epoch}");
+            return Ok(());
+        }
+        self.read_update_epoch = Some(epoch);
+
         qtrace!("[{self}] Key update received");
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
@@ -1402,6 +1419,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 
@@ -1451,6 +1469,7 @@ impl CryptoStates {
             app_read: Some(app_read(3)),
             app_read_next: Some(app_read(4)),
             read_update_time: None,
+            read_update_epoch: None,
         }
     }
 }
@@ -1525,9 +1544,16 @@ impl CryptoStreams {
         Ok(())
     }
 
+    /// # Errors
+    /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
     pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
-        rx.inbound_frame(offset, data);
+        // Nothing this far ahead can ever be delivered.
+        if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
+            return Err(Error::CryptoBufferExceeded);
+        }
+        rx.inbound_frame(offset, data)
+            .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
             Ok(())
         } else {
@@ -1547,15 +1573,15 @@ impl CryptoStreams {
             .read_to_end(buf))
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        if let Some(cs) = self.get_mut(token.space) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_acked(token.offset, token.length);
         }
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         // See BZ 1624800, ignore lost packets in spaces we've dropped keys
-        if let Some(cs) = self.get_mut(token.space) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_lost(token.offset, token.length);
         }
     }
@@ -1659,7 +1685,6 @@ impl CryptoStreams {
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
-                space,
                 offset,
                 length: len,
             }));
@@ -1754,9 +1779,10 @@ impl Default for CryptoStreams {
     }
 }
 
+/// The packet number space is not recorded because it can be derived from the carrying packet's
+/// type.
 #[derive(Debug, Clone)]
 pub struct CryptoRecoveryToken {
-    space: PacketNumberSpace,
     offset: u64,
     length: usize,
 }
@@ -1773,5 +1799,43 @@ mod tests {
         fixture_init();
         let dx = CryptoDxState::test_default_write();
         assert_eq!(dx.to_string(), "epoch 0 Write");
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod buffer_limits {
+    use neqo_common::to_u64;
+
+    use super::{CryptoStreams, PacketNumberSpace, RxStreamOrderer};
+    use crate::Error;
+
+    /// How many one-byte ranges, each separated by a one-byte gap, to offer.
+    const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
+
+    // Offsets have to stay inside `BUFFER_LIMIT`.
+    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
+
+    #[test]
+    fn crypto_offset_beyond_buffer() {
+        let offset = CryptoStreams::BUFFER_LIMIT + 1;
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[0; 1]),
+            Err(Error::CryptoBufferExceeded)
+        );
+        assert_eq!(
+            CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn crypto_too_many_ranges() {
+        let mut cs = CryptoStreams::default();
+        let rejected = (0..RANGES).find_map(|i| {
+            cs.inbound_frame(PacketNumberSpace::Initial, 2 * i + 1, &[0; 1])
+                .err()
+        });
+        assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
     }
 }

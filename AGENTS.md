@@ -16,7 +16,7 @@ In addition to the instructions in this file, also follow the detailed instructi
 ## Building and Testing
 
 ### Prerequisites
-- NSS library version as specified in the `min_version.txt` file of the [`nss`](https://github.com/mozilla/nss-rs) crate
+- NSS library version as specified in the `[package.metadata.nss]` table of the [`nss`](https://github.com/mozilla/nss-rs) crate's `Cargo.toml`
 - System NSS will be used if available and new enough; otherwise, build will fetch and compile NSS automatically
 
 ### Essential Commands (Always Use --locked)
@@ -101,7 +101,7 @@ neqo/
 ├── mtu/                # MTU detection (tests require GitHub Actions)
 └── .github/            # CI workflows and actions
     ├── workflows/      # CI pipeline definitions
-    └── actions/        # Reusable GitHub Actions (rust, nss, etc.)
+    └── actions/        # Reusable GitHub Actions (install-build-deps, build-neqo, etc.)
 ```
 
 ### Key Files

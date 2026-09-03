@@ -269,6 +269,19 @@ impl LossRecoverySpace {
             eliciting |= p.ack_eliciting();
             if p.lost() {
                 stats.late_ack += 1;
+                if let Some(reduced) = stats.lost.checked_sub(1) {
+                    stats.lost = reduced;
+                } else {
+                    debug_assert!(false, "spurious losses should have been lost already");
+                }
+                if let Some(reduced) = stats.bytes_lost.checked_sub(p.len()) {
+                    stats.bytes_lost = reduced;
+                } else {
+                    debug_assert!(
+                        false,
+                        "spurious lost bytes should have been counted already"
+                    );
+                }
             }
             if p.pto_fired() {
                 stats.pto_ack += 1;
@@ -510,6 +523,12 @@ impl Loss {
         self.qlog = qlog;
     }
 
+    fn count_lost(&self, lost: &[sent::Packet]) {
+        let mut stats = self.stats.borrow_mut();
+        stats.lost += lost.len();
+        stats.bytes_lost += lost.iter().map(sent::Packet::len).sum::<usize>();
+    }
+
     /// Drop all 0rtt packets.
     pub fn drop_0rtt(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
         let Some(sp) = self.spaces.get_mut(PacketNumberSpace::ApplicationData) else {
@@ -528,7 +547,7 @@ impl Loss {
     }
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: sent::Packet, now: Instant) {
-        let pn_space = PacketNumberSpace::from(sent_packet.packet_type());
+        let pn_space = sent_packet.space();
         qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(pto) = self.pto_state.as_mut() {
             pto.pto_sent(pn_space);
@@ -673,7 +692,7 @@ impl Loss {
         let loss_delay = primary_path.borrow().rtt().loss_delay();
         let mut lost = Vec::new();
         sp.detect_lost_packets(now, loss_delay, cleanup_delay, &mut lost);
-        self.stats.borrow_mut().lost += lost.len();
+        self.count_lost(&lost);
 
         // Tell the congestion controller about any lost packets.
         // The PTO for congestion control is the raw number, without exponential
@@ -994,7 +1013,7 @@ impl Loss {
                 now,
             );
         }
-        self.stats.borrow_mut().lost += lost_packets.len();
+        self.count_lost(&lost_packets);
 
         self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
         lost_packets
@@ -1549,7 +1568,7 @@ mod tests {
                 recovery::Tokens::new(),
                 ON_SENT_SIZE,
             );
-            let pn_space = PacketNumberSpace::from(sent_pkt.packet_type());
+            let pn_space = sent_pkt.space();
             lr.on_packet_sent(sent_pkt, now());
             lr.on_ack_received(
                 pn_space,

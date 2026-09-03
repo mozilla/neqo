@@ -31,13 +31,13 @@ jobs:
     name: Network namespace tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+      - uses: ./.github/actions/install-build-deps
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false"
 
       - name: Run network namespace tests
         run: sudo -E env "PATH=$PATH" cargo test --locked --package mtu --test netns -- --nocapture
@@ -56,7 +56,7 @@ jobs:
             header: bsd.h
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install bindgen-cli
@@ -85,14 +85,14 @@ jobs:
             "aarch64-linux-android",
           ]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-android
         with:
           target: ${{ matrix.target }}
           working-directory: mtu
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          nss: "false" # The mtu crate does not need NSS.
 
   check-vm:
     name: Run checks for VM-only platforms
@@ -104,7 +104,7 @@ jobs:
       matrix:
         os: [freebsd, openbsd, netbsd, solaris]
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/check-vm
@@ -113,6 +113,7 @@ jobs:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
           bindgen-args: ${{ env.BSD_BINDGEN_ARGS }}
+          nss-version-check: "false"
 
   check-bindings:
     name: Check bindings
@@ -123,7 +124,7 @@ jobs:
       pull-requests: write # to create PRs for binding updates
       contents: write # to push branches for binding updates
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
 
