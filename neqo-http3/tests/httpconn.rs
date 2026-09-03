@@ -8,15 +8,15 @@
 
 mod common;
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use neqo_common::{Datagram, event::Provider as _, expect_usize, qtrace};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
 };
-use neqo_transport::{CloseReason, ConnectionParameters, Error, Output, StreamType};
-use nss::{AuthenticationStatus, ResumptionToken};
+use neqo_transport::{ConnectionParameters, StreamType};
+use nss::ResumptionToken;
 use test_fixture::*;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
@@ -91,45 +91,6 @@ fn process_client_events(conn: &mut Http3Client) {
     }
     assert!(response_header_found);
     assert!(response_data_found);
-}
-
-fn connect_peers_with_network_propagation_delay(
-    hconn_c: &mut Http3Client,
-    hconn_s: &mut Http3Server,
-    net_delay: u64,
-) -> (Option<Datagram>, Instant) {
-    let net_delay = Duration::from_millis(net_delay);
-    assert_eq!(hconn_c.state(), Http3State::Initializing);
-    let mut now = now();
-    let out = hconn_c.process_output(now); // Initial
-    let out2 = hconn_c.process_output(now); // Initial
-    now += net_delay;
-    _ = hconn_s.process(out.dgram(), now); // ACK
-    let out = hconn_s.process(out2.dgram(), now);
-    now += net_delay;
-    let out = hconn_c.process(out.dgram(), now);
-    now += net_delay;
-    let out = hconn_s.process(out.dgram(), now);
-    now += net_delay;
-    let out = hconn_c.process(out.dgram(), now); // ACK
-    now += net_delay;
-    let out = hconn_s.process(out.dgram(), now); // consume ACK
-    assert!(out.dgram().is_none());
-    let authentication_needed = |e| matches!(e, Http3ClientEvent::AuthenticationNeeded);
-    assert!(hconn_c.events().any(authentication_needed));
-    now += net_delay;
-    hconn_c.authenticated(AuthenticationStatus::Ok, now);
-    let out = hconn_c.process_output(now); // Handshake
-    assert_eq!(hconn_c.state(), Http3State::Connected);
-    now += net_delay;
-    let out = hconn_s.process(out.dgram(), now); // HANDSHAKE_DONE
-    now += net_delay;
-    let out = hconn_c.process(out.dgram(), now); // Consume HANDSHAKE_DONE, send control streams.
-    now += net_delay;
-    let out = hconn_s.process(out.dgram(), now); // consume and send control streams.
-    now += net_delay;
-    let out = hconn_c.process(out.dgram(), now); // consume control streams.
-    (out.dgram(), now)
 }
 
 #[must_use]
@@ -472,45 +433,33 @@ fn zerortt() {
 }
 
 #[test]
-/// When a client has an outstanding fetch, it will send keepalives.
-/// Test that it will successfully run until the connection times out.
-fn fetch_noresponse_will_idletimeout() {
-    let mut hconn_c = default_http3_client();
-    let mut hconn_s = default_http3_server();
+/// A client with an outstanding fetch keeps the connection alive with
+/// keepalives. When the server keeps acknowledging them but never answers the
+/// request, the path stays healthy, so black-hole detection must not fire: the
+/// connection remains open well past the idle timeout.
+fn fetch_noresponse_healthy_path_stays_open() {
+    // Connect and send a GET the server receives but never answers.
+    let (mut hconn_c, mut hconn_s, _req) = common::connect_and_send_request(true);
 
-    let (dgram, mut now) =
-        connect_peers_with_network_propagation_delay(&mut hconn_c, &mut hconn_s, 10);
-
-    qtrace!("-----client");
-    let req = hconn_c
-        .fetch(
-            now,
-            "GET",
-            ("https", "something.com", "/"),
-            &[],
-            Priority::default(),
-        )
-        .unwrap();
-    assert_eq!(req, 0);
-    hconn_c.stream_close_send(req, now).unwrap();
-    let _out = hconn_c.process(dgram, now);
-    qtrace!("-----server");
-
-    let mut done = false;
-    while !done {
-        while let Some(event) = hconn_c.next_event() {
-            if let Http3ClientEvent::StateChange(
-                Http3State::Closing(error_code) | Http3State::Closed(error_code),
-            ) = event
-            {
-                assert_eq!(error_code, CloseReason::Transport(Error::IdleTimeout));
-                done = true;
-            }
-        }
-
-        if let Output::Callback(t) = hconn_c.process_output(now) {
-            now += t;
-        }
+    // With an outstanding request the client keeps the connection alive with
+    // keepalives. As long as the server acknowledges them the path is healthy,
+    // so the consecutive-PTO count never grows and max_pto must not trip: the
+    // connection stays open well past the idle timeout.
+    let keepalive = ConnectionParameters::DEFAULT_IDLE_TIMEOUT / 2;
+    let mut now = now();
+    let end = now + ConnectionParameters::DEFAULT_IDLE_TIMEOUT * 4;
+    while now < end {
+        now += keepalive;
+        let ping = hconn_c
+            .process_output(now)
+            .dgram()
+            .expect("client sends a keepalive ping");
+        let ack = hconn_s
+            .process(Some(ping), now)
+            .dgram()
+            .expect("server acks the keepalive");
+        hconn_c.process_input(ack, now);
+        assert_eq!(hconn_c.state(), Http3State::Connected);
     }
 }
 

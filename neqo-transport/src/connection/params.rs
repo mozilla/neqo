@@ -183,7 +183,7 @@ impl Default for ConnectionParameters {
             max_streams_uni: LOCAL_STREAM_LIMIT_UNI,
             ack_ratio: Self::DEFAULT_ACK_RATIO,
             idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
-            max_pto: None,
+            max_pto: NonZeroUsize::new(7),
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: MAX_DATAGRAM_FRAME_SIZE,
             outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
