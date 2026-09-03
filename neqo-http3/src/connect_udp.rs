@@ -444,7 +444,7 @@ pub(crate) trait ServerEvents {
 
 impl ServerEvents for Http3ServerEvents {
     fn connect_udp_new_session(&self, session: ServerSession, headers: Vec<Header>) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::NewSession {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::NewSession {
             session,
             headers,
         }));
@@ -456,7 +456,7 @@ impl ServerEvents for Http3ServerEvents {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::SessionClosed {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::SessionClosed {
             session,
             reason,
             headers,
@@ -464,7 +464,7 @@ impl ServerEvents for Http3ServerEvents {
     }
 
     fn connect_udp_datagram(&self, session: ServerSession, datagram: Bytes) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
             session,
             datagram,
         }));

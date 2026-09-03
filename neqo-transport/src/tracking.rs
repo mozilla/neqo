@@ -17,14 +17,12 @@ use enumset::{EnumSet, EnumSetType};
 use log::{Level, log_enabled};
 use neqo_common::{Buffer, Ecn, MAX_VARINT, qdebug, qtrace, qwarn, to_u64};
 use nss::Epoch;
-use smallvec::SmallVec;
 use strum::{Display, EnumIter};
 
 use crate::{
     Error, Res, Stats, ecn,
     frame::{FrameEncoder as _, FrameType},
-    packet,
-    recovery::{self},
+    packet, recovery,
     stats::FrameStats,
 };
 
@@ -166,20 +164,6 @@ pub const DEFAULT_REMOTE_ACK_DELAY: Duration = Duration::from_millis(25);
 pub const DEFAULT_ACK_PACKET_TOLERANCE: packet::Number = 1;
 const MAX_TRACKED_RANGES: usize = 32;
 const MAX_ACKS_PER_FRAME: usize = 32;
-
-/// A structure that tracks what was included in an ACK.
-#[derive(Debug, Clone)]
-pub struct AckToken {
-    space: PacketNumberSpace,
-    ranges: Box<[PacketRange]>,
-}
-
-impl AckToken {
-    /// Get the space for this token.
-    pub const fn space(&self) -> PacketNumberSpace {
-        self.space
-    }
-}
 
 /// A structure that tracks what packets have been received,
 /// and what needs acknowledgement for a packet number space.
@@ -446,7 +430,7 @@ impl RecvdPackets {
             .filter(|r| r.ack_needed())
             .take(max_ranges)
             .cloned()
-            .collect::<SmallVec<[_; MAX_TRACKED_RANGES]>>();
+            .collect::<Vec<_>>();
         if ranges.is_empty() {
             return;
         }
@@ -499,10 +483,7 @@ impl RecvdPackets {
         self.last_ack_time = Some(now);
         self.unacknowledged_count = 0;
 
-        tokens.push(recovery::Token::Ack(AckToken {
-            space: self.space,
-            ranges: ranges.into_boxed_slice(),
-        }));
+        tokens.push(recovery::Token::Ack(ranges.into_boxed_slice()));
     }
 }
 
@@ -575,9 +556,9 @@ impl AckTracker {
             .min()
     }
 
-    pub fn acked(&mut self, token: &AckToken) {
-        if let Some(space) = self.get_mut(token.space) {
-            space.acknowledged(&token.ranges);
+    pub fn acked(&mut self, pn_space: PacketNumberSpace, acked: &[PacketRange]) {
+        if let Some(space) = self.get_mut(pn_space) {
+            space.acknowledged(acked);
         }
     }
 
@@ -620,13 +601,7 @@ mod tests {
         AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, PacketRange,
         RecvdPackets,
     };
-    use crate::{
-        Stats,
-        frame::Frame,
-        packet,
-        recovery::{self},
-        stats::FrameStats,
-    };
+    use crate::{Stats, frame::Frame, packet, recovery, stats::FrameStats};
 
     const RTT: Duration = Duration::from_millis(100);
 
@@ -978,7 +953,7 @@ mod tests {
         );
         assert_eq!(frame_stats.ack, 1);
         if let recovery::Token::Ack(tok) = &tokens[0] {
-            tracker.acked(tok); // Should be a noop.
+            tracker.acked(PacketNumberSpace::Initial, tok); // Should be a noop.
         } else {
             panic!("not an ACK token");
         }

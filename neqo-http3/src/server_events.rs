@@ -6,13 +6,12 @@
 
 use std::{
     cell::RefCell,
-    collections::VecDeque,
     fmt::{self, Display, Formatter},
     rc::Rc,
     time::Instant,
 };
 
-use neqo_common::{Header, qdebug};
+use neqo_common::{Header, event::Queue as EventQueue, qdebug};
 use neqo_transport::{AppError, Connection, StreamId, server::ConnectionRef};
 
 use crate::{
@@ -271,27 +270,28 @@ pub enum Http3ServerEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct Http3ServerEvents {
-    events: Rc<RefCell<VecDeque<Http3ServerEvent>>>,
+    events: EventQueue<Http3ServerEvent>,
 }
 
 impl Http3ServerEvents {
-    pub(crate) fn insert(&self, event: Http3ServerEvent) {
-        self.events.borrow_mut().push_back(event);
+    /// Append an event, allowing duplicates.
+    pub(crate) fn push(&self, event: Http3ServerEvent) {
+        self.events.push(event);
     }
 
     /// Take all events
     pub fn events(&self) -> impl Iterator<Item = Http3ServerEvent> + use<> {
-        self.events.replace(VecDeque::new()).into_iter()
+        self.events.take_all().into_iter()
     }
 
     /// Whether there is request pending.
     pub fn has_events(&self) -> bool {
-        !self.events.borrow().is_empty()
+        !self.events.is_empty()
     }
 
     /// Take the next event if present.
     pub fn next_event(&self) -> Option<Http3ServerEvent> {
-        self.events.borrow_mut().pop_front()
+        self.events.next_event()
     }
 
     /// Insert a `Headers` event.
@@ -301,7 +301,7 @@ impl Http3ServerEvents {
         headers: Vec<Header>,
         fin: bool,
     ) {
-        self.insert(Http3ServerEvent::Headers {
+        self.events.push(Http3ServerEvent::Headers {
             stream: request,
             headers,
             fin,
@@ -310,7 +310,8 @@ impl Http3ServerEvents {
 
     /// Insert a `StateChange` event.
     pub(crate) fn connection_state_change(&self, conn: ConnectionRef, state: Http3State) {
-        self.insert(Http3ServerEvent::StateChange { conn, state });
+        self.events
+            .push(Http3ServerEvent::StateChange { conn, state });
     }
 
     /// Insert a `Data` event.
@@ -322,7 +323,7 @@ impl Http3ServerEvents {
         data: Vec<u8>,
         fin: bool,
     ) {
-        self.insert(Http3ServerEvent::Data {
+        self.events.push(Http3ServerEvent::Data {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
             data,
             fin,
@@ -335,7 +336,7 @@ impl Http3ServerEvents {
         handler: Rc<RefCell<Http3ServerHandler>>,
         stream_info: Http3StreamInfo,
     ) {
-        self.insert(Http3ServerEvent::DataWritable {
+        self.events.push(Http3ServerEvent::DataWritable {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
         });
     }
@@ -347,7 +348,7 @@ impl Http3ServerEvents {
         stream_info: Http3StreamInfo,
         error: AppError,
     ) {
-        self.insert(Http3ServerEvent::StreamReset {
+        self.events.push(Http3ServerEvent::StreamReset {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
             error,
         });
@@ -360,14 +361,14 @@ impl Http3ServerEvents {
         stream_info: Http3StreamInfo,
         error: AppError,
     ) {
-        self.insert(Http3ServerEvent::StreamStopSending {
+        self.events.push(Http3ServerEvent::StreamStopSending {
             stream: Http3OrWebTransportStream::new(conn, handler, stream_info),
             error,
         });
     }
 
     pub(crate) fn priority_update(&self, stream_id: StreamId, priority: Priority) {
-        self.insert(Http3ServerEvent::PriorityUpdate {
+        self.events.push(Http3ServerEvent::PriorityUpdate {
             stream_id,
             priority,
         });

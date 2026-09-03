@@ -801,7 +801,7 @@ pub(crate) trait ServerEvents {
 
 impl ServerEvents for Http3ServerEvents {
     fn webtransport_new_session(&self, session: ServerSession, headers: Vec<Header>) {
-        self.insert(Http3ServerEvent::WebTransport(ServerEvent::NewSession {
+        self.push(Http3ServerEvent::WebTransport(ServerEvent::NewSession {
             session,
             headers,
         }));
@@ -813,7 +813,7 @@ impl ServerEvents for Http3ServerEvents {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        self.insert(Http3ServerEvent::WebTransport(ServerEvent::SessionClosed {
+        self.push(Http3ServerEvent::WebTransport(ServerEvent::SessionClosed {
             session,
             reason,
             headers,
@@ -821,13 +821,13 @@ impl ServerEvents for Http3ServerEvents {
     }
 
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream) {
-        self.insert(Http3ServerEvent::WebTransport(ServerEvent::NewStream(
+        self.push(Http3ServerEvent::WebTransport(ServerEvent::NewStream(
             stream,
         )));
     }
 
     fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes) {
-        self.insert(Http3ServerEvent::WebTransport(ServerEvent::Datagram {
+        self.push(Http3ServerEvent::WebTransport(ServerEvent::Datagram {
             session,
             datagram,
         }));
