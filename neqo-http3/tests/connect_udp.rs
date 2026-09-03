@@ -14,7 +14,7 @@ use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
-    features::extended_connect::{DEFAULT_HARD_LIMIT, DatagramOutcome, DatagramQueueOutcome},
+    features::extended_connect::{DatagramOutcome, DatagramQueueOutcome},
     webtransport::ClientSession as _,
 };
 use neqo_transport::{ConnectionParameters, StreamType};
@@ -801,11 +801,13 @@ fn connect_udp_datagram_outcome_uses_connect_udp_event() {
 fn connect_udp_server_send_datagram_reports_backpressure() {
     let (_client, _proxy, _session_id, proxy_session) = establish_new_session();
 
-    for _ in 0..DEFAULT_HARD_LIMIT {
-        proxy_session.send_datagram(PING, None, now()).unwrap();
+    // Drive the queue until the byte budget is actually hit, rather than
+    // pre-computing an iteration count.
+    for i in 0.. {
+        let outcome = proxy_session.send_datagram(PING, None, now()).unwrap();
+        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+            return;
+        }
+        assert!(i < 1_000_000, "byte budget should have been hit by now");
     }
-    assert_eq!(
-        proxy_session.send_datagram(PING, None, now()),
-        Ok(DatagramQueueOutcome::Overflowed)
-    );
 }
