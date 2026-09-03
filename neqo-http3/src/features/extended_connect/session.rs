@@ -457,7 +457,6 @@ impl Session {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
-            debug_assert!(false);
             return Err(Error::Unavailable);
         }
         let remote_datagram_size = conn.remote_datagram_size();
