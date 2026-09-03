@@ -47,6 +47,12 @@ pub struct Http3Server {
     /// so [`Self::process_multiple`]'s callback clamp doesn't need its own
     /// walk over `http3_handlers`.
     next_datagram_expiry: Option<Instant>,
+    /// The handler `next_datagram_expiry` was last read from, so
+    /// [`Self::process_http3`] can tell whether that cached value is still
+    /// trustworthy without rescanning every handler: it is, unless this
+    /// handler was just reprocessed (its expiry may have changed) or is
+    /// gone (its handler was removed).
+    next_datagram_expiry_conn: Option<ConnectionRef>,
 }
 
 impl Display for Http3Server {
@@ -84,6 +90,7 @@ impl Http3Server {
             http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
             next_datagram_expiry: None,
+            next_datagram_expiry_conn: None,
         })
     }
 
@@ -179,35 +186,59 @@ impl Http3Server {
             reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
         )]
         let mut active_conns = self.server.active_connections();
-        #[expect(
-            clippy::iter_over_hash_type,
-            reason = "OK to loop over handlers in an undefined order: this only decides \
-                      set membership, which doesn't depend on iteration order."
-        )]
-        for (conn, handler) in &self.http3_handlers {
-            if handler.borrow_mut().should_be_processed(now) {
-                active_conns.insert(conn.clone());
-            }
-        }
+        active_conns.extend(
+            self.http3_handlers
+                .iter()
+                .filter(|(_, handler)| handler.borrow_mut().should_be_processed(now))
+                .map(|(c, _)| c)
+                .cloned(),
+        );
+
+        // The cached minimum is only trustworthy if its owning handler isn't
+        // about to be reprocessed below (its expiry may change) and still
+        // has a handler at all (it may be removed by `process_events`).
+        let stale = self.next_datagram_expiry_conn.as_ref().is_none_or(|owner| {
+            active_conns.contains(owner) || !self.http3_handlers.contains_key(owner)
+        });
 
         #[expect(
             clippy::iter_over_hash_type,
             reason = "OK to loop over active connections in an undefined order."
         )]
-        for conn in active_conns {
-            self.process_events(&conn, now);
+        for conn in &active_conns {
+            self.process_events(conn, now);
+            // If the cached minimum is still valid, fold this freshly
+            // processed handler into it instead of rescanning every
+            // handler below.
+            if !stale
+                && let Some(handler) = self.http3_handlers.get(conn)
+                && let Some(expiry) = handler.borrow().next_datagram_expiry()
+                && self.next_datagram_expiry.is_none_or(|cur| expiry < cur)
+            {
+                self.next_datagram_expiry = Some(expiry);
+                self.next_datagram_expiry_conn = Some(conn.clone());
+            }
         }
 
-        // Recompute *after* processing: `process_events` is what drains each
-        // handler's datagram queue and refreshes its cached expiry, so a
-        // pre-loop read (as `should_be_processed` above needs, to decide
-        // which connections to process) would still be looking at last
-        // round's deadline.
-        self.next_datagram_expiry = self
-            .http3_handlers
-            .values()
-            .filter_map(|handler| handler.borrow().next_datagram_expiry())
-            .min();
+        if stale {
+            // The previous minimum can no longer be trusted: rescan every
+            // handler.
+            self.next_datagram_expiry = None;
+            self.next_datagram_expiry_conn = None;
+            #[expect(
+                clippy::iter_over_hash_type,
+                reason = "OK to loop over handlers in an undefined order: this only decides \
+                          the minimum, which doesn't depend on iteration order."
+            )]
+            for (conn, handler) in &self.http3_handlers {
+                if let Some(expiry) = handler.borrow().next_datagram_expiry()
+                    && self.next_datagram_expiry.is_none_or(|cur| expiry < cur)
+                {
+                    self.next_datagram_expiry = Some(expiry);
+                    self.next_datagram_expiry_conn = Some(conn.clone());
+                }
+            }
+        }
     }
 
     #[expect(
