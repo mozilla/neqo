@@ -13,7 +13,6 @@ members = [
 resolver = "2"
 
 [workspace.package]
-homepage = "https://github.com/mozilla/neqo/"
 repository = "https://github.com/mozilla/neqo/"
 authors = ["The Neqo Authors <necko@mozilla.com>"]
 description = "Neqo, the Mozilla implementation of QUIC in Rust."
@@ -46,6 +45,8 @@ strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.12", default-features = false }
 windows = { version = ">=0.60,<0.63", default-features = false }
 
+[workspace.lints.cargo]
+non_kebab_case_bins = "allow" # fuzzer names/corpora have had underscores
 
 [workspace.lints.rust]
 absolute_paths_not_starting_with_crate = "warn"

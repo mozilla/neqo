@@ -17,7 +17,7 @@ use std::{
     fmt::Display,
     fs,
     future::poll_fn,
-    io::{self},
+    io,
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,

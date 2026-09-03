@@ -46,7 +46,7 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
-    packet::{self},
+    packet,
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},

@@ -23,8 +23,7 @@ use strum::{Display, EnumIter};
 use crate::{
     Error, Res, Stats, ecn,
     frame::{FrameEncoder as _, FrameType},
-    packet,
-    recovery::{self},
+    packet, recovery,
     stats::FrameStats,
 };
 
@@ -613,13 +612,7 @@ mod tests {
         AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, PacketRange,
         RecvdPackets,
     };
-    use crate::{
-        Stats,
-        frame::Frame,
-        packet,
-        recovery::{self},
-        stats::FrameStats,
-    };
+    use crate::{Stats, frame::Frame, packet, recovery, stats::FrameStats};
 
     const RTT: Duration = Duration::from_millis(100);
 
