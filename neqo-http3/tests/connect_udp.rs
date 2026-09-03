@@ -741,7 +741,11 @@ fn connect_udp_session_rejected_by_webtransport_set_datagram_max_age() {
     fixture_init();
     let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
     assert_eq!(
-        client.webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), now()),
+        client.webtransport_set_datagram_max_age(
+            session_id,
+            Some(Duration::from_millis(100)),
+            now()
+        ),
         Err(Error::InvalidStreamId)
     );
 }

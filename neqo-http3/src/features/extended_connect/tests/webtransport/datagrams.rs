@@ -159,7 +159,7 @@ fn datagram_hard_limit_overflow_expires_stale_datagrams_first() {
 
     let t0 = now();
     wt.client
-        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(50), t0)
+        .webtransport_set_datagram_max_age(session_id, Some(Duration::from_millis(50)), t0)
         .unwrap();
 
     let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
@@ -231,6 +231,64 @@ fn datagram_hard_limit_overflow_counts_untracked_drops() {
     );
 }
 
+/// A burst far larger than the QUIC layer's outgoing datagram queue
+/// (`MAX_QUEUED_DATAGRAMS_DEFAULT`) must still be delivered in full. `drain()`
+/// hands over only what that queue can hold and keeps the remainder, so the
+/// backlog goes out over successive drains as the queue empties. Draining the
+/// whole session queue at once instead let the QUIC layer head-drop everything
+/// but the last few, and because the highest `send_order` is drained first, the
+/// survivors were the *lowest*-priority datagrams of the burst.
+#[test]
+fn datagram_burst_larger_than_quic_queue_is_fully_delivered() {
+    // Comfortably more than the QUIC layer's queue, so the burst can only get
+    // through if the leftovers are picked up by later drains.
+    const BURST: u8 = 100;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    for i in 0..BURST {
+        wt.client
+            .webtransport_send_datagram(session_id, &[0, i], Some(u64::from(i)), now(), 0, 0)
+            .unwrap();
+    }
+
+    wt.exchange_packets();
+
+    let mut received: Vec<u8> = wt
+        .server
+        .events()
+        .filter_map(|e| match e {
+            Http3ServerEvent::WebTransport(ServerEvent::Datagram { session, datagram })
+                if session.stream_id() == session_id =>
+            {
+                Some(datagram.as_ref()[1])
+            }
+            _ => None,
+        })
+        .collect();
+    received.sort_unstable();
+
+    assert_eq!(
+        received,
+        (0..BURST).collect::<Vec<_>>(),
+        "every datagram of the burst must arrive exactly once"
+    );
+
+    // Nothing may be reported as dropped either.
+    let bad_outcome = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                outcome: DatagramOutcome::Dropped(_),
+                ..
+            })
+        )
+    };
+    assert!(!wt.client.events().any(bad_outcome));
+}
+
 #[test]
 fn datagram_sent_reports_client_event() {
     // The `Sent` outcome is what tells the application its datagram actually
@@ -270,7 +328,7 @@ fn datagram_max_age_expiry_reports_client_event() {
 
     let t1 = t0 + Duration::from_millis(200);
     wt.client
-        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), t1)
+        .webtransport_set_datagram_max_age(session_id, Some(Duration::from_millis(100)), t1)
         .unwrap();
 
     let wt_expired_event = |e| {
@@ -410,7 +468,7 @@ fn server_datagram_sent_and_max_age_expiry_report_server_event() {
         .unwrap();
     let t1 = t0 + Duration::from_millis(200);
     wt_session
-        .set_datagram_max_age(Duration::from_millis(100), t1)
+        .set_datagram_max_age(Some(Duration::from_millis(100)), t1)
         .unwrap();
     // `set_datagram_max_age` only pushes the expiry onto the per-connection
     // handler's event queue; a `process_*` call is what drains that into the
@@ -442,7 +500,7 @@ fn server_datagram_expires_on_an_otherwise_idle_connection() {
     let session_id = wt_session.stream_id();
 
     wt_session
-        .set_datagram_max_age(Duration::from_millis(30), now())
+        .set_datagram_max_age(Some(Duration::from_millis(30)), now())
         .unwrap();
 
     // Enough filler datagrams to exhaust the transport's 10-slot queue on
@@ -489,7 +547,7 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     let session_id = wt_session.stream_id();
 
     wt_session
-        .set_datagram_max_age(Duration::from_secs(10), now())
+        .set_datagram_max_age(Some(Duration::from_secs(10)), now())
         .unwrap();
 
     // Enough filler datagrams to exhaust the transport's 10-slot queue on
@@ -509,7 +567,7 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
     // Shorten the deadline well inside the original one; the datagram is
     // not yet stale at `t0`, so nothing expires synchronously here.
     wt_session
-        .set_datagram_max_age(Duration::from_millis(30), t0)
+        .set_datagram_max_age(Some(Duration::from_millis(30)), t0)
         .unwrap();
 
     // Otherwise idle: only the datagram-expiry check in `should_be_processed`
@@ -526,4 +584,35 @@ fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() 
         )
     };
     assert!(wt.server.events().any(expired_event));
+}
+
+/// `drain()` reports every expired datagram, but that's only exercised via an
+/// explicit `set_datagram_max_age` call elsewhere. A datagram must also expire
+/// as a side effect of an ordinary `process_output` drain, using the default
+/// max-age, with no explicit call setting it.
+#[test]
+fn datagram_expires_during_a_normal_process_output_drain() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(13u64), t0, 0, 0)
+        .unwrap();
+
+    // Comfortably past the default max-age, so this expires on the very
+    // first drain rather than getting sent.
+    wt.client.process_output(t0 + Duration::from_secs(1));
+
+    let wt_expired_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(13),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_expired_event));
 }

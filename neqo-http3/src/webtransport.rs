@@ -23,7 +23,7 @@ use crate::{
     Http3StreamType, Res, SendGroupId, SessionAcceptAction,
     connection::Http3Connection,
     connection_server::Http3ServerHandler,
-    features::extended_connect,
+    features::{extended_connect, extended_connect::datagram_queue::default_max_age},
     request_target::RequestTarget,
     server_events::{Http3ServerEvents, StreamHandler},
 };
@@ -83,7 +83,7 @@ pub trait ClientSession {
     fn webtransport_set_datagram_max_age(
         &mut self,
         session_id: StreamId,
-        max_age: Duration,
+        max_age: Option<Duration>,
         now: Instant,
     ) -> Res<()>;
 
@@ -275,11 +275,12 @@ impl ClientSession for Http3Client {
     fn webtransport_set_datagram_max_age(
         &mut self,
         session_id: StreamId,
-        max_age: Duration,
+        max_age: Option<Duration>,
         now: Instant,
     ) -> Res<()> {
-        self.handler()
-            .webtransport_set_datagram_max_age(session_id, max_age, now)
+        let (conn, handler) = self.connection_and_handler();
+        let default = default_max_age(conn.stats().min_rtt);
+        handler.webtransport_set_datagram_max_age(session_id, max_age, now, default)
     }
 
     fn webtransport_set_sendorder(
@@ -663,8 +664,9 @@ pub(crate) trait ServerHandler {
     /// Returns error if the session ID is invalid or is not a WebTransport session.
     fn webtransport_set_datagram_max_age(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
-        max_age: Duration,
+        max_age: Option<Duration>,
         now: Instant,
     ) -> Res<()>;
 }
@@ -747,13 +749,15 @@ impl ServerHandler for Http3ServerHandler {
 
     fn webtransport_set_datagram_max_age(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
-        max_age: Duration,
+        max_age: Option<Duration>,
         now: Instant,
     ) -> Res<()> {
         self.mark_needs_processing();
+        let default = default_max_age(conn.stats().min_rtt);
         self.base_handler_mut()
-            .webtransport_set_datagram_max_age(session_id, max_age, now)
+            .webtransport_set_datagram_max_age(session_id, max_age, now, default)
     }
 }
 
@@ -923,12 +927,14 @@ impl ServerSession {
     /// # Errors
     ///
     /// Returns error if the session is no longer active.
-    pub fn set_datagram_max_age(&self, max_age: Duration, now: Instant) -> Res<()> {
+    pub fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
-        self.stream_handler
-            .handler
-            .borrow_mut()
-            .webtransport_set_datagram_max_age(session_id, max_age, now)
+        self.stream_handler.handler.borrow_mut().webtransport_set_datagram_max_age(
+            &mut self.stream_handler.conn.borrow_mut(),
+            session_id,
+            max_age,
+            now,
+        )
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.

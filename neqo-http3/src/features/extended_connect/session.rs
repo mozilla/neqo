@@ -21,7 +21,9 @@ use crate::{
     SendStream, Stream,
     features::extended_connect::{
         ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
-        datagram_queue::{DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome},
+        datagram_queue::{
+            DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome, default_max_age,
+        },
         stats::SessionStats,
     },
     frames::HFrame,
@@ -481,7 +483,9 @@ impl Session {
         // Expire before enqueueing: otherwise a queue full of stale datagrams
         // evicts one on `enqueue` below and reports `Overflowed`/`Dropped`
         // for it, when it should have been reported `Expired`.
-        let expired = self.datagram_queue.expire(now);
+        let expired = self
+            .datagram_queue
+            .expire(now, default_max_age(conn.stats().min_rtt));
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
@@ -539,7 +543,7 @@ impl Session {
 
     /// Drain the per-session datagram queue and hand datagrams to the QUIC layer.
     ///
-    /// Only as many datagrams as the QUIC layer can currently accept are handed
+    /// Only as many datagrams as the QUIC layer can currently hold are handed
     /// over; the rest stay queued for a later call, so that a burst is paced
     /// against what the connection can send instead of overflowing the QUIC
     /// layer's fixed-size queue. See [`DatagramQueue::drain`].
@@ -558,9 +562,11 @@ impl Session {
             return;
         }
 
-        let (expired, to_send) = self
-            .datagram_queue
-            .drain(now, conn.remaining_datagram_queue_capacity());
+        let (expired, to_send) = self.datagram_queue.drain(
+            now,
+            conn.remaining_datagram_queue_capacity(),
+            default_max_age(conn.stats().min_rtt),
+        );
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
@@ -601,16 +607,24 @@ impl Session {
     /// The instant at which this session's datagram queue next needs
     /// [`Self::process_datagram_queue`] called to expire a stale datagram.
     /// See [`DatagramQueue::next_expiry`].
-    pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
-        self.datagram_queue.next_expiry()
+    pub(crate) fn next_datagram_expiry(&self, conn: &Connection) -> Option<Instant> {
+        self.datagram_queue
+            .next_expiry(default_max_age(conn.stats().min_rtt))
     }
 
     pub(crate) fn set_datagram_high_water_mark(&mut self, mark: Option<usize>) {
         self.datagram_queue.set_high_water_mark(mark);
     }
 
-    pub(crate) fn set_datagram_max_age(&mut self, max_age: Duration, now: Instant) {
-        let expired = self.datagram_queue.set_max_age(max_age, now);
+    pub(crate) fn set_datagram_max_age(
+        &mut self,
+        max_age: Option<Duration>,
+        now: Instant,
+        default_max_age: Duration,
+    ) {
+        let expired = self
+            .datagram_queue
+            .set_max_age(max_age, now, default_max_age);
         for outcome in self.record_expired(expired) {
             self.report_datagram_outcome(outcome);
         }
