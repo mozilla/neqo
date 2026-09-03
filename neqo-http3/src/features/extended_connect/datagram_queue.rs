@@ -35,6 +35,9 @@ pub enum DatagramOutcome {
 }
 
 impl DatagramOutcome {
+    /// Unused within this workspace today; kept as public API for FFI
+    /// consumers (e.g. Gecko) that receive a `DatagramOutcome` without
+    /// already knowing which id it carries.
     #[must_use]
     pub const fn id(&self) -> DatagramId {
         match *self {
@@ -93,6 +96,13 @@ impl QueuedDatagram {
 /// to ensure datagrams are actually transmitted. In Gecko, this happens via
 /// `StreamHasDataToWrite()` -> `ForceSend()`, which asynchronously dispatches
 /// `SendData()` -> `ProcessOutput()` on the next event loop cycle.
+///
+/// This is the app-to-transport handover point, not the whole path: the
+/// WebTransport `outgoingMaxAge` guarantee only governs how long a datagram
+/// waits *here*. Once [`Self::drain`] hands it to
+/// [`Connection::send_datagram`][neqo_transport::Connection::send_datagram],
+/// it can still sit in the QUIC layer's own fixed-size queue past its
+/// deadline; nothing in this design covers that part of the spec.
 #[derive(Debug)]
 pub struct DatagramQueue {
     queue: VecDeque<QueuedDatagram>,

@@ -598,6 +598,7 @@ impl Session {
     pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
         self.datagram_queue.next_expiry()
     }
+
     pub(crate) fn set_datagram_high_water_mark(&mut self, mark: Option<usize>) {
         self.datagram_queue.set_high_water_mark(mark);
     }

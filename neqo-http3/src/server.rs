@@ -147,11 +147,11 @@ impl Http3Server {
         qtrace!("[{self}] Process");
         let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
-        // If we do not that a dgram already try again after process_http3.
         if let OutputBatch::DatagramBatch(d) = out {
             qtrace!("[{self}] Send packet: {d:?}");
             return OutputBatch::DatagramBatch(d);
         }
+        // No datagram yet: try again now that process_http3 has run.
         let out = self
             .server
             .process_multiple(Option::<Datagram>::None, now, max_datagrams);
