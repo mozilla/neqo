@@ -72,8 +72,14 @@ impl ValidationState {
 /// [`Ecn::NotEct`], the [`Ecn::NotEct`] value will always be 0.
 ///
 /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Default, Serialize)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
 pub struct Count(EnumMap<Ecn, u64>);
+
+impl Serialize for Count {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::stats::serialize_counts(self.0, serializer)
+    }
+}
 
 impl Deref for Count {
     type Target = EnumMap<Ecn, u64>;
@@ -133,7 +139,7 @@ pub struct ValidationCount(EnumMap<ValidationOutcome, u64>);
 
 impl Serialize for ValidationCount {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        crate::stats::serialize_sparse(self.0, |count| *count == 0, serializer)
+        crate::stats::serialize_counts(self.0, serializer)
     }
 }
 

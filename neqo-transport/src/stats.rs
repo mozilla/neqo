@@ -250,6 +250,15 @@ pub(crate) fn serialize_sparse<S: Serializer, K: Debug, V: Serialize>(
     map.end()
 }
 
+/// [`serialize_sparse`] for counters, i.e. leaving out the zeroes.
+#[expect(clippy::redundant_pub_crate, reason = "also used by crate::ecn")]
+pub(crate) fn serialize_counts<S: Serializer, K: Debug, V: Serialize + Default + PartialEq>(
+    entries: impl IntoIterator<Item = (K, V)>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serialize_sparse(entries, |count| *count == V::default(), serializer)
+}
+
 /// ECN counts by QUIC [`packet::Type`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
@@ -312,7 +321,7 @@ pub struct DscpCount(EnumMap<Dscp, usize>);
 
 impl Serialize for DscpCount {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_sparse(self.0, |count| *count == 0, serializer)
+        serialize_counts(self.0, serializer)
     }
 }
 

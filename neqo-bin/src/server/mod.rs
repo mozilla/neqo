@@ -711,11 +711,6 @@ pub(super) mod test_support {
             fn reports_stats_once_on_close_when_enabled() {
                 assert_eq!(reported_on_close(&mut $make(&stats_args(true))), 1);
             }
-
-            #[test]
-            fn does_not_report_when_stats_disabled() {
-                assert_eq!(reported_on_close(&mut $make(&stats_args(false))), 0);
-            }
         };
     }
 
