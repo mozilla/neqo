@@ -11,6 +11,10 @@ concurrency:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash # The implicit "bash -e" lacks pipefail, which masks failures.
+
 env:
   SHARDS: 64
   RUST_BACKTRACE: 1
@@ -49,10 +53,15 @@ jobs:
     name: Find mutants (shard ${{ matrix.shard }}/${{ needs.baseline.outputs.max_shard }})
     needs: baseline
     runs-on: ubuntu-24.04
+    # An aborted runner fails the job outright, skipping even always() steps;
+    # if only the child is SIGTERM'd we see 143 below. actions/runner-images#6680
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
         shard: ${{ fromJSON(needs.baseline.outputs.shards) }}
+    env:
+      SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -65,17 +74,21 @@ jobs:
 
       - name: Find mutants
         env:
-          SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           TIMEOUT: ${{ needs.baseline.outputs.timeout }}
         run: |
           # shellcheck disable=SC2086
-          # Exit codes: 0=success, 1=build/test failure (fail workflow),
-          # 2=missed, 3=timeout, 4=unviable (suppress, report in summary).
+          # Exit codes 2 (uncaught mutants) and 3 (timeouts) are findings, not
+          # errors: https://mutants.rs/exit-codes.html. On 143 (SIGTERM from an
+          # aborted runner) drop the partial output.
           (cargo mutants --shard "$SHARD" --sharding round-robin --baseline=skip --timeout "$TIMEOUT" $MUTANTS_ARGS 2>&1 \
-            || { ec=$?; [ $ec -ge 2 ] && [ $ec -le 4 ] && exit 0; exit $ec; }) | tee results.txt
-          # Some sharded runs get killed by GitHub with error code 143.
-          # This seems to be a GitHub-internal protection feature that we can't control:
-          # https://github.com/actions/runner-images/issues/6680
+            || { ec=$?; case $ec in 2|3) exit 0 ;; 143) rm -rf mutants.out; exit 0 ;; esac; exit $ec; }) | tee results.txt
+
+      # continue-on-error hides step failures, so carry them to the results job.
+      - name: Record shard failure
+        if: failure()
+        run: |
+          mkdir -p mutants.out
+          echo "shard $SHARD failed, see the job log" > mutants.out/failed.txt
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
@@ -103,7 +116,7 @@ jobs:
             shard="${dir##*-}"
             mv "$dir" "mutants.out/shard-$shard"
           done
-          for category in caught missed timeout unviable; do
+          for category in caught missed timeout unviable failed; do
             cat mutants.out/shard-*/"$category.txt" 2>/dev/null | sort -u > "mutants.out/$category.txt" || true
             rm -f mutants.out/shard-*/"$category.txt"
           done
@@ -119,8 +132,15 @@ jobs:
         env:
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
         run: |
+          # Aborted shards upload no artifact; failed ones upload only failed.txt.
+          reported=$(find mutants.out -maxdepth 1 -type d -name "shard-*" | wc -l | tr -d ' ')
+          failed_shards=$(wc -l < mutants.out/failed.txt | tr -d ' ')
+          done_shards=$((reported - failed_shards))
+          [ "$done_shards" -eq "$SHARDS" ] || echo "::warning::only $done_shards/$SHARDS shards reported results"
           {
             echo "## Mutation Testing Results"
+            echo "Shards completed: $done_shards/$SHARDS ($failed_shards failed)"
+            echo ""
             echo "| Category | Count |"
             echo "|----------|------:|"
             for category in caught missed timeout unviable; do
@@ -133,10 +153,16 @@ jobs:
                 echo "### Files with most $category mutants"
                 echo '```'
                 # Group by file, count occurrences, show top 10.
-                cut -d: -f1 "mutants.out/$category.txt" | sort | uniq -c | sort -rn | head -10
+                cut -d: -f1 "mutants.out/$category.txt" | sort | uniq -c | sort -rn | sed -n '1,10p'
                 echo '```'
               fi
             done
             echo ""
             echo "[Download full results]($ARTIFACT_URL)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail on shard errors
+        run: |
+          [ -s mutants.out/failed.txt ] || exit 0
+          cat mutants.out/failed.txt
+          exit 1
