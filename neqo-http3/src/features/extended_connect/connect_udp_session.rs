@@ -133,10 +133,6 @@ impl Protocol for Session {
         self.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
-        if conn.stream_avail_send_space(self.session_id)? < dgram_data.len() {
-            qdebug!("Not enough space to send datagram capsule, dropping it.");
-            return Ok(());
-        }
         // TODO: Make Capsule abstract over either an owned (Bytes) or borrowed (&[u8]) type
         // to avoid this allocation.
         let capsule = Capsule::Datagram {
@@ -144,6 +140,14 @@ impl Protocol for Session {
         };
         let mut enc = Encoder::default();
         capsule.encode(&mut enc);
+
+        // Datagrams are best-effort, so drop rather than buffer one that doesn't fit.
+        // The check has to cover the encoded capsule, not just its payload: the capsule
+        // type and length varints are on the wire too.
+        if conn.stream_avail_send_space(self.session_id)? < enc.len() {
+            qdebug!("Not enough space to send datagram capsule, dropping it.");
+            return Ok(());
+        }
         control_stream_send.send_data_atomic(conn, enc.as_ref(), now)?;
         qtrace!("[{self}] sent datagram via HTTP DATAGRAM Capsule");
         Ok(())
