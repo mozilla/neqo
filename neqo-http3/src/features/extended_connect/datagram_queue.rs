@@ -15,13 +15,17 @@ use neqo_transport::DEFAULT_INITIAL_RTT;
 
 pub const DEFAULT_HARD_LIMIT: usize = 1000;
 
-/// Multiplier applied to the path's minimum RTT by [`default_max_age`].
-const DEFAULT_MAX_AGE_RTT_MULTIPLIER: u32 = 2;
+/// Numerator/denominator of the multiplier applied to the path's minimum RTT
+/// by [`default_max_age`]. Kept as an integer ratio rather than a float so the
+/// `Duration` arithmetic stays exact.
+const DEFAULT_MAX_AGE_RTT_MULTIPLIER_NUM: u32 = 5;
+const DEFAULT_MAX_AGE_RTT_MULTIPLIER_DEN: u32 = 4;
 
-/// Lower bound for [`default_max_age`], so that a very low RTT (loopback, LAN)
-/// does not expire datagrams faster than the send path can plausibly drain
-/// them.
-const DEFAULT_MAX_AGE_FLOOR: Duration = Duration::from_millis(6);
+/// Lower bound for [`default_max_age`]. Rooted in app performance targets
+/// rather than RTT: roughly one frame at 60fps, the pace a responsive site is
+/// already expected to service input at, so a low-RTT path (loopback, LAN)
+/// does not expire datagrams faster than that.
+const DEFAULT_MAX_AGE_FLOOR: Duration = Duration::from_millis(20);
 
 /// The "[implementation-defined] value" that [`sendDatagrams`] step 4
 /// substitutes when the application leaves `outgoingMaxAge` unset.
@@ -32,12 +36,13 @@ const DEFAULT_MAX_AGE_FLOOR: Duration = Duration::from_millis(6);
 /// adds delay to everything behind it. Datagrams are best-effort, so the queue
 /// sheds it rather than growing without bound.
 ///
-/// Scaling with the path RTT instead of using a fixed constant keeps the bound
-/// meaningful across very different links. Chromium does the same but tighter:
-/// QUICHE's `QuicDatagramQueue::GetMaxTimeInQueue()` uses
-/// `max(1.25 * min_rtt, 4ms)`. The values here are deliberately more generous,
-/// so that a burst which inherently spans several round trips - a video key
-/// frame, say - is not shed before it has had a chance to go out.
+/// The 1.25x multiplier matches Chromium's QUICHE
+/// `QuicDatagramQueue::GetMaxTimeInQueue()`. The floor deliberately does not
+/// match Chromium's 4ms: a fixed few milliseconds is too tight for a
+/// intercontinental or satellite path to plausibly drain a burst - a video key
+/// frame, say - before it is shed, so the floor instead comes from how fast a
+/// site is expected to service input (one frame at 60fps), and RTT scaling
+/// takes over above that on higher-latency paths.
 ///
 /// [implementation-defined]: https://infra.spec.whatwg.org/#implementation-defined
 /// [`sendDatagrams`]: https://w3c.github.io/webtransport/#senddatagrams
@@ -52,7 +57,10 @@ pub fn default_max_age(min_rtt: Duration) -> Duration {
     } else {
         min_rtt
     };
-    max(rtt * DEFAULT_MAX_AGE_RTT_MULTIPLIER, DEFAULT_MAX_AGE_FLOOR)
+    max(
+        rtt * DEFAULT_MAX_AGE_RTT_MULTIPLIER_NUM / DEFAULT_MAX_AGE_RTT_MULTIPLIER_DEN,
+        DEFAULT_MAX_AGE_FLOOR,
+    )
 }
 
 /// Caller-supplied identifier used to report the fate of a tracked datagram.
@@ -931,19 +939,23 @@ mod tests {
         // collapse onto the floor.
         assert_eq!(
             default_max_age(Duration::ZERO),
-            DEFAULT_INITIAL_RTT * DEFAULT_MAX_AGE_RTT_MULTIPLIER
+            DEFAULT_INITIAL_RTT * DEFAULT_MAX_AGE_RTT_MULTIPLIER_NUM
+                / DEFAULT_MAX_AGE_RTT_MULTIPLIER_DEN
         );
     }
 
     #[test]
     fn default_max_age_scales_with_rtt() {
+        // Above the floor: scales at 1.25x.
         assert_eq!(
             default_max_age(Duration::from_millis(50)),
-            Duration::from_millis(100)
+            Duration::from_micros(62_500)
         );
+        // Below the floor: clamped to the 20ms floor rather than following RTT
+        // down.
         assert_eq!(
             default_max_age(Duration::from_millis(3)),
-            Duration::from_millis(6)
+            Duration::from_millis(20)
         );
     }
 
