@@ -1687,6 +1687,11 @@ impl Http3Connection {
     /// Also refreshes the cache [`Self::next_datagram_expiry`] reads, using
     /// the same `recv_streams` walk this already has to do rather than
     /// paying for a second one.
+    ///
+    /// Invariant callers must preserve: the cache is only as fresh as the
+    /// last call to this function, so a caller that clamps a callback delay
+    /// against [`Self::next_datagram_expiry`] must call this *first*, in the
+    /// same processing round, or it clamps against last round's deadline.
     pub(crate) fn process_all_datagram_queues(&mut self, conn: &mut Connection, now: Instant) {
         self.datagram_next_expiry = self
             .recv_streams

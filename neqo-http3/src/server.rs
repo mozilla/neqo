@@ -43,8 +43,9 @@ pub struct Http3Server {
     events: Http3ServerEvents,
     /// The earliest instant at which any handler's outgoing datagram queue
     /// needs expiring, across every connection. Refreshed by
-    /// [`Self::process_http3`]'s single pass over `http3_handlers`, so
-    /// [`Self::process_multiple`]'s callback clamp doesn't need its own.
+    /// [`Self::process_http3`] after it processes every active connection,
+    /// so [`Self::process_multiple`]'s callback clamp doesn't need its own
+    /// walk over `http3_handlers`.
     next_datagram_expiry: Option<Instant>,
 }
 
@@ -158,9 +159,7 @@ impl Http3Server {
         // http3-layer datagram queue's max-age deadline; clamp it the same
         // way `Http3Client::process_multiple_output` does, so an
         // otherwise-idle connection still wakes up in time to expire a
-        // stale queued datagram. `next_datagram_expiry` was just refreshed
-        // by `process_http3` above, so this needs no `http3_handlers` walk
-        // of its own.
+        // stale queued datagram.
         match out {
             OutputBatch::Callback(delay) => OutputBatch::Callback(
                 self.next_datagram_expiry
@@ -180,17 +179,16 @@ impl Http3Server {
             reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."
         )]
         let mut active_conns = self.server.active_connections();
-        self.next_datagram_expiry = self
-            .http3_handlers
-            .iter()
-            .filter_map(|(conn, handler)| {
-                let mut handler = handler.borrow_mut();
-                if handler.should_be_processed(now) {
-                    active_conns.insert(conn.clone());
-                }
-                handler.next_datagram_expiry()
-            })
-            .min();
+        #[expect(
+            clippy::iter_over_hash_type,
+            reason = "OK to loop over handlers in an undefined order: this only decides \
+                      set membership, which doesn't depend on iteration order."
+        )]
+        for (conn, handler) in &self.http3_handlers {
+            if handler.borrow_mut().should_be_processed(now) {
+                active_conns.insert(conn.clone());
+            }
+        }
 
         #[expect(
             clippy::iter_over_hash_type,
@@ -199,6 +197,17 @@ impl Http3Server {
         for conn in active_conns {
             self.process_events(&conn, now);
         }
+
+        // Recompute *after* processing: `process_events` is what drains each
+        // handler's datagram queue and refreshes its cached expiry, so a
+        // pre-loop read (as `should_be_processed` above needs, to decide
+        // which connections to process) would still be looking at last
+        // round's deadline.
+        self.next_datagram_expiry = self
+            .http3_handlers
+            .values()
+            .filter_map(|handler| handler.borrow().next_datagram_expiry())
+            .min();
     }
 
     #[expect(
