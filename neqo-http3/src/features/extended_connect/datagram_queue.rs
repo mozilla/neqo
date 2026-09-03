@@ -127,10 +127,12 @@ impl DatagramQueue {
     pub fn set_max_age(&mut self, max_age: Duration, now: Instant) -> Vec<Option<DatagramId>> {
         qtrace!("Setting max age to {max_age:?}");
         self.max_age = max_age;
-        self.expire_old_datagrams(now)
+        self.expire(now)
     }
 
-    fn expire_old_datagrams(&mut self, now: Instant) -> Vec<Option<DatagramId>> {
+    /// Remove and return every datagram older than `max_age`, oldest first.
+    /// Returns one entry per expired datagram, `Some(id)` for tracked ones.
+    pub fn expire(&mut self, now: Instant) -> Vec<Option<DatagramId>> {
         let mut expired = Vec::new();
         while self
             .queue
@@ -218,7 +220,7 @@ impl DatagramQueue {
     ) -> (Vec<Option<DatagramId>>, Vec<QueuedDatagram>) {
         // Expiry is not a send, so it must not be gated on `budget`: otherwise
         // stale datagrams pile up while the QUIC layer's queue is full.
-        let expired = self.expire_old_datagrams(now);
+        let expired = self.expire(now);
         let count = budget.min(self.queue.len());
         let to_send = self.queue.drain(..count).collect();
         (expired, to_send)
@@ -379,7 +381,7 @@ mod tests {
         // Advance time by 150 ms without sleeping.
         let t1 = t0 + Duration::from_millis(150);
 
-        let expired = queue.expire_old_datagrams(t1);
+        let expired = queue.expire(t1);
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0], Some(1));
         assert!(queue.is_empty());
@@ -394,7 +396,7 @@ mod tests {
         queue.enqueue(vec![1], None, t0);
 
         let t1 = t0 + Duration::from_millis(150);
-        let expired = queue.expire_old_datagrams(t1);
+        let expired = queue.expire(t1);
         assert_eq!(expired, vec![None]);
         assert!(queue.is_empty());
     }

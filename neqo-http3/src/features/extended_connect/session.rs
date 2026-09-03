@@ -476,6 +476,14 @@ impl Session {
             DatagramTracking::None => None,
         };
 
+        // Expire before enqueueing: otherwise a queue full of stale datagrams
+        // evicts one on `enqueue` below and reports `Overflowed`/`Dropped`
+        // for it, when it should have been reported `Expired`.
+        let expired = self.datagram_queue.expire(now);
+        for outcome in self.record_expired(expired) {
+            self.report_datagram_outcome(outcome);
+        }
+
         let (outcome, dropped) =
             self.datagram_queue
                 .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);

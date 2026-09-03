@@ -148,6 +148,61 @@ fn datagram_hard_limit_overflow_reports_outcome() {
     );
 }
 
+/// A queue full of datagrams that are all past `max_age` must expire the
+/// oldest one on the next `send_datagram` call, not evict it as a hard-limit
+/// `Overflowed`/`Dropped`: age, not depth, is why it's leaving the queue.
+#[test]
+fn datagram_hard_limit_overflow_expires_stale_datagrams_first() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(50), t0)
+        .unwrap();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for id in 0..limit {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), t0)
+            .unwrap();
+        assert_eq!(outcome, DatagramQueueOutcome::Ok);
+    }
+
+    // Every queued datagram is now past max_age, so this must expire
+    // datagram 0 rather than hard-limit-evicting it.
+    let t1 = t0 + Duration::from_millis(100);
+    let outcome = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), t1)
+        .unwrap();
+    assert_eq!(outcome, DatagramQueueOutcome::Ok);
+
+    let events: Vec<_> = wt.client.events().collect();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(0),
+            }) if *sid == session_id
+        )),
+        "the stale datagram must be reported as Expired"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                outcome: DatagramOutcome::Dropped(0),
+                ..
+            })
+        )),
+        "the stale datagram must not also be reported as Dropped"
+    );
+}
+
 /// `datagrams_dropped_outgoing` must count every eviction, tracked or not:
 /// unlike the `DatagramOutcome::Dropped` event, which only fires for tracked
 /// datagrams, this is the only signal an untracked drop leaves behind.
