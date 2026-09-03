@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{
@@ -17,7 +17,8 @@ use neqo_common::{
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramTracking, OutputBatch, State, StreamId, StreamType,
+    ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -300,6 +301,15 @@ pub struct Http3Connection {
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
     send_group_generator: SendGroupGenerator,
+    /// Cached result of the last [`Self::process_all_datagram_queues`] call,
+    /// read by [`Self::next_datagram_expiry`] instead of re-walking
+    /// `recv_streams`.
+    datagram_next_expiry: Option<Instant>,
+    /// The stream id of every extended-CONNECT session's control stream,
+    /// kept in sync with `recv_streams` on session create/remove so
+    /// [`Self::process_all_datagram_queues`] doesn't need to walk every
+    /// stream on the connection to find the handful that are sessions.
+    extended_connect_session_ids: HashSet<StreamId>,
 }
 
 impl Display for Http3Connection {
@@ -338,6 +348,8 @@ impl Http3Connection {
             recv_streams: HashMap::default(),
             send_group_generator: SendGroupGenerator::default(),
             role,
+            datagram_next_expiry: None,
+            extended_connect_session_ids: HashSet::default(),
         }
     }
 
@@ -657,6 +669,7 @@ impl Http3Connection {
             // TODO: investigate whether this code can automatically retry failed transactions.
             self.send_streams.clear();
             self.recv_streams.clear();
+            self.extended_connect_session_ids.clear();
             Ok(())
         } else {
             debug_assert!(false, "Zero rtt rejected in the wrong state");
@@ -782,6 +795,7 @@ impl Http3Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
+        self.extended_connect_session_ids.clear();
     }
 
     /// This function will not handle the output of the function completely, but only
@@ -1220,6 +1234,7 @@ impl Http3Connection {
             Box::new(Rc::clone(&extended_conn)),
             Box::new(Rc::clone(&extended_conn)),
         );
+        self.extended_connect_session_ids.insert(id);
 
         let final_headers = Self::create_request_headers(&RequestDescription {
             method: "CONNECT",
@@ -1330,6 +1345,7 @@ impl Http3Connection {
                 Box::new(Rc::clone(&extended_conn)),
                 Box::new(extended_conn),
             );
+            self.extended_connect_session_ids.insert(stream_id);
             self.streams_with_pending_data.insert(stream_id);
         } else {
             self.cancel_fetch(stream_id, Error::HttpRequestRejected.code(), conn)?;
@@ -1637,10 +1653,85 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .send_datagram(conn, buf, id, now)
+    }
+
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub fn webtransport_set_datagram_high_water_mark(
+        &self,
+        session_id: StreamId,
+        mark: Option<usize>,
+    ) -> Res<()> {
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .set_datagram_high_water_mark(mark);
+        Ok(())
+    }
+
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub fn webtransport_set_datagram_max_age(
+        &self,
+        session_id: StreamId,
+        max_age: Duration,
+        now: Instant,
+    ) -> Res<()> {
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .set_datagram_max_age(max_age, now);
+        Ok(())
+    }
+
+    /// Drain every session's datagram queue into the QUIC layer.
+    ///
+    /// Applies to every extended-CONNECT protocol, not just `WebTransport`: connect-udp
+    /// sessions queue their datagrams the same way. Each session reports its own
+    /// outcomes through its own `events`/`connect_type`, so there is no per-outcome
+    /// callback here for a caller to mis-tag by protocol.
+    ///
+    /// Also refreshes the cache [`Self::next_datagram_expiry`] reads, using
+    /// [`Self::extended_connect_session_ids`] instead of walking all of
+    /// `recv_streams`: most streams on a connection aren't extended-CONNECT
+    /// sessions at all, and the per-feature check below only helps when the
+    /// feature is off entirely.
+    ///
+    /// Invariant callers must preserve: the cache is only as fresh as the
+    /// last call to this function, so a caller that clamps a callback delay
+    /// against [`Self::next_datagram_expiry`] must call this *first*, in the
+    /// same processing round, or it clamps against last round's deadline.
+    pub(crate) fn process_all_datagram_queues(&mut self, conn: &mut Connection, now: Instant) {
+        if !self.webtransport.enabled() && !self.connect_udp.enabled() {
+            self.datagram_next_expiry = None;
+            return;
+        }
+        self.datagram_next_expiry = self
+            .extended_connect_session_ids
+            .iter()
+            .filter_map(|id| self.recv_streams.get(id))
+            .filter_map(|s| s.extended_connect_session())
+            .filter_map(|session| {
+                session.borrow_mut().process_datagram_queue(conn, now);
+                session.borrow().next_datagram_expiry()
+            })
+            .min();
+    }
+
+    /// The earliest instant at which any session's outgoing datagram queue
+    /// needs [`Self::process_all_datagram_queues`] called again to expire a
+    /// stale datagram, even if nothing else - no packets to send or receive,
+    /// no other timer - would otherwise trigger it. `None` if no session has
+    /// a datagram queued with an expiry pending.
+    ///
+    /// Reads the cache [`Self::process_all_datagram_queues`] refreshes,
+    /// instead of walking `recv_streams` a second time.
+    pub(crate) const fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.datagram_next_expiry
     }
 
     /// Frames whose handling is specific to the client and server (`Goaway`,
@@ -1862,6 +1953,7 @@ impl Http3Connection {
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
         {
+            self.extended_connect_session_ids.remove(&stream_id);
             self.send_streams.remove(&stream_id)?;
             if let Some(wt) = s.extended_connect_session() {
                 self.remove_extended_connect(&wt, conn);
@@ -1878,12 +1970,15 @@ impl Http3Connection {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
-            && let Some(wt) = self
+        {
+            self.extended_connect_session_ids.remove(&stream_id);
+            if let Some(wt) = self
                 .recv_streams
                 .remove(&stream_id)?
                 .extended_connect_session()
-        {
-            self.remove_extended_connect(&wt, conn);
+            {
+                self.remove_extended_connect(&wt, conn);
+            }
         }
         stream
     }
@@ -1938,6 +2033,24 @@ impl Http3Connection {
     #[must_use]
     pub fn recv_streams_mut(&mut self) -> &mut HashMap<StreamId, Box<dyn RecvStream>> {
         &mut self.recv_streams
+    }
+}
+
+/// Clamp an [`OutputBatch::Callback`]'s delay to `expiry`, if that's sooner:
+/// the transport layer's callback delay has no notion of an http3-layer
+/// datagram queue's max-age deadline, so without this an otherwise-idle
+/// connection with a queued datagram would wait on whatever unrelated timer
+/// happens to fire next instead of waking up in time to expire it. A no-op
+/// on every other [`OutputBatch`] variant, and on an `expiry` that's already
+/// passed or absent.
+pub fn clamp_to_expiry(out: OutputBatch, expiry: Option<Instant>, now: Instant) -> OutputBatch {
+    match out {
+        OutputBatch::Callback(delay) => OutputBatch::Callback(
+            expiry
+                .filter(|expiry| *expiry > now)
+                .map_or(delay, |expiry| delay.min(expiry - now)),
+        ),
+        out => out,
     }
 }
 

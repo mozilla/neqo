@@ -4049,6 +4049,16 @@ impl Connection {
             .is_some_and(|tp| tp.get_empty(ResetStreamAt))
     }
 
+    /// How many more datagrams can be passed to [`Self::send_datagram`] before
+    /// it starts dropping datagrams that are already queued. A caller holding
+    /// its own queue should use this to hand over only what fits, so that
+    /// datagrams it cannot pass on yet stay under its own eviction policy
+    /// rather than being head-dropped here.
+    #[must_use]
+    pub fn remaining_datagram_queue_capacity(&self) -> usize {
+        self.quic_datagrams.remaining_capacity()
+    }
+
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.

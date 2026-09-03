@@ -4,15 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Encoder, to_u64};
-use neqo_transport::ConnectionParameters;
+use std::time::Duration;
+
+use neqo_common::{Encoder, event::Provider as _, to_u64};
+use neqo_transport::{ConnectionParameters, Output};
 use test_fixture::now;
 
 use crate::{
-    features::extended_connect::tests::webtransport::{
-        DATAGRAM_SIZE, WtTest, wt_default_parameters,
+    Http3ClientEvent, Http3ServerEvent, WebTransportEvent,
+    features::extended_connect::{
+        DatagramOutcome, DatagramQueueOutcome,
+        datagram_queue::DEFAULT_HARD_LIMIT,
+        tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
     },
-    webtransport::ServerSession,
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
 const DGRAM: &[u8] = &[0, 100];
@@ -27,7 +32,10 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
         Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(()));
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
     assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(()));
 
     wt.exchange_packets();
@@ -74,4 +82,440 @@ fn max_datagram_size_smaller_than_session_prefix() {
 
     assert_eq!(wt_session.max_datagram_size(), Ok(0));
     assert_eq!(wt.max_datagram_size(wt_session.stream_id()), Ok(0));
+}
+
+#[test]
+fn datagram_high_water_mark_reported_via_send_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .webtransport_set_datagram_high_water_mark(session_id, Some(2))
+        .unwrap();
+
+    let mut send = || {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, now())
+            .unwrap()
+    };
+
+    assert_eq!(send(), DatagramQueueOutcome::Ok);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+}
+
+#[test]
+fn datagram_hard_limit_overflow_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for id in 0..limit {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now())
+            .unwrap();
+        assert_eq!(outcome, DatagramQueueOutcome::Ok);
+    }
+
+    let outcome = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), now())
+        .unwrap();
+    assert_eq!(outcome, DatagramQueueOutcome::Overflowed);
+
+    // The synchronous `Overflowed` return value no longer carries the
+    // evicted id (to avoid reporting the same eviction twice): a consumer
+    // reconciling ids must get it from this event instead.
+    let dropped_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Dropped(0),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(dropped_event));
+    assert_eq!(
+        wt.client
+            .webtransport_session_stats(session_id)
+            .unwrap()
+            .datagrams_dropped_outgoing,
+        1
+    );
+}
+
+/// A queue full of datagrams that are all past `max_age` must expire the
+/// oldest one on the next `send_datagram` call, not evict it as a hard-limit
+/// `Overflowed`/`Dropped`: age, not depth, is why it's leaving the queue.
+#[test]
+fn datagram_hard_limit_overflow_expires_stale_datagrams_first() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(50), t0)
+        .unwrap();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for id in 0..limit {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), t0)
+            .unwrap();
+        assert_eq!(outcome, DatagramQueueOutcome::Ok);
+    }
+
+    // Every queued datagram is now past max_age, so this must expire
+    // datagram 0 rather than hard-limit-evicting it.
+    let t1 = t0 + Duration::from_millis(100);
+    let outcome = wt
+        .client
+        .webtransport_send_datagram(session_id, DGRAM, Some(limit), t1)
+        .unwrap();
+    assert_eq!(outcome, DatagramQueueOutcome::Ok);
+
+    let events: Vec<_> = wt.client.events().collect();
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(0),
+            }) if *sid == session_id
+        )),
+        "the stale datagram must be reported as Expired"
+    );
+    assert!(
+        !events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                outcome: DatagramOutcome::Dropped(0),
+                ..
+            })
+        )),
+        "the stale datagram must not also be reported as Dropped"
+    );
+}
+
+/// `datagrams_dropped_outgoing` must count every eviction, tracked or not:
+/// unlike the `DatagramOutcome::Dropped` event, which only fires for tracked
+/// datagrams, this is the only signal an untracked drop leaves behind.
+#[test]
+fn datagram_hard_limit_overflow_counts_untracked_drops() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let limit = u64::try_from(DEFAULT_HARD_LIMIT).unwrap();
+    for _ in 0..limit {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, now())
+            .unwrap();
+    }
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, None, now())
+        .unwrap();
+
+    assert_eq!(
+        wt.client
+            .webtransport_session_stats(session_id)
+            .unwrap()
+            .datagrams_dropped_outgoing,
+        1
+    );
+}
+
+#[test]
+fn datagram_sent_reports_client_event() {
+    // The `Sent` outcome is what tells the application its datagram actually
+    // reached the QUIC layer; it is only produced when the queue is drained
+    // during `process_output()`.
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(9u64), now())
+        .unwrap();
+    wt.exchange_packets();
+
+    let wt_sent_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Sent(9),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_sent_event));
+}
+
+#[test]
+fn datagram_max_age_expiry_reports_client_event() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let t0 = now();
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(7u64), t0)
+        .unwrap();
+
+    let t1 = t0 + Duration::from_millis(200);
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), t1)
+        .unwrap();
+
+    let wt_expired_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Expired(7),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(wt_expired_event));
+}
+
+/// A datagram still sitting in the queue when its session closes must be
+/// reported as `Dropped`, not silently discarded: a consumer tracking ids
+/// through the event stream would otherwise wait forever for an outcome
+/// that will never arrive.
+#[test]
+fn datagram_dropped_on_session_close_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Enqueued but not yet drained: no `process_output`/`exchange_packets`
+    // call happens between this and the cancellation below.
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now())
+        .unwrap();
+
+    wt.cancel_session_client(session_id);
+
+    let dropped_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Dropped(42),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(dropped_event));
+}
+
+/// A peer-initiated close (the `CLOSE_WEBTRANSPORT_SESSION` capsule, handled
+/// via `read_control_stream`) must drop and report queued datagrams exactly
+/// like the locally-initiated paths above: it is the more common close, and
+/// without this a consumer waits forever for an outcome that never arrives.
+#[test]
+fn datagram_dropped_on_peer_initiated_session_close_reports_outcome() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Produce the server's close capsule before the client enqueues its
+    // datagram, so the datagram is still queued (nothing has called
+    // `process_output` on the client yet) when the capsule is delivered.
+    // The pacer can defer the very first packet after the frame is queued,
+    // so retry with time advanced by the requested delay until it ships.
+    WtTest::session_close_frame_server(&wt_session, 0, "");
+    let mut when = now();
+    let close_dgram = loop {
+        match wt.server.process_output(when) {
+            Output::Datagram(d) => break Some(d),
+            Output::Callback(delay) => when += delay,
+            Output::None => break None,
+        }
+    };
+
+    wt.client
+        .webtransport_send_datagram(session_id, DGRAM, Some(42u64), now())
+        .unwrap();
+
+    // A single `process` call both reads the close capsule (driving the
+    // session out of `Active` via `read_control_stream`) and attempts to
+    // drain the datagram queue; before drop was wired into that path, the
+    // still-queued datagram was silently abandoned instead of reported.
+    drop(wt.client.process(close_dgram, now()));
+
+    let dropped_event = |e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Dropped(42),
+            }) if sid == session_id
+        )
+    };
+    assert!(wt.client.events().any(dropped_event));
+}
+
+/// `ServerSession::set_datagram_high_water_mark` is new public API introduced
+/// alongside its client-side counterpart (see
+/// `datagram_high_water_mark_reported_via_send_datagram`), but had no test of
+/// its own.
+#[test]
+fn server_datagram_high_water_mark_reported_via_send_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    wt_session.set_datagram_high_water_mark(Some(2)).unwrap();
+
+    let send = || wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    assert_eq!(send(), DatagramQueueOutcome::Ok);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+    assert_eq!(send(), DatagramQueueOutcome::AboveWatermark);
+}
+
+/// `ServerSession::set_datagram_max_age` and `ServerEvent::DatagramOutcome`
+/// are new public API introduced alongside their client-side counterparts,
+/// but had no test of their own.
+#[test]
+fn server_datagram_sent_and_max_age_expiry_report_server_event() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session.send_datagram(DGRAM, Some(1u64), now()).unwrap();
+    wt.exchange_packets();
+
+    let sent_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Sent(1),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(sent_event));
+
+    let t0 = now();
+    wt_session.send_datagram(DGRAM, Some(2u64), t0).unwrap();
+    let t1 = t0 + Duration::from_millis(200);
+    wt_session
+        .set_datagram_max_age(Duration::from_millis(100), t1)
+        .unwrap();
+    // `set_datagram_max_age` only pushes the expiry onto the per-connection
+    // handler's event queue; a `process_*` call is what drains that into the
+    // top-level `Http3Server`'s own event queue `wt.server.events()` reads.
+    wt.server.process_output(t1);
+
+    let expired_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Expired(2),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(expired_event));
+}
+
+/// A datagram queued on the server must still expire once its max-age
+/// passes, even when nothing else - no other data to send, no other
+/// events, no explicit `set_datagram_max_age` call - would otherwise cause
+/// that connection to be processed. Without `should_be_processed` checking
+/// the pending expiry itself, the connection is skipped indefinitely and
+/// the datagram is never expired.
+#[test]
+fn server_datagram_expires_on_an_otherwise_idle_connection() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session
+        .set_datagram_max_age(Duration::from_millis(30), now())
+        .unwrap();
+
+    // Enough filler datagrams to exhaust the transport's 10-slot queue on
+    // the first (needs-processing-triggered) drain below, so the tracked
+    // datagram is left stuck in the http3-level queue rather than sent
+    // immediately.
+    for _ in 0..15 {
+        wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    }
+    wt_session.send_datagram(DGRAM, Some(77u64), now()).unwrap();
+
+    let t0 = now();
+    wt.server.process_output(t0);
+
+    // Otherwise idle: nothing else happens between here and the deadline,
+    // so only `should_be_processed`'s datagram-expiry check can trigger
+    // the drain that actually expires it.
+    wt.server.process_output(t0 + Duration::from_millis(35));
+
+    let expired_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Expired(77),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(expired_event));
+}
+
+/// Shortening `max_age` on an idle server connection must take effect at the
+/// new deadline, not linger until the original one: `set_max_age` only
+/// refreshes `Http3Connection`'s cached `next_datagram_expiry` when the
+/// connection is actually processed, so the setter must mark the connection
+/// as needing processing or an otherwise idle connection is never revisited
+/// to pick up the shorter deadline.
+#[test]
+fn server_shortening_max_age_on_idle_connection_still_expires_on_new_deadline() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session
+        .set_datagram_max_age(Duration::from_secs(10), now())
+        .unwrap();
+
+    // Enough filler datagrams to exhaust the transport's 10-slot queue on
+    // the first (needs-processing-triggered) drain below, so the tracked
+    // datagram is left stuck in the http3-level queue - and so still
+    // subject to max-age - rather than handed to the QUIC layer immediately.
+    for _ in 0..15 {
+        wt_session.send_datagram(DGRAM, None, now()).unwrap();
+    }
+    wt_session.send_datagram(DGRAM, Some(77u64), now()).unwrap();
+
+    let t0 = now();
+    wt.server.process_output(t0);
+
+    // Shorten the deadline well inside the original one; the datagram is
+    // not yet stale at `t0`, so nothing expires synchronously here.
+    wt_session
+        .set_datagram_max_age(Duration::from_millis(30), t0)
+        .unwrap();
+
+    // Otherwise idle: only the datagram-expiry check in `should_be_processed`
+    // (fed by the refreshed cache) can trigger the drain that expires this.
+    wt.server.process_output(t0 + Duration::from_millis(35));
+
+    let expired_event = |e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::DatagramOutcome {
+                session,
+                outcome: DatagramOutcome::Expired(77),
+            }) if session.stream_id() == session_id
+        )
+    };
+    assert!(wt.server.events().any(expired_event));
 }

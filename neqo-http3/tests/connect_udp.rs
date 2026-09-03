@@ -6,12 +6,15 @@
 
 #![cfg(test)]
 
+use std::time::Duration;
+
 use http::Uri;
 use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _, qinfo};
 use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, Priority, SessionAcceptAction,
+    Http3ServerEvent, Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
+    features::extended_connect::{DEFAULT_HARD_LIMIT, DatagramOutcome, DatagramQueueOutcome},
     webtransport::ClientSession as _,
 };
 use neqo_transport::{ConnectionParameters, StreamType};
@@ -714,5 +717,91 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
     assert_eq!(
         client.webtransport_create_stream(session_id, StreamType::UniDi),
         Err(Error::InvalidStreamId)
+    );
+}
+
+/// `webtransport_set_datagram_high_water_mark` must not accept a connect-udp
+/// session id just because it happens to share the extended-CONNECT session
+/// machinery with WebTransport.
+#[test]
+fn connect_udp_session_rejected_by_webtransport_set_datagram_high_water_mark() {
+    fixture_init();
+    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_set_datagram_high_water_mark(session_id, Some(2)),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// `webtransport_set_datagram_max_age` must not accept a connect-udp session
+/// id just because it happens to share the extended-CONNECT session
+/// machinery with WebTransport.
+#[test]
+fn connect_udp_session_rejected_by_webtransport_set_datagram_max_age() {
+    fixture_init();
+    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    assert_eq!(
+        client.webtransport_set_datagram_max_age(session_id, Duration::from_millis(100), now()),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// A connect-udp session's datagram outcomes must arrive as
+/// `ConnectUdpEvent::DatagramOutcome`, not `WebTransportEvent::DatagramOutcome`:
+/// both protocols share the same outgoing-datagram-queue machinery, and a
+/// consumer that only knows about one of them must not be handed the other's
+/// event.
+#[test]
+fn connect_udp_datagram_outcome_uses_connect_udp_event() {
+    let (mut client, mut proxy, session_id, _proxy_session) = establish_new_session();
+
+    client
+        .connect_udp_send_datagram(session_id, PING, Some(1u64), now())
+        .unwrap();
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let events: Vec<_> = client.events().collect();
+
+    let sent_as_connect_udp = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                session_id: sid,
+                outcome: DatagramOutcome::Sent(1),
+            }) if *sid == session_id
+        )
+    });
+    assert!(
+        sent_as_connect_udp,
+        "connect-udp datagram outcome must be reported as a ConnectUdpEvent"
+    );
+
+    let mistagged_as_webtransport = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome { .. })
+        )
+    });
+    assert!(
+        !mistagged_as_webtransport,
+        "a connect-udp session's datagram outcome must never be reported as a WebTransportEvent"
+    );
+}
+
+/// The server-side connect-udp `send_datagram` must surface the queue's
+/// `DatagramQueueOutcome`, same as its client-side counterpart and as
+/// `ServerHandler::webtransport_send_datagram` on the WebTransport side:
+/// without this, a connect-udp server has a queue but no backpressure
+/// signal telling it the queue is full.
+#[test]
+fn connect_udp_server_send_datagram_reports_backpressure() {
+    let (_client, _proxy, _session_id, proxy_session) = establish_new_session();
+
+    for _ in 0..DEFAULT_HARD_LIMIT {
+        proxy_session.send_datagram(PING, None, now()).unwrap();
+    }
+    assert_eq!(
+        proxy_session.send_datagram(PING, None, now()),
+        Ok(DatagramQueueOutcome::Overflowed)
     );
 }

@@ -9,10 +9,10 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
     str::from_utf8,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
-use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
+use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
 use neqo_transport::{AppError, Connection, DatagramTracking, StreamId, streams::SendGroupId};
 use rustc_hash::FxHashSet as HashSet;
 
@@ -20,7 +20,9 @@ use crate::{
     CloseType, Error, Http3StreamType, HttpRecvStream, Priority, ReceiveOutput, RecvStream, Res,
     SendStream, Stream,
     features::extended_connect::{
-        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers, stats::SessionStats,
+        ExtendedConnectEvents, ExtendedConnectType, HeaderListener, Headers,
+        datagram_queue::{DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueOutcome},
+        stats::SessionStats,
     },
     frames::HFrame,
     priority::PriorityHandler,
@@ -61,6 +63,9 @@ pub(crate) struct Session {
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
     draining: bool,
+    /// Outgoing datagrams awaiting handover to the QUIC layer. Shared by every
+    /// extended-CONNECT protocol; the queue itself is protocol-agnostic.
+    datagram_queue: DatagramQueue,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -120,6 +125,7 @@ impl Session {
             events,
             protocol,
             draining: false,
+            datagram_queue: DatagramQueue::new(),
         }
     }
 
@@ -150,6 +156,7 @@ impl Session {
             events,
             protocol,
             draining: false,
+            datagram_queue: DatagramQueue::new(),
         })
     }
 
@@ -234,6 +241,7 @@ impl Session {
         }
         qdebug!("[{self}]: close session type={close_type:?}");
         self.state = State::Done;
+        self.drop_queued_datagrams();
         if !close_type.locally_initiated() {
             self.events.session_end(
                 self.protocol.connect_type(),
@@ -353,6 +361,9 @@ impl Session {
             &mut self.control_stream_recv,
             now,
         )? {
+            if new_state.closing_state() {
+                self.drop_queued_datagrams();
+            }
             self.state = new_state;
         }
         Ok(())
@@ -371,6 +382,7 @@ impl Session {
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
+        self.drop_queued_datagrams();
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
             self.control_stream_send
@@ -390,33 +402,64 @@ impl Session {
         self.control_stream_send.send_data(conn, buf, now)
     }
 
+    /// Enqueue a datagram for sending.
+    ///
+    /// The datagram is placed into the per-session datagram queue and will be
+    /// moved to the QUIC send queue when `process_datagram_queue()` is called
+    /// (which happens during `process_http3()` as part of `process_output()`).
+    /// The caller must ensure `process_output()` is called afterward to
+    /// actually transmit the datagram.
+    ///
+    /// Returns the state of the queue after the datagram was accepted, so the
+    /// caller can apply backpressure (see `DatagramQueueOutcome`).
+    ///
+    /// When the peer only supports the HTTP DATAGRAM Capsule fallback (no
+    /// QUIC DATAGRAM support), the capsule is written straight to the
+    /// control stream instead of going through the queue: the returned
+    /// `DatagramQueueOutcome` is always `Ok` on that path and carries no
+    /// backpressure signal, and a resulting `DatagramOutcome::Sent` means
+    /// only "written to the control stream", not "accepted by
+    /// `Connection::send_datagram`" as it does on the queued path.
+    ///
     /// # Errors
     ///
     /// Returns an error if:
+    /// - The encoded datagram exceeds the peer's `max_datagram_frame_size`
+    ///   (`Error::Transport(neqo_transport::Error::TooMuchData)`).
     /// - The session is not in Active state (`Error::Unavailable`).
-    /// - QUIC datagram or HTTP DATAGRAM Capsule sending fails.
+    /// - The peer supports neither QUIC DATAGRAM nor the HTTP DATAGRAM Capsule
+    ///   (`Error::Transport(neqo_transport::Error::NotAvailable)`).
+    /// - HTTP DATAGRAM Capsule sending fails.
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<DatagramQueueOutcome> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
             debug_assert!(false);
             return Err(Error::Unavailable);
         }
-
-        if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
-            qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            return self.protocol.write_datagram_capsule(
-                &mut self.control_stream_send,
-                conn,
-                buf,
-                now,
-            );
+        let remote_datagram_size = conn.remote_datagram_size();
+        if remote_datagram_size == 0 {
+            if self.protocol.datagram_capsule_support() {
+                qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
+                self.protocol.write_datagram_capsule(
+                    &mut self.control_stream_send,
+                    conn,
+                    buf,
+                    now,
+                )?;
+                if let DatagramTracking::Id(id) = id.into() {
+                    self.report_datagram_outcome(DatagramOutcome::Sent(id));
+                }
+                return Ok(DatagramQueueOutcome::Ok);
+            }
+            qdebug!("[{self}] peer does not support QUIC DATAGRAM");
+            return Err(Error::Transport(neqo_transport::Error::NotAvailable));
         }
 
         let mut dgram_data = Encoder::default();
@@ -424,9 +467,147 @@ impl Session {
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
-        conn.send_datagram(dgram_data.into(), id)?;
-        qtrace!("[{self}] sent datagram via QUIC datagram");
-        Ok(())
+        if to_u64(dgram_data.len()) > remote_datagram_size {
+            return Err(Error::Transport(neqo_transport::Error::TooMuchData));
+        }
+
+        let id_opt = match id.into() {
+            DatagramTracking::Id(id_val) => Some(id_val),
+            DatagramTracking::None => None,
+        };
+
+        // Expire before enqueueing: otherwise a queue full of stale datagrams
+        // evicts one on `enqueue` below and reports `Overflowed`/`Dropped`
+        // for it, when it should have been reported `Expired`.
+        let expired = self.datagram_queue.expire(now);
+        for outcome in self.record_expired(expired) {
+            self.report_datagram_outcome(outcome);
+        }
+
+        let (outcome, dropped) =
+            self.datagram_queue
+                .enqueue(Vec::<u8>::from(dgram_data), id_opt, now);
+        if outcome == DatagramQueueOutcome::Overflowed {
+            self.count_dropped_outgoing(1);
+        }
+        if let Some(id) = dropped {
+            self.report_datagram_outcome(DatagramOutcome::Dropped(id));
+        }
+        qtrace!("[{self}] enqueued datagram for sending via QUIC datagram");
+        Ok(outcome)
+    }
+
+    /// Count every expired datagram and report an outcome for the tracked ones.
+    ///
+    /// Untracked datagrams (`None`) get no outcome, but must still be counted:
+    /// the stat is the number of datagrams that expired, not the number the
+    /// application asked to be notified about.
+    fn record_expired(&mut self, expired: Vec<Option<DatagramId>>) -> Vec<DatagramOutcome> {
+        if let Some(stats) = self.protocol.stats_mut() {
+            stats.datagrams_expired_outgoing += to_u64(expired.len());
+        }
+        expired
+            .into_iter()
+            .flatten()
+            .map(DatagramOutcome::Expired)
+            .collect()
+    }
+
+    /// Report an outcome through this session's own `events`/`connect_type`,
+    /// rather than returning it to the caller: keeps a connect-udp session's
+    /// outcomes from being mis-tagged as `WebTransport` by a caller that
+    /// only knows about `WebTransport`.
+    fn report_datagram_outcome(&self, outcome: DatagramOutcome) {
+        self.events
+            .datagram_outcome(self.id, outcome, self.protocol.connect_type());
+    }
+
+    /// Count every datagram discarded without being sent and without
+    /// expiring, tracked or not: [`Self::report_datagram_outcome`] only
+    /// fires for tracked ones, but the stat must reflect all of them.
+    fn count_dropped_outgoing(&mut self, n: u64) {
+        if let Some(stats) = self.protocol.stats_mut() {
+            stats.datagrams_dropped_outgoing += n;
+        }
+    }
+
+    /// Drain the per-session datagram queue and hand datagrams to the QUIC layer.
+    ///
+    /// Only as many datagrams as the QUIC layer can currently accept are handed
+    /// over; the rest stay queued for a later call, so that a burst is paced
+    /// against what the connection can send instead of overflowing the QUIC
+    /// layer's fixed-size queue. See [`DatagramQueue::drain`].
+    ///
+    /// A no-op once the session is no longer `Active`: nothing enqueues new
+    /// datagrams past that point, and any already queued are dropped and
+    /// reported by [`Self::close`]/[`Self::close_session`], not handed to a
+    /// `conn.send_datagram()` the peer has already been told is closed.
+    ///
+    /// Outcomes are reported directly through this session's own `events` and
+    /// `connect_type`, rather than returned to the caller, so a connect-udp
+    /// session's outcomes can't be mis-tagged as `WebTransport` by a caller
+    /// that only knows about `WebTransport`.
+    pub(crate) fn process_datagram_queue(&mut self, conn: &mut Connection, now: Instant) {
+        if self.state != State::Active {
+            return;
+        }
+
+        let (expired, to_send) = self
+            .datagram_queue
+            .drain(now, conn.remaining_datagram_queue_capacity());
+        for outcome in self.record_expired(expired) {
+            self.report_datagram_outcome(outcome);
+        }
+
+        for dgram in to_send {
+            let tracking = dgram
+                .id
+                .map_or(DatagramTracking::None, DatagramTracking::Id);
+            // A datagram the QUIC layer refuses is gone: `drain` already removed it
+            // from the queue. Report it so the application isn't left waiting, and
+            // keep going, since a later datagram may still be small enough to fit.
+            let outcome = match conn.send_datagram(dgram.data, tracking) {
+                Ok(()) => DatagramOutcome::Sent,
+                Err(e) => {
+                    qdebug!("[{self}] QUIC layer refused datagram {:?}: {e}", dgram.id);
+                    self.count_dropped_outgoing(1);
+                    DatagramOutcome::Dropped
+                }
+            };
+            if let Some(id) = dgram.id {
+                self.report_datagram_outcome(outcome(id));
+            }
+        }
+    }
+
+    /// Drop every datagram still queued when the session closes, reporting
+    /// each tracked one so the application isn't left waiting for an outcome
+    /// that will never come once nothing will call
+    /// [`Self::process_datagram_queue`] again.
+    fn drop_queued_datagrams(&mut self) {
+        let dropped = self.datagram_queue.take_all();
+        self.count_dropped_outgoing(to_u64(dropped.len()));
+        for id in dropped.into_iter().filter_map(|d| d.id) {
+            self.report_datagram_outcome(DatagramOutcome::Dropped(id));
+        }
+    }
+
+    /// The instant at which this session's datagram queue next needs
+    /// [`Self::process_datagram_queue`] called to expire a stale datagram.
+    /// See [`DatagramQueue::next_expiry`].
+    pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.datagram_queue.next_expiry()
+    }
+
+    pub(crate) fn set_datagram_high_water_mark(&mut self, mark: Option<usize>) {
+        self.datagram_queue.set_high_water_mark(mark);
+    }
+
+    pub(crate) fn set_datagram_max_age(&mut self, max_age: Duration, now: Instant) {
+        let expired = self.datagram_queue.set_max_age(max_age, now);
+        for outcome in self.record_expired(expired) {
+            self.report_datagram_outcome(outcome);
+        }
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
@@ -628,6 +809,10 @@ pub(crate) trait Protocol: Debug + Display {
             false,
             "stats called for extended connect protocol not tracking stats"
         );
+        None
+    }
+
+    fn stats_mut(&mut self) -> Option<&mut SessionStats> {
         None
     }
 

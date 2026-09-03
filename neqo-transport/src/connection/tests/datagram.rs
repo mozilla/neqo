@@ -442,6 +442,39 @@ fn dgram_unsupported() {
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
 }
 
+/// `remaining_datagram_queue_capacity` is what a caller holding its own
+/// queue (e.g. an http3-layer `DatagramQueue`) uses to decide how much it
+/// can hand over without being head-dropped here; it must track the queue
+/// exactly, including staying at `0` - not wrapping - once the queue is
+/// full and stays full.
+#[test]
+fn remaining_datagram_queue_capacity_tracks_the_queue() {
+    let (mut client, _server) = connect_datagram();
+
+    assert_eq!(client.remaining_datagram_queue_capacity(), OUTGOING_QUEUE);
+
+    assert_eq!(
+        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        Ok(())
+    );
+    assert_eq!(
+        client.remaining_datagram_queue_capacity(),
+        OUTGOING_QUEUE - 1
+    );
+
+    assert_eq!(
+        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
+        Ok(())
+    );
+    assert_eq!(client.remaining_datagram_queue_capacity(), 0);
+
+    // The queue is already full: this evicts datagram 1 rather than
+    // growing past `OUTGOING_QUEUE`, so capacity stays at 0 rather than
+    // underflowing.
+    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(3)), Ok(()));
+    assert_eq!(client.remaining_datagram_queue_capacity(), 0);
+}
+
 #[test]
 fn outgoing_datagram_queue_full() {
     let (mut client, mut server) = connect_datagram();
