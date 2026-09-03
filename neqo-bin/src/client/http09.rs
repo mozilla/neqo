@@ -11,7 +11,7 @@ use std::{
     collections::VecDeque,
     fmt::Display,
     fs::File,
-    io::{BufWriter, Cursor, Write as _},
+    io::{BufWriter, Write as _},
     net::SocketAddr,
     num::NonZeroUsize,
     path::PathBuf,
@@ -29,7 +29,7 @@ use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
-use crate::{STREAM_IO_BUFFER_SIZE, now};
+use crate::{STREAM_IO_BUFFER_SIZE, SendBuf, now};
 
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
@@ -193,10 +193,10 @@ impl super::Client for Connection {
     fn process_multiple_output<'a>(
         &mut self,
         now: Instant,
-        send_buffer: Cursor<&'a mut [u8]>,
+        send_buf: SendBuf<'a>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Cursor<&'a mut [u8]>> {
-        self.process_multiple_output(now, send_buffer, max_datagrams)
+    ) -> OutputBatch<SendBuf<'a>> {
+        self.process_multiple_output(now, send_buf, max_datagrams)
     }
 
     fn process_multiple_input<'a>(

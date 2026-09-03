@@ -6,6 +6,7 @@
 
 use std::{
     fmt::{self, Debug, Formatter},
+    io,
     net::SocketAddr,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
@@ -24,10 +25,11 @@ pub struct Datagram<D = Vec<u8>> {
     d: D,
 }
 
-impl<B: Buffer> TryFrom<Batch<B>> for Datagram {
+// Only for `Vec<u8>`, so that the buffer is moved rather than copied.
+impl TryFrom<Batch<Vec<u8>>> for Datagram {
     type Error = ();
 
-    fn try_from(d: Batch<B>) -> Result<Self, Self::Error> {
+    fn try_from(d: Batch<Vec<u8>>) -> Result<Self, Self::Error> {
         if d.num_datagrams() != 1 {
             return Err(());
         }
@@ -35,8 +37,7 @@ impl<B: Buffer> TryFrom<Batch<B>> for Datagram {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            // TODO: Performance footgun?
-            d: d.d.as_slice().to_vec(),
+            d: d.d,
         })
     }
 }
@@ -156,8 +157,6 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-///
-/// TODO: pub fields good idea?
 #[derive(Clone, PartialEq, Eq)]
 pub struct Batch<B> {
     src: SocketAddr,
@@ -195,17 +194,6 @@ impl From<Datagram<Vec<u8>>> for Batch<Vec<u8>> {
 }
 
 impl<B: Buffer> Batch<B> {
-    /// Maximum [`Batch`] size in bytes.
-    ///
-    /// This value is set conservatively to ensure compatibility with batch IO
-    /// system calls across all supported platforms.
-    ///
-    /// See for example Linux limit in
-    /// <https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402>.
-    pub const MAX: usize = 65535 // maximum UDP datagram size
-        - 40 // IPv6 header
-        - 8; // UDP header
-
     #[must_use]
     pub const fn new(
         src: SocketAddr,
@@ -221,6 +209,28 @@ impl<B: Buffer> Batch<B> {
             datagram_size,
             d,
         }
+    }
+
+    /// Copy into `buffer`, which must be empty, returning a [`Batch`] over it.
+    ///
+    /// # Errors
+    /// When `buffer` cannot hold the contents.
+    pub fn copy_into<C: Buffer>(&self, mut buffer: C) -> Result<Batch<C>, io::Error> {
+        debug_assert!(buffer.is_empty());
+        // `write_all` writes what fits before failing, so undo a partial write.
+        // Back to the entry position, not 0, to not discard a caller's bytes.
+        let start = buffer.position();
+        if let Err(e) = buffer.write_all(self.data()) {
+            buffer.truncate(start);
+            return Err(e);
+        }
+        Ok(Batch {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            datagram_size: self.datagram_size,
+            d: buffer,
+        })
     }
 
     #[must_use]
@@ -285,13 +295,14 @@ impl<B: Buffer> Batch<B> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::{
+        io::Cursor,
         net::{IpAddr, Ipv6Addr, SocketAddr},
         num::NonZeroUsize,
     };
 
     use test_fixture::{DEFAULT_ADDR, datagram};
 
-    use crate::{Datagram, Ecn, Tos, datagram};
+    use crate::{Buffer, Datagram, Ecn, Tos, datagram};
 
     #[test]
     fn fmt_datagram() {
@@ -326,8 +337,6 @@ mod tests {
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
 
-        // TODO: cleanup the &mut
-
         // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
         let batch =
             datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
@@ -360,6 +369,46 @@ mod tests {
         );
         batch.set_tos(Ecn::Ce.into());
         assert_eq!(batch.tos(), Ecn::Ce.into());
+    }
+
+    #[test]
+    fn batch_copy_into() {
+        let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
+        let batch = datagram::Batch::new(
+            src,
+            dst,
+            Ecn::Ce.into(),
+            NonZeroUsize::new(4).unwrap(),
+            vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
+        );
+
+        let mut buf = [0; 16];
+        let copy = batch.copy_into(Cursor::new(&mut buf[..])).unwrap();
+        assert_eq!(copy.source(), src);
+        assert_eq!(copy.destination(), dst);
+        assert_eq!(copy.tos(), Ecn::Ce.into());
+        assert_eq!(copy.datagram_size(), batch.datagram_size());
+        assert_eq!(copy.data(), batch.data());
+        assert_eq!(copy.num_datagrams(), batch.num_datagrams());
+    }
+
+    #[test]
+    fn batch_copy_into_too_small() {
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let batch = datagram::Batch::new(
+            addr,
+            addr,
+            Tos::default(),
+            NonZeroUsize::new(4).unwrap(),
+            vec![0u8; 10],
+        );
+
+        let mut buf = [0; 4];
+        let mut cursor = Cursor::new(&mut buf[..]);
+        assert!(batch.copy_into(&mut cursor).is_err());
+        assert_eq!(Buffer::position(&cursor), 0);
+        assert_eq!(buf, [0; 4]);
     }
 
     #[test]

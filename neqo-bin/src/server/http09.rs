@@ -24,7 +24,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::Args;
 use crate::{
-    STREAM_IO_BUFFER_SIZE,
+    STREAM_IO_BUFFER_SIZE, SendBuf,
     send_data::{SendData, SendResult},
 };
 
@@ -190,13 +190,15 @@ impl HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+    fn process_multiple<'a, 'b, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
         dgrams: D,
         now: Instant,
+        send_buf: SendBuf<'b>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Vec<u8>> {
-        self.server.process_multiple(dgrams, now, max_datagrams)
+    ) -> OutputBatch<SendBuf<'b>> {
+        self.server
+            .process_multiple(dgrams, now, send_buf, max_datagrams)
     }
 
     fn process_events(&mut self, now: Instant) {

@@ -802,3 +802,114 @@ fn server_receives_new_token() {
         }
     ));
 }
+
+/// A batch that does not fit the target buffer is dropped, not truncated.
+#[test]
+fn output_batch_copy_into_too_small() {
+    use std::{io::Cursor, num::NonZeroUsize};
+
+    use neqo_common::{Tos, datagram};
+
+    use super::OutputBatch;
+
+    let batch = datagram::Batch::new(
+        DEFAULT_ADDR,
+        DEFAULT_ADDR,
+        Tos::default(),
+        NonZeroUsize::new(4).unwrap(),
+        vec![0; 8],
+    );
+    let mut buf = [0; 4];
+    assert!(matches!(
+        OutputBatch::DatagramBatch(batch).copy_into(Cursor::new(&mut buf[..])),
+        OutputBatch::None
+    ));
+
+    let mut buf = [0; 4];
+    assert!(matches!(
+        OutputBatch::<Vec<u8>>::None.copy_into(Cursor::new(&mut buf[..])),
+        OutputBatch::None
+    ));
+    let mut buf = [0; 4];
+    assert!(matches!(
+        OutputBatch::<Vec<u8>>::Callback(Duration::from_millis(7))
+            .copy_into(Cursor::new(&mut buf[..])),
+        OutputBatch::Callback(d) if d == Duration::from_millis(7)
+    ));
+}
+
+/// One buffer shared across connections must yield only the later one's bytes.
+#[test]
+fn shared_send_buffer_across_connections() {
+    use std::num::NonZeroUsize;
+
+    let mut idle = default_client();
+    let mut idle_server = default_server();
+    connect_force_idle(&mut idle, &mut idle_server);
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    client.stream_close_send(stream_id).unwrap();
+
+    let mut buf = Vec::new();
+    assert!(
+        idle.process_multiple_output(now(), &mut buf, NonZeroUsize::MIN)
+            .dgram()
+            .is_none()
+    );
+    assert!(buf.is_empty());
+
+    let batch = client
+        .process_multiple_output(now(), &mut buf, NonZeroUsize::MIN)
+        .dgram()
+        .expect("a datagram");
+    assert_eq!(batch.num_datagrams(), 1);
+    assert_eq!(batch.data().len(), batch.datagram_size().get());
+
+    let d = Datagram::new(
+        batch.source(),
+        batch.destination(),
+        batch.tos(),
+        batch.data(),
+    );
+    server.process_input(d, now());
+    assert!(
+        server
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::RecvStreamReadable { .. }))
+    );
+}
+
+/// A bounded send buffer limits the batch rather than overrunning.
+#[test]
+fn send_buffer_bounds_batch() {
+    use std::{io::Cursor, num::NonZeroUsize};
+
+    const MAX_DATAGRAMS: usize = 4;
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream_id);
+
+    let max = NonZeroUsize::new(MAX_DATAGRAMS).unwrap();
+    let roomy = client
+        .process_multiple_output(now(), Vec::new(), max)
+        .dgram()
+        .expect("a datagram");
+    assert!(roomy.num_datagrams() > 2, "need a multi-datagram batch");
+    let ds = roomy.datagram_size().get();
+
+    // A buffer with room for two datagrams yields at most two.
+    let mut buf = vec![0; 2 * ds];
+    let bounded = client
+        .process_multiple_output(now(), Cursor::new(&mut buf[..]), max)
+        .dgram()
+        .expect("a datagram");
+    assert!(bounded.num_datagrams() <= 2);
+    assert!(bounded.data().len() <= 2 * ds);
+}

@@ -110,10 +110,10 @@ pub enum Output {
     Callback(Duration),
 }
 
-impl<B: Buffer> TryFrom<OutputBatch<B>> for Output {
+impl TryFrom<OutputBatch<Vec<u8>>> for Output {
     type Error = ();
 
-    fn try_from(value: OutputBatch<B>) -> Result<Self, Self::Error> {
+    fn try_from(value: OutputBatch<Vec<u8>>) -> Result<Self, Self::Error> {
         match value {
             OutputBatch::None => Ok(Self::None),
             OutputBatch::DatagramBatch(dg) => Ok(Self::Datagram(dg.try_into()?)),
@@ -150,6 +150,24 @@ impl<B: Buffer> OutputBatch<B> {
         match self {
             Self::DatagramBatch(dg) => Some(dg),
             _ => None,
+        }
+    }
+
+    /// Re-back this batch with `buffer`, copying its contents.
+    ///
+    /// Drops a datagram that does not fit; loss recovery or the peer retries.
+    #[must_use]
+    pub fn copy_into<C: Buffer>(self, buffer: C) -> OutputBatch<C> {
+        match self {
+            Self::None => OutputBatch::None,
+            Self::Callback(t) => OutputBatch::Callback(t),
+            Self::DatagramBatch(b) => match b.copy_into(buffer) {
+                Ok(b) => OutputBatch::DatagramBatch(b),
+                Err(e) => {
+                    qerror!("Dropping {} byte datagram: {e}", b.data().len());
+                    OutputBatch::None
+                }
+            },
         }
     }
 }
@@ -1236,8 +1254,7 @@ impl Connection {
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        let mut send_buffer = vec![];
-        self.process_multiple_output(now, &mut send_buffer, 1.try_into().expect(">0"))
+        self.process_multiple_output(now, Vec::new(), NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -1246,6 +1263,11 @@ impl Connection {
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
+    ///
+    /// `send_buffer` must be empty, as the batch is segmented from its start.
+    /// It is left empty when no batch is returned, so it can be reused as-is.
+    /// It also has to hold one maximum size datagram, which is a PMTUD probe
+    /// rather than the current PLPMTU, so `neqo_udp::SEND_BUF_SIZE` bytes.
     #[must_use = "OutputBatch of the process_multiple_output function must be handled"]
     pub fn process_multiple_output<B: Buffer>(
         &mut self,
@@ -1302,13 +1324,14 @@ impl Connection {
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        let mut send_buffer = vec![];
-        self.process_multiple(dgram, now, &mut send_buffer, 1.try_into().expect(">0"))
+        self.process_multiple(dgram, now, Vec::new(), NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
 
     /// Process input and generate output.
+    ///
+    /// `send_buffer` must be empty, see [`Connection::process_multiple_output`].
     #[must_use = "OutputBatch of the process_multiple function must be handled"]
     pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, B: Buffer>(
         &mut self,
@@ -2389,7 +2412,7 @@ impl Connection {
     fn write_appdata_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
-        tokens: &mut Vec<recovery::Token>,
+        tokens: &mut recovery::Tokens,
         now: Instant,
     ) {
         let rtt = self.paths.primary().map_or_else(
@@ -2604,7 +2627,10 @@ impl Connection {
             #[cfg(test)]
             if let Some(w) = &mut self.test_frame_writer {
                 assert!(!builder.is_full(), "test_frame_writer set on full packet");
-                w.write_frames(builder);
+                // `FrameWriter` is not generic over the buffer, so write via a copy.
+                let mut b = builder.copy_to_vec();
+                w.write_frames(&mut b);
+                builder.restore_from(b);
             }
         }
 
@@ -2672,12 +2698,22 @@ impl Connection {
         mut send_buffer: B,
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch<B>> {
+        // GSO segmentation and `Batch::num_datagrams` count from offset 0.
+        debug_assert!(send_buffer.is_empty());
         let packet_tos = path.borrow().tos();
 
         let mut datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
         let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
+        // A PMTUD probe is larger than the current PLPMTU, so it sets the
+        // minimum the buffer has to hold for the first datagram.
+        let first_datagram = if path.borrow().pmtud().needs_probe() {
+            path.borrow().pmtud().probe_size()
+        } else {
+            mtu
+        };
+        debug_assert!(send_buffer.available().is_none_or(|a| a >= first_datagram));
 
         loop {
             if max_datagrams.get() <= num_datagrams {
@@ -2708,17 +2744,22 @@ impl Connection {
                 // See for example Linux kernel:
                 // https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402
                 || address_family_max_mtu - send_buffer.position() < mtu
+                // Whatever the caller's buffer can still hold.
+                || send_buffer.available().is_some_and(|a| a < mtu)
             }) {
                 break;
             }
 
-            match self.output_dgram_on_path(
+            let res = self.output_dgram_on_path(
                 path,
                 now,
                 closing_frame.take(),
-                Encoder::new_with_buffer(&mut send_buffer),
+                Encoder::new(&mut send_buffer),
                 packet_tos,
-            )? {
+            );
+            // Discard any bytes already written, so a reused buffer stays clean.
+            let res = res.inspect_err(|_| send_buffer.truncate(0))?;
+            match res {
                 SendOption::Yes => {
                     debug_assert_eq!(
                         mtu,
@@ -2726,9 +2767,11 @@ impl Connection {
                         "MTU does not change within batch"
                     );
                     num_datagrams += 1;
-                    let ds = *datagram_size
-                        .get_or_insert(send_buffer.position() - send_buffer_len_before);
-                    if (send_buffer.position() % ds) > 0 {
+                    let this_size = send_buffer.position() - send_buffer_len_before;
+                    let ds = *datagram_size.get_or_insert(this_size);
+                    // A larger one would slip past the multiple-of check below.
+                    debug_assert!(this_size <= ds);
+                    if !send_buffer.position().is_multiple_of(ds) {
                         // GSO requires that all packets in a batch are of equal
                         // size. Only the last packet can be smaller. This
                         // packet was smaller. Make sure it was the last by
@@ -2747,11 +2790,16 @@ impl Connection {
         }
 
         debug_assert!(!send_buffer.is_empty());
+        // Checked before moving `send_buffer`, so this path can still clear it.
+        let Some(datagram_size) = datagram_size else {
+            send_buffer.truncate(0);
+            return Err(Error::Internal);
+        };
         let batch = path.borrow_mut().datagram_batch(
             send_buffer,
             packet_tos,
             num_datagrams,
-            datagram_size.ok_or(Error::Internal)?,
+            datagram_size,
             &mut self.stats.borrow_mut(),
         );
 
@@ -4084,7 +4132,7 @@ impl Connection {
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
         let mut buffer = Vec::new();
-        let encoder = Encoder::new_borrowed_vec(&mut buffer);
+        let encoder = Encoder::new(&mut buffer);
 
         let (_, builder, _) = Self::build_packet_header(
             &path.borrow(),

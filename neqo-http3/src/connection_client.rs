@@ -766,7 +766,7 @@ impl Http3Client {
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process_output(&mut self, now: Instant) -> Output {
         let send_buffer = vec![];
-        self.process_multiple_output(now, 1.try_into().expect(">0"), send_buffer)
+        self.process_multiple_output(now, send_buffer, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -798,11 +798,12 @@ impl Http3Client {
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
+    /// `send_buffer` must be empty.
     pub fn process_multiple_output<B: Buffer>(
         &mut self,
         now: Instant,
-        max_datagrams: NonZeroUsize,
         send_buffer: B,
+        max_datagrams: NonZeroUsize,
     ) -> OutputBatch<B> {
         qtrace!("[{self}] Process output");
 

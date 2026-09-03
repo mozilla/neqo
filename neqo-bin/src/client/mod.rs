@@ -10,7 +10,7 @@ use std::{
     collections::VecDeque,
     fmt::Display,
     fs::{File, OpenOptions, create_dir_all},
-    io::{self, BufWriter, Cursor, ErrorKind},
+    io::{self, BufWriter, ErrorKind},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,
@@ -48,7 +48,7 @@ use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now};
+use crate::{SendBuf, SharedArgs, now};
 
 mod http09;
 mod http3;
@@ -387,9 +387,9 @@ trait Client {
     fn process_multiple_output<'b>(
         &mut self,
         now: Instant,
-        send_buf: Cursor<&'b mut [u8]>,
+        send_buf: SendBuf<'b>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Cursor<&'b mut [u8]>>;
+    ) -> OutputBatch<SendBuf<'b>>;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -478,11 +478,11 @@ impl<'a, H: Handler> Runner<'a, H> {
                 .inspect_err(|_| qerror!("Socket return GSO size of 0"))
                 .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
 
-            let send_buffer = Cursor::new(&mut self.send_buf[..]);
-            match self
-                .client
-                .process_multiple_output(now(), send_buffer, max_datagrams)
-            {
+            match self.client.process_multiple_output(
+                now(),
+                SendBuf::new(&mut self.send_buf[..]),
+                max_datagrams,
+            ) {
                 OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try

@@ -45,7 +45,7 @@ use nss::{
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now, send_data::SendData};
+use crate::{SendBuf, SharedArgs, now, send_data::SendData};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -301,12 +301,13 @@ pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendDat
 
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+    fn process_multiple<'a, 'b, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
         dgrams: D,
         now: Instant,
+        send_buf: SendBuf<'b>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Vec<u8>>;
+    ) -> OutputBatch<SendBuf<'b>>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
@@ -326,6 +327,7 @@ pub struct Runner<S> {
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<(SocketAddr, crate::udp::Socket)>,
     recv_buf: RecvBuf,
+    send_buf: Vec<u8>,
 }
 
 impl<S: HttpServer + Unpin> Runner<S> {
@@ -341,6 +343,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             timeout: None,
             sockets,
             recv_buf: RecvBuf::default(),
+            send_buf: vec![0; neqo_udp::SEND_BUF_SIZE],
         }
     }
 
@@ -371,6 +374,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
         server: &mut S,
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        send_buf: &mut [u8],
         now: &dyn Fn() -> Instant,
         mut input_dgrams: Option<DatagramIter<'_>>,
     ) -> Result<(), io::Error> {
@@ -395,6 +399,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             match server.process_multiple(
                 input_dgrams.take().into_iter().flatten(),
                 now(),
+                SendBuf::new(&mut send_buf[..]),
                 smallest_max_gso_segments,
             ) {
                 OutputBatch::DatagramBatch(dgram) => {
@@ -466,6 +471,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                 &mut self.server,
                 &mut self.timeout,
                 &mut self.sockets,
+                &mut self.send_buf,
                 &self.now,
                 Some(input_dgrams),
             )
@@ -480,6 +486,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             &mut self.server,
             &mut self.timeout,
             &mut self.sockets,
+            &mut self.send_buf,
             &self.now,
             None,
         )
@@ -627,16 +634,17 @@ mod tests {
     }
 
     impl HttpServer for MockServer {
-        fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+        fn process_multiple<'a, 'b, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
             &mut self,
             dgrams: D,
             _now: Instant,
+            send_buf: SendBuf<'b>,
             _max_datagrams: NonZeroUsize,
-        ) -> OutputBatch<Vec<u8>> {
+        ) -> OutputBatch<SendBuf<'b>> {
             self.received += dgrams.into_iter().count();
-            self.batches
-                .pop()
-                .map_or(OutputBatch::None, OutputBatch::DatagramBatch)
+            self.batches.pop().map_or(OutputBatch::None, |b| {
+                OutputBatch::DatagramBatch(b.copy_into(send_buf).unwrap())
+            })
         }
 
         fn process_events(&mut self, _now: Instant) {}

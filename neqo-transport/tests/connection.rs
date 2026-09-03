@@ -175,7 +175,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
     let pn_len = usize::from(header[0] & 0b0000_0011) + 1;
     let len_pos = header.len() - pn_len - Encoder::varint_len(to_u64(pn_len + orig_payload.len()));
     header.truncate(len_pos);
-    let mut enc = Encoder::new_borrowed_vec(&mut header);
+    let mut enc = Encoder::new(&mut header);
     enc.encode_len(4 + payload.len() + aead.expansion());
     enc.encode_uint(4, pn);
     header[0] = header[0] & 0xfc | 0b0000_0011; // Set the packet number length to 4.

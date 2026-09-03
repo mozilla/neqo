@@ -15,12 +15,12 @@ use std::{
     ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{
-    Datagram, Role, Tos, event::Provider as _, hex::Hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
-    qwarn,
+    Buffer, Datagram, Role, Tos, datagram, event::Provider as _, hex::Hex, qdebug, qerror, qinfo,
+    qlog::Qlog, qtrace, qwarn,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -231,7 +231,6 @@ impl Server {
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Output {
-        qdebug!("[{self}] Handle initial");
         qdebug!("[{self}] Handle initial");
         #[cfg(feature = "build-fuzzing-corpus")]
         Self::write_addr_valid_corpus(dgram.source(), &initial.token);
@@ -546,32 +545,62 @@ impl Server {
         OutputBatch::None
     }
 
+    /// Re-back an owned batch, as Version Negotiation, Retry and the handshake
+    /// build, with the caller's buffer.
+    ///
+    /// Asks to be called again if the datagram had to be dropped while saved
+    /// input is still pending, so that the input is not left undrained.
+    #[must_use]
+    pub fn copy_output_into<B: Buffer>(
+        &self,
+        batch: OutputBatch<Vec<u8>>,
+        send_buffer: B,
+    ) -> OutputBatch<B> {
+        match batch.copy_into(send_buffer) {
+            OutputBatch::None if !self.saved_datagrams.is_empty() => {
+                OutputBatch::Callback(Duration::ZERO)
+            }
+            o => o,
+        }
+    }
+
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(
+    fn process_next_output<B: Buffer>(
         &mut self,
         now: Instant,
+        mut send_buffer: B,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Vec<u8>> {
+    ) -> OutputBatch<B> {
         assert!(
             self.saved_datagrams.is_empty(),
             "Always process all inbound datagrams first."
         );
         let mut callback = None;
 
+        // Reused across connections; no output leaves the buffer empty.
         for connection in &mut self.connections {
-            let send_buffer = Vec::new();
-            match connection
+            let (src, dst, tos, datagram_size) = match connection
                 .borrow_mut()
-                .process_multiple_output(now, send_buffer, max_datagrams)
+                .process_multiple_output(now, &mut send_buffer, max_datagrams)
             {
-                OutputBatch::None => {}
-                d @ OutputBatch::DatagramBatch(_) => return d,
-                OutputBatch::Callback(next) => match callback {
-                    Some(previous) => callback = Some(min(previous, next)),
-                    None => callback = Some(next),
-                },
-            }
+                OutputBatch::DatagramBatch(b) => {
+                    (b.source(), b.destination(), b.tos(), b.datagram_size())
+                }
+                OutputBatch::None => continue,
+                OutputBatch::Callback(next) => {
+                    callback = Some(callback.map_or(next, |previous| min(previous, next)));
+                    continue;
+                }
+            };
+            // Only metadata outlives the match, so `send_buffer` is free to move.
+            return OutputBatch::DatagramBatch(datagram::Batch::new(
+                src,
+                dst,
+                tos,
+                datagram_size,
+                send_buffer,
+            ));
         }
 
         callback.map_or(OutputBatch::None, OutputBatch::Callback)
@@ -592,24 +621,31 @@ impl Server {
         dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgrams, now, Vec::new(), NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
 
-    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
+    /// `send_buffer` must be empty, see [`Connection::process_multiple_output`].
+    pub fn process_multiple<
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+        B: Buffer,
+    >(
         &mut self,
         dgrams: I,
         now: Instant,
+        send_buffer: B,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Vec<u8>> {
-        if let o @ OutputBatch::DatagramBatch(_) = self.process_multiple_input(dgrams, now) {
+    ) -> OutputBatch<B> {
+        let input = self.process_multiple_input(dgrams, now);
+        if matches!(input, OutputBatch::DatagramBatch(_)) {
             // Return immediately. Do any maintenance on next call.
-            return o;
+            return self.copy_output_into(input, send_buffer);
         }
 
         // Process output datagrams.
-        let maybe_callback = match self.process_next_output(now, max_datagrams) {
+        let maybe_callback = match self.process_next_output(now, send_buffer, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
             o @ (OutputBatch::Callback(_) | OutputBatch::None) => o,

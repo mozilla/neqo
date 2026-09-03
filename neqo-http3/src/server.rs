@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, qtrace};
+use neqo_common::{Buffer, Datagram, qtrace};
 use neqo_transport::{
     ConnectionIdGenerator, Output, OutputBatch,
     server::{ConnectionRef, Server, ValidateAddress},
@@ -126,29 +126,36 @@ impl Http3Server {
         dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgrams, now, Vec::new(), NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
 
-    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
+    /// `send_buffer` must be empty.
+    pub fn process_multiple<
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+        B: Buffer,
+    >(
         &mut self,
         dgrams: I,
         now: Instant,
+        send_buffer: B,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch<Vec<u8>> {
+    ) -> OutputBatch<B> {
         qtrace!("[{self}] Process");
         let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
         // If we do not that a dgram already try again after process_http3.
         match out {
-            OutputBatch::DatagramBatch(d) => {
-                qtrace!("[{self}] Send packet: {d:?}");
-                OutputBatch::DatagramBatch(d)
+            o @ OutputBatch::DatagramBatch(_) => {
+                qtrace!("[{self}] Send packet: {o:?}");
+                self.server.copy_output_into(o, send_buffer)
             }
             _ => self.server.process_multiple(
                 std::iter::empty::<Datagram<Vec<u8>>>(),
                 now,
+                send_buffer,
                 max_datagrams,
             ),
         }

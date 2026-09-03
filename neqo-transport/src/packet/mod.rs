@@ -183,8 +183,10 @@ impl Builder<Vec<u8>> {
         Ok(complete.split_off(start))
     }
 
-    /// Make a Version Negotiation packet.
-    #[must_use]
+    /// Write a Version Negotiation packet into `send_buffer`.
+    ///
+    /// # Panics
+    /// When `send_buffer` cannot grow to hold the packet.
     pub fn version_negotiation<B: Buffer>(
         dcid: &[u8],
         scid: &[u8],
@@ -192,7 +194,7 @@ impl Builder<Vec<u8>> {
         versions: &[Version],
         send_buffer: B,
     ) {
-        let mut encoder = Encoder::new_with_buffer(send_buffer);
+        let mut encoder = Encoder::new(send_buffer);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(BIT_LONG | (grease[3] & 0x7f));
@@ -216,10 +218,10 @@ impl Builder<Vec<u8>> {
 }
 
 impl<B: Buffer> Builder<B> {
-    // TODO cfg
-    // TODO hack
-    pub fn x(&self) -> Builder<Vec<u8>> {
-        dbg!("x");
+    /// Copy into a [`Vec`]-backed builder, for callers that cannot be generic
+    /// over the buffer. Fold the result back with [`Builder::restore_from`].
+    #[cfg(test)]
+    pub(crate) fn copy_to_vec(&self) -> Builder<Vec<u8>> {
         let Self {
             encoder,
             pn,
@@ -228,11 +230,9 @@ impl<B: Buffer> Builder<B> {
             limit,
             padding,
         } = self;
-        dbg!(encoder.len());
-        let encoder = encoder.to_owned();
 
         Builder {
-            encoder,
+            encoder: Encoder::from(encoder.as_ref()),
             pn: *pn,
             header: header.clone(),
             offsets: (*offsets).clone(),
@@ -241,24 +241,18 @@ impl<B: Buffer> Builder<B> {
         }
     }
 
-    // TODO cfg
-    // TODO hack
-    pub fn y(&mut self, builder: Builder<Vec<u8>>) {
-        dbg!("y");
+    /// Adopt `builder`'s state and append what it wrote. It must have come
+    /// from [`Builder::copy_to_vec`] on `self`.
+    #[cfg(test)]
+    pub(crate) fn restore_from(&mut self, builder: Builder<Vec<u8>>) {
         self.pn = builder.pn;
         self.header = builder.header;
         self.offsets = builder.offsets;
         self.limit = builder.limit;
         self.padding = builder.padding;
 
-        dbg!(self.encoder.len());
-
-        dbg!(builder.encoder.len());
-
         self.encoder
             .encode(&builder.encoder.as_ref()[(self.encoder.len())..]);
-
-        dbg!(self.encoder.len());
     }
 
     /// Start building a short header packet.
@@ -1806,8 +1800,7 @@ mod tests {
         0x01, 0xff, 0x00, 0x00, 0x1d, 0x0a, 0x0a, 0x0a, 0x0a,
     ];
 
-    #[test]
-    fn build_vn() {
+    fn build_sample_vn() -> Vec<u8> {
         fixture_init();
         let mut vn = Vec::new();
         Builder::version_negotiation(
@@ -1817,6 +1810,12 @@ mod tests {
             &Version::all(),
             &mut vn,
         );
+        vn
+    }
+
+    #[test]
+    fn build_vn() {
+        let mut vn = build_sample_vn();
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
@@ -1828,15 +1827,7 @@ mod tests {
 
     #[test]
     fn vn_do_not_repeat_client_grease() {
-        fixture_init();
-        let mut vn = Vec::new();
-        Builder::version_negotiation(
-            SERVER_CID,
-            CLIENT_CID,
-            0x0a0a_0a0a,
-            &Version::all(),
-            &mut vn,
-        );
+        let vn = build_sample_vn();
         assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
 
