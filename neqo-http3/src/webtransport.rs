@@ -829,6 +829,30 @@ impl ServerSession {
         }
     }
 
+    /// Send a `WT_DRAIN_SESSION` capsule on this session's stream.
+    ///
+    /// Only used in tests to simulate the server initiating a graceful drain.
+    /// Going through the session (rather than searching the server's connections
+    /// for a matching stream ID) guarantees the capsule reaches the connection
+    /// that actually owns the session: stream IDs are per-connection, so two
+    /// clients readily share one.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the session does not exist or sending fails.
+    #[cfg(test)]
+    pub fn test_drain_session(&self, now: Instant) -> Res<()> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .test_webtransport_drain_session(
+                &mut self.stream_handler.conn.borrow_mut(),
+                session_id,
+                now,
+            )
+    }
+
     #[must_use]
     pub fn state(&self) -> Http3State {
         self.stream_handler.handler.borrow().state()
@@ -1056,6 +1080,16 @@ pub enum ServerEvent {
         session: ServerSession,
         outcome: extended_connect::DatagramOutcome,
     },
+    /// The remote endpoint sent a `WT_DRAIN_SESSION` capsule, signalling that
+    /// it wishes to gracefully close this session.
+    ///
+    /// The server application should stop creating new streams on the session
+    /// and close it once existing activity is complete.
+    ///
+    /// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7>
+    Draining {
+        session: ServerSession,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -1073,6 +1107,7 @@ pub(crate) trait ServerEvents {
         session: ServerSession,
         outcome: extended_connect::DatagramOutcome,
     );
+    fn webtransport_session_draining(&self, session: ServerSession);
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -1117,5 +1152,11 @@ impl ServerEvents for Http3ServerEvents {
         self.push(Http3ServerEvent::WebTransport(
             ServerEvent::DatagramOutcome { session, outcome },
         ));
+    }
+
+    fn webtransport_session_draining(&self, session: ServerSession) {
+        self.push(Http3ServerEvent::WebTransport(ServerEvent::Draining {
+            session,
+        }));
     }
 }

@@ -60,6 +60,9 @@ pub enum WebTransportEvent {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     },
+    Draining {
+        session_id: StreamId,
+    },
     NewStream(Http3StreamInfo),
     Datagram {
         session_id: StreamId,
@@ -212,6 +215,16 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
             }
         };
         self.events.push(event);
+    }
+
+    fn session_draining(&self, connect_type: ExtendedConnectType, stream_id: StreamId) {
+        if connect_type == ExtendedConnectType::WebTransport {
+            self.events.push(Http3ServerConnEvent::WebTransport(
+                WebTransportEvent::Draining {
+                    session_id: stream_id,
+                },
+            ));
+        }
     }
 
     fn extended_connect_new_stream(

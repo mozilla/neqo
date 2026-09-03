@@ -18,8 +18,8 @@ use crate::{
         CloseReason,
         stats::SessionStats,
         tests::webtransport::{
-            DATAGRAM_SIZE, WtTest, assert_wt, default_http3_client, default_http3_server,
-            wt_default_parameters,
+            DATAGRAM_SIZE, WtTest, assert_wt, connect_with, default_http3_client,
+            default_http3_server, wt_default_parameters,
         },
     },
     frames::WebTransportFrame,
@@ -472,7 +472,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
 
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
 /// "a signal to applications to initiate shutdown for all WebTransport sessions":
-/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#name-interaction-with-the-http-3>
 ///
 /// An active session (stream ID < `goaway_stream_id`) should receive a `Draining`
 /// event and remain open — no `SessionClosed`.
@@ -546,7 +546,7 @@ fn wt_goaway_repeated_no_duplicate_draining() {
 
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
 /// "a signal to applications to initiate shutdown for all WebTransport sessions":
-/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#name-interaction-with-the-http-3>
 ///
 /// A rejected session (stream ID >= `goaway_stream_id`) should receive both a
 /// `Draining` event and eventually a `SessionClosed` event.
@@ -1115,6 +1115,224 @@ fn wt_session_stats_initial() {
     assert_eq!(stats, SessionStats::default());
 }
 
+/// When the server sends a `WT_DRAIN_SESSION` capsule, the client should
+/// receive a [`WebTransportEvent::Draining`] event and the session should
+/// remain open.
+///
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7>
+#[test]
+fn wt_drain_session_client() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt_session.test_drain_session(now()).unwrap();
+    wt.exchange_packets();
+
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+
+    let has_draining = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                if *sid == session_id
+        )
+    });
+    assert!(
+        has_draining,
+        "expected Draining event after server WT_DRAIN_SESSION"
+    );
+
+    // WT_DRAIN_SESSION does not close the session — no SessionClosed event.
+    let has_closed = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
+                stream_id: sid, ..
+            }) if *sid == session_id
+        )
+    });
+    assert!(
+        !has_closed,
+        "session must remain open after WT_DRAIN_SESSION"
+    );
+}
+
+/// A `WT_DRAIN_SESSION` capsule must reach the connection that owns the session, and
+/// only that one. Stream IDs are per-connection, so a second client on the same server
+/// readily has a session with the same ID; addressing by ID alone could drain the wrong one.
+#[test]
+fn wt_drain_session_only_reaches_the_owning_connection() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // A second client opens its own session on the same server.
+    let mut other = default_http3_client(wt_default_parameters());
+    connect_with(&mut other, &mut wt.server);
+    let other_session_id = other
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    super::exchange_packets(&mut other, &mut wt.server);
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+            session
+                .response(&SessionAcceptAction::Accept, now())
+                .unwrap();
+        }
+    }
+    super::exchange_packets(&mut other, &mut wt.server);
+    assert_eq!(
+        other_session_id, session_id,
+        "both sessions should use the same per-connection stream ID"
+    );
+
+    wt_session.test_drain_session(now()).unwrap();
+    wt.exchange_packets();
+    super::exchange_packets(&mut other, &mut wt.server);
+
+    let draining = |e: &Http3ClientEvent| {
+        matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id })
+                if *stream_id == session_id
+        )
+    };
+    assert!(
+        wt.client.events().any(|e| draining(&e)),
+        "the owning connection's client must see the Draining event"
+    );
+    assert!(
+        !other.events().any(|e| draining(&e)),
+        "the other connection's client must not be drained"
+    );
+}
+
+/// A repeated `WT_DRAIN_SESSION` capsule must not produce a second `Draining` event: the session's
+/// `draining` state deduplicates emission (draft-ietf-webtrans-http3-14, §4.7).
+#[test]
+fn wt_drain_session_client_deduplicates_events() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    let count_draining = |wt: &mut WtTest| {
+        wt.client
+            .events()
+            .filter(|e| {
+                matches!(
+                    e,
+                    Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                        if *sid == session_id
+                )
+            })
+            .count()
+    };
+
+    // The first capsule emits exactly one Draining event.
+    wt_session.test_drain_session(now()).unwrap();
+    wt.exchange_packets();
+    assert_eq!(
+        count_draining(&mut wt),
+        1,
+        "first WT_DRAIN_SESSION should emit one Draining event"
+    );
+
+    // A second capsule on the still-open session is processed but deduplicated: no further event.
+    wt_session.test_drain_session(now()).unwrap();
+    wt.exchange_packets();
+    assert_eq!(
+        count_draining(&mut wt),
+        0,
+        "repeated WT_DRAIN_SESSION must not emit another Draining event"
+    );
+}
+
+/// A `WT_DRAIN_SESSION` capsule followed by the session-stream FIN both drains and closes the
+/// session: the client emits a `Draining` event and then a clean `SessionClosed` (error 0).
+///
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7>
+#[test]
+fn wt_drain_session_client_with_fin() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // Drain, then FIN the session stream. neqo flushes the capsule and the FIN as separate stream
+    // frames, so the client reads the capsule first (Draining) and the FIN next (clean close).
+    wt_session.test_drain_session(now()).unwrap();
+    wt.exchange_packets();
+    wt_session.stream_close_send(now()).unwrap();
+    wt.exchange_packets();
+
+    let events: Vec<Http3ClientEvent> = wt.client.events().collect();
+
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining { stream_id: sid })
+                if *sid == session_id
+        )),
+        "expected Draining event"
+    );
+
+    // The FIN closes the session cleanly (error 0), matching the handler's `State::Done` path.
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
+                stream_id: sid,
+                reason: CloseReason::Clean { error: 0, .. },
+                ..
+            }) if *sid == session_id
+        )),
+        "expected clean SessionClosed (error 0) after WT_DRAIN_SESSION with FIN"
+    );
+}
+
+/// When the client sends a `WT_DRAIN_SESSION` capsule, the server should
+/// receive a [`ServerEvent::Draining`] event and the session
+/// should remain open.
+///
+/// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-14.html#section-4.7>
+#[test]
+fn wt_drain_session_server() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    wt.client
+        .test_webtransport_drain_session(session_id, now())
+        .unwrap();
+    wt.exchange_packets();
+
+    let events: Vec<Http3ServerEvent> = wt.server.events().collect();
+
+    let has_draining = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::Draining { session })
+                if session.stream_id() == session_id
+        )
+    });
+    assert!(
+        has_draining,
+        "expected server Draining event after client WT_DRAIN_SESSION"
+    );
+
+    // WT_DRAIN_SESSION does not close the session — no SessionClosed event.
+    let has_closed = events.iter().any(|e| {
+        matches!(
+            e,
+            Http3ServerEvent::WebTransport(ServerEvent::SessionClosed { session, .. })
+                if session.stream_id() == session_id
+        )
+    });
+    assert!(
+        !has_closed,
+        "session must remain open after WT_DRAIN_SESSION"
+    );
+}
 /// A `CLOSE_WEBTRANSPORT_SESSION` capsule that does not fit in the control stream's
 /// current flow-control window must be buffered and sent once credit arrives, not
 /// discarded. Dropping it closes the session with a bare FIN, losing the
