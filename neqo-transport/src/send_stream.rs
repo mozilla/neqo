@@ -3576,6 +3576,36 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn write_frames_follows_stream_creation_order() {
+        let conn_fc = connection_fc(u64::MAX);
+        let conn_events = ConnectionEvents::default();
+        let mut streams = SendStreams::default();
+
+        // Stream IDs are allocated in creation order for ordinary HTTP streams. Insert them
+        // in that order and verify the scheduler preserves that order when priorities match.
+        for id in [StreamId::from(0), StreamId::from(4)] {
+            let mut stream =
+                SendStream::new(id, u64::MAX, Rc::clone(&conn_fc), conn_events.clone());
+            stream.send(&[1]).unwrap();
+            streams.insert(id, stream);
+        }
+
+        let mut tokens = recovery::Tokens::new();
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        streams.write_frames(
+            TransmissionPriority::default(),
+            &mut builder,
+            &mut tokens,
+            &mut FrameStats::default(),
+        );
+
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(as_stream_token(&tokens[0]).id, StreamId::from(0));
+        assert_eq!(as_stream_token(&tokens[1]).id, StreamId::from(4));
+    }
+
     const fn as_stream_token(t: &recovery::Token) -> &RecoveryToken {
         if let recovery::Token::Stream(StreamRecoveryToken::Stream(rt)) = &t {
             rt
