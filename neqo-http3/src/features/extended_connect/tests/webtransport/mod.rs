@@ -27,8 +27,13 @@ use crate::{
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
-// Leave space for large QUIC header.
-const DATAGRAM_SIZE: u64 = to_u64(Pmtud::default_plpmtu(DEFAULT_ADDR.ip())) - 40;
+// Leave space for QUIC short header (1 + CID up to 20 + PN 4) + AEAD (16) +
+// frame type (1) = 42 bytes, plus an extra 8-byte safety margin. That margin
+// ensures this value (used as the advertised max_datagram_frame_size) stays
+// below `Connection::max_datagram_size()`'s own MTU-based calculation, so
+// tests can assume the advertised limit is always the binding constraint
+// rather than depending on the exact overhead arithmetic there.
+const DATAGRAM_SIZE: u64 = to_u64(Pmtud::default_plpmtu(DEFAULT_ADDR.ip())) - 50;
 
 pub fn wt_default_parameters() -> Http3Parameters {
     Http3Parameters::default()
