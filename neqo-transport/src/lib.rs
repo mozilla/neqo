@@ -70,8 +70,8 @@ pub use self::{
         },
     },
     datagram_queue::{
-        DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueCapacity, DatagramQueueOutcome,
-        QueuedDatagram, default_max_age as default_datagram_max_age,
+        DatagramId, DatagramOutcome, DatagramQueueCapacity, DatagramQueueOutcome,
+        default_max_age as default_datagram_max_age,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,

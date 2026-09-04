@@ -43,6 +43,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
@@ -1083,6 +1084,13 @@ impl Connection {
 
         self.streams.cleanup_closed_streams();
 
+        // Not gated on anything else needing to happen: expiry is not a
+        // send, so stale datagrams must not wait on some other timer to
+        // also be due. `default_max_age` is a snapshot of the current RTT
+        // estimate here to avoid re-borrowing `self.paths` inside the loop.
+        let default_max_age = self.datagram_default_max_age();
+        _ = self.quic_datagrams.expire_datagrams(now, default_max_age);
+
         let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
 
@@ -1215,6 +1223,14 @@ impl Connection {
         if let Some(key_update_time) = self.crypto.states().update_time() {
             qtrace!("[{self}] Key update timer {key_update_time:?}");
             delays.push(key_update_time);
+        }
+
+        if let Some(dgram_time) = self
+            .quic_datagrams
+            .next_datagram_expiry(self.datagram_default_max_age())
+        {
+            qtrace!("[{self}] Datagram expiry timer {dgram_time:?}");
+            delays.push(dgram_time);
         }
 
         // `release_resumption_token_timer` is not considered here, because
@@ -4114,6 +4130,102 @@ impl Connection {
     /// [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
     pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<bool> {
         self.quic_datagrams.add_datagram(buf, id.into())
+    }
+
+    /// [`crate::datagram_queue::default_max_age`] evaluated against this
+    /// connection's current RTT estimate. Internal to `Connection` so
+    /// per-session datagram-queue callers below do not each need their own
+    /// route to the RTT estimate.
+    fn datagram_default_max_age(&self) -> Duration {
+        let min_rtt = self
+            .paths
+            .primary()
+            .map_or(Duration::ZERO, |p| p.borrow().rtt().minimum());
+        crate::datagram_queue::default_max_age(min_rtt)
+    }
+
+    /// Enqueue a datagram on `session`'s outgoing queue: byte-budgeted,
+    /// high-water-mark-tracked, and scheduled by `send_group_id`/
+    /// `send_order` and age. `session` is opaque to `Connection` — nothing
+    /// here requires it to be a real stream, only a stable per-caller tag
+    /// (in practice, a WebTransport session's control-stream `StreamId`).
+    /// `send_group_id` of `SendGroupId::new(0)` means ungrouped.
+    ///
+    /// Unlike [`Self::send_datagram`], this never fails: the *path* MTU is
+    /// applied later, at packet-build time, exactly like queued stream data.
+    ///
+    /// The peer's limit is not, though: the caller must not enqueue anything
+    /// longer than [`Self::remote_datagram_size`], or anything at all while
+    /// that is `0` (the peer sent no `max_datagram_frame_size` and so does
+    /// not support DATAGRAM frames at all). Neither is checked here or at
+    /// packet-build time, and sending either violates the peer's transport
+    /// parameters. Callers that want the check made for them should use
+    /// [`Self::send_datagram`], which has an error path for it.
+    pub fn enqueue_datagram(
+        &mut self,
+        session: StreamId,
+        data: Vec<u8>,
+        id: Option<DatagramId>,
+        now: Instant,
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> DatagramQueueOutcome {
+        self.quic_datagrams
+            .enqueue_datagram(session, data, id, now, send_group_id, send_order)
+    }
+
+    /// See `DatagramQueue::set_high_water_mark`.
+    pub fn set_datagram_high_water_mark(&mut self, session: StreamId, mark: Option<usize>) {
+        self.quic_datagrams
+            .set_datagram_high_water_mark(session, mark);
+    }
+
+    /// See `DatagramQueue::set_max_queued_bytes`.
+    pub fn set_datagram_max_queued_bytes(&mut self, session: StreamId, bytes: usize) {
+        self.quic_datagrams
+            .set_datagram_max_queued_bytes(session, bytes);
+    }
+
+    /// See `DatagramQueue::set_max_age`. Unlike the inner engine's own
+    /// method, does not take `default_max_age`: this connection's own RTT
+    /// estimate supplies it.
+    pub fn set_datagram_max_age(
+        &mut self,
+        session: StreamId,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) -> Vec<Option<DatagramId>> {
+        let default_max_age = self.datagram_default_max_age();
+        self.quic_datagrams
+            .set_datagram_max_age(session, max_age, now, default_max_age)
+    }
+
+    /// See `DatagramQueue::capacity`.
+    #[must_use]
+    pub fn datagram_queue_capacity(&self, session: StreamId) -> DatagramQueueCapacity {
+        self.quic_datagrams.datagram_queue_capacity(session)
+    }
+
+    /// Remove every datagram queued on `session`'s behalf, e.g. because the
+    /// session is closing. Returns one entry per removed datagram, `Some(id)`
+    /// for tracked ones, for the caller to report a `Dropped` outcome for.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> Vec<Option<DatagramId>> {
+        self.quic_datagrams.drop_session_datagrams(session)
+    }
+
+    /// The instant at which the oldest datagram queued on any session
+    /// crosses its effective max-age, if any session has one queued.
+    ///
+    /// `next_delay`/`process_timer` already act on this deadline on their
+    /// own schedule, so a caller driven purely by `process_output`'s
+    /// returned callback duration never needs this directly. It exists for
+    /// a caller that decides whether to invoke *other* per-connection
+    /// processing (e.g. a per-session outcome sweep) based on whether
+    /// anything is due right now, independently of that callback.
+    #[must_use]
+    pub fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.quic_datagrams
+            .next_datagram_expiry(self.datagram_default_max_age())
     }
 
     /// Return the PLMTU of the primary path.
