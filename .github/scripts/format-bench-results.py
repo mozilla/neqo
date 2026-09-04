@@ -4,10 +4,25 @@
 Reads benchmark output from stdin or a file and writes:
 - all-bench-results.md: All benchmark results as collapsibles
 - significant-results.md: Only results with regressions or improvements
+
+Given a `perf stat` output directory as a second argument, also writes:
+- perf-stat.md: Instructions per cycle per benchmark, for both sides
 """
 
 import re
 import sys
+from pathlib import Path
+from typing import NamedTuple
+
+# The machine's run-to-run IPC spread is around 0.5%, so flag several times that.
+SIGNIFICANT_IPC_PCT = 2.0
+
+# Only numeric values, so `<not counted>` and prose lines simply do not match.
+COUNTER_RE = re.compile(
+    r"^\s*(?P<value>[\d,]+(?:\.\d+)?)\s+(?:msec\s+)?(?P<event>[\w:/=.-]+)"
+)
+# Prefer criterion's own variant name over the sanitized file name.
+EXACT_RE = re.compile(r"counter stats for '.*--exact (?P<name>[^']+)'")
 
 
 def extract_middle_pct(line: str) -> str:
@@ -151,6 +166,128 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
     return all_results, significant_results
 
 
+def parse_stat(path: Path) -> tuple[str, dict[str, float]]:
+    """Return the benchmark name and counters from one `perf stat` output file."""
+    name = path.stem
+    counters: dict[str, float] = {}
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if match := EXACT_RE.search(line):
+            name = match.group("name")
+        elif match := COUNTER_RE.match(line):
+            counters[match.group("event")] = float(
+                match.group("value").replace(",", "")
+            )
+    return name, counters
+
+
+def ipc(counters: dict[str, float]) -> float | None:
+    """Instructions per cycle, both in user mode so the ratio is consistent."""
+    instructions = counters.get("instructions:u")
+    cycles = counters.get("cycles:u")
+    if not instructions or not cycles:
+        return None
+    return instructions / cycles
+
+
+def disturbance(*sides: dict[str, float]) -> str:
+    """Describe counters that should be zero, worst of the sides given."""
+    notes = []
+    for event, label in (
+        ("context-switches", "context switches"),
+        ("cpu-migrations", "CPU migrations"),
+        ("major-faults", "major faults"),
+    ):
+        worst = max(side.get(event, 0) for side in sides)
+        if worst > 0:
+            notes.append(f"{int(worst)} {label}")
+    return f":warning: {', '.join(notes)}" if notes else ""
+
+
+class StatRow(NamedTuple):
+    """One benchmark's IPC before and after, as a percentage change."""
+
+    name: str
+    before: float
+    after: float
+    delta: float
+    note: str
+
+    @property
+    def significant(self) -> bool:
+        return abs(self.delta) >= SIGNIFICANT_IPC_PCT
+
+    def markdown(self) -> str:
+        bold = "**" if self.significant else ""
+        return (
+            f"| {self.name} | {self.before:.2f} | {self.after:.2f} "
+            f"| {bold}{self.delta:+.1f}%{bold} | {self.note} |"
+        )
+
+
+def stat_rows(stats_dir: Path) -> list[StatRow]:
+    """Compare each benchmark's `perf stat` output, largest change first."""
+    rows = []
+    for after_file in sorted((stats_dir / "neqo").glob("*.txt")):
+        before_file = stats_dir / "neqo-baseline" / after_file.name
+        if not before_file.is_file():
+            continue
+        name, after_counters = parse_stat(after_file)
+        _, before_counters = parse_stat(before_file)
+        before, after = ipc(before_counters), ipc(after_counters)
+        if before is None or after is None:
+            continue
+        rows.append(
+            StatRow(
+                name,
+                before,
+                after,
+                100 * (after - before) / before,
+                disturbance(before_counters, after_counters),
+            )
+        )
+    return sorted(rows, key=lambda row: -abs(row.delta))
+
+
+def write_stat_markdown(stats_dir: Path) -> None:
+    """Write perf-stat.md, highlighting the benchmarks that moved."""
+    rows = stat_rows(stats_dir)
+    if not rows:
+        if any(stats_dir.rglob("*.txt")):
+            print(f"::warning::no IPC rows parsed from {stats_dir}", file=sys.stderr)
+        return
+
+    def table(rows: list[StatRow]) -> list[str]:
+        return [
+            "| Benchmark | IPC before | IPC after | ΔIPC | |",
+            "|:---|---:|---:|---:|:---|",
+            *(row.markdown() for row in rows),
+        ]
+
+    significant = [row for row in rows if row.significant]
+    lines = [
+        "### Instructions per cycle",
+        "",
+        (
+            "Lower means more stalling for the same work. Counter totals are not "
+            "comparable between runs, because criterion chooses its own iteration "
+            "count, so only this ratio is."
+        ),
+        "",
+        *(
+            table(significant)
+            if significant
+            else ["No significant differences in instructions per cycle."]
+        ),
+        "",
+        "<details><summary>All results</summary>",
+        "",
+        *table(rows),
+        "",
+        "</details>",
+    ]
+    Path("perf-stat.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     """Parse benchmark results and write Markdown output files."""
     # Read from file argument or stdin
@@ -159,6 +296,9 @@ def main() -> None:
             all_results, significant_results = process_input(f)
     else:
         all_results, significant_results = process_input(sys.stdin)
+
+    if len(sys.argv) > 2:
+        write_stat_markdown(Path(sys.argv[2]))
 
     with open("all-bench-results.md", "w", encoding="utf-8") as f:
         f.write("\n".join(all_results))
