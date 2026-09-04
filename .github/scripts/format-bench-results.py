@@ -23,6 +23,8 @@ COUNTER_RE = re.compile(
 )
 # Prefer criterion's own variant name over the sanitized file name.
 EXACT_RE = re.compile(r"counter stats for '.*--exact (?P<name>[^']+)'")
+# perf appends an enable fraction when it time-shares counters, making them estimates.
+MULTIPLEX_RE = re.compile(r"\((\d+\.\d+)%\)\s*$")
 
 
 def extract_middle_pct(line: str) -> str:
@@ -177,6 +179,8 @@ def parse_stat(path: Path) -> tuple[str, dict[str, float]]:
             counters[match.group("event")] = float(
                 match.group("value").replace(",", "")
             )
+            if scaled := MULTIPLEX_RE.search(line):
+                counters[match.group("event") + "%"] = float(scaled.group(1))
     return name, counters
 
 
@@ -200,6 +204,8 @@ def disturbance(*sides: dict[str, float]) -> str:
         worst = max(side.get(event, 0) for side in sides)
         if worst > 0:
             notes.append(f"{int(worst)} {label}")
+    if any(v < 100 for side in sides for k, v in side.items() if k.endswith("%")):
+        notes.append("counters multiplexed, so these are estimates")
     return f":warning: {', '.join(notes)}" if notes else ""
 
 
@@ -250,6 +256,9 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
 
 def write_stat_markdown(stats_dir: Path) -> None:
     """Write perf-stat.md, highlighting the benchmarks that moved."""
+    # The self-hosted runner keeps its workspace, so drop any earlier run's table first.
+    out = Path("perf-stat.md")
+    out.unlink(missing_ok=True)
     rows = stat_rows(stats_dir)
     if not rows:
         if any(stats_dir.rglob("*.txt")):
@@ -270,7 +279,8 @@ def write_stat_markdown(stats_dir: Path) -> None:
         (
             "Lower means more stalling for the same work. Counter totals are not "
             "comparable between runs, because criterion chooses its own iteration "
-            "count, so only this ratio is."
+            "count, so only this ratio is. A :warning: marks a run with signs of "
+            "interference; treat its IPC with suspicion."
         ),
         "",
         *(
@@ -285,7 +295,7 @@ def write_stat_markdown(stats_dir: Path) -> None:
         "",
         "</details>",
     ]
-    Path("perf-stat.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:

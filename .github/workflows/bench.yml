@@ -158,6 +158,8 @@ jobs:
             local subcmd="$1" dir="$2" out ext="$4"
             out="$3/$(basename "$dir")"
             local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
+            # Start empty, so a removed benchmark leaves no stale file to compare against.
+            sudo rm -rf "$out"
             mkdir -p "$out"
             for BENCH in "$dir"/!(neqo-client|neqo-server); do
               BIN_NAME=$(basename "$BENCH")
@@ -174,9 +176,12 @@ jobs:
               fi
             done
           }
+          # Both `stat` passes back to back, so the compared sides are adjacent in time.
+          for SIDE in ../dist/neqo ../dist/neqo-baseline; do
+            perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt
+          done
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
             perf_dir "$PERF_OPT" "$SIDE" ../profiles perf
-            perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt
           done
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../profiles ../stats
@@ -229,7 +234,7 @@ jobs:
               cat perf-stat.md
             fi
           } > results.md
-          rm -f all-bench-results.md significant-results.md
+          rm -f all-bench-results.md significant-results.md perf-stat.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
@@ -282,4 +287,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries dist profiles comment-data || true
+          rm -r -- binaries dist profiles stats comment-data || true
