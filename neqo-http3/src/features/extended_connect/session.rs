@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -13,8 +11,12 @@ use std::{
     str::from_utf8,
     time::Instant,
 };
+#[cfg(test)]
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     AppError, Connection, DatagramQueueOutcome, DatagramTracking, StreamId,
     streams::{SendGroupId, SendOrder},
@@ -507,6 +509,24 @@ impl Session {
         mark: Option<NonZeroUsize>,
     ) {
         conn.set_datagram_high_water_mark(self.id, mark);
+    }
+
+    /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
+    #[cfg(test)]
+    pub(crate) fn set_datagram_max_age(
+        &self,
+        conn: &mut Connection,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) {
+        conn.set_datagram_max_age(self.id, max_age, now);
+    }
+
+    /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn datagram_queue_capacity(&self, conn: &Connection) -> DatagramQueueCapacity {
+        conn.datagram_queue_capacity(self.id)
     }
 
     /// Expire stale queued datagrams, counting them against this session's
