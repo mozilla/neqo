@@ -124,6 +124,7 @@ fn datagram_larger_than_peers_limit_is_rejected_synchronously() {
         Err(crate::Error::Transport(neqo_transport::Error::TooMuchData)),
         "an oversized datagram must fail before ever reaching the queue"
     );
+    assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 0);
 }
 
 /// The other side of the boundary: a datagram of exactly `max_datagram_size`
@@ -142,6 +143,7 @@ fn datagram_of_exactly_the_peers_limit_is_accepted() {
         wt_session.send_datagram(&largest, Some(1), now(), SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
     );
+    assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
 }
 
 #[test]
