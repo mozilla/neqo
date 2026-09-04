@@ -1699,6 +1699,8 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    // RFC 9114, Section 7.2.4.2 covers omitted non-default settings.
+                    HSettingType::EnableConnect,
                     // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
                     // requires a client that stored SETTINGS_H3_DATAGRAM with its
                     // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR

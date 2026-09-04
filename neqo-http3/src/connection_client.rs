@@ -4277,6 +4277,26 @@ mod tests {
     }
 
     #[test]
+    fn zero_rtt_new_server_setting_connect_smaller() {
+        // The server advertised SETTINGS_ENABLE_CONNECT_PROTOCOL=1 before, and now withholds it.
+        zero_rtt_change_settings(
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+                HSetting::new(HSettingType::EnableConnect, 1),
+            ],
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+            ],
+            &Http3State::Closing(CloseReason::Application(265)),
+            ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+        );
+    }
+
+    #[test]
     fn zero_rtt_max_table_size_first_omitted() {
         // send server original settings without MaxTableCapacity
         // send new server setting with MaxTableCapacity
