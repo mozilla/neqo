@@ -118,7 +118,8 @@ jobs:
         env:
           BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          bench_exec() { sudo nice -n -20 env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          # `LC_ALL=C`, as perf formats counters for the locale, decimal separator included.
+          bench_exec() { sudo nice -n -20 env "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
           filter_cset() { grep -v '^cset' || test $? = 1; }
           shopt -s extglob nullglob
 
@@ -154,9 +155,10 @@ jobs:
               bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
             fi
           done
-          # Run `perf $1` over every benchmark in $2, writing $4 files under $3/<side>/.
+          # Run `perf $1` over every benchmark in $2, writing $4 files under $3/<side>/,
+          # profiling each variant for $5 seconds.
           perf_dir() {
-            local subcmd="$1" dir="$2" out ext="$4"
+            local subcmd="$1" dir="$2" out ext="$4" secs="$5"
             out="$3/$(basename "$dir")"
             local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
             mkdir -p "$out"
@@ -167,20 +169,21 @@ jobs:
                 while IFS= read -r VARIANT; do
                   SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
                   # shellcheck disable=SC2086
-                  bench_exec perf -- $subcmd -o "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time 5 --exact "$VARIANT" | filter_cset
+                  bench_exec perf -- $subcmd -o "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" --exact "$VARIANT" | filter_cset
                 done <<< "$VARIANTS"
               else
                 # shellcheck disable=SC2086
-                bench_exec perf -- $subcmd -o "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time 5 | filter_cset
+                bench_exec perf -- $subcmd -o "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" | filter_cset
               fi
             done
           }
           # `stat` for both sides first, so `record`'s overhead cannot skew the IPC comparison.
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
-            perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt
+            perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt 5
           done
+          # Longer, because the flamegraphs need samples, not just an exact ratio.
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
-            perf_dir "$PERF_OPT" "$SIDE" ../profiles perf
+            perf_dir "$PERF_OPT" "$SIDE" ../profiles perf 15
           done
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
           sudo chown -R "$(id -u)" target/criterion ../profiles ../stats
@@ -193,7 +196,7 @@ jobs:
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
-            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
+            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
             # One self-cost histogram per event, so IPC can be read off per symbol.
             perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
               -F overhead,period,symbol,dso > "${f%.perf}.report.txt"

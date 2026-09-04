@@ -14,14 +14,9 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-# Measured with identical code on both sides: IPC differed by at most 1.3%, and a
-# shielded CPU still context-switched about 3 times a second.
-SIGNIFICANT_IPC_PCT = 2.0
-MAX_SWITCHES_PER_SEC = 10.0
-
-# Only numeric values, so `<not counted>` and prose lines simply do not match.
+# Unseparated numbers only, so a locale-formatted value cannot parse to the wrong one.
 COUNTER_RE = re.compile(
-    r"^\s*(?P<value>[\d,]+(?:\.\d+)?)\s+(?:msec\s+)?(?P<event>[\w:/=.-]+)"
+    r"^\s*(?P<value>\d+(?:\.\d+)?)\s+(?:msec\s+)?(?P<event>[\w:/=.-]+)"
 )
 # Prefer criterion's own variant name over the sanitized file name.
 EXACT_RE = re.compile(r"counter stats for '.*--exact (?P<name>[^']+)'")
@@ -184,13 +179,6 @@ class Stat(NamedTuple):
         cycles = self.counters.get("cycles:u")
         return instructions / cycles if instructions and cycles else None
 
-    @property
-    def switches_per_sec(self) -> float:
-        """Context switches per second, `task-clock` being in milliseconds."""
-        clock = self.counters.get("task-clock")
-        switches = self.counters.get("context-switches", 0.0)
-        return 1000 * switches / clock if clock else 0.0
-
 
 def parse_stat(path: Path) -> Stat:
     """Read one `perf stat` output file."""
@@ -201,9 +189,7 @@ def parse_stat(path: Path) -> Stat:
         if match := EXACT_RE.search(line):
             name = match.group("name")
         elif match := COUNTER_RE.match(line):
-            counters[match.group("event")] = float(
-                match.group("value").replace(",", "")
-            )
+            counters[match.group("event")] = float(match.group("value"))
             if scaled := MULTIPLEX_RE.search(line):
                 multiplexed |= float(scaled.group(1)) < 100
     return Stat(name, counters, multiplexed)
@@ -218,8 +204,6 @@ def disturbance(*sides: Stat) -> str:
     ):
         if worst := max(side.counters.get(event, 0.0) for side in sides):
             notes.append(f"{worst:.0f} {label}{'s' if worst > 1 else ''}")
-    if (rate := max(side.switches_per_sec for side in sides)) > MAX_SWITCHES_PER_SEC:
-        notes.append(f"{rate:.0f} context switches/s")
     if any(side.multiplexed for side in sides):
         notes.append("counters multiplexed, so these are estimates")
     return f":warning: {', '.join(notes)}" if notes else ""
@@ -234,15 +218,10 @@ class StatRow(NamedTuple):
     delta: float
     note: str
 
-    @property
-    def significant(self) -> bool:
-        return abs(self.delta) >= SIGNIFICANT_IPC_PCT
-
     def markdown(self) -> str:
-        bold = "**" if self.significant else ""
         return (
             f"| {self.name} | {self.before:.2f} | {self.after:.2f} "
-            f"| {bold}{self.delta:+.1f}%{bold} | {self.note} |"
+            f"| {self.delta:+.1f}% | {self.note} |"
         )
 
 
@@ -252,6 +231,7 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
     for after_file in sorted((stats_dir / "neqo").glob("*.txt")):
         before_file = stats_dir / "neqo-baseline" / after_file.name
         if not before_file.is_file():
+            print(f"::notice::no baseline `perf stat` output for {after_file.name}")
             continue
         after_stat, before_stat = parse_stat(after_file), parse_stat(before_file)
         before, after = before_stat.ipc, after_stat.ipc
@@ -271,7 +251,7 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
 
 
 def write_stat_markdown(stats_dir: Path) -> None:
-    """Write perf-stat.md, highlighting the benchmarks that moved."""
+    """Write perf-stat.md, largest change first."""
     # The runner keeps its workspace, so drop an earlier run's table.
     out = Path("perf-stat.md")
     out.unlink(missing_ok=True)
@@ -284,35 +264,20 @@ def write_stat_markdown(stats_dir: Path) -> None:
             print(f"::warning::no IPC rows parsed from {stats_dir}")
         return
 
-    def table(rows: list[StatRow]) -> list[str]:
-        return [
-            "| Benchmark | IPC before | IPC after | ΔIPC | |",
-            "|:---|---:|---:|---:|:---|",
-            *(row.markdown() for row in rows),
-        ]
-
-    significant = [row for row in rows if row.significant]
     lines = [
         "### Instructions per cycle",
         "",
         (
             "A diagnostic, not a verdict: read it beside criterion's timing above. "
             "Removing work shifts the instruction mix, so a real speedup can show "
-            "lower IPC. Totals are not comparable across runs, only this ratio. A "
+            "lower IPC. Totals are not comparable across runs, only this ratio, and "
+            "they include criterion's batch setup, which its timing excludes. A "
             ":warning: marks signs of interference."
         ),
         "",
-        *(
-            table(significant)
-            if significant
-            else ["No significant differences in instructions per cycle."]
-        ),
-        "",
-        "<details><summary>All benchmarks</summary>",
-        "",
-        *table(rows),
-        "",
-        "</details>",
+        "| Benchmark | IPC before | IPC after | ΔIPC | |",
+        "|:---|---:|---:|---:|:---|",
+        *(row.markdown() for row in rows),
     ]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

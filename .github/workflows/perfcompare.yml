@@ -196,7 +196,10 @@ jobs:
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
-            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
+            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
+            # One self-cost histogram per event, so IPC can be read off per symbol.
+            perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
+              -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
