@@ -1094,7 +1094,7 @@ impl NewConnectionIds {
 }
 
 impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         for i in 0..self.count {
             let seqno = Self::SEQNO + i;
             let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
@@ -1187,7 +1187,7 @@ fn retire_cid_queue_bounded() {
 struct RetireUnissued(u64);
 
 impl crate::connection::test_internal::FrameWriter for RetireUnissued {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         builder
             .encode_varint(FrameType::RetireConnectionId)
             .encode_varint(self.0);
@@ -1325,7 +1325,7 @@ fn retire_prior_to_migration_success() {
 struct GarbageWriter {}
 
 impl crate::connection::test_internal::FrameWriter for GarbageWriter {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);
     }

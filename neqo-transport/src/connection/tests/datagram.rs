@@ -48,7 +48,7 @@ struct InsertDatagram<'a> {
 }
 
 impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         builder.encode_varint(FrameType::Datagram);
         builder.encode(self.data);
     }
@@ -57,7 +57,7 @@ impl crate::connection::test_internal::FrameWriter for InsertDatagram<'_> {
 struct InsertEmptyDatagram;
 
 impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+    fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
         builder.encode_varint(FrameType::DatagramWithLen);
         builder.encode_vvec(&[]);
     }
@@ -570,7 +570,7 @@ fn datagram_overfill(client: &mut Connection, server: &mut Connection, gap: usiz
     /// This `FrameWriter` should not be invoked.
     struct PanickingFrameWriter {}
     impl crate::connection::test_internal::FrameWriter for PanickingFrameWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
             panic!(
                 "builder invoked with {} bytes remaining",
                 builder.remaining()
@@ -631,7 +631,7 @@ fn datagram_fill_gap4() {
         called: Rc<RefCell<bool>>,
     }
     impl crate::connection::test_internal::FrameWriter for TrackingFrameWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
             assert_eq!(builder.remaining(), 2);
             *self.called.borrow_mut() = true;
         }

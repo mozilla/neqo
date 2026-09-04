@@ -13,6 +13,11 @@ env:
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
   PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
+  # DIAGNOSTIC ONLY, do not merge. Which pipeline slot the extra cycles land in.
+  PERF_TOPDOWN_OPT: stat --no-big-num --topdown
+  # Whether the front end serves uops from the cache or falls back to legacy decode, which a
+  # function grown past the uop cache would do without ever missing L1i.
+  PERF_DSB_OPT: stat --no-big-num -e instructions:u,idq.dsb_uops,idq.mite_uops
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
@@ -132,7 +137,7 @@ jobs:
             sudo chown -R --no-dereference "$(id -u)" target
           fi
           # Start empty, so a removed benchmark leaves no stale file to compare against.
-          rm -rf target/criterion ../profiles ../stats ../results.txt ../results-baseline.txt
+          rm -rf target/criterion ../profiles ../stats ../topdown ../dsb ../results.txt ../results-baseline.txt
           # Run baseline and PR builds interleaved.
           sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
           variants() { "$1" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true; }
@@ -181,12 +186,17 @@ jobs:
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
             perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt 5
           done
+          # DIAGNOSTIC ONLY. Separate passes: --topdown claims its own counters.
+          for SIDE in ../dist/neqo ../dist/neqo-baseline; do
+            perf_dir "$PERF_TOPDOWN_OPT" "$SIDE" ../topdown txt 5
+            perf_dir "$PERF_DSB_OPT" "$SIDE" ../dsb txt 5
+          done
           # Longer, because the flamegraphs need samples, not just an exact ratio.
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
             perf_dir "$PERF_OPT" "$SIDE" ../profiles perf 15
           done
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
-          sudo chown -R "$(id -u)" target/criterion ../profiles ../stats
+          sudo chown -R "$(id -u)" target/criterion ../profiles ../stats ../topdown ../dsb
 
       # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
@@ -262,6 +272,8 @@ jobs:
             profiles/*/*.svg
             profiles/*/*.report.txt
             stats/*/*.txt
+            topdown/*/*.txt
+            dsb/*/*.txt
             *.txt
             *.md
             event.json
@@ -291,4 +303,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- dist profiles stats comment-data || true
+          rm -r -- dist profiles stats topdown dsb comment-data || true

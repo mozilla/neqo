@@ -15,20 +15,29 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
-    slice::{self, ChunksMut},
+    slice::ChunksMut,
 };
 
 use log::{Level, log_enabled};
-use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
+use neqo_common::{Buffer, Datagram, Tos, datagram, qdebug, qtrace};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock;
 
-/// Receive buffer size
+/// Receive buffer size, per slot in [`RecvBuf`].
 ///
 /// Fits a maximum size UDP datagram, or, on platforms with segmentation
 /// offloading, multiple smaller datagrams.
-const RECV_BUF_SIZE: usize = u16::MAX as usize;
+///
+/// Rounded up to a page-aligned stride: where [`NUM_BUFS`] exceeds one, 65535
+/// doubles the pages a datagram makes resident. The payload maximum is 65527.
+const RECV_BUF_SIZE: usize = u16::MAX as usize + 1;
+
+/// Send buffer size
+///
+/// Has to hold the largest PMTUD probe, which reaches the top of
+/// `neqo-transport`'s search table, so it cannot be shrunk to an MTU.
+pub const SEND_BUF_SIZE: usize = u16::MAX as usize;
 
 /// The number of buffers to pass to the OS on [`Socket::recv`].
 ///
@@ -49,18 +58,22 @@ const NUM_BUFS: usize = 1;
 const NUM_BUFS: usize = 16;
 
 /// A UDP receive buffer.
-pub struct RecvBuf(Vec<Vec<u8>>);
+///
+/// One contiguous zeroed allocation of `NUM_BUFS` slots. Where the allocator
+/// serves that as zero-filled pages, resident memory tracks what is received.
+pub struct RecvBuf(Box<[u8]>);
 
 impl Default for RecvBuf {
     fn default() -> Self {
-        Self(vec![vec![0; RECV_BUF_SIZE]; NUM_BUFS])
+        // `into_boxed_slice` does not reallocate, as capacity matches length.
+        Self(vec![0; RECV_BUF_SIZE * NUM_BUFS].into_boxed_slice())
     }
 }
 
-pub fn send_inner(
+pub fn send_inner<B: Buffer>(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &datagram::Batch,
+    d: &datagram::Batch<B>,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
@@ -151,7 +164,7 @@ pub fn recv_inner<'a, S: SocketRef>(
 ) -> Result<DatagramIter<'a>, io::Error> {
     let mut metas = [RecvMeta::default(); NUM_BUFS];
     let mut iovs: [IoSliceMut; NUM_BUFS] = {
-        let mut bufs = recv_buf.0.iter_mut().map(|b| IoSliceMut::new(b));
+        let mut bufs = recv_buf.0.chunks_mut(RECV_BUF_SIZE).map(IoSliceMut::new);
         array::from_fn(|_| bufs.next().expect("NUM_BUFS elements"))
     };
 
@@ -175,7 +188,10 @@ pub fn recv_inner<'a, S: SocketRef>(
 
     Ok(DatagramIter {
         current_buffer: None,
-        remaining_buffers: metas.into_iter().zip(recv_buf.0.iter_mut()).take(n),
+        remaining_buffers: metas
+            .into_iter()
+            .zip(recv_buf.0.chunks_mut(RECV_BUF_SIZE))
+            .take(n),
         local_address,
     })
 }
@@ -187,7 +203,7 @@ pub struct DatagramIter<'a> {
     /// Remaining buffers, each containing zero or more datagrams, one
     /// [`RecvMeta`] per buffer.
     remaining_buffers:
-        iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, slice::IterMut<'a, Vec<u8>>>>,
+        iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, ChunksMut<'a, u8>>>,
     /// The local address of the UDP socket used to receive the datagrams.
     local_address: SocketAddr,
 }
@@ -269,7 +285,7 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`datagram::Batch`] on the given [`Socket`].
-    pub fn send(&self, d: &datagram::Batch) -> io::Result<()> {
+    pub fn send<B: Buffer>(&self, d: &datagram::Batch<B>) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
@@ -341,7 +357,7 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram: datagram::Batch = Datagram::new(
+        let datagram: datagram::Batch<Vec<u8>> = Datagram::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
