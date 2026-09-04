@@ -14,8 +14,11 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-# The machine's run-to-run IPC spread is around 0.5%, so flag several times that.
+# Measured on the bencher over 13 benchmarks with identical code on both sides:
+# the largest run-to-run IPC difference was 1.3%, the mean 0.4%.
 SIGNIFICANT_IPC_PCT = 2.0
+# Same run: a shielded CPU still yields to kernel threads, at up to about 3 switches/s.
+MAX_SWITCHES_PER_SEC = 10.0
 
 # Only numeric values, so `<not counted>` and prose lines simply do not match.
 COUNTER_RE = re.compile(
@@ -194,16 +197,25 @@ def ipc(counters: dict[str, float]) -> float | None:
 
 
 def disturbance(*sides: dict[str, float]) -> str:
-    """Describe counters that should be zero, worst of the sides given."""
+    """Describe counters that indicate a disturbed run, worst of the sides given."""
     notes = []
     for event, label in (
-        ("context-switches", "context switches"),
         ("cpu-migrations", "CPU migrations"),
         ("major-faults", "major faults"),
     ):
         worst = max(side.get(event, 0) for side in sides)
         if worst > 0:
             notes.append(f"{int(worst)} {label}")
+    rate = max(
+        (
+            1000 * side["context-switches"] / side["task-clock"]
+            for side in sides
+            if side.get("task-clock") and side.get("context-switches")
+        ),
+        default=0.0,
+    )
+    if rate > MAX_SWITCHES_PER_SEC:
+        notes.append(f"{rate:.0f} context switches/s")
     if any(v < 100 for side in sides for k, v in side.items() if k.endswith("%")):
         notes.append("counters multiplexed, so these are estimates")
     return f":warning: {', '.join(notes)}" if notes else ""
@@ -241,6 +253,7 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
         _, before_counters = parse_stat(before_file)
         before, after = ipc(before_counters), ipc(after_counters)
         if before is None or after is None:
+            print(f"::warning::no IPC counters in {after_file.name}")
             continue
         rows.append(
             StatRow(
@@ -261,7 +274,10 @@ def write_stat_markdown(stats_dir: Path) -> None:
     out.unlink(missing_ok=True)
     rows = stat_rows(stats_dir)
     if not rows:
-        if any(stats_dir.rglob("*.txt")):
+        # `rglob` on a missing directory is empty, not an error, so check separately.
+        if not stats_dir.is_dir():
+            print(f"::warning::{stats_dir} is not a directory")
+        elif any(stats_dir.rglob("*.txt")):
             print(f"::warning::no IPC rows parsed from {stats_dir}")
         return
 
@@ -277,10 +293,10 @@ def write_stat_markdown(stats_dir: Path) -> None:
         "### Instructions per cycle",
         "",
         (
-            "Lower means more stalling for the same work. Counter totals are not "
-            "comparable between runs, because criterion chooses its own iteration "
-            "count, so only this ratio is. A :warning: marks a run with signs of "
-            "interference; treat its IPC with suspicion."
+            "A diagnostic, not a verdict: read it beside criterion's timing above. "
+            "Removing work shifts the instruction mix, so a real speedup can show "
+            "lower IPC. Totals are not comparable across runs, only this ratio. A "
+            ":warning: marks signs of interference."
         ),
         "",
         *(
@@ -289,7 +305,7 @@ def write_stat_markdown(stats_dir: Path) -> None:
             else ["No significant differences in instructions per cycle."]
         ),
         "",
-        "<details><summary>All results</summary>",
+        "<details><summary>All benchmarks</summary>",
         "",
         *table(rows),
         "",

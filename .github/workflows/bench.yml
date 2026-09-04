@@ -132,7 +132,7 @@ jobs:
             sudo chown -R --no-dereference "$(id -u)" target
           fi
           # Start empty, so a removed benchmark leaves no stale file to compare against.
-          rm -rf target/criterion ../profiles ../stats
+          rm -rf target/criterion ../profiles ../stats ../results.txt ../results-baseline.txt
           # Run baseline and PR builds interleaved.
           sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
           variants() { "$1" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true; }
@@ -177,7 +177,7 @@ jobs:
               fi
             done
           }
-          # Both `stat` passes back to back, so the compared sides are adjacent in time.
+          # `stat` for both sides first, so `record`'s overhead cannot skew the IPC comparison.
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
             perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt
           done
@@ -197,7 +197,8 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
             # One self-cost histogram per event, so IPC can be read off per symbol.
-            perf report -i "$f" --stdio --no-children --percent-limit 1 > "${f%.perf}.report.txt"
+            perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
+              -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
