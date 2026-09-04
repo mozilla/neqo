@@ -1269,6 +1269,9 @@ impl Connection {
     /// It also has to hold one maximum size datagram, which is a PMTUD probe
     /// rather than the current PLPMTU, so `neqo_udp::SEND_BUF_SIZE` bytes.
     #[must_use = "OutputBatch of the process_multiple_output function must be handled"]
+    // Keeps this out of `process`, which otherwise grows past the inlining threshold and stops
+    // being inlined into its own callers. See the discussion on #2747.
+    #[inline(never)]
     pub fn process_multiple_output<B: Buffer>(
         &mut self,
         now: Instant,
