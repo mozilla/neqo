@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(test)]
+use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Display, Formatter},
@@ -14,8 +16,8 @@ use std::{
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
 use neqo_transport::{
-    Connection, DatagramTracking, StreamId, StreamType, recv_stream, send_stream,
-    server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
+    send_stream, server::ConnectionRef, streams::SendOrder,
 };
 
 use crate::{
@@ -186,8 +188,10 @@ pub trait ClientSession {
     ///
     /// # Returns
     ///
-    /// `Ok(false)` when the outgoing QUIC datagram queue is full; the sender
-    /// should then wait for an [`OutgoingDatagramSpaceAvailable`] event.
+    /// The queue's backpressure signal (see [`DatagramQueueOutcome`]); the
+    /// sender should wait for an [`OutgoingDatagramSpaceAvailable`] event
+    /// before sending more once the outcome is no longer
+    /// [`DatagramQueueOutcome::Ok`].
     ///
     /// # Errors
     ///
@@ -202,7 +206,9 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool>;
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome>;
 }
 
 impl ClientSession for Http3Client {
@@ -344,10 +350,20 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool> {
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
         qtrace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
-        handler.webtransport_send_datagram(session_id, conn, buf, id, now)
+        handler.webtransport_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -417,7 +433,10 @@ trait Handler {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats>;
 
-    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors ClientSession::webtransport_send_datagram plus session_id/conn"
+    )]
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -425,7 +444,9 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool>;
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome>;
 }
 
 impl Handler for Http3Connection {
@@ -506,8 +527,18 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
+        self.extended_connect_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -537,7 +568,10 @@ pub(crate) trait ServerHandler {
         stream_type: StreamType,
     ) -> Res<StreamId>;
 
-    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors ClientSession::webtransport_send_datagram plus session_id/conn"
+    )]
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -545,7 +579,9 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool>;
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome>;
 }
 
 impl ServerHandler for Http3ServerHandler {
@@ -600,10 +636,19 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool> {
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
         self.mark_needs_processing();
-        self.base_handler_mut()
-            .webtransport_send_datagram(session_id, conn, buf, id, now)
+        self.base_handler_mut().webtransport_send_datagram(
+            session_id,
+            conn,
+            buf,
+            id,
+            now,
+            send_group_id,
+            send_order,
+        )
     }
 }
 
@@ -714,8 +759,10 @@ impl ServerSession {
     ///
     /// # Returns
     ///
-    /// `Ok(false)` when the outgoing QUIC datagram queue is full; the sender
-    /// should then wait for an [`OutgoingDatagramSpaceAvailable`] event.
+    /// The queue's backpressure signal (see [`DatagramQueueOutcome`]); the
+    /// sender should wait for an [`OutgoingDatagramSpaceAvailable`] event
+    /// before sending more once the outcome is no longer
+    /// [`DatagramQueueOutcome::Ok`].
     ///
     /// # Errors
     ///
@@ -729,7 +776,9 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool> {
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -740,7 +789,27 @@ impl ServerSession {
                 buf,
                 id,
                 now,
+                send_group_id,
+                send_order,
             )
+    }
+
+    /// Set the outgoing-datagram queue's high water mark for this session.
+    ///
+    /// Test-only: not yet exposed to a production caller.
+    #[cfg(test)]
+    pub(crate) fn set_datagram_high_water_mark(&self, mark: Option<NonZeroUsize>) {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_set_datagram_high_water_mark(
+                session_id,
+                &mut self.stream_handler.conn.borrow_mut(),
+                mark,
+            )
+            .expect("test session must exist");
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
