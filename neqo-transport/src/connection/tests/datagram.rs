@@ -917,8 +917,6 @@ fn datagram_fill_gap4() {
     assert!(*called.borrow());
 }
 
-// ── Per-session queues (`Connection::enqueue_datagram` et al.) ─────────────
-
 #[test]
 fn per_session_queues_round_robin_across_sessions() {
     let (mut client, mut server) = connect_datagram();
@@ -980,6 +978,73 @@ fn per_session_queues_round_robin_across_sessions() {
         payloads,
         vec![vec![b'A'; 4], vec![b'B'; 4], vec![b'A'; 4], vec![b'B'; 4]],
         "sessions must be served round-robin, not one drained before the other starts"
+    );
+}
+
+#[test]
+fn expire_datagrams_expires_stale_entries_across_every_session() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+
+    let session_a = StreamId::new(0);
+    let session_b = StreamId::new(4);
+    client.set_datagram_max_age(session_a, Some(Duration::from_millis(5)), now);
+    client.set_datagram_max_age(session_b, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session_a, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    _ = client.enqueue_datagram(session_b, vec![2], Some(2), now, SendGroupId::new(0), 0);
+
+    let later = now + Duration::from_millis(10);
+    let mut expired = client.expire_datagrams(later);
+    expired.sort_unstable();
+    assert_eq!(expired, vec![Some(1), Some(2)]);
+    assert_eq!(
+        client.datagram_queue_capacity(session_a).queued_datagrams,
+        0
+    );
+    assert_eq!(
+        client.datagram_queue_capacity(session_b).queued_datagrams,
+        0
+    );
+}
+
+#[test]
+fn expire_session_datagrams_leaves_other_sessions_alone() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+
+    let session_a = StreamId::new(0);
+    let session_b = StreamId::new(4);
+    client.set_datagram_max_age(session_a, Some(Duration::from_millis(5)), now);
+    client.set_datagram_max_age(session_b, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session_a, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    _ = client.enqueue_datagram(session_b, vec![2], Some(2), now, SendGroupId::new(0), 0);
+
+    let later = now + Duration::from_millis(10);
+    assert_eq!(
+        client.expire_session_datagrams(session_a, later),
+        vec![Some(1)],
+        "a session-scoped sweep must not report another session's datagrams"
+    );
+    assert_eq!(
+        client.datagram_queue_capacity(session_b).queued_datagrams,
+        1,
+        "nor expire them"
+    );
+    assert_eq!(
+        client.expire_session_datagrams(session_b, later),
+        vec![Some(2)]
+    );
+}
+
+#[test]
+fn expire_session_datagrams_on_an_unknown_session_is_empty() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+
+    assert!(
+        client
+            .expire_session_datagrams(StreamId::new(8), now)
+            .is_empty()
     );
 }
 
