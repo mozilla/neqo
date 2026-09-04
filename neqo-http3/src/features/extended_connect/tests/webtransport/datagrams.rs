@@ -161,6 +161,32 @@ fn outgoing_datagram_space_available_forwarded() {
 }
 
 #[test]
+fn server_processes_a_connection_whose_only_pending_work_is_an_expired_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    // Enqueue without marking the connection as needing processing: the
+    // datagram's own expiry must be enough on its own to get this
+    // connection processed later, with nothing else giving it a reason.
+    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .send_datagram_without_marking_needs_processing(DGRAM, Some(1), t0)
+        .unwrap();
+    assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
+
+    let later = t0 + Duration::from_millis(10);
+    drop(wt.server.process_output(later));
+
+    assert_eq!(
+        wt_session.datagram_queue_capacity().queued_datagrams,
+        0,
+        "the datagram's own expiry must get this connection processed"
+    );
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
+}
+
+#[test]
 fn datagram_send_order_controls_priority() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
