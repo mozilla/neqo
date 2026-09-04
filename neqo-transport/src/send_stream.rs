@@ -32,7 +32,7 @@ use crate::{
     recovery::{self, StreamRecoveryToken},
     stats::FrameStats,
     stream_id::StreamId,
-    streams::{SendGroupId, SendOrder},
+    streams::{NULL_GROUP_ID, SendGroupId, SendOrder},
     tparams::{
         TransportParameterId::{InitialMaxStreamDataBidiRemote, InitialMaxStreamDataUni},
         TransportParameters,
@@ -1914,11 +1914,6 @@ pub struct SendStreams {
     // builder fills mid-pass, preserving fairness.
     fair_rr_next: usize,
 }
-
-/// Key used in `per_group` to represent the null sendGroup (ungrouped fair streams).
-/// Real [`SendGroupId`] values start at 1 (see `neqo-http3` `send_group.rs`), so 0 is safe
-/// as a sentinel here.
-const NULL_GROUP_ID: SendGroupId = SendGroupId::new(0);
 
 impl SendStreams {
     #[allow(
