@@ -14,9 +14,6 @@
 //! one `DatagramQueue` per session (keyed by an opaque handle) and
 //! round-robins between them at packet-build time, so a datagram is never
 //! buffered anywhere without this age policy applying to it.
-//!
-//! Not yet wired up: `QuicDatagrams` still holds a single unbounded
-//! `VecDeque` per connection; see #3983.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -55,8 +52,8 @@ const DEFAULT_MAX_QUEUED_BYTES: usize = 256 * 1024;
 
 /// Conservative per-datagram bookkeeping overhead charged in addition to
 /// payload bytes when accounting against a queue's byte budget
-/// ([`DatagramQueueCapacity::max_queued_bytes`], settable via
-/// [`DatagramQueue::set_max_queued_bytes`]), so a flood of tiny datagrams is
+/// ([`DatagramQueueCapacity::max_queued_bytes`], settable in tests via
+/// `DatagramQueue::set_max_queued_bytes`), so a flood of tiny datagrams is
 /// bounded by the same budget as large ones instead of needing a separate
 /// count cap. Approximates the queue's own per-entry cost (the
 /// [`QueuedDatagram`] struct plus its slot in the group's
@@ -423,7 +420,9 @@ impl DatagramQueue {
     /// Set the byte budget enforced by [`Self::enqueue`]'s eviction and
     /// [`Self::capacity`]'s snapshot. Does not retroactively evict anything
     /// already queued; a lowered budget only takes effect on the next
-    /// [`Self::enqueue`].
+    /// [`Self::enqueue`]. Test-only: nothing in production tunes the budget
+    /// away from [`DEFAULT_MAX_QUEUED_BYTES`].
+    #[cfg(test)]
     pub fn set_max_queued_bytes(&mut self, bytes: usize) {
         qtrace!("Setting max queued bytes to {bytes}");
         self.max_queued_bytes = bytes;
@@ -475,12 +474,26 @@ impl DatagramQueue {
 
     /// Return and reset the number of datagrams expired since the last call,
     /// by whichever caller ran [`Self::expire`].
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "first caller is the per-session sweep in the next commit"
+        )
+    )]
     pub fn take_expired_count(&mut self) -> u64 {
         std::mem::take(&mut self.expired)
     }
 
     /// Whether [`Self::take_expired_count`] would return a nonzero count,
     /// without consuming it.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "first caller is the per-session sweep in the next commit"
+        )
+    )]
     #[must_use]
     pub const fn has_expired(&self) -> bool {
         self.expired > 0
@@ -704,8 +717,8 @@ impl DatagramQueue {
 
     /// Call after anything that can unblock the queue: a removal
     /// ([`Self::take_next`], [`Self::expire`], [`Self::set_max_age`]) or a
-    /// relaxed bound ([`Self::set_high_water_mark`],
-    /// [`Self::set_max_queued_bytes`]). `true` once, the moment a queue that
+    /// relaxed bound ([`Self::set_high_water_mark`], or in tests
+    /// `set_max_queued_bytes`). `true` once, the moment a queue that
     /// [`Self::enqueue`] reported as anything but [`DatagramQueueOutcome::Ok`]
     /// drains back below the high water mark and has freed the charge it is
     /// waiting on, for the caller to fire a resume signal. `false` every
