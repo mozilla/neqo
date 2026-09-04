@@ -129,7 +129,8 @@ jobs:
           if [ -d target ]; then
             sudo chown -R --no-dereference "$(id -u)" target
           fi
-          rm -rf target/criterion
+          # Start empty, so a removed benchmark leaves no stale file to compare against.
+          rm -rf target/criterion ../profiles ../stats
           # Run baseline and PR builds interleaved.
           sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
           variants() { "$1" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true; }
@@ -158,8 +159,6 @@ jobs:
             local subcmd="$1" dir="$2" out ext="$4"
             out="$3/$(basename "$dir")"
             local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
-            # Start empty, so a removed benchmark leaves no stale file to compare against.
-            sudo rm -rf "$out"
             mkdir -p "$out"
             for BENCH in "$dir"/!(neqo-client|neqo-server); do
               BIN_NAME=$(basename "$BENCH")
