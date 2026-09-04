@@ -825,10 +825,6 @@ impl ServerSession {
     ///
     /// Test-only; see [`Self::set_datagram_high_water_mark`].
     #[cfg(test)]
-    #[expect(
-        dead_code,
-        reason = "first caller is the expiry test in the next commit"
-    )]
     pub(crate) fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
@@ -848,10 +844,6 @@ impl ServerSession {
     ///
     /// Test-only; see [`Self::set_datagram_high_water_mark`].
     #[cfg(test)]
-    #[expect(
-        dead_code,
-        reason = "first caller is the expiry test in the next commit"
-    )]
     pub(crate) fn stats(&self) -> extended_connect::stats::SessionStats {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
@@ -866,10 +858,6 @@ impl ServerSession {
     ///
     /// Test-only; see [`Self::set_datagram_high_water_mark`].
     #[cfg(test)]
-    #[expect(
-        dead_code,
-        reason = "first caller is the expiry test in the next commit"
-    )]
     pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler

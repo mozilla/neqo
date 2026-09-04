@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Duration;
+
 use neqo_common::{Encoder, to_u64};
 use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, streams::SendGroupId};
 use test_fixture::now;
@@ -80,6 +82,33 @@ fn max_datagram_size_smaller_than_session_prefix() {
 
     assert_eq!(wt_session.max_datagram_size(), Ok(0));
     assert_eq!(wt.max_datagram_size(wt_session.stream_id()), Ok(0));
+}
+
+#[test]
+fn datagram_expires_before_being_sent() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
+
+    // No packets ever need to be built in between: expiry must not wait on
+    // that. Driving the server's own HTTP/3 tick (not exchange_packets,
+    // which uses its own clock) is enough on its own.
+    let later = t0 + Duration::from_millis(10);
+    drop(wt.server.process_output(later));
+
+    assert_eq!(
+        wt_session.datagram_queue_capacity().queued_datagrams,
+        0,
+        "the stale datagram must be gone before it is ever handed to the QUIC layer"
+    );
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
 }
 
 #[test]
