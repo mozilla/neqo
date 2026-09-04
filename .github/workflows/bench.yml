@@ -10,7 +10,7 @@ env:
   RUSTUP_TOOLCHAIN: stable
   # `cycles:u` stays first: samply makes the first `-e` event its sample table, the rest markers.
   # Per-symbol IPC comes from the `perf report` dumps. No cache or TLB events: only 4 counters.
-  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,context-switches,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
+  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
   PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618

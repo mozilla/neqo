@@ -11,7 +11,7 @@ env:
   RUSTUP_TOOLCHAIN: stable
   TRANSFER_SIZE: 33554432 # 32 MiB
   # Not the bench.yml set: GitHub-hosted runners have `cycles` but not `instructions`.
-  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,page-faults,major-faults,context-switches,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
+  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Profiling build settings; see also bench.yml and perfcompare.yml. `RUSTFLAGS` is needed here
   # because this workflow builds neqo inline rather than via the build-neqo action.
   CARGO_PROFILE_RELEASE_DEBUG: true

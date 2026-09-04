@@ -43,7 +43,7 @@ def bold_middle_pct(line: str) -> str:
     if match:
         start, end = match.start(), match.end()
         bracket = line[start + 1 : end - 1]  # Content inside brackets
-        parts = bracket.split("%")
+        parts = bracket.split("%", 2)
         if len(parts) >= 3:
             new_bracket = f"{parts[0]}%<b>{parts[1]}</b>%{parts[2]}"
             return line[: start + 1] + new_bracket + line[end - 1 :]
