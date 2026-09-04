@@ -19,6 +19,7 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
+mod datagram_queue;
 pub mod ecn;
 mod events;
 mod fc;
@@ -67,6 +68,10 @@ pub use self::{
             ConnectionParameters, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
             MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,
         },
+    },
+    datagram_queue::{
+        DatagramId, DatagramOutcome, DatagramQueue, DatagramQueueCapacity, DatagramQueueOutcome,
+        QueuedDatagram, default_max_age as default_datagram_max_age,
     },
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
