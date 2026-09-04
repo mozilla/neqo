@@ -6,7 +6,6 @@
 
 use std::{
     cmp::{max, min},
-    fmt::Display,
     time::{Duration, Instant},
 };
 
@@ -33,7 +32,8 @@ pub enum HyStartCssBaseline {
     EntryThreshold,
 }
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("HyStart++")]
 pub struct HyStart {
     /// > While an arriving ACK may newly acknowledge an arbitrary number of bytes, the HyStart++
     /// > algorithm limits the number of those bytes applied to increase the cwnd to `L*SMSS`
@@ -53,12 +53,6 @@ pub struct HyStart {
     window_end: Option<packet::Number>,
     css_baseline_min_rtt: Option<Duration>,
     css_round_count: usize,
-}
-
-impl Display for HyStart {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HyStart++")
-    }
 }
 
 impl HyStart {

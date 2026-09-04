@@ -6,7 +6,6 @@
 
 use std::{
     cell::{RefCell, RefMut},
-    fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     path::PathBuf,
     rc::Rc,
@@ -36,17 +35,13 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
 const MAX_EVENT_DATA_SIZE: usize = 1024;
 
+#[derive(displaydoc::Display)]
+#[displaydoc("Http3 server")]
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
     http3_handlers: HashMap<ConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
-}
-
-impl Display for Http3Server {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 server ")
-    }
 }
 
 impl Http3Server {
@@ -415,10 +410,7 @@ fn prepare_data(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{
-        collections::HashMap,
-        ops::{Deref, DerefMut},
-    };
+    use std::collections::HashMap;
 
     use neqo_common::{Encoder, event::Provider as _};
     use neqo_qpack as qpack;
@@ -620,7 +612,10 @@ mod tests {
         drop(connect_and_receive_settings());
     }
 
+    #[derive(derive_more::Deref, derive_more::DerefMut)]
     struct PeerConnection {
+        #[deref]
+        #[deref_mut]
         conn: Connection,
         control_stream_id: StreamId,
     }
@@ -630,19 +625,6 @@ mod tests {
         fn control_send(&mut self, data: &[u8]) {
             let res = self.conn.stream_send(self.control_stream_id, data);
             assert_eq!(res, Ok(data.len()));
-        }
-    }
-
-    impl Deref for PeerConnection {
-        type Target = Connection;
-        fn deref(&self) -> &Self::Target {
-            &self.conn
-        }
-    }
-
-    impl DerefMut for PeerConnection {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.conn
         }
     }
 

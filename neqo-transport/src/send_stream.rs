@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::{Ordering, max, min},
     collections::{BTreeMap, VecDeque, btree_map::Entry},
-    fmt::{self, Display, Formatter},
     mem,
     num::NonZeroUsize,
     ops::Add,
@@ -41,6 +40,7 @@ use crate::{
 
 /// The priority that is assigned to sending data for the stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
+#[cfg_attr(test, derive(strum::VariantArray))]
 pub enum TransmissionPriority {
     /// This stream is more important than the functioning of the connection.
     /// Don't use this priority unless the stream really is that important.
@@ -724,7 +724,8 @@ impl Stats {
 }
 
 /// Implement a QUIC send stream.
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("SendStream {stream_id}")]
 pub struct SendStream {
     stream_id: StreamId,
     state: State,
@@ -1735,12 +1736,6 @@ impl SendStream {
     }
 }
 
-impl Display for SendStream {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SendStream {}", self.stream_id)
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct OrderGroup {
     // This vector is sorted by StreamId
@@ -2428,6 +2423,7 @@ mod tests {
     use neqo_common::{
         Encoder, MAX_VARINT, event::Provider as _, expect_usize, hex::HexWithLen, qtrace, to_u64,
     };
+    use strum::VariantArray as _;
 
     use super::RecoveryToken;
     use crate::{
@@ -4389,16 +4385,8 @@ mod tests {
         ));
     }
 
-    const ALL_PRIORITIES: [TransmissionPriority; 5] = [
-        TransmissionPriority::Critical,
-        TransmissionPriority::Important,
-        TransmissionPriority::High,
-        TransmissionPriority::Normal,
-        TransmissionPriority::Low,
-    ];
-
     fn assert_has_data_only_at(s: &mut SendStream, expected: &[TransmissionPriority]) {
-        for &prio in &ALL_PRIORITIES {
+        for &prio in TransmissionPriority::VARIANTS {
             assert_eq!(
                 s.has_data_at(prio),
                 expected.contains(&prio),

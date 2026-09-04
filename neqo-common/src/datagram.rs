@@ -16,11 +16,13 @@ use crate::{Bytes, Tos, hex::HexWithLen};
 /// A UDP datagram.
 ///
 /// Guaranteed to not be empty.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, derive_more::AsMut, derive_more::AsRef)]
 pub struct Datagram<D = Vec<u8>> {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
+    #[as_mut([u8])]
+    #[as_ref([u8])]
     d: D,
 }
 
@@ -76,12 +78,6 @@ impl<D: AsRef<[u8]>> Datagram<D> {
             tos: self.tos,
             d: self.d.as_ref().to_vec(),
         }
-    }
-}
-
-impl<D: AsMut<[u8]> + AsRef<[u8]>> AsMut<[u8]> for Datagram<D> {
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.d.as_mut()
     }
 }
 
@@ -142,12 +138,6 @@ impl Datagram<Bytes> {
     pub fn from_bytes(src: SocketAddr, dst: SocketAddr, tos: Tos, d: Bytes) -> Self {
         assert!(!d.is_empty(), "Datagram data cannot be empty");
         Self { src, dst, tos, d }
-    }
-}
-
-impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
-    fn as_ref(&self) -> &[u8] {
-        self.d.as_ref()
     }
 }
 

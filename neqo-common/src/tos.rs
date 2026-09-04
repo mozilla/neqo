@@ -172,7 +172,7 @@ impl From<Tos> for Dscp {
 }
 
 /// The type-of-service field in an IP packet.
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, Default, derive_more::From, derive_more::Into)]
 pub struct Tos(u8);
 
 impl From<Ecn> for Tos {
@@ -196,18 +196,6 @@ impl From<(Dscp, Ecn)> for Tos {
 impl From<(Ecn, Dscp)> for Tos {
     fn from(v: (Ecn, Dscp)) -> Self {
         Self(u8::from(v.0) | u8::from(v.1))
-    }
-}
-
-impl From<Tos> for u8 {
-    fn from(v: Tos) -> Self {
-        v.0
-    }
-}
-
-impl From<u8> for Tos {
-    fn from(v: u8) -> Self {
-        Self(v)
     }
 }
 

@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    time::Instant,
-};
+use std::time::Instant;
 
 use neqo_common::{Bytes, Decoder, Encoder, qdebug, qtrace};
 use neqo_transport::{Connection, StreamId};
@@ -21,7 +18,8 @@ use crate::{
     frames::{FrameReader, StreamReaderRecvStreamWrapper, capsule::Capsule},
 };
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("ConnectUdpSession")]
 pub struct Session {
     frame_reader: FrameReader,
     session_id: StreamId,
@@ -34,12 +32,6 @@ impl Session {
             session_id,
             frame_reader: FrameReader::new(),
         }
-    }
-}
-
-impl Display for Session {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdpSession")
     }
 }
 
