@@ -14,7 +14,7 @@ use neqo_http3::{
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
     webtransport::ClientSession as _,
 };
-use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamType};
+use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamDataLimit, StreamType};
 use nss::AuthenticationStatus;
 use test_fixture::{
     DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
@@ -138,7 +138,7 @@ fn exchange_packets_through_proxy(
 
     qinfo!("Processing client_inner");
     while let Some(dgram) = client_inner.process_output(now()).dgram() {
-        client_outer
+        _ = client_outer
             .connect_udp_send_datagram(connect_udp_session_id, dgram.as_ref(), None, now())
             .unwrap();
     }
@@ -186,7 +186,7 @@ fn exchange_packets_through_proxy(
 
     qinfo!("Processing proxy");
     for dgram in server_out {
-        proxy_session
+        _ = proxy_session
             .send_datagram(dgram.as_ref(), None, now())
             .unwrap();
     }
@@ -226,9 +226,10 @@ fn session_lifecycle(client_closes: bool) {
     let (mut client, mut proxy, proxy_session) = establish_new_session();
     let session_id = proxy_session.stream_id();
 
-    client
-        .connect_udp_send_datagram(session_id, PING, None, now())
-        .unwrap();
+    assert_eq!(
+        client.connect_udp_send_datagram(session_id, PING, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -246,7 +247,10 @@ fn session_lifecycle(client_closes: bool) {
     assert_eq!(session_id, id);
     assert_eq!(&datagram, PING);
 
-    proxy_session.send_datagram(PONG, None, now()).unwrap();
+    assert_eq!(
+        proxy_session.send_datagram(PONG, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -411,7 +415,7 @@ fn server_datagram_before_accept() {
         let proxy_accept = proxy.process_output(now()).dgram().unwrap();
         assert!(proxy.process_output(now()).dgram().is_none());
 
-        proxy_session.send_datagram(b"ping", None, now()).unwrap();
+        _ = proxy_session.send_datagram(b"ping", None, now()).unwrap();
         let proxy_dgram = proxy.process_output(now()).dgram().unwrap();
 
         while client.next_event().is_some() {}
@@ -513,9 +517,10 @@ fn session_lifecycle_with_http_datagram_capsule() {
     let (mut client, mut proxy, session_id, proxy_session) = establish_capsule_session(None);
 
     qinfo!("Testing Capsule send (client -> server)");
-    client
-        .connect_udp_send_datagram(session_id, PING, None, now())
-        .unwrap();
+    assert_eq!(
+        client.connect_udp_send_datagram(session_id, PING, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -535,7 +540,10 @@ fn session_lifecycle_with_http_datagram_capsule() {
     qinfo!("Capsule decode successful (client -> server)");
 
     qinfo!("Testing Capsule receive (server -> client)");
-    proxy_session.send_datagram(PONG, None, now()).unwrap();
+    assert_eq!(
+        proxy_session.send_datagram(PONG, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     exchange_packets(&mut client, &mut proxy, false, None);
 
@@ -561,7 +569,7 @@ fn session_lifecycle_with_http_datagram_capsule() {
     for i in 0..5 {
         let mut payload = PING.to_vec();
         payload.push(i);
-        client
+        _ = client
             .connect_udp_send_datagram(session_id, &payload, None, now())
             .unwrap();
     }
@@ -666,10 +674,11 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
 }
 
 /// Backpressure surfaces end-to-end through connect-udp: once
-/// `connect_udp_send_datagram` fills the outgoing QUIC datagram queue and
-/// returns `Ok(false)`, draining it must deliver
-/// [`OutgoingDatagramSpaceAvailable`], so a datagram sender that backs off on
-/// `Ok(false)` learns it can resume.
+/// `connect_udp_send_datagram` fills the session's outgoing datagram queue
+/// up to connect-udp's built-in high water mark and reports
+/// `AboveWatermark`, draining it must deliver
+/// [`OutgoingDatagramSpaceAvailable`], so a datagram sender that backs off
+/// on that outcome learns it can resume.
 ///
 /// [`OutgoingDatagramSpaceAvailable`]: neqo_http3::Http3ClientEvent::OutgoingDatagramSpaceAvailable
 #[test]
@@ -678,8 +687,7 @@ fn outgoing_datagram_space_available_forwarded() {
     let (mut client, mut proxy, proxy_session) = establish_new_session_with_client_params(
         ConnectionParameters::default()
             .pmtud(true)
-            .datagram_size(1500)
-            .outgoing_datagram_queue(1),
+            .datagram_size(1500),
     );
     let session_id = proxy_session.stream_id();
 
@@ -687,9 +695,17 @@ fn outgoing_datagram_space_available_forwarded() {
     // datagram backpressure signal.
     while client.next_event().is_some() {}
 
+    // Connect-udp has no API to set a high water mark, so every session gets
+    // a built-in one of 10 datagrams: the tenth send reports the queue full.
+    for _ in 0..9 {
+        assert_eq!(
+            client.connect_udp_send_datagram(session_id, PING, None, now()),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
     assert_eq!(
         client.connect_udp_send_datagram(session_id, PING, None, now()),
-        Ok(false)
+        Ok(DatagramQueueOutcome::AboveWatermark)
     );
     assert!(
         !client
@@ -704,6 +720,45 @@ fn outgoing_datagram_space_available_forwarded() {
             .events()
             .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
         "OutgoingDatagramSpaceAvailable was not forwarded through connect-udp"
+    );
+}
+
+#[test]
+fn server_session_has_the_built_in_high_water_mark() {
+    fixture_init();
+    let (mut client, mut proxy, proxy_session) = establish_new_session_with_client_params(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(1500),
+    );
+
+    while proxy.next_event().is_some() {}
+
+    // The accepted side of a connect-udp session gets the same built-in mark
+    // as the side that created it: the proxy is the bulk sender here.
+    for _ in 0..9 {
+        assert_eq!(
+            proxy_session.send_datagram(PONG, None, now()),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+    assert_eq!(
+        proxy_session.send_datagram(PONG, None, now()),
+        Ok(DatagramQueueOutcome::AboveWatermark)
+    );
+    assert!(
+        !proxy
+            .events()
+            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
+        "resume event fired before the queue drained"
+    );
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+    assert!(
+        proxy
+            .events()
+            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
+        "OutgoingDatagramSpaceAvailable was not forwarded to the connect-udp server"
     );
 }
 
@@ -847,7 +902,9 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
     // A guard that counts only the payload keeps accepting after the framing stops
     // fitting, and the overflowing capsule is truncated and lost.
     let mut sent = 0;
-    while client.connect_udp_send_datagram(session_id, &[0x2c; 1], None, now()) == Ok(true) {
+    while client.connect_udp_send_datagram(session_id, &[0x2c; 1], None, now())
+        == Ok(DatagramQueueOutcome::Ok)
+    {
         sent += 1;
     }
     assert!(sent > 0, "no send space to fill");

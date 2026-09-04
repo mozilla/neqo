@@ -255,8 +255,9 @@ impl Protocol for Session {
         Self::validate_send_group(self, group_id)
     }
 
-    fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
+    fn datagram_prefix(&self) -> Option<u64> {
         // WebTransport does not add prefix (i.e. context ID).
+        None
     }
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
