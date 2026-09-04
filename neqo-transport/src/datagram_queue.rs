@@ -45,7 +45,7 @@ use crate::{
 /// anything deeper would expire before it could plausibly be sent; it is also
 /// ~207 datagrams at a 1200B MTU-sized payload once [`PER_DATAGRAM_OVERHEAD`]
 /// is charged, comfortably above a 64-datagram GSO-batch floor a single
-/// `sendmmsg` call can amortize.
+/// `sendmsg` call can amortize.
 ///
 /// Per session: nothing here caps the sum across a connection's sessions,
 /// so a peer opening many WebTransport sessions multiplies this backstop.
