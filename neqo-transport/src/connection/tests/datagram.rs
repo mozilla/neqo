@@ -817,3 +817,35 @@ fn shrinking_max_age_signals_space_available() {
         "a queue emptied by a shrunken max age must resume the sender"
     );
 }
+
+#[test]
+fn resume_signal_fires_once_a_blocked_queue_drains_below_watermark() {
+    let (mut client, mut server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    assert_eq!(
+        client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
+        DatagramQueueOutcome::AboveWatermark
+    );
+    assert!(
+        !client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+        "resume event fired before the queue drained"
+    );
+
+    let out = client
+        .process_output(now)
+        .dgram()
+        .expect("one small datagram fits in a packet");
+    server.process_input(out, now);
+
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+        "draining a blocked queue back below its watermark must fire a resume signal"
+    );
+}
