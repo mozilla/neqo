@@ -139,7 +139,8 @@ def process_input(input_file) -> tuple[list[str], list[str], set[str]]:
                 changed.add(name)
             split = BENCH_LINE_RE.match(line)
             name = split.group("name") if split else line
-            content = bold_middle_pct(split.group("rest")) if split else ""
+            # Match the indent the strip below leaves on criterion's later lines.
+            content = bold_middle_pct(" " * 7 + split.group("rest")) if split else ""
             status = ""
             time_pct = ""
             in_change = False
@@ -269,16 +270,17 @@ def write_stat_markdown(stats_dir: Path, changed: set[str]) -> None:
         ]
 
     moved = [row for row in rows if row.name in changed]
-    if changed and not moved:
+    if moved:
+        summary = table(moved)
+    elif changed:
         print("::warning::no IPC rows match the benchmarks criterion reported on")
+        summary = ["No `perf stat` data for the benchmarks whose timing changed."]
+    else:
+        summary = ["Criterion reported no significant timing changes."]
     lines = [
         "### Instructions per cycle",
         "",
-        *(
-            table(moved)
-            if moved
-            else ["Criterion reported no significant timing changes."]
-        ),
+        *summary,
         "",
         "<details><summary>All benchmarks</summary>",
         "",

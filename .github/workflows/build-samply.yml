@@ -17,17 +17,18 @@ jobs:
         with:
           persist-credentials: false
           sparse-checkout: .github/actions
-      - uses: $/.github/actions/install-build-deps
-        with:
-          version: stable
-          nss: "false"
-          rust-cache: "false"
-      # Keyed on the revision, so it is built once per bump.
+      # Keyed on the revision, so it is built once per bump. Restored first, so a hit skips below.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: cache
         with:
           path: samply/bin/samply
           key: samply-${{ runner.os }}-${{ runner.arch }}-${{ env.SAMPLY_REV }}
+      - uses: $/.github/actions/install-build-deps
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          version: stable
+          nss: "false"
+          rust-cache: "false"
       - name: Build samply
         if: steps.cache.outputs.cache-hit != 'true'
         run: cargo install --locked --git https://github.com/mstange/samply --rev "$SAMPLY_REV" --root samply samply
