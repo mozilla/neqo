@@ -267,14 +267,6 @@ def write_stat_markdown(stats_dir: Path) -> None:
     lines = [
         "### Instructions per cycle",
         "",
-        (
-            "A diagnostic, not a verdict: read it beside criterion's timing above. "
-            "Removing work shifts the instruction mix, so a real speedup can show "
-            "lower IPC. Totals are not comparable across runs, only this ratio, and "
-            "they include criterion's batch setup, which its timing excludes. A "
-            ":warning: marks signs of interference."
-        ),
-        "",
         "| Benchmark | IPC before | IPC after | ΔIPC | |",
         "|:---|---:|---:|---:|:---|",
         *(row.markdown() for row in rows),
