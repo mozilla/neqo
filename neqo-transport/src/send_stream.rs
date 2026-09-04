@@ -158,31 +158,50 @@ impl RangeTracker {
 
     /// When the range of acknowledged bytes from zero increases, we need to drop any
     /// ranges within that span AND maybe extend it to include any adjacent acknowledged ranges.
+    ///
+    /// The entries the frontier consumes are always a prefix of `used`, so this walks
+    /// that prefix first and drops it with a single `split_off`.  Removing the entries
+    /// one at a time instead rebalances the tree on every step, which dominates the
+    /// cost once more than a couple of ranges are below the frontier.
     fn coalesce_acked(&mut self) {
-        while let Some(e) = self.used.first_entry() {
-            match self.acked.cmp(e.key()) {
+        let mut acked = self.acked;
+        // Exclusive upper bound of the prefix of `used` to drop, if any.
+        let mut split = None;
+        // A partially covered `Sent` range has to be re-added above the new frontier.
+        let mut remainder = None;
+
+        for (&off, &(len, state)) in &self.used {
+            match acked.cmp(&off) {
                 Ordering::Greater => {
-                    let (off, (len, state)) = e.remove_entry();
-                    let overflow = (off + len).saturating_sub(self.acked);
+                    split = Some(off + 1);
+                    let overflow = (off + len).saturating_sub(acked);
                     if overflow > 0 {
                         if state == RangeState::Acked {
-                            self.acked += overflow;
+                            acked += overflow;
                         } else {
-                            self.used.insert(self.acked, (overflow, state));
+                            remainder = Some((acked, (overflow, state)));
                         }
                         break;
                     }
                 }
                 Ordering::Equal => {
-                    if e.get().1 == RangeState::Acked {
-                        let (len, _) = e.remove();
-                        self.acked += len;
+                    if state == RangeState::Acked {
+                        acked += len;
+                        split = Some(off + 1);
                     }
                     break;
                 }
                 Ordering::Less => break,
             }
         }
+
+        if let Some(split) = split {
+            self.used = self.used.split_off(&split);
+        }
+        if let Some((off, range)) = remainder {
+            self.used.insert(off, range);
+        }
+        self.acked = acked;
     }
 
     /// Mark a range as acknowledged.  This is simpler than marking a range as sent
