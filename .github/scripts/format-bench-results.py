@@ -55,10 +55,10 @@ def flush(
     time_pct: str,
     all_results: list[str],
     significant_results: list[str],
-) -> None:
-    """Output a benchmark result as a collapsible."""
+) -> bool:
+    """Output a benchmark result as a collapsible, returning whether it changed."""
     if not name:
-        return
+        return False
 
     # Determine status text and whether this is significant
     significant = False
@@ -86,6 +86,7 @@ def flush(
     all_results.append(collapsible)
     if significant:
         significant_results.append(collapsible)
+    return significant
 
 
 def _should_skip_line(line: str) -> bool:
@@ -112,10 +113,11 @@ def _detect_status(line: str, current_status: str) -> str:
     return current_status
 
 
-def process_input(input_file) -> tuple[list[str], list[str]]:
-    """Process benchmark input and return (all_results, significant_results)."""
+def process_input(input_file) -> tuple[list[str], list[str], set[str]]:
+    """Return (all_results, significant_results, names criterion says changed)."""
     all_results: list[str] = []
     significant_results: list[str] = []
+    changed: set[str] = set()
 
     name = ""
     content = ""
@@ -131,7 +133,8 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
 
         # New benchmark: starts at column 0, has content, not "Found"
         if line and not line[0].isspace() and not re.match(r"^Found.*outlier", line):
-            flush(name, content, status, time_pct, all_results, significant_results)
+            if flush(name, content, status, time_pct, all_results, significant_results):
+                changed.add(name)
             name = line
             content = ""
             status = ""
@@ -161,8 +164,9 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
                 content += "\n"
             content += processed_line
 
-    flush(name, content, status, time_pct, all_results, significant_results)
-    return all_results, significant_results
+    if flush(name, content, status, time_pct, all_results, significant_results):
+        changed.add(name)
+    return all_results, significant_results, changed
 
 
 class Stat(NamedTuple):
@@ -198,12 +202,9 @@ def parse_stat(path: Path) -> Stat:
 def disturbance(*sides: Stat) -> str:
     """Describe counters that indicate a disturbed run, worst of the sides given."""
     notes = []
-    for event, label in (
-        ("cpu-migrations", "CPU migration"),
-        ("major-faults", "major fault"),
-    ):
-        if worst := max(side.counters.get(event, 0.0) for side in sides):
-            notes.append(f"{worst:.0f} {label}{'s' if worst > 1 else ''}")
+    # Not migrations: those benchmarks are threaded, and the cpuset has two CPUs.
+    if worst := max(side.counters.get("major-faults", 0.0) for side in sides):
+        notes.append(f"{worst:.0f} major fault{'s' if worst > 1 else ''}")
     if any(side.multiplexed for side in sides):
         notes.append("counters multiplexed, so these are estimates")
     return f":warning: {', '.join(notes)}" if notes else ""
@@ -250,8 +251,8 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
     return sorted(rows, key=lambda row: -abs(row.delta))
 
 
-def write_stat_markdown(stats_dir: Path) -> None:
-    """Write perf-stat.md."""
+def write_stat_markdown(stats_dir: Path, changed: set[str]) -> None:
+    """Write perf-stat.md, leading with the benchmarks criterion says moved."""
     # The runner keeps its workspace, so drop an earlier run's table.
     out = Path("perf-stat.md")
     out.unlink(missing_ok=True)
@@ -266,12 +267,30 @@ def write_stat_markdown(stats_dir: Path) -> None:
             print(f"::warning::no IPC rows parsed from {stats_dir}")
         return
 
+    def table(rows: list[StatRow]) -> list[str]:
+        return [
+            "| Benchmark | IPC before | IPC after | ΔIPC | Notes |",
+            "|:---|---:|---:|---:|:---|",
+            *(row.markdown() for row in rows),
+        ]
+
+    moved = [row for row in rows if row.name in changed]
+    if changed and not moved:
+        print("::warning::no IPC rows match the benchmarks criterion reported on")
     lines = [
         "### Instructions per cycle",
         "",
-        "| Benchmark | IPC before | IPC after | ΔIPC | |",
-        "|:---|---:|---:|---:|:---|",
-        *(row.markdown() for row in rows),
+        *(
+            table(moved)
+            if moved
+            else ["No instructions per cycle for benchmarks whose timing changed."]
+        ),
+        "",
+        "<details><summary>All benchmarks</summary>",
+        "",
+        *table(rows),
+        "",
+        "</details>",
     ]
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -281,15 +300,15 @@ def main() -> None:
     # Read from file argument or stdin
     if len(sys.argv) > 1:
         with open(sys.argv[1], encoding="utf-8") as f:
-            all_results, significant_results = process_input(f)
+            all_results, significant_results, changed = process_input(f)
     else:
-        all_results, significant_results = process_input(sys.stdin)
+        all_results, significant_results, changed = process_input(sys.stdin)
 
     if len(sys.argv) > 2:
         # Never let the secondary output take the benchmark comment down with it.
         try:
-            write_stat_markdown(Path(sys.argv[2]))
-        except (OSError, ValueError) as e:
+            write_stat_markdown(Path(sys.argv[2]), changed)
+        except Exception as e:  # noqa: BLE001
             print(f"::warning::could not summarize perf stat output: {e}")
 
     with open("all-bench-results.md", "w", encoding="utf-8") as f:
