@@ -215,17 +215,32 @@ impl Http3ServerHandler {
         self.needs_processing = true;
     }
 
-    /// Whether this connection has events to process or data to send.
-    pub(crate) fn should_be_processed(&mut self) -> bool {
+    /// Whether this connection has events to process, data to send, a
+    /// queued datagram past its max-age, or an expiry count the transport's
+    /// own timer sweep left waiting on some session's queue. Without the
+    /// last two checks, a connection whose only pending work is an expired
+    /// datagram is never processed here: `Connection::process_timer` still
+    /// expires it (so it is never sent late), but nothing runs the
+    /// per-session sweep that counts it and reports its outcome.
+    ///
+    /// Both checks are gated on `active()`: the transport stops expiring
+    /// queues once it is closing or draining, so a stale deadline or count
+    /// on a connection that is on its way out would otherwise keep this
+    /// returning `true` until the handler is dropped.
+    pub(crate) fn should_be_processed(&mut self, conn: &Connection, now: Instant) -> bool {
         if self.needs_processing {
             self.needs_processing = false;
             return true;
         }
-        self.base_handler.has_data_to_send() || self.events.has_events()
+        self.base_handler.has_data_to_send()
+            || self.events.has_events()
+            // `<=`, not `<`: the queue expires at `timestamp + max_age`
+            // inclusive, so a deadline of exactly `now` has work to do.
+            || (self.base_handler.state().active()
+                && (conn.next_datagram_expiry().is_some_and(|e| e <= now)
+                    || conn.has_pending_datagram_counts()))
     }
 
-    // This function takes the provided result and check for an error.
-    // An error results in closing the connection.
     fn check_result<ERR>(&mut self, conn: &mut Connection, now: Instant, res: &Res<ERR>) -> bool {
         match &res {
             Err(e) => {
