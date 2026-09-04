@@ -591,7 +591,7 @@ fn client_initial_versions() {
     pub struct CryptoWriter {}
 
     impl test_internal::FrameWriter for CryptoWriter {
-        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        fn write_frames(&mut self, builder: &mut packet::Builder<Vec<u8>>) {
             // A first byte of 2 is the byte that indicates a ServerHello.
             builder.encode_varint(FrameType::Crypto);
             builder.encode_varint(0_u64); // Offset

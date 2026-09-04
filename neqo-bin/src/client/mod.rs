@@ -48,7 +48,7 @@ use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now};
+use crate::{SendBuf, SharedArgs, now};
 
 mod http09;
 mod http3;
@@ -384,8 +384,12 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
-    -> OutputBatch;
+    fn process_multiple_output<'b>(
+        &mut self,
+        now: Instant,
+        send_buf: SendBuf<'b>,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<SendBuf<'b>>;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -407,6 +411,7 @@ struct Runner<'a, H: Handler> {
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
     recv_buf: RecvBuf,
+    send_buf: Vec<u8>,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -425,6 +430,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             args,
             timeout: None,
             recv_buf: RecvBuf::default(),
+            send_buf: vec![0; neqo_udp::SEND_BUF_SIZE],
         }
     }
 
@@ -472,7 +478,11 @@ impl<'a, H: Handler> Runner<'a, H> {
                 .inspect_err(|_| qerror!("Socket return GSO size of 0"))
                 .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
 
-            match self.client.process_multiple_output(now(), max_datagrams) {
+            match self.client.process_multiple_output(
+                now(),
+                SendBuf::new(&mut self.send_buf[..]),
+                max_datagrams,
+            ) {
                 OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try
