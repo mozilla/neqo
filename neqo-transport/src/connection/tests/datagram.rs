@@ -957,6 +957,114 @@ fn per_session_queues_round_robin_across_sessions() {
 }
 
 #[test]
+fn expire_session_datagrams_leaves_other_sessions_alone() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+
+    let session_a = StreamId::new(0);
+    let session_b = StreamId::new(4);
+    client.set_datagram_max_age(session_a, Some(Duration::from_millis(5)), now);
+    client.set_datagram_max_age(session_b, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session_a, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    _ = client.enqueue_datagram(session_b, vec![2], Some(2), now, SendGroupId::new(0), 0);
+
+    let later = now + Duration::from_millis(10);
+    assert_eq!(
+        client.expire_session_datagrams(session_a, later),
+        1,
+        "a session-scoped sweep must not count another session's datagrams"
+    );
+    assert_eq!(
+        client.datagram_queue_capacity(session_b).queued_datagrams,
+        1,
+        "nor expire them"
+    );
+    assert_eq!(client.expire_session_datagrams(session_b, later), 1);
+}
+
+#[test]
+fn expire_session_datagrams_on_an_unknown_session_is_zero() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+
+    assert_eq!(client.expire_session_datagrams(StreamId::new(8), now), 0);
+}
+
+#[test]
+fn timer_expiry_is_counted_by_the_next_session_sweep() {
+    // Whether the timer or the per-session sweep sheds a datagram must not
+    // matter to the count: the timer runs first here, and the sweep still
+    // reports the expiry, exactly once.
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    assert!(!client.has_pending_datagram_counts());
+
+    let later = now + Duration::from_millis(10);
+    client.process_timer(later);
+    assert_eq!(client.datagram_queue_capacity(session).queued_datagrams, 0);
+    assert!(
+        client.has_pending_datagram_counts(),
+        "the timer's expiry is waiting to be counted"
+    );
+
+    assert_eq!(client.expire_session_datagrams(session, later), 1);
+    assert!(!client.has_pending_datagram_counts());
+    assert_eq!(
+        client.expire_session_datagrams(session, later),
+        0,
+        "counted once, not again"
+    );
+}
+
+#[test]
+fn take_session_expired_datagrams_drains_without_sweeping() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    _ = client.enqueue_datagram(session, vec![2], Some(2), now, SendGroupId::new(0), 0);
+    client.process_timer(now + Duration::from_millis(10));
+
+    assert_eq!(client.take_session_expired_datagrams(session), 2);
+    assert_eq!(client.take_session_expired_datagrams(session), 0);
+    assert_eq!(client.take_session_expired_datagrams(StreamId::new(8)), 0);
+}
+
+#[test]
+fn expiring_a_blocked_queue_via_the_session_sweep_signals_space_available() {
+    // The connection-wide timer sweep is covered by
+    // `expiring_a_blocked_session_queue_signals_space_available`; the
+    // per-session sweep shares its resume logic and must behave the same.
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    assert_eq!(
+        client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
+        DatagramQueueOutcome::AboveWatermark
+    );
+
+    assert_eq!(
+        client.expire_session_datagrams(session, now + Duration::from_millis(10)),
+        1
+    );
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+        "a queue emptied by the per-session sweep must resume the sender"
+    );
+}
+
+#[test]
 fn drop_session_datagrams_removes_only_that_sessions_entries() {
     let (mut client, _server) = connect_datagram();
     let now = now();

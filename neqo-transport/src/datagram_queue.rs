@@ -474,26 +474,12 @@ impl DatagramQueue {
 
     /// Return and reset the number of datagrams expired since the last call,
     /// by whichever caller ran [`Self::expire`].
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "first caller is the per-session sweep in the next commit"
-        )
-    )]
     pub fn take_expired_count(&mut self) -> u64 {
         std::mem::take(&mut self.expired)
     }
 
     /// Whether [`Self::take_expired_count`] would return a nonzero count,
     /// without consuming it.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "first caller is the per-session sweep in the next commit"
-        )
-    )]
     #[must_use]
     pub const fn has_expired(&self) -> bool {
         self.expired > 0

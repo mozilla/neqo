@@ -332,10 +332,7 @@ impl QuicDatagrams {
         min_rtt: Duration,
     ) -> DatagramQueueOutcome {
         let queue = self.queues.entry(session).or_default();
-        _ = queue.expire(now, default_max_age(min_rtt));
-        if queue.resume_if_unblocked() {
-            self.conn_events.datagram_space_available();
-        }
+        Self::expire_queue(queue, &self.conn_events, now, default_max_age(min_rtt));
         queue.enqueue(data, id, now, send_group_id, send_order)
     }
 
@@ -396,16 +393,66 @@ impl QuicDatagrams {
     /// Expire stale datagrams on every session's queue. Not gated on there
     /// being anything else to do: expiry is not a send, so it must happen
     /// even when nothing else is scheduled (see [`DatagramQueue::expire`]'s
-    /// doc comment).
+    /// doc comment). Called by `Connection::process_timer` on its own
+    /// schedule.
     pub fn expire_datagrams(&mut self, now: Instant, min_rtt: Duration) {
         let default_max_age = default_max_age(min_rtt);
-        let mut resume = false;
         for queue in self.queues.values_mut() {
-            _ = queue.expire(now, default_max_age);
-            resume |= queue.resume_if_unblocked();
+            Self::expire_queue(queue, &self.conn_events, now, default_max_age);
         }
-        if resume {
-            self.conn_events.datagram_space_available();
+    }
+
+    /// [`Self::expire_datagrams`] for a single session, returning how many of
+    /// its datagrams have expired since the last call: those shed here, plus
+    /// any the connection-wide sweep or an enqueue shed in the meantime.  The
+    /// count lives on the queue (see [`DatagramQueue::take_expired_count`]),
+    /// so which sweep ran first does not matter, and a caller that counts
+    /// per session never picks up another session's.
+    pub fn expire_session_datagrams(
+        &mut self,
+        session: StreamId,
+        now: Instant,
+        min_rtt: Duration,
+    ) -> u64 {
+        self.queues.get_mut(&session).map_or(0, |queue| {
+            Self::expire_queue(queue, &self.conn_events, now, default_max_age(min_rtt));
+            queue.take_expired_count()
+        })
+    }
+
+    /// See [`DatagramQueue::take_expired_count`]: the drain half of
+    /// [`Self::expire_session_datagrams`], for a caller that has no `now`
+    /// to sweep with (e.g. at session teardown).
+    pub fn take_session_expired_count(&mut self, session: StreamId) -> u64 {
+        self.queues
+            .get_mut(&session)
+            .map_or(0, DatagramQueue::take_expired_count)
+    }
+
+    /// Whether any session has a count waiting to be picked up by
+    /// [`Self::expire_session_datagrams`] or
+    /// [`Self::take_session_expired_count`]. Only those, or
+    /// [`Self::drop_session_datagrams`], ever clear a queue's counts.
+    #[must_use]
+    pub fn has_pending_counts(&self) -> bool {
+        self.queues.values().any(DatagramQueue::has_expired)
+    }
+
+    /// Expire `queue`'s stale entries and, if that unblocks it, fire the
+    /// resume event. Shared by [`Self::expire_datagrams`] (every session),
+    /// [`Self::expire_session_datagrams`] (a single one) and
+    /// [`Self::enqueue_datagram`]. Firing per queue rather than once per
+    /// sweep is fine: `datagram_space_available` deduplicates, so a sweep
+    /// that unblocks several queues still yields one event.
+    fn expire_queue(
+        queue: &mut DatagramQueue,
+        conn_events: &ConnectionEvents,
+        now: Instant,
+        default_max_age: Duration,
+    ) {
+        _ = queue.expire(now, default_max_age);
+        if queue.resume_if_unblocked() {
+            conn_events.datagram_space_available();
         }
     }
 
