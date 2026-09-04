@@ -11,7 +11,7 @@ use std::{cell::RefCell, rc::Rc};
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    Http3ServerEvent, Http3State, SendGroupId, SessionAcceptAction, WebTransportEvent,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType};
@@ -463,7 +463,9 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None, now).unwrap();
+    _ = wt_server_session
+        .send_datagram(b"PING", None, now, SendGroupId::new(0), 0)
+        .unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()
@@ -721,8 +723,15 @@ fn wt_stats_at_session_close() {
     let wt_session = create_wt_session(&mut client, &mut server);
     let session_id = wt_session.stream_id();
 
-    client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
+    _ = client
+        .webtransport_send_datagram(
+            session_id,
+            DATAGRAM_DATA,
+            None,
+            now(),
+            SendGroupId::new(0),
+            0,
+        )
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
