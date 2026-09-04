@@ -51,6 +51,19 @@ use crate::{
     stream_type_reader::NewStreamHeadReader,
 };
 
+/// Number of unidirectional streams HTTP/3 opens for its own use (control, QPACK encoder, QPACK
+/// decoder).  Streams of reserved types (RFC 9114, Section 6.2.3), which a peer may also open,
+/// are deliberately not counted: how many a given peer opens is a guess.
+pub const HTTP3_UNI_CONTROL_STREAMS: u64 = 3;
+
+/// Upper bound on the connection-wide incoming stream limit derived from anticipated
+/// `WebTransport` streams.
+///
+/// Without a cap, an application-controlled value summed across an unbounded number of sessions
+/// could ratchet the advertised `MAX_STREAMS` arbitrarily high; the limit is monotonic, so it
+/// never comes back down as sessions close.
+pub const MAX_ANTICIPATED_INCOMING_STREAMS: u64 = 10_000;
+
 pub struct RequestDescription<'b, T: RequestTarget> {
     pub method: &'b str,
     pub connect_type: Option<ConnectType>,
@@ -1435,6 +1448,52 @@ impl Http3Connection {
             return Err(Error::InvalidStreamId);
         };
         Ok(stats)
+    }
+
+    /// Recompute the connection's incoming limit for `stream_type` as the sum over open
+    /// `WebTransport` sessions; see
+    /// [`crate::webtransport::ClientSession::webtransport_set_anticipated_incoming_uni_streams`].
+    /// Walks every receive stream: call per session, not per stream.
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist, is not a `WebTransport`
+    /// session, or is already closing.
+    pub(crate) fn webtransport_set_anticipated_incoming_streams(
+        &self,
+        conn: &mut Connection,
+        session_id: StreamId,
+        stream_type: StreamType,
+        value: u16,
+    ) -> Res<()> {
+        let session = self.webtransport_session(session_id)?;
+        if session.borrow().is_closing() {
+            return Err(Error::InvalidStreamId);
+        }
+        session
+            .borrow_mut()
+            .set_anticipated_incoming(stream_type, value);
+
+        let total: u64 = self
+            .recv_streams
+            .values()
+            .filter_map(|s| {
+                let session = s.extended_connect_session()?;
+                let session = session.borrow();
+                (!session.is_closing()
+                    && session.connect_type() == ExtendedConnectType::WebTransport)
+                    .then(|| u64::from(session.anticipated_incoming(stream_type)))
+            })
+            .sum::<u64>()
+            .min(MAX_ANTICIPATED_INCOMING_STREAMS);
+
+        let total_including_h3 = match stream_type {
+            // HTTP/3 opens its own unidirectional streams (control and the two QPACK
+            // streams) out of the same limit, so they have to be added on top.
+            StreamType::UniDi => total + HTTP3_UNI_CONTROL_STREAMS,
+            StreamType::BiDi => total,
+        };
+        conn.set_remote_max_streams(stream_type, total_including_h3);
+        Ok(())
     }
 
     pub(crate) fn extended_connect_close_session(
