@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, to_u64};
 use static_assertions::const_assert;
@@ -13,14 +13,16 @@ use super::{
     AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
 };
 use crate::{
-    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud,
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud, StreamId,
     StreamType,
     connection::tests::DEFAULT_ADDR,
+    datagram_queue::DatagramQueueOutcome,
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
     quic_datagrams::QuicDatagram,
     send_stream::{RetransmissionPriority, TransmissionPriority},
+    streams::SendGroupId,
 };
 
 /// Minimum overhead for a short header packet carrying a DATAGRAM frame:
@@ -913,4 +915,184 @@ fn datagram_fill_gap4() {
     }));
     datagram_overfill(&mut client, &mut server, 4);
     assert!(*called.borrow());
+}
+
+// ── Per-session queues (`Connection::enqueue_datagram` et al.) ─────────────
+
+#[test]
+fn per_session_queues_round_robin_across_sessions() {
+    let (mut client, mut server) = connect_datagram();
+    let now = now();
+
+    // Two unrelated "sessions" (opaque `StreamId` tags), each enqueuing two
+    // datagrams. If they were served in enqueue order rather than
+    // round-robin, session A's two datagrams would both arrive before
+    // either of session B's.
+    let session_a = StreamId::new(0);
+    let session_b = StreamId::new(4);
+    _ = client.enqueue_datagram(
+        session_a,
+        vec![b'A'; 4],
+        Some(1),
+        now,
+        SendGroupId::new(0),
+        0,
+    );
+    _ = client.enqueue_datagram(
+        session_b,
+        vec![b'B'; 4],
+        Some(2),
+        now,
+        SendGroupId::new(0),
+        0,
+    );
+    _ = client.enqueue_datagram(
+        session_a,
+        vec![b'A'; 4],
+        Some(3),
+        now,
+        SendGroupId::new(0),
+        0,
+    );
+    _ = client.enqueue_datagram(
+        session_b,
+        vec![b'B'; 4],
+        Some(4),
+        now,
+        SendGroupId::new(0),
+        0,
+    );
+
+    let out = client
+        .process_output(now)
+        .dgram()
+        .expect("four small datagrams fit in one packet");
+    server.process_input(out, now);
+
+    let payloads: Vec<Vec<u8>> = server
+        .events()
+        .filter_map(|e| match e {
+            ConnectionEvent::Datagram(data) => Some(data),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        payloads,
+        vec![vec![b'A'; 4], vec![b'B'; 4], vec![b'A'; 4], vec![b'B'; 4]],
+        "sessions must be served round-robin, not one drained before the other starts"
+    );
+}
+
+#[test]
+fn drop_session_datagrams_removes_only_that_sessions_entries() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+
+    let session_a = StreamId::new(0);
+    let session_b = StreamId::new(4);
+    _ = client.enqueue_datagram(session_a, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    _ = client.enqueue_datagram(session_b, vec![2], Some(2), now, SendGroupId::new(0), 0);
+
+    assert_eq!(client.drop_session_datagrams(session_a), vec![Some(1)]);
+    assert_eq!(
+        client.datagram_queue_capacity(session_a).queued_datagrams,
+        0
+    );
+    assert_eq!(
+        client.datagram_queue_capacity(session_b).queued_datagrams,
+        1,
+        "session B's queue must be untouched by session A's teardown"
+    );
+}
+
+#[test]
+fn datagram_queue_expiry_drives_next_delay() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    let outcome =
+        client.enqueue_datagram(session, vec![1, 2, 3], Some(1), now, SendGroupId::new(0), 0);
+    assert_eq!(outcome, DatagramQueueOutcome::Ok);
+
+    assert_eq!(
+        client.next_delay(now, false),
+        Duration::from_millis(5),
+        "the queued datagram's max-age must drive the callback timer, \
+         shorter than every other pending timer on a freshly idle connection"
+    );
+}
+
+#[test]
+fn process_timer_expires_a_stale_datagram_with_no_packets_pending() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session, vec![1, 2, 3], Some(1), now, SendGroupId::new(0), 0);
+    assert_eq!(client.datagram_queue_capacity(session).queued_datagrams, 1);
+
+    client.process_timer(now + Duration::from_millis(10));
+
+    assert_eq!(
+        client.datagram_queue_capacity(session).queued_datagrams,
+        0,
+        "expiry must not wait on there being packets ready to build"
+    );
+}
+
+#[test]
+fn expiring_a_blocked_session_queue_signals_space_available() {
+    // Expiry, not a send, is how one of these queues is expected to shed
+    // load: a sender waiting above the high water mark for a queue that then
+    // ages out entirely would otherwise wait forever, since no send will ever
+    // revisit an empty queue.
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    assert_eq!(
+        client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
+        DatagramQueueOutcome::AboveWatermark
+    );
+
+    client.process_timer(now + Duration::from_millis(10));
+
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+        "a queue emptied by expiry must resume the sender"
+    );
+}
+
+#[test]
+fn shrinking_max_age_signals_space_available() {
+    // Same for the expiry that `set_datagram_max_age` runs on the spot.
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    assert_eq!(
+        client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
+        DatagramQueueOutcome::AboveWatermark
+    );
+
+    client.set_datagram_max_age(
+        session,
+        Some(Duration::from_millis(1)),
+        now + Duration::from_millis(10),
+    );
+
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+        "a queue emptied by a shrunken max age must resume the sender"
+    );
 }
