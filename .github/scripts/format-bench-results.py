@@ -251,7 +251,7 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
 
 
 def write_stat_markdown(stats_dir: Path) -> None:
-    """Write perf-stat.md, largest change first."""
+    """Write perf-stat.md."""
     # The runner keeps its workspace, so drop an earlier run's table.
     out = Path("perf-stat.md")
     out.unlink(missing_ok=True)
@@ -260,7 +260,9 @@ def write_stat_markdown(stats_dir: Path) -> None:
         # `rglob` on a missing directory is empty, not an error, so check separately.
         if not stats_dir.is_dir():
             print(f"::warning::{stats_dir} is not a directory")
-        elif any(stats_dir.rglob("*.txt")):
+        elif not any(stats_dir.rglob("*.txt")):
+            print(f"::warning::no `perf stat` output under {stats_dir}")
+        else:
             print(f"::warning::no IPC rows parsed from {stats_dir}")
         return
 

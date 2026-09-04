@@ -99,9 +99,6 @@ jobs:
       - name: Set up build artifacts
         run: |
           chmod +x dist/neqo/* dist/neqo-baseline/*
-          mkdir -p binaries/neqo binaries/neqo-baseline
-          cp dist/neqo/* binaries/neqo/
-          cp dist/neqo-baseline/* binaries/neqo-baseline/
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
@@ -118,8 +115,8 @@ jobs:
         env:
           BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          # `LC_ALL=C`, as perf formats counters for the locale, decimal separator included.
-          bench_exec() { sudo nice -n -20 env "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          # `MTU` is part of the benchmark names `--exact` matches; `LC_ALL=C` keeps perf parseable.
+          bench_exec() { sudo nice -n -20 env "MTU=$MTU" "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
           filter_cset() { grep -v '^cset' || test $? = 1; }
           shopt -s extglob nullglob
 
@@ -155,8 +152,7 @@ jobs:
               bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
             fi
           done
-          # Run `perf $1` over every benchmark in $2, writing $4 files under $3/<side>/,
-          # profiling each variant for $5 seconds.
+          # Run `perf $1` over every benchmark in $2 for $5 seconds, writing $4 under $3/<side>/.
           perf_dir() {
             local subcmd="$1" dir="$2" out ext="$4" secs="$5"
             out="$3/$(basename "$dir")"
@@ -197,7 +193,7 @@ jobs:
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
-            # One self-cost histogram per event, so IPC can be read off per symbol.
+            # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
             perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
               -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
@@ -252,7 +248,6 @@ jobs:
           path: |
             profiles/*/*.samply.json.gz
             profiles/*/*.syms.json
-            binaries
           compression-level: 9
 
       - name: Export performance data
@@ -293,4 +288,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries dist profiles stats comment-data || true
+          rm -r -- dist profiles stats comment-data || true

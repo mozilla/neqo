@@ -197,7 +197,7 @@ jobs:
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
-            # One self-cost histogram per event, so IPC can be read off per symbol.
+            # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
             perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
               -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
@@ -251,7 +251,6 @@ jobs:
           path: |
             *.samply.json.gz
             *.syms.json
-            binaries
           compression-level: 9
 
       - name: Export performance data
