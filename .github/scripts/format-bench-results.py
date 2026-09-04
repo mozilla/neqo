@@ -4,10 +4,26 @@
 Reads benchmark output from stdin or a file and writes:
 - all-bench-results.md: All benchmark results as collapsibles
 - significant-results.md: Only results with regressions or improvements
+
+Given a `perf stat` output directory as a second argument, also writes:
+- perf-stat.md: Instructions per cycle per benchmark, for both sides
 """
 
 import re
 import sys
+from pathlib import Path
+from typing import NamedTuple
+
+# Unseparated numbers only, so a locale-formatted value cannot parse to the wrong one.
+COUNTER_RE = re.compile(
+    r"^\s*(?P<value>\d+(?:\.\d+)?)\s+(?:msec\s+)?(?P<event>[\w:/=.-]+)"
+)
+# Criterion pads ids of 23 characters or fewer onto their `time:` line.
+BENCH_LINE_RE = re.compile(r"^(?P<name>.*?)\s+(?P<rest>time:\s+\[.*)$")
+# Prefer criterion's own variant name over the sanitized file name.
+EXACT_RE = re.compile(r"counter stats for '.*--exact (?P<name>[^']+)'")
+# perf appends an enable fraction when it time-shares counters, making them estimates.
+MULTIPLEX_RE = re.compile(r"\((\d+\.\d+)%\)\s*$")
 
 
 def extract_middle_pct(line: str) -> str:
@@ -27,7 +43,7 @@ def bold_middle_pct(line: str) -> str:
     if match:
         start, end = match.start(), match.end()
         bracket = line[start + 1 : end - 1]  # Content inside brackets
-        parts = bracket.split("%")
+        parts = bracket.split("%", 2)
         if len(parts) >= 3:
             new_bracket = f"{parts[0]}%<b>{parts[1]}</b>%{parts[2]}"
             return line[: start + 1] + new_bracket + line[end - 1 :]
@@ -41,10 +57,10 @@ def flush(
     time_pct: str,
     all_results: list[str],
     significant_results: list[str],
-) -> None:
-    """Output a benchmark result as a collapsible."""
+) -> bool:
+    """Output a benchmark result as a collapsible, returning whether it changed."""
     if not name:
-        return
+        return False
 
     # Determine status text and whether this is significant
     significant = False
@@ -72,6 +88,7 @@ def flush(
     all_results.append(collapsible)
     if significant:
         significant_results.append(collapsible)
+    return significant
 
 
 def _should_skip_line(line: str) -> bool:
@@ -98,10 +115,11 @@ def _detect_status(line: str, current_status: str) -> str:
     return current_status
 
 
-def process_input(input_file) -> tuple[list[str], list[str]]:
-    """Process benchmark input and return (all_results, significant_results)."""
+def process_input(input_file) -> tuple[list[str], list[str], set[str]]:
+    """Return (all_results, significant_results, names criterion says changed)."""
     all_results: list[str] = []
     significant_results: list[str] = []
+    changed: set[str] = set()
 
     name = ""
     content = ""
@@ -117,9 +135,12 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
 
         # New benchmark: starts at column 0, has content, not "Found"
         if line and not line[0].isspace() and not re.match(r"^Found.*outlier", line):
-            flush(name, content, status, time_pct, all_results, significant_results)
-            name = line
-            content = ""
+            if flush(name, content, status, time_pct, all_results, significant_results):
+                changed.add(name)
+            split = BENCH_LINE_RE.match(line)
+            name = split.group("name") if split else line
+            # Match the indent the strip below leaves on criterion's later lines.
+            content = bold_middle_pct(" " * 7 + split.group("rest")) if split else ""
             status = ""
             time_pct = ""
             in_change = False
@@ -147,8 +168,127 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
                 content += "\n"
             content += processed_line
 
-    flush(name, content, status, time_pct, all_results, significant_results)
-    return all_results, significant_results
+    if flush(name, content, status, time_pct, all_results, significant_results):
+        changed.add(name)
+    return all_results, significant_results, changed
+
+
+class Stat(NamedTuple):
+    """One `perf stat` run."""
+
+    name: str
+    counters: dict[str, float]
+    multiplexed: bool
+
+    @property
+    def ipc(self) -> float | None:
+        """Instructions per cycle, both in user mode so the ratio is consistent."""
+        instructions = self.counters.get("instructions:u")
+        cycles = self.counters.get("cycles:u")
+        return instructions / cycles if instructions and cycles else None
+
+
+def parse_stat(path: Path) -> Stat:
+    """Read one `perf stat` output file."""
+    name = path.stem
+    counters: dict[str, float] = {}
+    multiplexed = False
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if match := EXACT_RE.search(line):
+            name = match.group("name")
+        elif match := COUNTER_RE.match(line):
+            counters[match.group("event")] = float(match.group("value"))
+            if scaled := MULTIPLEX_RE.search(line):
+                multiplexed |= float(scaled.group(1)) < 100
+    return Stat(name, counters, multiplexed)
+
+
+def warn_if_untrustworthy(name: str, *sides: Stat) -> None:
+    """Annotate counters that make the measurement itself suspect."""
+    if worst := max(side.counters.get("major-faults", 0.0) for side in sides):
+        print(f"::warning::{worst:.0f} major faults in {name}, so it swapped")
+    if any(side.multiplexed for side in sides):
+        print(f"::warning::counters multiplexed in {name}, so its IPC is an estimate")
+
+
+class StatRow(NamedTuple):
+    """One benchmark's IPC before and after, as a percentage change."""
+
+    name: str
+    before: float
+    after: float
+    delta: float
+
+    def markdown(self) -> str:
+        return (
+            f"| {self.name} | {self.before:.2f} | {self.after:.2f} "
+            f"| {self.delta:+.1f}% |"
+        )
+
+
+def stat_rows(stats_dir: Path) -> list[StatRow]:
+    """Compare each benchmark's `perf stat` output, largest change first."""
+    rows = []
+    for after_file in sorted((stats_dir / "neqo").glob("*.txt")):
+        before_file = stats_dir / "neqo-baseline" / after_file.name
+        if not before_file.is_file():
+            print(f"::notice::no baseline `perf stat` output for {after_file.name}")
+            continue
+        after_stat, before_stat = parse_stat(after_file), parse_stat(before_file)
+        before, after = before_stat.ipc, after_stat.ipc
+        if before is None or after is None:
+            print(f"::warning::no IPC counters in {after_file.name}")
+            continue
+        warn_if_untrustworthy(after_stat.name, before_stat, after_stat)
+        rows.append(
+            StatRow(after_stat.name, before, after, 100 * (after - before) / before)
+        )
+    return sorted(rows, key=lambda row: -abs(row.delta))
+
+
+def write_stat_markdown(stats_dir: Path, changed: set[str]) -> None:
+    """Write perf-stat.md, leading with the benchmarks criterion says moved."""
+    # The runner keeps its workspace, so drop an earlier run's table.
+    out = Path("perf-stat.md")
+    out.unlink(missing_ok=True)
+    rows = stat_rows(stats_dir)
+    if not rows:
+        # `rglob` on a missing directory is empty, not an error, so check separately.
+        if not stats_dir.is_dir():
+            print(f"::warning::{stats_dir} is not a directory")
+        elif not any(stats_dir.rglob("*.txt")):
+            print(f"::warning::no `perf stat` output under {stats_dir}")
+        else:
+            print(f"::warning::no IPC rows parsed from {stats_dir}")
+        return
+
+    def table(rows: list[StatRow]) -> list[str]:
+        return [
+            "| Benchmark | IPC before | IPC after | ΔIPC |",
+            "|:---|---:|---:|---:|",
+            *(row.markdown() for row in rows),
+        ]
+
+    moved = [row for row in rows if row.name in changed]
+    if moved:
+        summary = table(moved)
+    elif changed:
+        print("::warning::no IPC rows match the benchmarks criterion reported on")
+        summary = ["No `perf stat` data for the benchmarks whose timing changed."]
+    else:
+        summary = ["Criterion reported no significant timing changes."]
+    lines = [
+        "### Instructions per cycle",
+        "",
+        *summary,
+        "",
+        "<details><summary>All benchmarks</summary>",
+        "",
+        *table(rows),
+        "",
+        "</details>",
+    ]
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -156,9 +296,16 @@ def main() -> None:
     # Read from file argument or stdin
     if len(sys.argv) > 1:
         with open(sys.argv[1], encoding="utf-8") as f:
-            all_results, significant_results = process_input(f)
+            all_results, significant_results, changed = process_input(f)
     else:
-        all_results, significant_results = process_input(sys.stdin)
+        all_results, significant_results, changed = process_input(sys.stdin)
+
+    if len(sys.argv) > 2:
+        # Never let the secondary output take the benchmark comment down with it.
+        try:
+            write_stat_markdown(Path(sys.argv[2]), changed)
+        except Exception as e:  # noqa: BLE001
+            print(f"::warning::could not summarize perf stat output: {e}")
 
     with open("all-bench-results.md", "w", encoding="utf-8") as f:
         f.write("\n".join(all_results))
