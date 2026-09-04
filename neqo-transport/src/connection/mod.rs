@@ -1086,10 +1086,9 @@ impl Connection {
 
         // Not gated on anything else needing to happen: expiry is not a
         // send, so stale datagrams must not wait on some other timer to
-        // also be due. `default_max_age` is a snapshot of the current RTT
-        // estimate here to avoid re-borrowing `self.paths` inside the loop.
+        // also be due.
         let default_max_age = self.datagram_default_max_age();
-        _ = self.quic_datagrams.expire_datagrams(now, default_max_age);
+        self.quic_datagrams.expire_datagrams(now, default_max_age);
 
         let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
@@ -4203,6 +4202,18 @@ impl Connection {
     #[must_use]
     pub fn datagram_queue_capacity(&self, session: StreamId) -> DatagramQueueCapacity {
         self.quic_datagrams.datagram_queue_capacity(session)
+    }
+
+    /// Expire stale datagrams on a single session's queue, for a caller
+    /// that reports outcomes or counts per session.
+    pub fn expire_session_datagrams(
+        &mut self,
+        session: StreamId,
+        now: Instant,
+    ) -> Vec<Option<DatagramId>> {
+        let default_max_age = self.datagram_default_max_age();
+        self.quic_datagrams
+            .expire_session_datagrams(session, now, default_max_age)
     }
 
     /// Remove every datagram queued on `session`'s behalf, e.g. because the

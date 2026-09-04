@@ -369,24 +369,56 @@ impl QuicDatagrams {
     /// per expired datagram across all sessions (`Some(id)` for tracked
     /// ones). Not gated on there being anything else to do: expiry is not a
     /// send, so it must happen even when nothing else is scheduled (see
-    /// [`DatagramQueue::expire`]'s doc comment).
-    ///
-    /// A caller that wants to report per-datagram outcomes (added later in
-    /// this stack; see `extended_connect::session::Session::report_expired`)
-    /// uses the returned IDs.
+    /// [`DatagramQueue::expire`]'s doc comment). Called by
+    /// `Connection::process_timer` on its own schedule, and also by a
+    /// per-session caller that wants the expired IDs, e.g. to report an
+    /// outcome tagged by application protocol (see
+    /// `extended_connect::session::Session::report_expired`, later in this
+    /// stack).
     pub fn expire_datagrams(
         &mut self,
         now: Instant,
         default_max_age: Duration,
     ) -> Vec<Option<DatagramId>> {
-        let mut expired = Vec::new();
-        let mut resume = false;
-        for queue in self.queues.values_mut() {
-            expired.extend(queue.expire(now, default_max_age));
-            resume |= queue.resume_if_unblocked();
-        }
-        if resume {
-            self.conn_events.datagram_space_available();
+        let Self {
+            queues,
+            conn_events,
+            ..
+        } = self;
+        queues
+            .values_mut()
+            .flat_map(|queue| Self::expire_queue(queue, conn_events, now, default_max_age))
+            .collect()
+    }
+
+    /// [`Self::expire_datagrams`] for a single session, so a caller that
+    /// reports outcomes per session does not pick up another session's
+    /// datagrams. Callers that own every session (and so cannot
+    /// misattribute) can use the connection-wide sweep instead.
+    pub fn expire_session_datagrams(
+        &mut self,
+        session: StreamId,
+        now: Instant,
+        default_max_age: Duration,
+    ) -> Vec<Option<DatagramId>> {
+        let Some(queue) = self.queues.get_mut(&session) else {
+            return Vec::new();
+        };
+        Self::expire_queue(queue, &self.conn_events, now, default_max_age)
+    }
+
+    /// Expire `queue`'s stale entries and, if that unblocks it, fire the
+    /// resume event. Shared by [`Self::expire_datagrams`] (every session)
+    /// and [`Self::expire_session_datagrams`] (a single one).
+    fn expire_queue(
+        queue: &mut DatagramQueue,
+        conn_events: &ConnectionEvents,
+        now: Instant,
+        default_max_age: Duration,
+    ) -> Vec<Option<DatagramId>> {
+        let expired = queue.expire(now, default_max_age);
+        if queue.resume_if_unblocked() {
+            conn_events.datagram_space_available();
         }
         expired
     }
