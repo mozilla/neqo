@@ -6,13 +6,13 @@
 
 mod common;
 
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, io::Cursor, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{Datagram, Decoder, Encoder, Role, qtrace};
 use neqo_transport::{
-    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output, State,
-    StreamType, Version,
+    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output,
+    OutputBatch, State, StreamType, Version,
     server::{ConnectionRef, Server, ValidateAddress},
     version,
 };
@@ -944,7 +944,8 @@ fn saved_datagrams() {
         .process_multiple(
             vec![invalid_dgram(), valid_dgram, invalid_dgram()],
             now(),
-            1.try_into().expect("1>0"),
+            Vec::new(),
+            NonZeroUsize::MIN,
         )
         .dgram()
         .expect("first packet triggers first vn");
@@ -954,13 +955,45 @@ fn saved_datagrams() {
     // which does require an immediate response. It thereby has to save the
     // fourth (new) datagram for the next call.
     server
-        .process_multiple(Some(invalid_dgram()), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Some(invalid_dgram()), now(), Vec::new(), NonZeroUsize::MIN)
         .dgram()
         .expect("third packet triggers second vn");
 
     // Server processes the fourth datagram.
     server
-        .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Vec::<Datagram>::new(), now(), Vec::new(), NonZeroUsize::MIN)
         .dgram()
         .expect("fourth packet triggers third vn");
+}
+
+/// A send buffer too small for a Version Negotiation packet drops it, but must
+/// still ask to be called again to drain the saved input.
+#[test]
+fn saved_datagrams_with_undersized_send_buffer() {
+    let mut server = default_server();
+
+    let invalid_dgram = || {
+        let mut client = default_client();
+        let dgram = client.process_output(now()).dgram().expect("a datagram");
+        let mut input = dgram.to_vec();
+        input[1] ^= 0x12;
+        Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), input)
+    };
+
+    // Two datagrams each need an immediate Version Negotiation response, so the
+    // second is saved while the first is answered.
+    let mut small = [0; 4];
+    let out = server.process_multiple(
+        vec![invalid_dgram(), invalid_dgram()],
+        now(),
+        Cursor::new(&mut small[..]),
+        NonZeroUsize::MIN,
+    );
+    assert!(matches!(out, OutputBatch::Callback(_)));
+
+    // A roomy buffer then drains what was saved.
+    server
+        .process_multiple(Vec::<Datagram>::new(), now(), Vec::new(), NonZeroUsize::MIN)
+        .dgram()
+        .expect("saved datagram triggers a vn");
 }
