@@ -12,7 +12,10 @@ use std::{
 };
 
 use neqo_common::{Bytes, Header, qdebug, qinfo, qtrace};
-use neqo_transport::{Connection, DatagramTracking, StreamId, server::ConnectionRef};
+use neqo_transport::{
+    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, server::ConnectionRef,
+    streams::SendGroupId,
+};
 
 use crate::{
     Error, Http3Client, Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Res,
@@ -241,7 +244,10 @@ impl Handler for Http3Connection {
         id: I,
         now: Instant,
     ) -> Res<bool> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+        // connect-udp has no sendGroup/sendOrder concept of its own: always
+        // ungrouped, default priority.
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now, SendGroupId::new(0), 0)
+            .map(|outcome| matches!(outcome, DatagramQueueOutcome::Ok))
     }
 }
 

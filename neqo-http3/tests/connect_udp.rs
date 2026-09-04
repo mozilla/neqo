@@ -666,10 +666,10 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
 }
 
 /// Backpressure surfaces end-to-end through connect-udp: once
-/// `connect_udp_send_datagram` fills the outgoing QUIC datagram queue and
-/// returns `Ok(false)`, draining it must deliver
-/// [`OutgoingDatagramSpaceAvailable`], so a datagram sender that backs off on
-/// `Ok(false)` learns it can resume.
+/// `connect_udp_send_datagram` fills the session's outgoing datagram queue
+/// up to connect-udp's built-in high water mark and returns `Ok(false)`,
+/// draining it must deliver [`OutgoingDatagramSpaceAvailable`], so a
+/// datagram sender that backs off on `Ok(false)` learns it can resume.
 ///
 /// [`OutgoingDatagramSpaceAvailable`]: neqo_http3::Http3ClientEvent::OutgoingDatagramSpaceAvailable
 #[test]
@@ -678,8 +678,7 @@ fn outgoing_datagram_space_available_forwarded() {
     let (mut client, mut proxy, proxy_session) = establish_new_session_with_client_params(
         ConnectionParameters::default()
             .pmtud(true)
-            .datagram_size(1500)
-            .outgoing_datagram_queue(1),
+            .datagram_size(1500),
     );
     let session_id = proxy_session.stream_id();
 
@@ -687,6 +686,14 @@ fn outgoing_datagram_space_available_forwarded() {
     // datagram backpressure signal.
     while client.next_event().is_some() {}
 
+    // Connect-udp has no API to set a high water mark, so every session gets
+    // a built-in one of 10 datagrams: the tenth send reports the queue full.
+    for _ in 0..9 {
+        assert_eq!(
+            client.connect_udp_send_datagram(session_id, PING, None, now()),
+            Ok(true)
+        );
+    }
     assert_eq!(
         client.connect_udp_send_datagram(session_id, PING, None, now()),
         Ok(false)
