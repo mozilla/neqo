@@ -9,11 +9,13 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   # samply makes the first `-e` event its sample table and the rest markers, so `cycles:u` stays
-  # first. `instructions` gives per-symbol IPC. The fault and scheduling counters flag a disturbed
+  # first. `instructions` gives per-symbol IPC, read off the `perf report` dumps in the artifact,
+  # as the profiler cannot aggregate markers. The fault and scheduling counters flag a disturbed
   # run. No cache or TLB events: only 4 counters, 3 with the NMI watchdog.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,context-switches,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Exact counts, so IPC has no sampling error; only the ratio compares across runs.
-  PERF_STAT_OPT: stat -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
+  # `--no-big-num`, as the thousands separators it replaces are locale-dependent.
+  PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
@@ -167,11 +169,11 @@ jobs:
                 while IFS= read -r VARIANT; do
                   SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
                   # shellcheck disable=SC2086
-                  bench_exec perf -- $subcmd -o "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
+                  bench_exec perf -- $subcmd -o "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time 5 --exact "$VARIANT" | filter_cset
                 done <<< "$VARIANTS"
               else
                 # shellcheck disable=SC2086
-                bench_exec perf -- $subcmd -o "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+                bench_exec perf -- $subcmd -o "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time 5 | filter_cset
               fi
             done
           }
@@ -194,6 +196,8 @@ jobs:
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
+            # One self-cost histogram per event, so IPC can be read off per symbol.
+            perf report -i "$f" --stdio --no-children --percent-limit 1 > "${f%.perf}.report.txt"
           done
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
@@ -256,6 +260,7 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
             profiles/*/*.svg
+            profiles/*/*.report.txt
             stats/*/*.txt
             *.txt
             *.md

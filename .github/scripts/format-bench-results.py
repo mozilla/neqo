@@ -262,7 +262,7 @@ def write_stat_markdown(stats_dir: Path) -> None:
     rows = stat_rows(stats_dir)
     if not rows:
         if any(stats_dir.rglob("*.txt")):
-            print(f"::warning::no IPC rows parsed from {stats_dir}", file=sys.stderr)
+            print(f"::warning::no IPC rows parsed from {stats_dir}")
         return
 
     def table(rows: list[StatRow]) -> list[str]:
@@ -308,7 +308,11 @@ def main() -> None:
         all_results, significant_results = process_input(sys.stdin)
 
     if len(sys.argv) > 2:
-        write_stat_markdown(Path(sys.argv[2]))
+        # Never let the secondary output take the benchmark comment down with it.
+        try:
+            write_stat_markdown(Path(sys.argv[2]))
+        except (OSError, ValueError) as e:
+            print(f"::warning::could not summarize perf stat output: {e}")
 
     with open("all-bench-results.md", "w", encoding="utf-8") as f:
         f.write("\n".join(all_results))
