@@ -4206,6 +4206,36 @@ impl Connection {
         self.quic_datagrams.datagram_queue_capacity(session)
     }
 
+    /// Expire stale datagrams on a single session's queue and return how many
+    /// of its datagrams have expired since the last call, whichever sweep
+    /// shed them, for a caller that counts expiries per session.
+    pub fn expire_session_datagrams(&mut self, session: StreamId, now: Instant) -> u64 {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams
+            .expire_session_datagrams(session, now, min_rtt)
+    }
+
+    /// [`Self::expire_session_datagrams`] without the sweep: only return the
+    /// count accumulated so far.
+    pub fn take_session_expired_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_expired_count(session)
+    }
+
+    /// Whether any session has an expiry count waiting to be picked up by
+    /// [`Self::expire_session_datagrams`]. `process_timer` sheds stale
+    /// datagrams on its own schedule, so a caller that sweeps only when given
+    /// a reason to needs this to learn that there is now something to count.
+    ///
+    /// A queue's counts clear only when drained or when
+    /// [`Self::drop_session_datagrams`] removes the queue. A caller that
+    /// stops sweeping a session without dropping its queue therefore leaves
+    /// this `true` for the rest of the connection, and re-processes the
+    /// connection for nothing on every tick.
+    #[must_use]
+    pub fn has_pending_datagram_counts(&self) -> bool {
+        self.quic_datagrams.has_pending_counts()
+    }
+
     /// Remove every datagram queued on `session`'s behalf, e.g. because the
     /// session is closing. Returns one entry per removed datagram, `Some(id)`
     /// for tracked ones, for the caller to report a `Dropped` outcome for.
