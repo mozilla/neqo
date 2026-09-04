@@ -665,45 +665,37 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
     );
 }
 
-/// Backpressure surfaces end-to-end through connect-udp: once
-/// `connect_udp_send_datagram` fills the outgoing QUIC datagram queue and
-/// returns `Ok(false)`, draining it must deliver
-/// [`OutgoingDatagramSpaceAvailable`], so a datagram sender that backs off on
-/// `Ok(false)` learns it can resume.
+/// `connect_udp_send_datagram` queues successfully under an otherwise
+/// unconstrained queue.
+///
+/// This used to also drive the queue above its high water mark (via
+/// `outgoing_datagram_queue(1)`) and check that draining it delivered
+/// [`OutgoingDatagramSpaceAvailable`]. That queue is `neqo-transport`'s
+/// original flat, connection-wide datagram queue, which connect-udp (like
+/// WebTransport) no longer sends through — datagrams go straight into a
+/// per-session queue instead, and only *that* queue's own high water mark
+/// (see `neqo_transport::Connection::set_datagram_high_water_mark`) can
+/// produce a resume signal. Unlike WebTransport, connect-udp has no
+/// `outgoingHighWaterMark`-equivalent attribute to set one, so there is
+/// currently no way to drive this from the connect-udp API to exercise that
+/// path here. See `neqo_transport::connection::tests::datagram::
+/// resume_signal_fires_once_a_blocked_queue_drains_below_watermark` for
+/// coverage of the resume signal itself.
 ///
 /// [`OutgoingDatagramSpaceAvailable`]: neqo_http3::Http3ClientEvent::OutgoingDatagramSpaceAvailable
 #[test]
 fn outgoing_datagram_space_available_forwarded() {
     fixture_init();
-    let (mut client, mut proxy, proxy_session) = establish_new_session_with_client_params(
+    let (mut client, _proxy, proxy_session) = establish_new_session_with_client_params(
         ConnectionParameters::default()
             .pmtud(true)
-            .datagram_size(1500)
-            .outgoing_datagram_queue(1),
+            .datagram_size(1500),
     );
     let session_id = proxy_session.stream_id();
 
-    // Drain session-setup events so the assertions below only observe the
-    // datagram backpressure signal.
-    while client.next_event().is_some() {}
-
     assert_eq!(
         client.connect_udp_send_datagram(session_id, PING, None, now()),
-        Ok(false)
-    );
-    assert!(
-        !client
-            .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
-        "resume event fired before the queue drained"
-    );
-
-    exchange_packets(&mut client, &mut proxy, false, None);
-    assert!(
-        client
-            .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
-        "OutgoingDatagramSpaceAvailable was not forwarded through connect-udp"
+        Ok(true)
     );
 }
 
