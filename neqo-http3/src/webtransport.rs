@@ -800,6 +800,33 @@ impl ServerSession {
             )
     }
 
+    /// Test-only: like [`Self::send_datagram`], but does not mark the
+    /// connection as needing processing, so a test can enqueue a datagram
+    /// and later observe whether it expires on its own, without an
+    /// unrelated reason to process the connection masking the check.
+    #[cfg(test)]
+    pub(crate) fn send_datagram_without_marking_needs_processing<I: Into<DatagramTracking>>(
+        &self,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<DatagramQueueOutcome> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_send_datagram(
+                session_id,
+                &mut self.stream_handler.conn.borrow_mut(),
+                buf,
+                id,
+                now,
+                SendGroupId::new(0),
+                0,
+            )
+    }
+
     /// Set the outgoing-datagram queue's high water mark for this session.
     ///
     /// Test-only: not yet exposed to a production caller.
