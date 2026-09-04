@@ -69,10 +69,7 @@ pub use self::{
             MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,
         },
     },
-    datagram_queue::{
-        DatagramId, DatagramQueue, DatagramQueueCapacity, DatagramQueueOutcome, QueuedDatagram,
-        default_max_age as default_datagram_max_age,
-    },
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
