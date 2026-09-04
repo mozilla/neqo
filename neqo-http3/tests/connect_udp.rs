@@ -684,7 +684,7 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
 ///
 /// [`OutgoingDatagramSpaceAvailable`]: neqo_http3::Http3ClientEvent::OutgoingDatagramSpaceAvailable
 #[test]
-fn outgoing_datagram_space_available_forwarded() {
+fn send_datagram_queues_with_no_high_water_mark_set() {
     fixture_init();
     let (mut client, _proxy, proxy_session) = establish_new_session_with_client_params(
         ConnectionParameters::default()
