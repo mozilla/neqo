@@ -24,8 +24,6 @@
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionStats {
-    /// Outgoing datagrams that expired before being sent.
-    ///
-    /// Currently always zero; populated once datagram expiry is wired up.
+    /// Outgoing datagrams that expired (per `outgoingMaxAge`) before being sent.
     pub datagrams_expired_outgoing: u64,
 }
