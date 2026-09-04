@@ -91,7 +91,7 @@ jobs:
           artifact-name: build-s2n
 
   build-samply:
-    uses: ./.github/workflows/build-samply.yml
+    uses: $/.github/workflows/build-samply.yml
 
   perfcompare:
     name: Performance comparison
@@ -203,7 +203,7 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
             # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
-            perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
+            perf report -i "$f" --stdio --no-children -g none \
               -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
 
@@ -255,7 +255,6 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
             *.samply.json.gz
-            *.syms.json
           compression-level: 9
 
       - name: Export performance data

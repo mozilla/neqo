@@ -10,8 +10,7 @@ env:
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
   TRANSFER_SIZE: 33554432 # 32 MiB
-  # Not the bench.yml event set: GitHub-hosted runners have `cycles` but not `instructions`.
-  # The fault and scheduling counters are software events, so they need no PMU.
+  # Not the bench.yml set: GitHub-hosted runners have `cycles` but not `instructions`.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,page-faults,major-faults,context-switches,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Profiling build settings; see also bench.yml and perfcompare.yml. `RUSTFLAGS` is needed here
   # because this workflow builds neqo inline rather than via the build-neqo action.
@@ -75,7 +74,7 @@ jobs:
           artifact-name: ${{ matrix.impl }}-binaries
 
   build-samply:
-    uses: ./.github/workflows/build-samply.yml
+    uses: $/.github/workflows/build-samply.yml
 
   build-neqo:
     name: Build neqo (${{ matrix.ref.name }})
@@ -190,7 +189,6 @@ jobs:
           name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-${{ matrix.ref.name }}
           path: |
             *.samply.json.gz
-            *.syms.json
           retention-days: 90
           if-no-files-found: ignore
 
@@ -325,7 +323,6 @@ jobs:
           name: perfcompare-${{ matrix.combo.client }}-${{ matrix.combo.server }}-${{ matrix.ref.name }}
           path: |
             *.samply.json.gz
-            *.syms.json
           retention-days: 90
           if-no-files-found: ignore
 

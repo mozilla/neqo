@@ -18,6 +18,8 @@ from typing import NamedTuple
 COUNTER_RE = re.compile(
     r"^\s*(?P<value>\d+(?:\.\d+)?)\s+(?:msec\s+)?(?P<event>[\w:/=.-]+)"
 )
+# Criterion pads ids of 23 characters or fewer onto their `time:` line.
+BENCH_LINE_RE = re.compile(r"^(?P<name>.*?)\s+(?P<rest>time:\s+\[.*)$")
 # Prefer criterion's own variant name over the sanitized file name.
 EXACT_RE = re.compile(r"counter stats for '.*--exact (?P<name>[^']+)'")
 # perf appends an enable fraction when it time-shares counters, making them estimates.
@@ -135,8 +137,9 @@ def process_input(input_file) -> tuple[list[str], list[str], set[str]]:
         if line and not line[0].isspace() and not re.match(r"^Found.*outlier", line):
             if flush(name, content, status, time_pct, all_results, significant_results):
                 changed.add(name)
-            name = line
-            content = ""
+            split = BENCH_LINE_RE.match(line)
+            name = split.group("name") if split else line
+            content = bold_middle_pct(split.group("rest")) if split else ""
             status = ""
             time_pct = ""
             in_change = False
@@ -200,7 +203,7 @@ def parse_stat(path: Path) -> Stat:
 
 
 def warn_if_untrustworthy(name: str, *sides: Stat) -> None:
-    """Annotate counters that make the measurement itself, not just the run, suspect."""
+    """Annotate counters that make the measurement itself suspect."""
     if worst := max(side.counters.get("major-faults", 0.0) for side in sides):
         print(f"::warning::{worst:.0f} major faults in {name}, so it swapped")
     if any(side.multiplexed for side in sides):
@@ -274,7 +277,7 @@ def write_stat_markdown(stats_dir: Path, changed: set[str]) -> None:
         *(
             table(moved)
             if moved
-            else ["No instructions per cycle for benchmarks whose timing changed."]
+            else ["Criterion reported no significant timing changes."]
         ),
         "",
         "<details><summary>All benchmarks</summary>",

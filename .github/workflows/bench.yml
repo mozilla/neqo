@@ -9,8 +9,7 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   # `cycles:u` stays first: samply makes the first `-e` event its sample table, the rest markers.
-  # Read per-symbol IPC off the `perf report` dumps, as the profiler cannot aggregate markers.
-  # No cache or TLB events: only 4 counters, 3 with the NMI watchdog.
+  # Per-symbol IPC comes from the `perf report` dumps. No cache or TLB events: only 4 counters.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,context-switches,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
   PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
@@ -51,7 +50,7 @@ jobs:
           baseline-ref: origin/${{ env.BASE_REF }}
 
   build-samply:
-    uses: ./.github/workflows/build-samply.yml
+    uses: $/.github/workflows/build-samply.yml
 
   bench:
     name: cargo bench
@@ -199,7 +198,7 @@ jobs:
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
             perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
             # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
-            perf report -i "$f" --stdio --no-children -g none --percent-limit 0.1 \
+            perf report -i "$f" --stdio --no-children -g none \
               -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
 
@@ -252,7 +251,6 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
             profiles/*/*.samply.json.gz
-            profiles/*/*.syms.json
           compression-level: 9
 
       - name: Export performance data
