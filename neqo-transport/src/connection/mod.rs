@@ -60,7 +60,7 @@ use crate::{
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
-    stream_id::StreamType,
+    stream_id::{MAX_STREAMS_LIMIT, StreamType},
     streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
@@ -3849,6 +3849,19 @@ impl Connection {
         }
 
         self.streams.stream_create(st)
+    }
+
+    /// Raise the maximum number of concurrent incoming streams of `stream_type`.
+    ///
+    /// This is a local receive window: the cumulative stream count advertised
+    /// in `MAX_STREAMS` (RFC 9000, Section 4.6) advances by it as the peer's
+    /// streams are retired.  Raise-only: a `max` not greater than the current
+    /// window has no effect.  Shrinking the window would also be legal, taking
+    /// effect as streams retire, but no caller needs it.  A `max` above
+    /// [`MAX_STREAMS_LIMIT`] is clamped to it.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        debug_assert!(max <= MAX_STREAMS_LIMIT, "max_streams is too large");
+        self.streams.set_remote_max_streams(stream_type, max);
     }
 
     /// Set the priority of a stream.
