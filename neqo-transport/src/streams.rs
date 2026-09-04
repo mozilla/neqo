@@ -39,12 +39,12 @@ pub type SendOrder = i64;
 ///
 /// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
 /// cannot be passed where a send-group id is expected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SendGroupId(u64);
 
 impl SendGroupId {
     /// Creates a new `SendGroupId`. Note: `0` is reserved as a sentinel
-    /// by the transport scheduler (`NULL_GROUP_ID`) and will be rejected
+    /// (`NULL_GROUP_ID`) and will be rejected
     /// by [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
     #[must_use]
     pub const fn new(id: u64) -> Self {
@@ -57,6 +57,13 @@ impl SendGroupId {
         self.0
     }
 }
+
+/// Sentinel for the null sendGroup: ungrouped fair streams in
+/// [`SendStreams`], datagrams with no group assigned in `DatagramQueue`.
+/// Real `SendGroupId` values start at 1 (see `neqo-http3`'s `send_group.rs`),
+/// so 0 is safe as a shared sentinel. Rejected by
+/// [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+pub(crate) const NULL_GROUP_ID: SendGroupId = SendGroupId::new(0);
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
