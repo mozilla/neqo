@@ -8,13 +8,11 @@ env:
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
-  # samply makes the first `-e` event its sample table and the rest markers, so `cycles:u` stays
-  # first. `instructions` gives per-symbol IPC, read off the `perf report` dumps in the artifact,
-  # as the profiler cannot aggregate markers. The fault and scheduling counters flag a disturbed
-  # run. No cache or TLB events: only 4 counters, 3 with the NMI watchdog.
+  # `cycles:u` stays first: samply makes the first `-e` event its sample table, the rest markers.
+  # Read per-symbol IPC off the `perf report` dumps, as the profiler cannot aggregate markers.
+  # No cache or TLB events: only 4 counters, 3 with the NMI watchdog.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,context-switches,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
-  # Exact counts, so IPC has no sampling error; only the ratio compares across runs.
-  # `--no-big-num`, as the thousands separators it replaces are locale-dependent.
+  # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
   PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer

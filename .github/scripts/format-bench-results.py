@@ -14,10 +14,9 @@ import sys
 from pathlib import Path
 from typing import NamedTuple
 
-# Measured on the bencher over 13 benchmarks with identical code on both sides:
-# the largest run-to-run IPC difference was 1.3%, the mean 0.4%.
+# Measured with identical code on both sides: IPC differed by at most 1.3%, and a
+# shielded CPU still context-switched about 3 times a second.
 SIGNIFICANT_IPC_PCT = 2.0
-# Same run: a shielded CPU still yields to kernel threads, at up to about 3 switches/s.
 MAX_SWITCHES_PER_SEC = 10.0
 
 # Only numeric values, so `<not counted>` and prose lines simply do not match.
@@ -171,10 +170,33 @@ def process_input(input_file) -> tuple[list[str], list[str]]:
     return all_results, significant_results
 
 
-def parse_stat(path: Path) -> tuple[str, dict[str, float]]:
-    """Return the benchmark name and counters from one `perf stat` output file."""
+class Stat(NamedTuple):
+    """One `perf stat` run."""
+
+    name: str
+    counters: dict[str, float]
+    multiplexed: bool
+
+    @property
+    def ipc(self) -> float | None:
+        """Instructions per cycle, both in user mode so the ratio is consistent."""
+        instructions = self.counters.get("instructions:u")
+        cycles = self.counters.get("cycles:u")
+        return instructions / cycles if instructions and cycles else None
+
+    @property
+    def switches_per_sec(self) -> float:
+        """Context switches per second, `task-clock` being in milliseconds."""
+        clock = self.counters.get("task-clock")
+        switches = self.counters.get("context-switches", 0.0)
+        return 1000 * switches / clock if clock else 0.0
+
+
+def parse_stat(path: Path) -> Stat:
+    """Read one `perf stat` output file."""
     name = path.stem
     counters: dict[str, float] = {}
+    multiplexed = False
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
         if match := EXACT_RE.search(line):
             name = match.group("name")
@@ -183,40 +205,22 @@ def parse_stat(path: Path) -> tuple[str, dict[str, float]]:
                 match.group("value").replace(",", "")
             )
             if scaled := MULTIPLEX_RE.search(line):
-                counters[match.group("event") + "%"] = float(scaled.group(1))
-    return name, counters
+                multiplexed |= float(scaled.group(1)) < 100
+    return Stat(name, counters, multiplexed)
 
 
-def ipc(counters: dict[str, float]) -> float | None:
-    """Instructions per cycle, both in user mode so the ratio is consistent."""
-    instructions = counters.get("instructions:u")
-    cycles = counters.get("cycles:u")
-    if not instructions or not cycles:
-        return None
-    return instructions / cycles
-
-
-def disturbance(*sides: dict[str, float]) -> str:
+def disturbance(*sides: Stat) -> str:
     """Describe counters that indicate a disturbed run, worst of the sides given."""
     notes = []
     for event, label in (
-        ("cpu-migrations", "CPU migrations"),
-        ("major-faults", "major faults"),
+        ("cpu-migrations", "CPU migration"),
+        ("major-faults", "major fault"),
     ):
-        worst = max(side.get(event, 0) for side in sides)
-        if worst > 0:
-            notes.append(f"{int(worst)} {label}")
-    rate = max(
-        (
-            1000 * side["context-switches"] / side["task-clock"]
-            for side in sides
-            if side.get("task-clock") and side.get("context-switches")
-        ),
-        default=0.0,
-    )
-    if rate > MAX_SWITCHES_PER_SEC:
+        if worst := max(side.counters.get(event, 0.0) for side in sides):
+            notes.append(f"{worst:.0f} {label}{'s' if worst > 1 else ''}")
+    if (rate := max(side.switches_per_sec for side in sides)) > MAX_SWITCHES_PER_SEC:
         notes.append(f"{rate:.0f} context switches/s")
-    if any(v < 100 for side in sides for k, v in side.items() if k.endswith("%")):
+    if any(side.multiplexed for side in sides):
         notes.append("counters multiplexed, so these are estimates")
     return f":warning: {', '.join(notes)}" if notes else ""
 
@@ -249,19 +253,18 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
         before_file = stats_dir / "neqo-baseline" / after_file.name
         if not before_file.is_file():
             continue
-        name, after_counters = parse_stat(after_file)
-        _, before_counters = parse_stat(before_file)
-        before, after = ipc(before_counters), ipc(after_counters)
+        after_stat, before_stat = parse_stat(after_file), parse_stat(before_file)
+        before, after = before_stat.ipc, after_stat.ipc
         if before is None or after is None:
             print(f"::warning::no IPC counters in {after_file.name}")
             continue
         rows.append(
             StatRow(
-                name,
+                after_stat.name,
                 before,
                 after,
                 100 * (after - before) / before,
-                disturbance(before_counters, after_counters),
+                disturbance(before_stat, after_stat),
             )
         )
     return sorted(rows, key=lambda row: -abs(row.delta))
@@ -269,7 +272,7 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
 
 def write_stat_markdown(stats_dir: Path) -> None:
     """Write perf-stat.md, highlighting the benchmarks that moved."""
-    # The self-hosted runner keeps its workspace, so drop any earlier run's table first.
+    # The runner keeps its workspace, so drop an earlier run's table.
     out = Path("perf-stat.md")
     out.unlink(missing_ok=True)
     rows = stat_rows(stats_dir)
