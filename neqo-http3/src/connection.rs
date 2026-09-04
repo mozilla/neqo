@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -13,11 +11,15 @@ use std::{
     rc::Rc,
     time::Instant,
 };
+#[cfg(test)]
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
@@ -1659,6 +1661,34 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Test-only; see [`Self::extended_connect_set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn webtransport_session_set_datagram_max_age(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) -> Res<()> {
+        self.webtransport_session(session_id)?
+            .borrow()
+            .set_datagram_max_age(conn, max_age, now);
+        Ok(())
+    }
+
+    /// Test-only; see [`Self::extended_connect_set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn extended_connect_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+        conn: &Connection,
+    ) -> Res<DatagramQueueCapacity> {
+        Ok(self
+            .validate_extended_connect_session(session_id)?
+            .borrow()
+            .datagram_queue_capacity(conn))
+    }
+
     /// Expire stale outgoing datagrams on every active extended-CONNECT
     /// session's queue and count them per session. Called once per
     /// `process_http3` tick. The transport counts expiries on the queue
@@ -1860,6 +1890,8 @@ impl Http3Connection {
         wt: &Rc<RefCell<extended_connect::session::Session>>,
         conn: &mut Connection,
     ) {
+        wt.borrow().drop_queued_datagrams(conn);
+
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         #[expect(

@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -13,8 +11,12 @@ use std::{
     str::from_utf8,
     time::Instant,
 };
+#[cfg(test)]
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     AppError, Connection, DatagramQueueOutcome, DatagramTracking, StreamId,
     streams::{SendGroupId, SendOrder},
@@ -377,6 +379,10 @@ impl Session {
             &mut self.control_stream_recv,
             now,
         )? {
+            // A new state only comes from the peer closing the session, with a
+            // close capsule or a FIN; nothing still queued can be sent after that.
+            self.expire_datagrams(conn, now);
+            self.drop_queued_datagrams(conn);
             self.state = new_state;
         }
         Ok(())
@@ -395,7 +401,7 @@ impl Session {
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
-        conn.drop_session_datagrams(self.id);
+        self.drop_queued_datagrams(conn);
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
             self.control_stream_send
@@ -509,6 +515,24 @@ impl Session {
         conn.set_max_buffered_datagrams(self.id, mark);
     }
 
+    /// Test-only; see `Http3Connection::extended_connect_set_max_buffered_datagrams`.
+    #[cfg(test)]
+    pub(crate) fn set_datagram_max_age(
+        &self,
+        conn: &mut Connection,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) {
+        conn.set_datagram_max_age(self.id, max_age, now);
+    }
+
+    /// Test-only; see `Http3Connection::extended_connect_set_max_buffered_datagrams`.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn datagram_queue_capacity(&self, conn: &Connection) -> DatagramQueueCapacity {
+        conn.datagram_queue_capacity(self.id)
+    }
+
     /// Expire stale queued datagrams, counting them against this session's
     /// stats, and return how many expired. See
     /// `Connection::expire_session_datagrams`.
@@ -521,6 +545,12 @@ impl Session {
         let expired = conn.expire_session_datagrams(self.id, now);
         self.protocol.record_expired_outgoing_datagrams(expired);
         expired
+    }
+
+    /// Drop this session's queue, which lives on `conn` and would otherwise
+    /// outlive the session.
+    pub(crate) fn drop_queued_datagrams(&self, conn: &mut Connection) {
+        conn.drop_session_datagrams(self.id);
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
