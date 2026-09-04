@@ -199,15 +199,12 @@ def parse_stat(path: Path) -> Stat:
     return Stat(name, counters, multiplexed)
 
 
-def disturbance(*sides: Stat) -> str:
-    """Describe counters that indicate a disturbed run, worst of the sides given."""
-    notes = []
-    # Not migrations: those benchmarks are threaded, and the cpuset has two CPUs.
+def warn_if_untrustworthy(name: str, *sides: Stat) -> None:
+    """Annotate counters that make the measurement itself, not just the run, suspect."""
     if worst := max(side.counters.get("major-faults", 0.0) for side in sides):
-        notes.append(f"{worst:.0f} major fault{'s' if worst > 1 else ''}")
+        print(f"::warning::{worst:.0f} major faults in {name}, so it swapped")
     if any(side.multiplexed for side in sides):
-        notes.append("counters multiplexed, so these are estimates")
-    return f":warning: {', '.join(notes)}" if notes else ""
+        print(f"::warning::counters multiplexed in {name}, so its IPC is an estimate")
 
 
 class StatRow(NamedTuple):
@@ -217,12 +214,11 @@ class StatRow(NamedTuple):
     before: float
     after: float
     delta: float
-    note: str
 
     def markdown(self) -> str:
         return (
             f"| {self.name} | {self.before:.2f} | {self.after:.2f} "
-            f"| {self.delta:+.1f}% | {self.note} |"
+            f"| {self.delta:+.1f}% |"
         )
 
 
@@ -239,14 +235,9 @@ def stat_rows(stats_dir: Path) -> list[StatRow]:
         if before is None or after is None:
             print(f"::warning::no IPC counters in {after_file.name}")
             continue
+        warn_if_untrustworthy(after_stat.name, before_stat, after_stat)
         rows.append(
-            StatRow(
-                after_stat.name,
-                before,
-                after,
-                100 * (after - before) / before,
-                disturbance(before_stat, after_stat),
-            )
+            StatRow(after_stat.name, before, after, 100 * (after - before) / before)
         )
     return sorted(rows, key=lambda row: -abs(row.delta))
 
@@ -269,8 +260,8 @@ def write_stat_markdown(stats_dir: Path, changed: set[str]) -> None:
 
     def table(rows: list[StatRow]) -> list[str]:
         return [
-            "| Benchmark | IPC before | IPC after | ΔIPC | Notes |",
-            "|:---|---:|---:|---:|:---|",
+            "| Benchmark | IPC before | IPC after | ΔIPC |",
+            "|:---|---:|---:|---:|",
             *(row.markdown() for row in rows),
         ]
 

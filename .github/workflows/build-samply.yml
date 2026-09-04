@@ -1,0 +1,45 @@
+name: Build samply
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build-samply:
+    name: Build samply
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions
+      - uses: ./.github/actions/install-build-deps
+        with:
+          version: stable
+          nss: "false"
+          rust-cache: "false"
+      - name: Resolve samply revision
+        id: samply
+        run: echo "rev=$(git ls-remote https://github.com/mstange/samply main | cut -f1)" >> "$GITHUB_OUTPUT"
+      # Keyed on the revision, so the first workflow to need it builds and the rest hit the cache.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: cache
+        with:
+          path: samply/bin/samply
+          key: samply-${{ runner.os }}-${{ runner.arch }}-${{ steps.samply.outputs.rev }}
+      - name: Build samply
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          REV: ${{ steps.samply.outputs.rev }}
+          # This build doesn't need the profiling settings the rest of the workflow uses.
+          CARGO_PROFILE_RELEASE_DEBUG: false
+          CARGO_PROFILE_RELEASE_LTO: false
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+          RUSTFLAGS: ""
+        run: cargo install --locked --git https://github.com/mstange/samply --rev "$REV" --root samply samply
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: samply
+          path: samply/bin/samply
+          retention-days: 1
