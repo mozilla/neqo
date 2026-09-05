@@ -8,7 +8,7 @@
 
 use std::{
     cell::RefCell,
-    fmt::{self, Debug},
+    fmt::Debug,
     ops::{Deref, DerefMut},
     rc::Rc,
     time::Duration,
@@ -16,11 +16,13 @@ use std::{
 
 use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
+use serde::{Serialize, Serializer, ser::SerializeMap as _};
+use serde_with::skip_serializing_none;
 use strum::IntoEnumIterator as _;
 
 use crate::{cc::CongestionTrigger, ecn, packet, version::Version};
 
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct FrameStats {
     pub ack: usize,
     pub largest_acknowledged: packet::Number,
@@ -55,46 +57,6 @@ pub struct FrameStats {
     pub datagram: usize,
 }
 
-impl Debug for FrameStats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
-            f,
-            "    crypto {} done {} token {} close {}",
-            self.crypto, self.handshake_done, self.new_token, self.connection_close,
-        )?;
-        writeln!(
-            f,
-            "    ack {} (max {}) ping {} padding {}",
-            self.ack, self.largest_acknowledged, self.ping, self.padding
-        )?;
-        writeln!(
-            f,
-            "    stream {} reset {} reset_at {} stop {}",
-            self.stream, self.reset_stream, self.reset_stream_at, self.stop_sending,
-        )?;
-        writeln!(
-            f,
-            "    max: stream {} data {} stream_data {}",
-            self.max_streams, self.max_data, self.max_stream_data,
-        )?;
-        writeln!(
-            f,
-            "    blocked: stream {} data {} stream_data {}",
-            self.streams_blocked, self.data_blocked, self.stream_data_blocked,
-        )?;
-        writeln!(f, "    datagram {}", self.datagram)?;
-        writeln!(
-            f,
-            "    ncid {} rcid {} pchallenge {} presponse {}",
-            self.new_connection_id,
-            self.retire_connection_id,
-            self.path_challenge,
-            self.path_response,
-        )?;
-        writeln!(f, "    ack_frequency {}", self.ack_frequency)
-    }
-}
-
 #[cfg(test)]
 impl FrameStats {
     pub(crate) const fn all(&self) -> usize {
@@ -125,7 +87,7 @@ impl FrameStats {
 }
 
 /// Datagram stats
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct DatagramStats {
     /// The number of datagrams declared lost.
     pub lost: usize,
@@ -136,7 +98,7 @@ pub struct DatagramStats {
     pub dropped_queue_full: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum SlowStartExitReason {
     /// Exited due to a congestion event. Carries the trigger (loss or ECN).
     CongestionEvent(CongestionTrigger),
@@ -144,7 +106,7 @@ pub enum SlowStartExitReason {
     Heuristic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SlowStartExitStats {
     /// The reason slow start was exited. The `CongestionEvent` variant carries a
     /// `CongestionTrigger` (`Loss` or `Ecn`) and `Loss` carries the amount of lost packets.
@@ -165,7 +127,7 @@ pub struct SlowStartExitStats {
 /// `loss` and `ecn` are mutually exclusive triggers (their sum equals the total number of
 /// congestion events). `spurious` is an orthogonal category that applies to a subset of
 /// loss-triggered congestion events.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct CongestionEventStats {
     /// Congestion events triggered by packet loss.
     pub loss: usize,
@@ -178,14 +140,16 @@ pub struct CongestionEventStats {
 
 /// Tracks SEARCH reset occurrences: how many times SEARCH reset and the maximum number of bins
 /// skipped across all resets.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[skip_serializing_none]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 pub struct SearchResetStats {
     pub count: usize,
     pub max_passed_bins: Option<usize>,
 }
 
 /// Congestion Control stats
-#[derive(Default, Clone, PartialEq)]
+#[skip_serializing_none]
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct CongestionControlStats {
     /// Congestion window size, in bytes, on the primary path. Not updated continuously: this
     /// is a snapshot taken only when stats are pulled from the connection (see
@@ -227,9 +191,11 @@ pub struct CongestionControlStats {
     pub search_zero_sent_bytes: usize,
     /// The `latest_rtt` from the first ACK that initialized SEARCH. Used to evaluate whether the
     /// initial RTT sample (which sets `bin_duration`) is inflated relative to `min_rtt`.
+    #[serde(rename = "search_first_rtt_ms", serialize_with = "opt_ms")]
     pub search_first_rtt: Option<Duration>,
     /// The `latest_rtt` from the second ACK processed by SEARCH. Together with `search_first_rtt`,
     /// allows evaluating whether `min(first, second)` would be a better initialization value.
+    #[serde(rename = "search_second_rtt_ms", serialize_with = "opt_ms")]
     pub search_second_rtt: Option<Duration>,
     /// Cubic's `w_max`: the congestion window (in bytes) just before the most recent
     /// congestion reduction (with fast convergence applied). `None` if no congestion event has
@@ -238,43 +204,68 @@ pub struct CongestionControlStats {
     pub w_max: Option<f64>,
 }
 
-impl Debug for CongestionControlStats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(
-            f,
-            "    cwnd {} in_flight {}",
-            self.cwnd, self.bytes_in_flight
-        )?;
-        writeln!(
-            f,
-            "    ce_loss {} ce_ecn {} ce_spurious {}",
-            self.congestion_events.loss,
-            self.congestion_events.ecn,
-            self.congestion_events.spurious,
-        )?;
-        writeln!(
-            f,
-            "    ss_exit_cwnd {:?} ss_exit_reason {:?}",
-            self.slow_start_exit.as_ref().map(|e| e.exit_cwnd),
-            self.slow_start_exit.as_ref().map(|e| &e.reason),
-        )
+/// Serialize a [`Duration`] as fractional milliseconds, the unit RTTs are
+/// compared in. serde's default is a `{"secs": _, "nanos": _}` pair.
+fn ms<S: Serializer>(d: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_f64(d.as_secs_f64() * 1000.0)
+}
+
+/// [`ms`] for an optional [`Duration`].
+#[expect(clippy::ref_option, reason = "signature required by serialize_with")]
+fn opt_ms<S: Serializer>(d: &Option<Duration>, serializer: S) -> Result<S::Ok, S::Error> {
+    match d {
+        Some(d) => ms(d, serializer),
+        None => serializer.serialize_none(),
     }
 }
 
+/// A map key, serialized as its [`Debug`] form.
+///
+/// JSON object keys have to be strings, but `serde` renders a key variant that
+/// carries data — such as [`ecn::ValidationOutcome::NotCapable`] — as an object,
+/// which `serde_json` rejects. Going through [`Debug`] keeps that off the table
+/// for every key type, present and future. For the unit-only key enums it emits
+/// the same variant name `serde` would.
+struct Key<K>(K);
+
+impl<K: Debug> Serialize for Key<K> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&format_args!("{:?}", self.0))
+    }
+}
+
+/// Serialize `entries` as a map, leaving out the ones `skip` selects.
+#[expect(clippy::redundant_pub_crate, reason = "also used by crate::ecn")]
+pub(crate) fn serialize_sparse<S: Serializer, K: Debug, V: Serialize>(
+    entries: impl IntoIterator<Item = (K, V)>,
+    skip: impl Fn(&V) -> bool,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut map = serializer.serialize_map(None)?;
+    for (key, value) in entries {
+        if !skip(&value) {
+            map.serialize_entry(&Key(key), &value)?;
+        }
+    }
+    map.end()
+}
+
+/// [`serialize_sparse`] for counters, i.e. leaving out the zeroes.
+#[expect(clippy::redundant_pub_crate, reason = "also used by crate::ecn")]
+pub(crate) fn serialize_counts<S: Serializer, K: Debug, V: Serialize + Default + PartialEq>(
+    entries: impl IntoIterator<Item = (K, V)>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serialize_sparse(entries, |count| *count == V::default(), serializer)
+}
+
 /// ECN counts by QUIC [`packet::Type`].
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
-impl Debug for EcnCount {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (pt, count) in self.0 {
-            // Don't show all-zero rows.
-            if count.is_empty() {
-                continue;
-            }
-            writeln!(f, "      {pt:?} {count:?}")?;
-        }
-        Ok(())
+impl Serialize for EcnCount {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_sparse(self.0, ecn::Count::is_empty, serializer)
     }
 }
 
@@ -292,7 +283,7 @@ impl DerefMut for EcnCount {
 }
 
 /// Packet types and numbers of the first ECN mark transition between two marks.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>);
 
 impl Deref for EcnTransitions {
@@ -308,40 +299,29 @@ impl DerefMut for EcnTransitions {
     }
 }
 
-impl Debug for EcnTransitions {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        for from in Ecn::iter() {
-            // Don't show all-None rows.
-            if self.0[from].iter().all(|(_, v)| v.is_none()) {
-                continue;
-            }
-            write!(f, "      First {from:?} ")?;
-            for to in Ecn::iter() {
-                // Don't show transitions that were not recorded.
-                if let Some(pkt) = self.0[from][to] {
-                    write!(f, "to {to:?} {pkt:?} ")?;
-                }
-            }
-            writeln!(f)?;
-        }
-        Ok(())
+/// Transitions recorded for a single "from" ECN mark, keyed by "to" mark.
+struct EcnTransitionRow(EnumMap<Ecn, Option<(packet::Type, packet::Number)>>);
+
+impl Serialize for EcnTransitionRow {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_sparse(self.0, Option::is_none, serializer)
+    }
+}
+
+impl Serialize for EcnTransitions {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let rows = Ecn::iter().map(|from| (from, EcnTransitionRow(self.0[from])));
+        serialize_sparse(rows, |row| row.0.values().all(Option::is_none), serializer)
     }
 }
 
 /// Received packet counts by DSCP value.
-#[derive(Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DscpCount(EnumMap<Dscp, usize>);
 
-impl Debug for DscpCount {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        for (dscp, count) in self.0 {
-            // Don't show zero counts.
-            if count == 0 {
-                continue;
-            }
-            write!(f, "{dscp:?}: {count} ")?;
-        }
-        Ok(())
+impl Serialize for DscpCount {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_counts(self.0, serializer)
     }
 }
 
@@ -359,7 +339,8 @@ impl DerefMut for DscpCount {
 }
 
 /// Connection statistics
-#[derive(Default, Clone, PartialEq)]
+#[skip_serializing_none]
+#[derive(Default, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub info: String,
 
@@ -405,10 +386,13 @@ pub struct Stats {
     pub resumed: bool,
 
     /// The current, estimated round-trip time on the primary path.
+    #[serde(rename = "rtt_ms", serialize_with = "ms")]
     pub rtt: Duration,
     /// The current, estimated round-trip time variation on the primary path.
+    #[serde(rename = "rttvar_ms", serialize_with = "ms")]
     pub rttvar: Duration,
     /// The current minimum RTT observed on the primary path.
+    #[serde(rename = "min_rtt_ms", serialize_with = "ms")]
     pub min_rtt: Duration,
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
@@ -496,61 +480,6 @@ impl Stats {
     }
 }
 
-impl Debug for Stats {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "stats for {}", self.info)?;
-        writeln!(f, "  version: {:?}", self.version)?;
-        writeln!(
-            f,
-            "  rx: {} drop {} dup {} saved {}",
-            self.packets_rx, self.dropped_rx, self.dups_rx, self.saved_datagrams
-        )?;
-        writeln!(
-            f,
-            "  tx: {} lost {} lateack {} ptoack {} unackdrop {}",
-            self.packets_tx, self.lost, self.late_ack, self.pto_ack, self.unacked_range_dropped
-        )?;
-        writeln!(f, "  cc:")?;
-        self.cc.fmt(f)?;
-        writeln!(
-            f,
-            "  pmtud: {} sent {} acked {} lost {} iface_mtu {:?} peer_max_udp_payload {} pmtu",
-            self.pmtud_tx,
-            self.pmtud_ack,
-            self.pmtud_lost,
-            self.pmtud_iface_mtu,
-            self.pmtud_peer_max_udp_payload,
-            self.pmtud_pmtu
-        )?;
-        writeln!(f, "  resumed: {}", self.resumed)?;
-        writeln!(f, "  frames rx:")?;
-        self.frame_rx.fmt(f)?;
-        writeln!(f, "  frames tx:")?;
-        self.frame_tx.fmt(f)?;
-        writeln!(f, "  ecn:\n    tx:")?;
-        self.ecn_tx.fmt(f)?;
-        writeln!(f, "    acked:")?;
-        self.ecn_tx_acked.fmt(f)?;
-        writeln!(f, "    rx:")?;
-        self.ecn_rx.fmt(f)?;
-        writeln!(
-            f,
-            "    path validation outcomes: {:?}",
-            self.ecn_path_validation
-        )?;
-        writeln!(f, "    mark transitions:")?;
-        self.ecn_rx_transition.fmt(f)?;
-        writeln!(f, "  dscp: {:?}", self.dscp_rx)?;
-        writeln!(
-            f,
-            "  bytes: rx {} lost {} acked {}",
-            self.bytes_rx, self.bytes_lost, self.bytes_acked
-        )?;
-        writeln!(f, "  rtt: {:?} rttvar: {:?}", self.rtt, self.rttvar)?;
-        writeln!(f, "  min_rtt: {:?}", self.min_rtt)
-    }
-}
-
 #[derive(Default, Clone)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
@@ -563,32 +492,39 @@ impl Deref for StatsCell {
     }
 }
 
-impl Debug for StatsCell {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.stats.borrow().fmt(f)
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Ecn;
+    use std::time::Duration;
 
-    use super::{EcnCount, EcnTransitions, Stats, StatsCell};
-    use crate::packet;
+    use neqo_common::Ecn;
+    use serde::Serialize;
+    use serde_json::{Value, json};
+
+    use super::{EcnCount, EcnTransitions, Stats, StatsCell, opt_ms};
+    use crate::{
+        ecn::{ValidationCount, ValidationError, ValidationOutcome},
+        packet,
+        stats::{CongestionControlStats, DscpCount, SearchResetStats},
+    };
+
+    /// The JSON `Stats` serializes to, as it is written to a `--stats` file.
+    fn to_json<T: Serialize>(value: &T) -> String {
+        serde_json::to_string(value).expect("serializes")
+    }
 
     #[test]
     fn stats_init_sets_info() {
         let mut stats = Stats::default();
         stats.init("conn-1".into());
-        assert!(format!("{stats:?}").contains("conn-1"));
+        assert_eq!(stats.info, "conn-1");
     }
 
     #[test]
-    fn stats_cell_debug() {
+    fn stats_cell_init_sets_info() {
         let cell = StatsCell::default();
         cell.borrow_mut().init("cell-test".into());
-        assert!(format!("{cell:?}").contains("cell-test"));
+        assert_eq!(cell.borrow().info, "cell-test");
     }
 
     #[test]
@@ -600,63 +536,112 @@ mod tests {
     }
 
     #[test]
-    fn ecn_count_debug_nonempty() {
-        let mut counts = EcnCount::default();
-        counts[packet::Type::Short][Ecn::Ce] = 3;
-        let s = format!("{counts:?}");
-        assert!(s.contains("Short"));
-    }
-
-    #[test]
     fn ecn_transitions_deref_mut_and_deref() {
         let mut trans = EcnTransitions::default();
         trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
         assert_eq!(trans[Ecn::Ect0][Ecn::Ce], Some((packet::Type::Short, 42)));
     }
-}
 
-#[test]
-fn debug() {
-    let stats = Stats::default();
-    assert_eq!(
-        format!("{stats:?}"),
-        "stats for\u{0020}
-  version: Version1
-  rx: 0 drop 0 dup 0 saved 0
-  tx: 0 lost 0 lateack 0 ptoack 0 unackdrop 0
-  cc:
-    cwnd 0 in_flight 0
-    ce_loss 0 ce_ecn 0 ce_spurious 0
-    ss_exit_cwnd None ss_exit_reason None
-  pmtud: 0 sent 0 acked 0 lost 0 iface_mtu None peer_max_udp_payload 0 pmtu
-  resumed: false
-  frames rx:
-    crypto 0 done 0 token 0 close 0
-    ack 0 (max 0) ping 0 padding 0
-    stream 0 reset 0 reset_at 0 stop 0
-    max: stream 0 data 0 stream_data 0
-    blocked: stream 0 data 0 stream_data 0
-    datagram 0
-    ncid 0 rcid 0 pchallenge 0 presponse 0
-    ack_frequency 0
-  frames tx:
-    crypto 0 done 0 token 0 close 0
-    ack 0 (max 0) ping 0 padding 0
-    stream 0 reset 0 reset_at 0 stop 0
-    max: stream 0 data 0 stream_data 0
-    blocked: stream 0 data 0 stream_data 0
-    datagram 0
-    ncid 0 rcid 0 pchallenge 0 presponse 0
-    ack_frequency 0
-  ecn:
-    tx:
-    acked:
-    rx:
-    path validation outcomes: ValidationCount({Capable: 0, NotCapable(BlackHole): 0, NotCapable(Bleaching): 0, NotCapable(ReceivedUnsentECT1): 0})
-    mark transitions:
-  dscp:\x20
-  bytes: rx 0 lost 0 acked 0
-  rtt: 0ns rttvar: 0ns
-  min_rtt: 0ns\n"
-    );
+    #[test]
+    fn ecn_count_json_skips_only_empty_rows() {
+        assert_eq!(to_json(&EcnCount::default()), "{}");
+
+        let mut counts = EcnCount::default();
+        counts[packet::Type::Short][Ecn::Ce] = 3;
+        let json = to_json(&counts);
+        assert!(json.contains("Short"));
+        assert!(!json.contains("Initial") && !json.contains("Handshake"));
+    }
+
+    #[test]
+    fn ecn_transitions_json_skips_rows_with_no_transitions() {
+        assert_eq!(to_json(&EcnTransitions::default()), "{}");
+
+        let mut trans = EcnTransitions::default();
+        trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
+        assert_eq!(to_json(&trans), r#"{"Ect0":{"Ce":["Short",42]}}"#);
+    }
+
+    #[test]
+    fn dscp_count_json_skips_zero_entries() {
+        assert_eq!(to_json(&DscpCount::default()), "{}");
+    }
+
+    /// Serializing a default [`Stats`] exercises every field's serializer, so
+    /// this covers fields added later without needing to be told about them.
+    #[test]
+    fn stats_json_round_trips() {
+        let json = to_json(&Stats::default());
+        serde_json::from_str::<Value>(&json)
+            .unwrap_or_else(|e| panic!("invalid JSON: {e}: {json}"));
+    }
+
+    #[test]
+    fn durations_are_fractional_milliseconds() {
+        let stats = Stats {
+            min_rtt: Duration::from_micros(1500),
+            cc: CongestionControlStats {
+                search_first_rtt: Some(Duration::from_micros(2500)),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&stats).expect("serializes");
+        // The unit is part of the key, so a consumer needs no out-of-band schema.
+        assert_eq!(json["min_rtt_ms"], json!(1.5));
+        assert_eq!(json["cc"]["search_first_rtt_ms"], json!(2.5));
+    }
+
+    #[test]
+    fn optional_durations_are_milliseconds_or_null() {
+        let value = |d| opt_ms(&d, serde_json::value::Serializer).expect("serializes");
+        assert_eq!(value(Some(Duration::from_micros(1500))), json!(1.5));
+        assert_eq!(value(None), Value::Null);
+    }
+
+    #[test]
+    fn validation_count_json_skips_zero_outcomes() {
+        assert_eq!(to_json(&ValidationCount::default()), "{}");
+
+        let mut counts = ValidationCount::default();
+        counts[ValidationOutcome::Capable] = 1;
+        let json = to_json(&counts);
+        assert!(json.contains("Capable"));
+        assert!(!json.contains("NotCapable"));
+    }
+
+    #[test]
+    fn validation_count_json_keys_carry_their_payload() {
+        let mut counts = ValidationCount::default();
+        counts[ValidationOutcome::NotCapable(ValidationError::BlackHole)] = 1;
+        assert_eq!(
+            serde_json::to_value(counts).expect("serializes"),
+            json!({"NotCapable(BlackHole)": 1})
+        );
+    }
+
+    #[test]
+    fn skip_serializing_none_omits_none_and_keeps_some() {
+        let stats = Stats {
+            ecn_last_mark: Some(Ecn::Ect0),
+            pmtud_peer_max_udp_payload: None,
+            cc: CongestionControlStats {
+                w_max: Some(1.0),
+                search_reset: SearchResetStats {
+                    max_passed_bins: None,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let json = to_json(&stats);
+
+        for field in ["ecn_last_mark", "w_max"] {
+            assert!(json.contains(&format!("\"{field}\"")));
+        }
+        for field in ["pmtud_peer_max_udp_payload", "max_passed_bins"] {
+            assert!(!json.contains(&format!("\"{field}\"")));
+        }
+    }
 }

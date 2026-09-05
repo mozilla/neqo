@@ -15,7 +15,7 @@ use std::{
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
 use neqo_http3::{
-    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
+    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, StreamId,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
@@ -25,6 +25,7 @@ use super::Args;
 use crate::{
     now,
     send_data::{SendData, SendResult},
+    server::StatsReporter,
 };
 
 pub struct HttpServer {
@@ -34,6 +35,7 @@ pub struct HttpServer {
     /// Tracks POST requests: (bytes received, optional response size from path)
     posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
+    stats: StatsReporter,
 }
 
 impl HttpServer {
@@ -108,6 +110,7 @@ impl HttpServer {
             remaining_data: HashMap::default(),
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
+            stats: StatsReporter::new(&args.shared),
         }
     }
 }
@@ -208,6 +211,10 @@ impl super::HttpServer for HttpServer {
                         self.send_response(&stream, response, now);
                     }
                 }
+                Http3ServerEvent::StateChange {
+                    conn,
+                    state: Http3State::Closing(_) | Http3State::Closed(_),
+                } => self.stats.report(&conn.connection()),
                 _ => {}
             }
         }
@@ -216,4 +223,29 @@ impl super::HttpServer for HttpServer {
     fn has_events(&self) -> bool {
         self.server.has_events()
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_transport::RandomConnectionIdGenerator;
+    use test_fixture::{ProcessServer, anti_replay, fixture_init};
+
+    use super::{Args, HttpServer};
+    use crate::server::{
+        StatsReporter,
+        test_support::{StatsServer, reported_on_close, stats_args, stats_tests},
+    };
+
+    fn make_server(args: &Args) -> HttpServer {
+        fixture_init();
+        HttpServer::new(
+            args,
+            anti_replay(),
+            Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10))),
+        )
+    }
+
+    stats_tests!(make_server);
 }
