@@ -1251,12 +1251,18 @@ impl Connection {
 
     /// Wrapper around [`Connection::process_multiple_output`] that processes a
     /// single output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, Vec::new(), NonZeroUsize::MIN)
-            .try_into()
-            .expect("max_datagrams is 1")
+        // Borrowed, so the output path is monomorphized over `&mut Vec<u8>` only.
+        let mut send_buffer = Vec::new();
+        let (src, dst, tos) =
+            match self.process_multiple_output(now, &mut send_buffer, NonZeroUsize::MIN) {
+                OutputBatch::None => return Output::None,
+                OutputBatch::Callback(t) => return Output::Callback(t),
+                OutputBatch::DatagramBatch(b) => (b.source(), b.destination(), b.tos()),
+            };
+        // Only metadata outlives the match, so `send_buffer` is free to move.
+        Output::Datagram(Datagram::new(src, dst, tos, send_buffer))
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -1320,16 +1326,22 @@ impl Connection {
 
     /// Wrapper around [`Connection::process_multiple`], processing a single
     /// input and single output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process function must be handled"]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, Vec::new(), NonZeroUsize::MIN)
-            .try_into()
-            .expect("max_datagrams is 1")
+        // Borrowed, so the output path is monomorphized over `&mut Vec<u8>` only.
+        let mut send_buffer = Vec::new();
+        let (src, dst, tos) =
+            match self.process_multiple(dgram, now, &mut send_buffer, NonZeroUsize::MIN) {
+                OutputBatch::None => return Output::None,
+                OutputBatch::Callback(t) => return Output::Callback(t),
+                OutputBatch::DatagramBatch(b) => (b.source(), b.destination(), b.tos()),
+            };
+        // Only metadata outlives the match, so `send_buffer` is free to move.
+        Output::Datagram(Datagram::new(src, dst, tos, send_buffer))
     }
 
     /// Process input and generate output.

@@ -763,12 +763,17 @@ impl Http3Client {
 
     /// Wrapper around [`Http3Client::process_multiple_output`] that processes a single
     /// output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        let send_buffer = vec![];
-        self.process_multiple_output(now, send_buffer, NonZeroUsize::MIN)
-            .try_into()
-            .expect("max_datagrams is 1")
+        // Borrowed, so the output path is monomorphized over `&mut Vec<u8>` only.
+        let mut send_buffer = Vec::new();
+        let (src, dst, tos) =
+            match self.process_multiple_output(now, &mut send_buffer, NonZeroUsize::MIN) {
+                OutputBatch::None => return Output::None,
+                OutputBatch::Callback(t) => return Output::Callback(t),
+                OutputBatch::DatagramBatch(b) => (b.source(), b.destination(), b.tos()),
+            };
+        // Only metadata outlives the match, so `send_buffer` is free to move.
+        Output::Datagram(Datagram::new(src, dst, tos, send_buffer))
     }
 
     /// The function should be called to check if there are new UDP packets to be sent. It should
