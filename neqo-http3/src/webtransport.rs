@@ -14,11 +14,9 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
-    send_stream, server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
+    StreamType, recv_stream, send_stream, server::ConnectionRef, streams::SendOrder,
 };
 
 use crate::{
@@ -95,6 +93,22 @@ pub trait ClientSession {
         session_id: StreamId,
         high_water_mark: Option<NonZeroUsize>,
     ) -> Res<()>;
+
+    /// A snapshot of this session's outgoing-datagram queue state; see
+    /// [`DatagramQueueCapacity`].  The bytes are charged bytes (payload,
+    /// prefix and a fixed per-datagram overhead), so `remaining_bytes` is an
+    /// upper bound on the payload that still fits.  The count high water
+    /// mark is not included.  With the HTTP DATAGRAM Capsule fallback
+    /// nothing is queued, so the snapshot would always show an empty queue;
+    /// that path is connect-udp only, which this accessor refuses anyway.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity>;
 
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
     /// to the implementation-defined default with `None`.
@@ -285,6 +299,14 @@ impl ClientSession for Http3Client {
     ) -> Res<()> {
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_session_set_datagram_high_water_mark(conn, session_id, high_water_mark)
+    }
+
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity> {
+        self.handler()
+            .webtransport_datagram_queue_capacity(self.connection(), session_id)
     }
 
     fn webtransport_set_datagram_max_age(
@@ -998,7 +1020,8 @@ impl ServerSession {
 
     /// Snapshot of the outgoing-datagram queue's current byte/count state.
     ///
-    /// Test-only; no production caller reads this yet.
+    /// Test-only: the caller that sizes send credit from this is a client
+    /// (see [`ClientSession::webtransport_datagram_queue_capacity`]).
     #[cfg(test)]
     pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
         let session_id = self.stream_handler.stream_id();
@@ -1006,10 +1029,7 @@ impl ServerSession {
             .handler
             .borrow_mut()
             .base_handler_mut()
-            .extended_connect_datagram_queue_capacity(
-                session_id,
-                &self.stream_handler.conn.borrow(),
-            )
+            .webtransport_datagram_queue_capacity(&self.stream_handler.conn.borrow(), session_id)
             .expect("test session must exist")
     }
 
