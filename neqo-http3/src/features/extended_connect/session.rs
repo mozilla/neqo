@@ -14,11 +14,9 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    AppError, Connection, DatagramId, DatagramOutcome, DatagramQueueOutcome, DatagramTracking,
-    StreamId,
+    AppError, Connection, DatagramId, DatagramOutcome, DatagramQueueCapacity, DatagramQueueOutcome,
+    DatagramTracking, StreamId,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::FxHashSet as HashSet;
@@ -599,8 +597,6 @@ impl Session {
         self.report_expired(&expired);
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
-    #[cfg(test)]
     #[must_use]
     pub(crate) fn datagram_queue_capacity(&self, conn: &Connection) -> DatagramQueueCapacity {
         conn.datagram_queue_capacity(self.id)

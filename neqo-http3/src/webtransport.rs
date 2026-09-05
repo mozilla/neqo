@@ -14,11 +14,10 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    Connection, DatagramQueueOutcome, DatagramTracking, Error as TransportError, StreamId,
-    StreamType, recv_stream, send_stream, server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking,
+    Error as TransportError, StreamId, StreamType, recv_stream, send_stream, server::ConnectionRef,
+    streams::SendOrder,
 };
 
 use crate::{
@@ -80,6 +79,17 @@ pub trait ClientSession {
         session_id: StreamId,
         high_water_mark: Option<NonZeroUsize>,
     ) -> Res<()>;
+
+    /// A snapshot of this session's outgoing-datagram queue state, for
+    /// driving a content-process credit grant. See [`DatagramQueueCapacity`].
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity>;
 
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
     /// to the implementation-defined default with `None`.
@@ -265,6 +275,14 @@ impl ClientSession for Http3Client {
     ) -> Res<()> {
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_set_datagram_high_water_mark(conn, session_id, high_water_mark)
+    }
+
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity> {
+        self.handler()
+            .webtransport_datagram_queue_capacity(self.connection(), session_id)
     }
 
     fn webtransport_set_datagram_max_age(
