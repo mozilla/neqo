@@ -62,6 +62,12 @@ pub trait ClientSession {
 
     /// Send a connect-udp datagram.
     ///
+    /// If the peer has no QUIC DATAGRAM support, this falls back to the HTTP
+    /// DATAGRAM Capsule and bypasses the datagram queue entirely: the
+    /// returned `DatagramQueueOutcome` is always `Ok` on that path and does
+    /// not reflect any real backpressure (see `DatagramOutcome::Sent`'s
+    /// docs).
+    ///
     /// # Errors
     ///
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
@@ -73,7 +79,7 @@ pub trait ClientSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl ClientSession for Http3Client {
@@ -118,7 +124,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -160,7 +166,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl Handler for Http3Connection {
@@ -232,7 +238,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -263,7 +269,7 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<extended_connect::DatagramQueueOutcome>;
 }
 
 impl ServerHandler for Http3ServerHandler {
@@ -300,7 +306,7 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -391,7 +397,7 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<extended_connect::DatagramQueueOutcome> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -425,6 +431,7 @@ impl ServerSession {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ServerEvent {
     NewSession {
         session: ServerSession,
@@ -439,6 +446,10 @@ pub enum ServerEvent {
         session: ServerSession,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -450,6 +461,11 @@ pub(crate) trait ServerEvents {
         headers: Option<Vec<Header>>,
     );
     fn connect_udp_datagram(&self, session: ServerSession, datagram: Bytes);
+    fn connect_udp_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    );
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -477,6 +493,17 @@ impl ServerEvents for Http3ServerEvents {
         self.push(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
             session,
             datagram,
+        }));
+    }
+
+    fn connect_udp_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    ) {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::DatagramOutcome {
+            session,
+            outcome,
         }));
     }
 }

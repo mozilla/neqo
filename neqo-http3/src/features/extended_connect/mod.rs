@@ -5,11 +5,15 @@
 // except according to those terms.
 
 pub(crate) mod connect_udp_session;
+pub(crate) mod datagram_queue;
 pub mod send_group;
 pub mod session;
 pub mod stats;
 pub(crate) mod webtransport_session;
 pub(crate) mod webtransport_streams;
+
+// Re-export DatagramOutcome for FFI access
+pub use datagram_queue::{DEFAULT_HARD_LIMIT, DatagramId, DatagramOutcome, DatagramQueueOutcome};
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -54,6 +58,12 @@ pub(crate) trait ExtendedConnectEvents: Debug {
         &self,
         session_id: StreamId,
         datagram: Bytes,
+        connect_type: ExtendedConnectType,
+    );
+    fn datagram_outcome(
+        &self,
+        session_id: StreamId,
+        outcome: DatagramOutcome,
         connect_type: ExtendedConnectType,
     );
 }

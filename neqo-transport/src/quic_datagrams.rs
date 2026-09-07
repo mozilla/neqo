@@ -94,6 +94,13 @@ impl QuicDatagrams {
         self.remote_datagram_size = min(v, QuicDatagram::MAX_SIZE);
     }
 
+    /// How many more datagrams can be queued before [`Self::add_datagram`]
+    /// starts evicting datagrams that are already queued.
+    pub fn remaining_capacity(&self) -> usize {
+        self.max_queued_outgoing_datagrams
+            .saturating_sub(self.datagrams.len())
+    }
+
     /// This function tries to write a datagram frame into a packet. If the
     /// frame does not fit into the packet, the datagram will be dropped and a
     /// [`OutgoingDatagramOutcome::DroppedTooBig`] event will be posted.

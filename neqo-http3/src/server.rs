@@ -24,7 +24,7 @@ use rustc_hash::FxHashMap as HashMap;
 use crate::{
     Http3Parameters, Http3StreamInfo, Res,
     connect_udp::{self, ServerEvents as _},
-    connection::Http3State,
+    connection::{Http3State, clamp_to_expiry},
     connection_server::Http3ServerHandler,
     server_connection_events::{ConnectUdpEvent, Http3ServerConnEvent, WebTransportEvent},
     server_events::{Http3OrWebTransportStream, Http3ServerEvent, Http3ServerEvents},
@@ -41,6 +41,18 @@ pub struct Http3Server {
     http3_parameters: Http3Parameters,
     http3_handlers: HashMap<ConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
+    /// The earliest instant at which any handler's outgoing datagram queue
+    /// needs expiring, across every connection. Refreshed by
+    /// [`Self::process_http3`] after it processes every active connection,
+    /// so [`Self::process_multiple`]'s callback clamp doesn't need its own
+    /// walk over `http3_handlers`.
+    next_datagram_expiry: Option<Instant>,
+    /// The handler `next_datagram_expiry` was last read from, so
+    /// [`Self::process_http3`] can tell whether that cached value is still
+    /// trustworthy without rescanning every handler: it is, unless this
+    /// handler was just reprocessed (its expiry may have changed) or is
+    /// gone (its handler was removed).
+    next_datagram_expiry_conn: Option<ConnectionRef>,
 }
 
 impl Display for Http3Server {
@@ -77,6 +89,8 @@ impl Http3Server {
             http3_parameters,
             http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
+            next_datagram_expiry: None,
+            next_datagram_expiry_conn: None,
         })
     }
 
@@ -140,16 +154,15 @@ impl Http3Server {
         qtrace!("[{self}] Process");
         let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
-        // If we do not that a dgram already try again after process_http3.
-        match out {
-            OutputBatch::DatagramBatch(d) => {
-                qtrace!("[{self}] Send packet: {d:?}");
-                OutputBatch::DatagramBatch(d)
-            }
-            _ => self
-                .server
-                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
+        if let OutputBatch::DatagramBatch(d) = out {
+            qtrace!("[{self}] Send packet: {d:?}");
+            return OutputBatch::DatagramBatch(d);
         }
+        // No datagram yet: try again now that process_http3 has run.
+        let out = self
+            .server
+            .process_multiple(Option::<Datagram>::None, now, max_datagrams);
+        clamp_to_expiry(out, self.next_datagram_expiry, now)
     }
 
     /// Process HTTP3 layer.
@@ -163,17 +176,55 @@ impl Http3Server {
         active_conns.extend(
             self.http3_handlers
                 .iter()
-                .filter(|(_, handler)| handler.borrow_mut().should_be_processed())
+                .filter(|(_, handler)| handler.borrow_mut().should_be_processed(now))
                 .map(|(c, _)| c)
                 .cloned(),
         );
+
+        // The cached minimum is only trustworthy if its owning handler isn't
+        // about to be reprocessed below (its expiry may change) and still
+        // has a handler at all (it may be removed by `process_events`).
+        let stale = self.next_datagram_expiry_conn.as_ref().is_none_or(|owner| {
+            active_conns.contains(owner) || !self.http3_handlers.contains_key(owner)
+        });
 
         #[expect(
             clippy::iter_over_hash_type,
             reason = "OK to loop over active connections in an undefined order."
         )]
-        for conn in active_conns {
-            self.process_events(&conn, now);
+        for conn in &active_conns {
+            self.process_events(conn, now);
+            // If the cached minimum is still valid, fold this freshly
+            // processed handler into it instead of rescanning every
+            // handler below.
+            if !stale
+                && let Some(handler) = self.http3_handlers.get(conn)
+                && let Some(expiry) = handler.borrow().next_datagram_expiry()
+                && self.next_datagram_expiry.is_none_or(|cur| expiry < cur)
+            {
+                self.next_datagram_expiry = Some(expiry);
+                self.next_datagram_expiry_conn = Some(conn.clone());
+            }
+        }
+
+        if stale {
+            // The previous minimum can no longer be trusted: rescan every
+            // handler.
+            self.next_datagram_expiry = None;
+            self.next_datagram_expiry_conn = None;
+            #[expect(
+                clippy::iter_over_hash_type,
+                reason = "OK to loop over handlers in an undefined order: this only decides \
+                          the minimum, which doesn't depend on iteration order."
+            )]
+            for (conn, handler) in &self.http3_handlers {
+                if let Some(expiry) = handler.borrow().next_datagram_expiry()
+                    && self.next_datagram_expiry.is_none_or(|cur| expiry < cur)
+                {
+                    self.next_datagram_expiry = Some(expiry);
+                    self.next_datagram_expiry_conn = Some(conn.clone());
+                }
+            }
         }
     }
 
@@ -326,6 +377,28 @@ impl Http3Server {
                                 session_id,
                             ),
                             datagram,
+                        );
+                    }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                        session_id,
+                        outcome,
+                    }) => {
+                        self.events.webtransport_datagram_outcome(
+                            ServerSession::new(conn.clone(), Rc::clone(handler), session_id),
+                            outcome,
+                        );
+                    }
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                        session_id,
+                        outcome,
+                    }) => {
+                        self.events.connect_udp_datagram_outcome(
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ),
+                            outcome,
                         );
                     }
                 }
