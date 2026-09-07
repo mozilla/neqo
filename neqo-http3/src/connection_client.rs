@@ -4277,7 +4277,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_rtt_new_server_setting_connect_smaller() {
+    fn zero_rtt_extended_connect_disabled() {
         // The server advertised SETTINGS_ENABLE_CONNECT_PROTOCOL=1 before, and now withholds it.
         zero_rtt_change_settings(
             &[
