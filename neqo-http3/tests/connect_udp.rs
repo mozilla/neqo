@@ -127,16 +127,19 @@ fn exchange_packets_through_proxy(
     }
 
     qinfo!("Processing client_outer");
+    let mut client_buf = Vec::new();
     let mut client_outer_dgrams = client_outer
-        .process_multiple_output(now(), 64.try_into().unwrap())
+        .process_multiple_output(now(), &mut client_buf, 64.try_into().unwrap())
         .dgram()
         .unwrap();
 
     qinfo!("Processing proxy");
+    let mut proxy_buf = Vec::new();
     let proxy_out = proxy
         .process_multiple(
             client_outer_dgrams.iter_mut(),
             now(),
+            &mut proxy_buf,
             64.try_into().unwrap(),
         )
         .dgram();

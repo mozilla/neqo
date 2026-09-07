@@ -89,7 +89,7 @@ impl Socket {
     }
 
     /// Send a [`datagram::Batch`] on the given [`Socket`].
-    pub fn send(&self, d: &datagram::Batch) -> io::Result<()> {
+    pub fn send(&self, d: &datagram::Batch<'_>) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             neqo_udp::send_inner(&self.state, (&self.inner).into(), d)
         })

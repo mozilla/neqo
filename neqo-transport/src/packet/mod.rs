@@ -119,6 +119,7 @@ impl From<Epoch> for Type {
     }
 }
 
+#[derive(Clone)]
 struct BuilderOffsets {
     /// The bits of the first octet that need masking.
     first_byte_mask: u8,
@@ -182,15 +183,18 @@ impl Builder<Vec<u8>> {
         Ok(complete.split_off(start))
     }
 
-    /// Make a Version Negotiation packet.
-    #[must_use]
-    pub fn version_negotiation(
+    /// Write a Version Negotiation packet into `send_buffer`.
+    ///
+    /// # Panics
+    /// When `send_buffer` cannot grow to hold the packet.
+    pub fn version_negotiation<B: Buffer>(
         dcid: &[u8],
         scid: &[u8],
         client_version: u32,
         versions: &[Version],
-    ) -> Vec<u8> {
-        let mut encoder = Encoder::default();
+        send_buffer: B,
+    ) {
+        let mut encoder = Encoder::new(send_buffer);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(BIT_LONG | (grease[3] & 0x7f));
@@ -210,12 +214,47 @@ impl Builder<Vec<u8>> {
         // by making the last byte differ from the client initial.
         grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
         encoder.encode(&grease[..4]);
-
-        Vec::from(encoder)
     }
 }
 
 impl<B: Buffer> Builder<B> {
+    /// Copy into a [`Vec`]-backed builder, for callers that cannot be generic
+    /// over the buffer. Fold the result back with [`Builder::restore_from`].
+    #[cfg(test)]
+    pub(crate) fn copy_to_vec(&self) -> Builder<Vec<u8>> {
+        let Self {
+            encoder,
+            pn,
+            header,
+            offsets,
+            limit,
+            padding,
+        } = self;
+
+        Builder {
+            encoder: Encoder::from(encoder.as_ref()),
+            pn: *pn,
+            header: header.clone(),
+            offsets: (*offsets).clone(),
+            limit: *limit,
+            padding: *padding,
+        }
+    }
+
+    /// Adopt `builder`'s state and append what it wrote. It must have come
+    /// from [`Builder::copy_to_vec`] on `self`.
+    #[cfg(test)]
+    pub(crate) fn restore_from(&mut self, builder: Builder<Vec<u8>>) {
+        self.pn = builder.pn;
+        self.header = builder.header;
+        self.offsets = builder.offsets;
+        self.limit = builder.limit;
+        self.padding = builder.padding;
+
+        self.encoder
+            .encode(&builder.encoder.as_ref()[(self.encoder.len())..]);
+    }
+
     /// Start building a short header packet.
     ///
     /// This doesn't fail if there isn't enough space; instead it returns a builder that
@@ -1761,11 +1800,22 @@ mod tests {
         0x01, 0xff, 0x00, 0x00, 0x1d, 0x0a, 0x0a, 0x0a, 0x0a,
     ];
 
+    fn build_sample_vn() -> Vec<u8> {
+        fixture_init();
+        let mut vn = Vec::new();
+        Builder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+            &mut vn,
+        );
+        vn
+    }
+
     #[test]
     fn build_vn() {
-        fixture_init();
-        let mut vn =
-            Builder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a_0a0a, &Version::all());
+        let mut vn = build_sample_vn();
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
@@ -1777,8 +1827,7 @@ mod tests {
 
     #[test]
     fn vn_do_not_repeat_client_grease() {
-        fixture_init();
-        let vn = Builder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a_0a0a, &Version::all());
+        let vn = build_sample_vn();
         assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
 
