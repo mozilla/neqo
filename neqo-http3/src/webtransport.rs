@@ -4,13 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    ops::Deref,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
 use neqo_transport::{
@@ -602,15 +596,10 @@ impl ServerHandler for Http3ServerHandler {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, derive_more::Deref, displaydoc::Display)]
+#[displaydoc("WebTransport session {stream_handler}")]
 pub struct ServerSession {
     stream_handler: StreamHandler,
-}
-
-impl Display for ServerSession {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "WebTransport session {}", self.stream_handler)
-    }
 }
 
 impl ServerSession {
@@ -777,13 +766,6 @@ impl ServerSession {
             .conn
             .borrow()
             .webtransport_export_keying_material(session_id, label, context, out)
-    }
-}
-
-impl Deref for ServerSession {
-    type Target = StreamHandler;
-    fn deref(&self) -> &Self::Target {
-        &self.stream_handler
     }
 }
 

@@ -11,7 +11,6 @@ mod token;
 
 use std::{
     cmp::{max, min},
-    fmt::{self, Display, Formatter},
     ops::RangeInclusive,
     time::{Duration, Instant},
 };
@@ -485,7 +484,8 @@ impl PtoState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("recovery::Loss")]
 pub struct Loss {
     /// When the handshake was confirmed, if it has been.
     confirmed_time: Option<Instant>,
@@ -1056,12 +1056,6 @@ impl Loss {
     }
 }
 
-impl Display for Loss {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "recovery::Loss")
-    }
-}
-
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 #[allow(
@@ -1072,7 +1066,7 @@ impl Display for Loss {
 mod tests {
     use std::{
         cell::RefCell,
-        ops::{Deref, DerefMut, RangeInclusive},
+        ops::RangeInclusive,
         rc::Rc,
         time::{Duration, Instant},
     };
@@ -1104,7 +1098,12 @@ mod tests {
     const TEST_RTT: Duration = ms(7000);
     const TEST_RTTVAR: Duration = ms(3500);
 
+    // Most uses of the fixture only care about the loss recovery piece,
+    // but the internal functions need the other bits.
+    #[derive(derive_more::Deref, derive_more::DerefMut)]
     struct Fixture {
+        #[deref]
+        #[deref_mut]
         lr: recovery::Loss,
         path: PathRef,
     }
@@ -1174,21 +1173,6 @@ mod tests {
                 lr: recovery::Loss::new(stats, FAST_PTO_SCALE),
                 path: Rc::new(RefCell::new(path)),
             }
-        }
-    }
-
-    // Most uses of the fixture only care about the loss recovery piece,
-    // but the internal functions need the other bits.
-    impl Deref for Fixture {
-        type Target = recovery::Loss;
-        fn deref(&self) -> &Self::Target {
-            &self.lr
-        }
-    }
-
-    impl DerefMut for Fixture {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.lr
         }
     }
 

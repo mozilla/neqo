@@ -6,12 +6,7 @@
 
 // Encoding and decoding packets off the wire.
 
-use std::{
-    cmp::min,
-    fmt,
-    ops::{Deref, DerefMut, Range},
-    time::Instant,
-};
+use std::{cmp::min, fmt, ops::Range, time::Instant};
 
 use enum_map::Enum;
 use log::debug;
@@ -130,7 +125,11 @@ struct BuilderOffsets {
 
 /// A packet builder that can be used to produce short packets and long packets.
 /// This does not produce Retry or Version Negotiation.
+#[derive(derive_more::Deref, derive_more::DerefMut, derive_more::Into)]
 pub struct Builder<B> {
+    #[deref]
+    #[deref_mut]
+    #[into]
     encoder: Encoder<B>,
     pn: Number,
     header: Range<usize>,
@@ -542,26 +541,6 @@ impl<B: Buffer> Builder<B> {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-}
-
-impl<B> Deref for Builder<B> {
-    type Target = Encoder<B>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.encoder
-    }
-}
-
-impl<B> DerefMut for Builder<B> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.encoder
-    }
-}
-
-impl<B> From<Builder<B>> for Encoder<B> {
-    fn from(v: Builder<B>) -> Self {
-        v.encoder
     }
 }
 
@@ -1082,10 +1061,12 @@ impl DecryptionError<'_> {
     }
 }
 
+#[derive(derive_more::Deref)]
 pub struct Decrypted<'a> {
     version: Version,
     pt: Type,
     pn: Number,
+    #[deref(forward)]
     data: &'a [u8],
     dcid: ConnectionId,
     scid: Option<ConnectionId>,
@@ -1127,14 +1108,6 @@ impl Decrypted<'_> {
     #[must_use]
     pub const fn scone(&self) -> Option<Bitrate> {
         self.scone
-    }
-}
-
-impl Deref for Decrypted<'_> {
-    type Target = [u8];
-
-    fn deref(&self) -> &Self::Target {
-        self.data
     }
 }
 

@@ -17,7 +17,7 @@
 
 use std::{
     cmp::min,
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Debug, Formatter},
     time::{Duration, Instant},
 };
 
@@ -26,6 +26,8 @@ use neqo_common::{qtrace, to_u64};
 use crate::rtt::GRANULARITY;
 
 /// A pacer that uses a leaky bucket.
+#[derive(displaydoc::Display)]
+#[displaydoc("Pacer {c}/{p}")]
 pub struct Pacer {
     /// Whether pacing is enabled.
     enabled: bool,
@@ -173,12 +175,6 @@ impl Pacer {
                 .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
         );
         self.t = now;
-    }
-}
-
-impl Display for Pacer {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Pacer {}/{}", self.c, self.p)
     }
 }
 

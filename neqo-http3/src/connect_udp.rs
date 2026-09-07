@@ -4,12 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, rc::Rc, time::Instant};
 
 use neqo_common::{Bytes, Header, qdebug, qinfo, qtrace};
 use neqo_transport::{Connection, DatagramTracking, StreamId, server::ConnectionRef};
@@ -307,15 +302,10 @@ impl ServerHandler for Http3ServerHandler {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, displaydoc::Display)]
+#[displaydoc("ConnectUdp session {stream_handler}")]
 pub struct ServerSession {
     stream_handler: StreamHandler,
-}
-
-impl Display for ServerSession {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "ConnectUdp session {}", self.stream_handler)
-    }
 }
 
 impl ServerSession {

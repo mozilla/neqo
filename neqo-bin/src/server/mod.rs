@@ -607,23 +607,16 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
-    use std::fmt;
-
     use neqo_common::{Tos, datagram};
     use tokio::time::timeout;
 
     use super::*;
 
-    #[derive(Default)]
+    #[derive(Default, displaydoc::Display)]
+    #[displaydoc("MockServer")]
     struct MockServer {
         batches: Vec<datagram::Batch>,
         received: usize,
-    }
-
-    impl Display for MockServer {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "MockServer")
-        }
     }
 
     impl HttpServer for MockServer {
