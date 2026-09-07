@@ -189,9 +189,6 @@ impl<'a> Batch<'a> {
     ///
     /// # Errors
     /// When `buffer` cannot hold `d`.
-    ///
-    /// # Panics
-    /// Never, as a [`Datagram`] is not empty.
     pub fn copy_from<B: Buffer>(d: &Datagram, buffer: &'a mut B) -> Result<Self, io::Error> {
         let start = buffer.position();
         // `write_all` writes what fits before failing, so undo a partial write.
@@ -199,7 +196,9 @@ impl<'a> Batch<'a> {
             buffer.truncate(start);
             return Err(e);
         }
-        let datagram_size = NonZeroUsize::new(d.len()).expect("Datagram is not empty");
+        // `Datagram` is guaranteed to not be empty.
+        let datagram_size =
+            NonZeroUsize::new(d.len()).ok_or_else(|| io::Error::other("Datagram is not empty"))?;
         Ok(Self::new(
             d.source(),
             d.destination(),
