@@ -102,10 +102,4 @@ for fuzzer in $(cargo fuzz list); do
     after=$(find "$corpus" -type f | wc -l | tr -d ' ')
     diff=$((after - before))
     echo "$fuzzer fuzzer: $diff new samples added (now $after)"
-
-    # Minimize the merged corpus.
-    echo "$fuzzer fuzzer: Minimizing merged corpus..."
-    minimize_corpus "$fuzzer" "$corpus"
-    final=$(find "$corpus" -type f | wc -l | tr -d ' ')
-    echo "$fuzzer fuzzer: Final corpus size: $final samples"
 done
