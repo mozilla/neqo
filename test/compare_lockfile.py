@@ -10,8 +10,11 @@ Compare Cargo.lock versions with Gecko's and verify alignment invariants.
 
 Checks three invariants:
   (A) HARD:     No package version duplicates unless Gecko has the same split.
-  (B) ADVISORY: No shared dep newer than Gecko (warn; staged for next vendor).
-  (C) HARD:     No shared production dep older than Gecko (update-lockfile missed it).
+  (B) ADVISORY: Deps ahead of Gecko that Gecko picks up when neqo is vendored, deps
+                on a semver range Gecko doesn't carry (nothing to pin to), and deps
+                another crate's version requirement rules out pinning.
+  (C) HARD:     Every other shared dep, dev- and build-dependencies included, sits
+                on Gecko's exact version (update-lockfile missed it).
 
 Exits 0 if no hard violations, 1 otherwise.
 
@@ -19,21 +22,56 @@ Usage: uv run --project test compare-lockfile
 """
 
 import sys
-
-from packaging.version import Version
+from typing import NamedTuple
 
 from lockfile_utils import (
-    classify_version_relation,
+    PinPlan,
+    PinPolicy,
+    VersionIndex,
+    collect_pin_targets,
+    divergence_rationales,
     find_dependents,
     find_dev_only_packages,
-    find_neqo_or_workspace_deps,
+    find_divergences,
+    find_neqo_only_deps,
     find_non_gecko_duplicates,
-    get_all_versions,
-    group_by_semver_range,
-    is_ahead_of_gecko,
+    find_pinnable_packages,
+    format_rationales,
+    load_cargo_metadata,
     load_lockfiles,
+    load_version_requirements,
+    parse_packages,
     semver_range,
+    versions_by_name,
 )
+
+
+class Issue(NamedTuple):
+    """One of our versions of a package that doesn't line up with Gecko's."""
+
+    description: str
+    our_ver: str
+    # None when we hold a version in a semver range Gecko doesn't carry at all.
+    gecko_ver: str | None
+
+
+class Mismatch(NamedTuple):
+    """A package with at least one version that doesn't line up with Gecko's."""
+
+    name: str
+    our_vers: str
+    gecko_vers: str
+    status: str
+    issues: list[Issue]
+    category: str = ""
+
+
+class Match(NamedTuple):
+    """A package whose versions all line up with Gecko's."""
+
+    name: str
+    our_vers: str
+    gecko_vers: str
 
 
 # ---------------------------------------------------------------------------
@@ -41,110 +79,77 @@ from lockfile_utils import (
 # ---------------------------------------------------------------------------
 
 def find_version_issues(
-    ours: list[tuple[str, str]], theirs: list[tuple[str, str]]
-) -> list[tuple[str, str, str | None]]:
+    name: str,
+    ours: set[str],
+    theirs: set[str],
+    plan: PinPlan,
+) -> list[Issue]:
     """Find version mismatches between our and Gecko's versions of a package.
 
-    Returns list of (description, our_ver, gecko_ver) tuples for each issue.
-    gecko_ver is None when we have a version in a range Gecko doesn't carry.
+    Versions that update-lockfile pins, or would pin if a requirement allowed it,
+    are reported against their pin target; the rest fall back to Gecko's version in
+    the same semver range.
     """
-    gecko_by_range = group_by_semver_range([v for v, _s in theirs])
-    issues: list[tuple[str, str, str | None]] = []
-
-    for v, _s in ours:
-        sv_rng = semver_range(v)
-        gecko_in_range = gecko_by_range.get(sv_rng, [])
-        relation = classify_version_relation(v, gecko_in_range)
-
-        if relation == "no-range":
-            issues.append((f"we have {v}, Gecko doesn't have {sv_rng}.x", v, None))
-        elif relation != "match":
-            gecko_ver = max(gecko_in_range, key=Version)
-            issues.append((f"{v} vs {gecko_ver}", v, gecko_ver))
+    issues: list[Issue] = []
+    for div in find_divergences(name, ours, theirs, plan):
+        if div.pin_target:
+            desc = f"{div.our_ver} vs. {div.pin_target}"
+        elif div.blocked:
+            desc = (
+                f"{div.our_ver} vs. {div.blocked.gecko_ver}, ruled out by "
+                f"{div.blocked.requirer}'s "
+                f'`{name} = "{div.blocked.requirement}"`'
+            )
+        elif div.gecko_ver is None:
+            rng = semver_range(div.our_ver)
+            desc = f"we have {div.our_ver}, Gecko doesn't have {rng}.x"
+        else:
+            desc = f"{div.our_ver} vs. {div.gecko_ver}"
+        issues.append(Issue(desc, div.our_ver, div.gecko_ver))
 
     return issues
 
 
 def compare_versions(
-    our_versions: dict, gecko_versions: dict, common: list[str]
-) -> tuple[list, list]:
-    """Compare versions for common packages and classify as match or mismatch.
-
-    Returns (matches, mismatches) where:
-    - matches:    [(name, our_str, their_str), ...]
-    - mismatches: [(name, our_str, their_str, status, issues), ...]
-    """
-    mismatches = []
-    matches = []
+    our_versions: VersionIndex,
+    gecko_versions: VersionIndex,
+    common: list[str],
+    plan: PinPlan,
+) -> tuple[list[Match], list[Mismatch]]:
+    """Compare versions for common packages and split into matches and mismatches."""
+    matches: list[Match] = []
+    mismatches: list[Mismatch] = []
 
     for name in common:
-        ours = our_versions[name]
-        theirs = gecko_versions[name]
+        ours, theirs = our_versions[name], gecko_versions[name]
+        our_str = ", ".join(sorted(ours))
+        their_str = ", ".join(sorted(theirs))
 
-        our_str = ", ".join(sorted({v for v, _s in ours}))
-        their_str = ", ".join(sorted({v for v, _s in theirs}))
-
-        issues = find_version_issues(ours, theirs)
-
+        issues = find_version_issues(name, ours, theirs, plan)
         if issues:
-            status = "✗ " + "; ".join(desc for desc, _, _ in issues)
-            mismatches.append((name, our_str, their_str, status, issues))
+            status = "✗ " + "; ".join(issue.description for issue in issues)
+            mismatches.append(Mismatch(name, our_str, their_str, status, issues))
         else:
-            matches.append((name, our_str, their_str))
+            matches.append(Match(name, our_str, their_str))
 
     return matches, mismatches
 
 
-def filter_neqo_only_mismatches(
-    mismatches: list,
-    matches: list,
-    gecko_versions: dict,
-    gecko_lock: dict,
-    our_lock: dict,
-) -> tuple[list, list, set[str]]:
-    """Filter mismatches for neqo-only packages where our version is ahead.
-
-    These are expected since update-lockfile updates neqo-only deps to latest.
-    Also filters transitive cases: packages whose version in our lockfile is only
-    pulled in by neqo-only (or workspace) crates.
-
-    Returns (filtered_matches, filtered_mismatches, neqo_only).
-    """
-    neqo_only, neqo_or_workspace = find_neqo_or_workspace_deps(gecko_lock, our_lock)
-
-    filtered = []
-    for name, our_str, their_str, status, issues in mismatches:
-        if name not in neqo_or_workspace:
-            filtered.append((name, our_str, their_str, status, issues))
-            continue
-
-        remaining = [
-            (desc, our_ver, gecko_ver)
-            for desc, our_ver, gecko_ver in issues
-            if not is_ahead_of_gecko(our_ver, gecko_ver, gecko_versions[name])
-        ]
-
-        if not remaining:
-            matches.append((name, our_str, their_str))
-        else:
-            new_status = "✗ " + "; ".join(d for d, _, _ in remaining)
-            filtered.append((name, our_str, their_str, new_status, remaining))
-
-    return matches, filtered, neqo_only
-
-
 def categorize_mismatch(
-    name: str, issues: list, neqo_only: set[str], dev_only: set[str], our_lock: dict
+    mismatch: Mismatch, neqo_only: set[str], dev_only: set[str], our_lock: dict
 ) -> str:
     """Categorize a mismatch as neqo-only, dev/build only, or PRODUCTION."""
+    name = mismatch.name
     if name in neqo_only:
         return "neqo-only"
 
-    for _desc, our_ver, _gecko_ver in issues:
-        dependents = find_dependents(our_lock, name, our_ver)
-        if not dependents:
-            dependents = find_dependents(our_lock, name)
-        if not all(d.split()[0] in dev_only for d in dependents):
+    for issue in mismatch.issues:
+        # A dependency entry omits the version when the package appears only once,
+        # so fall back to every dependent of the package.
+        dependents = find_dependents(our_lock, name, issue.our_ver) or find_dependents(
+            our_lock, name
+        )
+        if not all(dep in dev_only for dep, _ver in dependents):
             return "PRODUCTION"
 
     return "dev/build only"
@@ -155,7 +160,7 @@ def categorize_mismatch(
 # ---------------------------------------------------------------------------
 
 def check_invariant_a(
-    our_lock: dict, gecko_versions: dict
+    our_lock: dict, gecko_versions: VersionIndex
 ) -> list[tuple[str, str, str]]:
     """Check invariant A: no non-Gecko duplicate package versions.
 
@@ -172,40 +177,37 @@ def check_invariant_a(
 
 
 def classify_issues_by_severity(
-    mismatches: list,
+    mismatches: list[Mismatch],
+    plan: PinPlan,
+    pinnable: set[str],
     neqo_only: set[str],
     dev_only: set[str],
     our_lock: dict,
-) -> tuple[list, list]:
-    """Split mismatches into hard violations and warnings.
+) -> tuple[list[Mismatch], list[Mismatch]]:
+    """Split mismatches into hard violations and warnings, filling in the category.
 
-    Hard violations: shared production deps that are BEHIND Gecko (invariant C).
-    Warnings:        anything ahead of Gecko (invariant B), neqo-only mismatches,
-                     dev/build-only mismatches, and "no Gecko range" cases.
-
-    Returns (hard_violations, warnings) where each entry is
-    (name, our_str, their_str, status, issues, category).
+    Hard violations: versions update-lockfile pins to Gecko that haven't been moved
+                     yet (invariant C).  Dev- and build-dependencies count: Gecko
+                     doesn't adopt them when neqo is vendored, so a mismatch in
+                     either direction is a real misalignment.
+    Warnings:        everything update-lockfile leaves alone — neqo-only deps ahead
+                     of Gecko, versions in a semver range Gecko doesn't carry, and
+                     pins another crate's requirement rules out (invariant B).
     """
-    hard_violations = []
-    warnings = []
+    hard_violations: list[Mismatch] = []
+    warnings: list[Mismatch] = []
 
-    for name, our_str, their_str, status, issues in mismatches:
-        category = categorize_mismatch(name, issues, neqo_only, dev_only, our_lock)
-
-        # Check if any issue is a BEHIND move for a production dep.
-        has_hard_behind = (
-            category == "PRODUCTION"
-            and any(
-                gecko_ver is not None and Version(our_ver) < Version(gecko_ver)
-                for _, our_ver, gecko_ver in issues
-            )
+    for mismatch in mismatches:
+        categorized = mismatch._replace(
+            category=categorize_mismatch(mismatch, neqo_only, dev_only, our_lock)
         )
-
-        entry = (name, our_str, their_str, status, issues, category)
-        if has_hard_behind:
-            hard_violations.append(entry)
-        else:
-            warnings.append(entry)
+        # Only a violation when the version could actually reach a Gecko build;
+        # elsewhere we still aim for Gecko's version, but missing it harms nothing.
+        is_hard = mismatch.name in pinnable and any(
+            (mismatch.name, issue.our_ver) in plan.targets
+            for issue in mismatch.issues
+        )
+        (hard_violations if is_hard else warnings).append(categorized)
 
     return hard_violations, warnings
 
@@ -214,33 +216,44 @@ def classify_issues_by_severity(
 # Reporting
 # ---------------------------------------------------------------------------
 
+TABLE_WIDTH = 110
+
+
+def table_row(name: str, ours: str, theirs: str, status: str) -> str:
+    """Format one row of the package comparison table."""
+    return f"{name:<30} {ours:<25} {theirs:<25} {status}"
+
+
+def print_section(label: str, count: int) -> None:
+    """Print a rule-delimited section heading."""
+    print(f"\n{'=' * TABLE_WIDTH}")
+    print(f"{label} ({count}):")
+    print("=" * TABLE_WIDTH)
+
+
 def print_invariant_a_violations(violations: list[tuple[str, str, str]]) -> None:
-    print(f"\n{'=' * 110}")
-    print(f"HARD VIOLATIONS — Invariant A: non-Gecko duplicate versions ({len(violations)}):")
-    print(f"{'=' * 110}")
-    for name, off_ver, desc in violations:
+    print_section(
+        "HARD VIOLATIONS — Invariant A: non-Gecko duplicate versions", len(violations)
+    )
+    for name, _off_ver, desc in violations:
         print(f"  {name}: {desc}")
     print("  Run update-lockfile to attempt auto-resolution.")
 
 
-def print_version_violations(label: str, entries: list) -> None:
-    print(f"\n{'=' * 110}")
-    print(f"{label} ({len(entries)}):")
-    print(f"{'=' * 110}")
-    print(
-        f"{'Package':<30} {'Our Version(s)':<25} {'Gecko Version(s)':<25} {'Status'}"
-    )
-    print("-" * 110)
-    for name, our_str, their_str, status, _issues, category in entries:
-        print(f"{name:<30} {our_str:<25} {their_str:<25} {status}")
-        print(f"  ({category})")
+def print_version_violations(label: str, entries: list[Mismatch]) -> None:
+    print_section(label, len(entries))
+    print(table_row("Package", "Our Version(s)", "Gecko Version(s)", "Status"))
+    print("-" * TABLE_WIDTH)
+    for entry in entries:
+        print(table_row(entry.name, entry.our_vers, entry.gecko_vers, entry.status))
+        print(f"  ({entry.category})")
 
 
-def print_matches(matches: list) -> None:
-    print(f"{'Package':<30} {'Our Version(s)':<25} {'Gecko Version(s)':<25} {'Status'}")
-    print("=" * 110)
-    for name, our_str, their_str in matches:
-        print(f"{name:<30} {our_str:<25} {their_str:<25} ✓ Match")
+def print_matches(matches: list[Match]) -> None:
+    print(table_row("Package", "Our Version(s)", "Gecko Version(s)", "Status"))
+    print("=" * TABLE_WIDTH)
+    for match in matches:
+        print(table_row(match.name, match.our_vers, match.gecko_vers, "✓ Match"))
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +264,8 @@ def main():
     """Compare Cargo.lock versions with Gecko's and verify alignment invariants."""
     our_lock, gecko_lock = load_lockfiles()
 
-    gecko_versions = get_all_versions(gecko_lock)
-    our_versions = get_all_versions(our_lock)
+    gecko_versions = versions_by_name(gecko_lock)
+    our_versions = versions_by_name(our_lock)
 
     common = sorted(set(gecko_versions) & set(our_versions))
 
@@ -260,18 +273,25 @@ def main():
     dup_violations = check_invariant_a(our_lock, gecko_versions)
 
     # --- Invariants B/C: version alignment ---
-    matches, mismatches = compare_versions(our_versions, gecko_versions, common)
+    # pin_targets is the same set of moves update-lockfile applies, so anything
+    # still listed here is a version it would have pinned.  Moves no requirement
+    # in the graph allows come back as blocked and stay advisory.
+    metadata = load_cargo_metadata()
+    neqo_only = find_neqo_only_deps(gecko_lock, our_lock)
+    pinnable = find_pinnable_packages(metadata, gecko_lock)
+    plan = collect_pin_targets(
+        set(common),
+        neqo_only,
+        parse_packages(gecko_lock),
+        parse_packages(our_lock),
+        load_version_requirements(metadata),
+    )
 
-    if mismatches:
-        matches, mismatches, neqo_only = filter_neqo_only_mismatches(
-            mismatches, matches, gecko_versions, gecko_lock, our_lock
-        )
-    else:
-        neqo_only: set[str] = set()
+    matches, mismatches = compare_versions(our_versions, gecko_versions, common, plan)
 
-    dev_only = find_dev_only_packages()
-    hard_behind, warnings = classify_issues_by_severity(
-        mismatches, neqo_only, dev_only, our_lock
+    dev_only = find_dev_only_packages(metadata)
+    hard_misaligned, warnings = classify_issues_by_severity(
+        mismatches, plan, pinnable, neqo_only, dev_only, our_lock
     )
 
     # --- Print report ---
@@ -281,20 +301,28 @@ def main():
     if dup_violations:
         print_invariant_a_violations(dup_violations)
 
-    if hard_behind:
+    if hard_misaligned:
         print_version_violations(
-            "HARD VIOLATIONS — Invariant C: shared production deps behind Gecko",
-            hard_behind,
+            "HARD VIOLATIONS — Invariant C: shared deps not pinned to Gecko",
+            hard_misaligned,
         )
 
     if warnings:
         print_version_violations("WARNINGS (advisory only)", warnings)
 
+    # --- Rationale for every package that differs from Gecko ---
+    policy = PinPolicy.build(gecko_lock, metadata, neqo_only)
+    entries = divergence_rationales(parse_packages(our_lock), policy, our_lock, plan)
+    print(format_rationales("Why each version differs from Gecko", entries))
+
     # --- Summary ---
-    n_hard = len(dup_violations) + len(hard_behind)
+    n_hard = len(dup_violations) + len(hard_misaligned)
     print(f"\nSummary: {len(matches)} matches, {len(mismatches)} mismatches")
     print(f"  Duplicates:  {len(dup_violations)} hard violation(s)")
-    print(f"  Behind Gecko: {len(hard_behind)} hard violation(s), {len(warnings)} warning(s)")
+    print(
+        f"  Not pinned to Gecko: {len(hard_misaligned)} hard violation(s), "
+        f"{len(warnings)} warning(s)"
+    )
     if n_hard:
         print(f"\nTotal: {n_hard} hard violation(s) — run update-lockfile to fix.")
     else:
