@@ -8,7 +8,7 @@
 
 use std::{io, net::SocketAddr};
 
-use neqo_common::{datagram, qdebug};
+use neqo_common::{Buffer, datagram, qdebug};
 use neqo_udp::{DatagramIter, RecvBuf};
 
 /// Ideally this would live in [`neqo_udp`]. [`neqo_udp`] is used in Firefox.
@@ -89,7 +89,7 @@ impl Socket {
     }
 
     /// Send a [`datagram::Batch`] on the given [`Socket`].
-    pub fn send(&self, d: &datagram::Batch) -> io::Result<()> {
+    pub fn send<B: Buffer>(&self, d: &datagram::Batch<B>) -> io::Result<()> {
         self.inner.try_io(tokio::io::Interest::WRITABLE, || {
             neqo_udp::send_inner(&self.state, (&self.inner).into(), d)
         })

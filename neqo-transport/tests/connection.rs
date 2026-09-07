@@ -32,8 +32,9 @@ fn gso() {
     client.stream_send(stream_id2, &[42; 2048]).unwrap();
     client.stream_close_send(stream_id2).unwrap();
 
+    let send_buffer = vec![];
     let out = client
-        .process_multiple_output(now(), 64.try_into().expect(">0"))
+        .process_multiple_output(now(), send_buffer, 64.try_into().expect(">0"))
         .dgram()
         .unwrap();
 
@@ -174,7 +175,7 @@ fn set_payload(server_packet: Option<&Datagram>, client_dcid: &[u8], payload: &[
     let pn_len = usize::from(header[0] & 0b0000_0011) + 1;
     let len_pos = header.len() - pn_len - Encoder::varint_len(to_u64(pn_len + orig_payload.len()));
     header.truncate(len_pos);
-    let mut enc = Encoder::new_borrowed_vec(&mut header);
+    let mut enc = Encoder::new(&mut header);
     enc.encode_len(4 + payload.len() + aead.expansion());
     enc.encode_uint(4, pn);
     header[0] = header[0] & 0xfc | 0b0000_0011; // Set the packet number length to 4.

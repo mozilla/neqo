@@ -31,7 +31,7 @@ use rustc_hash::FxHashMap as HashMap;
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
 use crate::{
-    STREAM_IO_BUFFER_SIZE, now,
+    STREAM_IO_BUFFER_SIZE, SendBuf, now,
     send_data::{SendData, SendResult},
 };
 
@@ -134,12 +134,13 @@ impl super::Client for Http3Client {
         self.state().try_into()
     }
 
-    fn process_multiple_output(
+    fn process_multiple_output<'a>(
         &mut self,
         now: Instant,
+        send_buf: SendBuf<'a>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        self.process_multiple_output(now, max_datagrams)
+    ) -> OutputBatch<SendBuf<'a>> {
+        self.process_multiple_output(now, send_buf, max_datagrams)
     }
 
     fn process_multiple_input<'a>(

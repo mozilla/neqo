@@ -236,6 +236,15 @@ impl<B: Buffer> PartialEq for Encoder<B> {
 impl<B: Buffer> Eq for Encoder<B> {}
 
 impl<B: Buffer> Encoder<B> {
+    /// Append to `b`; [`Encoder::len`] counts only what this [`Encoder`] writes.
+    #[must_use]
+    pub fn new(b: B) -> Self {
+        Self {
+            start: b.position(),
+            buf: b,
+        }
+    }
+
     /// Get the length of the [`Encoder`].
     ///
     /// Note that the length of the underlying buffer might be larger.
@@ -561,16 +570,6 @@ impl<'a> Encoder<Cursor<&'a mut [u8]>> {
     }
 }
 
-impl<'a> Encoder<&'a mut Vec<u8>> {
-    #[must_use]
-    pub fn new_borrowed_vec(buf: &'a mut Vec<u8>) -> Self {
-        Encoder {
-            start: buf.position(),
-            buf,
-        }
-    }
-}
-
 /// Extends a memory buffer with methods beyond [`std::io::Write`]. Needed for
 /// [`Encoder`].
 ///
@@ -582,6 +581,11 @@ pub trait Buffer: io::Write {
 
     fn is_empty(&self) -> bool {
         self.position() == 0
+    }
+
+    /// How many more bytes can be written, or [`None`] if the buffer grows.
+    fn available(&self) -> Option<usize> {
+        None
     }
 
     fn as_slice(&self) -> &[u8];
@@ -597,6 +601,40 @@ pub trait Buffer: io::Write {
     fn write_at(&mut self, pos: usize, data: u8);
 
     fn rotate_right(&mut self, start: usize, count: usize);
+}
+
+impl<B: Buffer> Buffer for &mut B {
+    fn position(&self) -> usize {
+        B::position(self)
+    }
+
+    fn available(&self) -> Option<usize> {
+        B::available(self)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        B::as_slice(self)
+    }
+
+    fn as_mut(&mut self) -> &mut [u8] {
+        B::as_mut(self)
+    }
+
+    fn truncate(&mut self, len: usize) {
+        B::truncate(self, len);
+    }
+
+    fn pad_to(&mut self, n: usize, v: u8) {
+        B::pad_to(self, n, v);
+    }
+
+    fn write_at(&mut self, pos: usize, data: u8) {
+        B::write_at(self, pos, data);
+    }
+
+    fn rotate_right(&mut self, start: usize, count: usize) {
+        B::rotate_right(self, start, count);
+    }
 }
 
 impl Buffer for Vec<u8> {
@@ -629,39 +667,13 @@ impl Buffer for Vec<u8> {
     }
 }
 
-impl Buffer for &mut Vec<u8> {
-    fn position(&self) -> usize {
-        Vec::len(self)
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        self.as_ref()
-    }
-
-    fn as_mut(&mut self) -> &mut [u8] {
-        self.as_mut_slice()
-    }
-
-    fn truncate(&mut self, len: usize) {
-        Vec::truncate(self, len);
-    }
-
-    fn pad_to(&mut self, n: usize, v: u8) {
-        self.resize(n, v);
-    }
-
-    fn write_at(&mut self, pos: usize, data: u8) {
-        self[pos] = data;
-    }
-
-    fn rotate_right(&mut self, start: usize, count: usize) {
-        self[start..].rotate_right(count);
-    }
-}
-
 impl Buffer for Cursor<&mut [u8]> {
     fn position(&self) -> usize {
         expect_usize(self.position())
+    }
+
+    fn available(&self) -> Option<usize> {
+        Some(self.get_ref().len() - Buffer::position(self))
     }
 
     fn as_slice(&self) -> &[u8] {
@@ -1234,7 +1246,7 @@ mod tests {
         check_as_mut(Encoder::default());
 
         let mut buf = Vec::<u8>::new();
-        check_as_mut(Encoder::new_borrowed_vec(&mut buf));
+        check_as_mut(Encoder::new(&mut buf));
 
         let mut buf = [0; 16];
         check_as_mut(Encoder::new_borrowed_slice(&mut buf[..]));
@@ -1247,7 +1259,7 @@ mod tests {
         let mut non_empty_vec = vec![1, 2, 3, 4];
         assert_eq!(non_empty_vec.len(), Buffer::position(&non_empty_vec));
 
-        let mut enc = Encoder::new_borrowed_vec(&mut non_empty_vec);
+        let mut enc = Encoder::new(&mut non_empty_vec);
         assert!(enc.is_empty());
         enc.encode_byte(5);
         assert!(!enc.is_empty());
@@ -1294,7 +1306,7 @@ mod tests {
     #[test]
     fn as_decoder_exposes_encoded_bytes_only_not_whole_buffer() {
         let mut buffer = vec![1, 2, 3, 4];
-        let mut enc = Encoder::new_borrowed_vec(&mut buffer);
+        let mut enc = Encoder::new(&mut buffer);
         enc.encode([5, 6, 7]);
 
         let decoder = enc.as_decoder();

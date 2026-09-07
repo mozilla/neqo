@@ -49,7 +49,7 @@ fn gso_with_max_mtu() {
     loop {
         fill_stream(&mut client, stream_id);
         let mut pkts = client
-            .process_multiple_output(now(), 2.try_into().unwrap())
+            .process_multiple_output(now(), Vec::new(), 2.try_into().unwrap())
             .dgram()
             .unwrap();
         if pkts.datagram_size().get() == 65507 {
@@ -190,4 +190,52 @@ fn vpn_migration_triggers_pmtud() {
     let expected_vpn_mtu = 1380 - header_size;
     assert_eq!(server.plpmtu(), expected_vpn_mtu);
     assert_eq!(client.plpmtu(), expected_vpn_mtu);
+}
+
+/// A PMTUD probe is larger than the current PLPMTU, so a send buffer has to be
+/// sized for the probe, not the PLPMTU.
+#[test]
+fn send_buffer_holds_pmtud_probe() {
+    use std::{io::Cursor, num::NonZeroUsize};
+
+    fixture_init();
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .pmtud_iface_mtu(false),
+    );
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    let needs_probe = |c: &Connection| c.paths.primary().unwrap().borrow().pmtud().needs_probe();
+
+    // Acknowledge probes until another one is pending, so that the next
+    // datagram is a probe larger than the current PLPMTU.
+    fill_stream(&mut client, stream_id);
+    while !needs_probe(&client) {
+        let mut pkts = client
+            .process_multiple_output(now(), Vec::new(), 2.try_into().unwrap())
+            .dgram()
+            .unwrap();
+        server.process_multiple_input(pkts.iter_mut(), now());
+        if let Some(ack) = server.process_output(now()).dgram() {
+            client.process_input(ack, now());
+        }
+        fill_stream(&mut client, stream_id);
+    }
+
+    let (plpmtu, probe) = {
+        let path = client.paths.primary().unwrap();
+        let p = path.borrow();
+        (p.pmtud().plpmtu(), p.pmtud().probe_size())
+    };
+    assert!(probe > plpmtu);
+
+    let mut buf = vec![0; probe];
+    let batch = client
+        .process_multiple_output(now(), Cursor::new(&mut buf[..]), NonZeroUsize::MIN)
+        .dgram()
+        .expect("a datagram");
+    assert_eq!(batch.datagram_size().get(), probe);
 }

@@ -7,6 +7,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::{
+    io::Cursor,
     net::{SocketAddr, ToSocketAddrs as _},
     path::PathBuf,
     time::{Duration, Instant},
@@ -24,6 +25,9 @@ pub mod client;
 mod send_data;
 pub mod server;
 pub mod udp;
+
+/// A view of the long-lived UDP send buffer, handed to `process_*` per call.
+pub type SendBuf<'a> = Cursor<&'a mut [u8]>;
 
 /// Firefox default value
 ///
