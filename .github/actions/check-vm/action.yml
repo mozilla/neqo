@@ -146,7 +146,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@d0518f912576ae759075aa00fb9fe27037940271 # v1.5.4
+      uses: vmactions/freebsd-vm@f0552d3b69211736abd97f02ff3d4674c56b73b1 # v1.5.5
       with:
         usesh: true
         disable-cache: true
@@ -156,7 +156,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@e6c68b637a12e83519688d115d57d5b0b53923cd # v1.4.6
+      uses: vmactions/openbsd-vm@86cdc08415d9d0865267e686561e276c52d62530 # v1.4.7
       with:
         usesh: true
         disable-cache: true
@@ -166,7 +166,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@00081e82b14bc40114eb97f32b4455306828516b # v1.4.6
+      uses: vmactions/netbsd-vm@6334c835de4c04a59fe59f0f8f071e02a2f0bab3 # v1.4.7
       with:
         usesh: true
         disable-cache: true
@@ -176,7 +176,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@315163f088b66e55bbcc45928bd224d4973b2312 # v1.3.8
+      uses: vmactions/solaris-vm@96d8d976f9e67d82ec6c7e8ce9c1060731f9e21c # v1.3.9
       with:
         release: "11.4-gcc"
         usesh: true
