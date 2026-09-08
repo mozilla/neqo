@@ -20,7 +20,7 @@ use neqo_transport::{Connection, StreamId};
 use crate::{
     BufferedStream, CloseType, Error, Http3StreamInfo, Http3StreamType, HttpSendStream, Res,
     SendStream, SendStreamEvents, Stream,
-    frames::HFrame,
+    frames::{HFrame, HFrameType},
     headers_checks::{headers_valid, is_interim, trailers_valid},
 };
 
@@ -137,6 +137,16 @@ impl SendMessage {
             encoder,
             conn_events,
         }
+    }
+
+    /// Bytes a `DATA` frame carrying `payload_len` payload bytes takes on the
+    /// stream: the frame's type and length varints plus the payload. Mirrors
+    /// what [`Self::send_data_atomic`] writes.
+    #[must_use]
+    pub(crate) fn data_frame_len(payload_len: usize) -> usize {
+        Encoder::varint_len(u64::from(HFrameType::DATA))
+            + Encoder::varint_len(to_u64(payload_len))
+            + payload_len
     }
 
     /// # Errors

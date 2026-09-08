@@ -131,9 +131,6 @@ pub struct DatagramStats {
     pub lost: usize,
     /// The number of datagrams dropped due to being too large.
     pub dropped_too_big: usize,
-    /// The number of datagrams dropped due to reaching the limit of the
-    /// outgoing queue.
-    pub dropped_queue_full: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

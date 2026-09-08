@@ -915,6 +915,9 @@ impl Http3Client {
                 ConnectionEvent::Datagram(dgram) => {
                     self.base_handler.handle_datagram(dgram);
                 }
+                ConnectionEvent::OutgoingDatagramSpaceAvailable => {
+                    self.events.datagram_space_available();
+                }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
                 | ConnectionEvent::SconeUpdated(_)

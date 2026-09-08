@@ -1630,6 +1630,7 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1637,7 +1638,7 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .send_datagram(conn, buf, id, now)

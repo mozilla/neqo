@@ -61,6 +61,9 @@ pub(crate) struct Session {
     /// CONNECT request.
     protocol: Box<dyn Protocol>,
     draining: bool,
+    /// Set when a datagram capsule was refused with `FlowControlLimit`, so a
+    /// resume event fires once the control stream is writable again.
+    datagram_capsule_blocked: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -120,6 +123,7 @@ impl Session {
             events,
             protocol,
             draining: false,
+            datagram_capsule_blocked: false,
         }
     }
 
@@ -150,6 +154,7 @@ impl Session {
             events,
             protocol,
             draining: false,
+            datagram_capsule_blocked: false,
         })
     }
 
@@ -226,6 +231,15 @@ impl Session {
             self.state = State::Done;
         }
         Ok(())
+    }
+
+    fn stream_writable(&mut self) {
+        // The control stream has flow-control space again; if a datagram capsule
+        // was refused, tell the sender it can resume.
+        if self.datagram_capsule_blocked {
+            self.datagram_capsule_blocked = false;
+            self.events.capsule_space_available();
+        }
     }
 
     fn close(&mut self, close_type: CloseType) {
@@ -390,18 +404,21 @@ impl Session {
         self.control_stream_send.send_data(conn, buf, now)
     }
 
+    /// Send a datagram, as a QUIC datagram or, when the peer offers no QUIC
+    /// datagram support, an HTTP DATAGRAM Capsule. Returns `Ok(false)` when the
+    /// outgoing QUIC datagram queue is full.
+    ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - The session is not in Active state (`Error::Unavailable`).
-    /// - QUIC datagram or HTTP DATAGRAM Capsule sending fails.
+    /// `Error::Unavailable` if the session is not Active; other errors if
+    /// sending the datagram or capsule fails.
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
             qdebug!("[{self}]: cannot send datagram in {:?} state.", self.state);
@@ -411,12 +428,17 @@ impl Session {
 
         if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            return self.protocol.write_datagram_capsule(
-                &mut self.control_stream_send,
-                conn,
-                buf,
-                now,
-            );
+            // The Capsule path errors when the control stream's flow-control
+            // window is exhausted, then emits a resume event once the stream is
+            // writable again (see `stream_writable`).
+            let res =
+                self.protocol
+                    .write_datagram_capsule(&mut self.control_stream_send, conn, buf, now);
+            if matches!(res, Err(Error::FlowControlLimit)) {
+                self.datagram_capsule_blocked = true;
+            }
+            // Fullness is reported by the error above, never as `Ok(false)`.
+            return res.map(|()| true);
         }
 
         let mut dgram_data = Encoder::default();
@@ -424,9 +446,9 @@ impl Session {
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
 
-        conn.send_datagram(dgram_data.into(), id)?;
-        qtrace!("[{self}] sent datagram via QUIC datagram");
-        Ok(())
+        let has_space = conn.send_datagram(dgram_data.into(), id)?;
+        qtrace!("[{self}] sent datagram via QUIC datagram, has_space={has_space}");
+        Ok(has_space)
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
@@ -538,7 +560,9 @@ impl SendStream for Rc<RefCell<Session>> {
         self.borrow_mut().has_data_to_send()
     }
 
-    fn stream_writable(&self) {}
+    fn stream_writable(&self) {
+        self.borrow_mut().stream_writable();
+    }
 
     fn done(&self) -> bool {
         self.borrow_mut().done()
@@ -652,6 +676,15 @@ pub(crate) trait Protocol: Debug + Display {
     fn datagram_capsule_support(&self) -> bool;
 
     /// Write a datagram as an HTTP DATAGRAM Capsule to the control stream.
+    ///
+    /// Capsules are buffered on the control stream, so their limit is that
+    /// stream's flow-control window. A write that would exceed the window returns
+    /// [`FlowControlLimit`] instead of dropping the datagram, and arms a writable
+    /// notification so an [`OutgoingDatagramSpaceAvailable`] event fires once the
+    /// stream can hold a capsule again; a successful write returns `Ok(())`.
+    ///
+    /// [`FlowControlLimit`]: crate::Error::FlowControlLimit
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ClientEvent::OutgoingDatagramSpaceAvailable
     fn write_datagram_capsule(
         &self,
         _control_stream_send: &mut Box<dyn SendStream>,

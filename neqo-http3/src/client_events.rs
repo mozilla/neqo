@@ -115,6 +115,8 @@ pub enum Http3ClientEvent {
     WebTransport(WebTransportEvent),
     /// `ConnectUdp` events
     ConnectUdp(ConnectUdpEvent),
+    /// The outgoing QUIC datagram queue has space again after having been full.
+    OutgoingDatagramSpaceAvailable,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -290,6 +292,10 @@ impl ExtendedConnectEvents for Http3ClientEvents {
         };
         self.events.push(event);
     }
+
+    fn capsule_space_available(&self) {
+        self.datagram_space_available();
+    }
 }
 
 impl Http3ClientEvents {
@@ -298,6 +304,15 @@ impl Http3ClientEvents {
         if stream_type == StreamType::BiDi {
             self.events.push(Http3ClientEvent::RequestsCreatable);
         }
+    }
+
+    /// Emit the outgoing QUIC datagram queue's resume event, forwarding
+    /// `neqo-transport`'s [`ConnectionEvent::OutgoingDatagramSpaceAvailable`].
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramSpaceAvailable`]: neqo_transport::ConnectionEvent::OutgoingDatagramSpaceAvailable
+    pub(crate) fn datagram_space_available(&self) {
+        self.events
+            .push_unique(Http3ClientEvent::OutgoingDatagramSpaceAvailable);
     }
 
     /// Add a new `AuthenticationNeeded` event

@@ -44,6 +44,8 @@ pub enum Http3ServerConnEvent {
     },
     /// Connection state change.
     StateChange(Http3State),
+    /// The outgoing QUIC datagram queue has space again after having been full.
+    OutgoingDatagramSpaceAvailable,
     WebTransport(WebTransportEvent),
     ConnectUdp(ConnectUdpEvent),
 }
@@ -238,6 +240,10 @@ impl ExtendedConnectEvents for Http3ServerConnEvents {
         };
         self.events.push(event);
     }
+
+    fn capsule_space_available(&self) {
+        self.datagram_space_available();
+    }
 }
 
 impl Http3ServerConnEvents {
@@ -247,6 +253,15 @@ impl Http3ServerConnEvents {
 
     pub fn next_event(&self) -> Option<Http3ServerConnEvent> {
         self.events.next_event()
+    }
+
+    /// Emit the outgoing QUIC datagram queue's resume event, forwarding
+    /// `neqo-transport`'s [`ConnectionEvent::OutgoingDatagramSpaceAvailable`].
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramSpaceAvailable`]: neqo_transport::ConnectionEvent::OutgoingDatagramSpaceAvailable
+    pub(crate) fn datagram_space_available(&self) {
+        self.events
+            .push_unique(Http3ServerConnEvent::OutgoingDatagramSpaceAvailable);
     }
 
     pub fn connection_state_change(&self, state: Http3State) {

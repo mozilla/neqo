@@ -277,6 +277,10 @@ pub enum Http3ServerEvent {
         stream_id: StreamId,
         priority: Priority,
     },
+    /// The outgoing QUIC datagram queue has space again after having been full.
+    OutgoingDatagramSpaceAvailable {
+        conn: ConnectionRef,
+    },
     WebTransport(crate::webtransport::ServerEvent),
     ConnectUdp(crate::connect_udp::ServerEvent),
 }
@@ -325,6 +329,12 @@ impl Http3ServerEvents {
     pub(crate) fn connection_state_change(&self, conn: ConnectionRef, state: Http3State) {
         self.events
             .push(Http3ServerEvent::StateChange { conn, state });
+    }
+
+    /// Insert an `OutgoingDatagramSpaceAvailable` event.
+    pub(crate) fn datagram_space_available(&self, conn: ConnectionRef) {
+        self.events
+            .push(Http3ServerEvent::OutgoingDatagramSpaceAvailable { conn });
     }
 
     /// Insert a `Data` event.
