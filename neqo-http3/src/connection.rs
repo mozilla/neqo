@@ -1895,6 +1895,17 @@ impl Http3Connection {
         wt: &Rc<RefCell<extended_connect::session::Session>>,
         conn: &mut Connection,
     ) {
+        // The session object is going away, but its outgoing datagram queue
+        // lives on `conn` and outlives it. `Connection::process_timer` does
+        // keep expiring that orphaned queue, but with no session left there
+        // is nobody to report the outcomes through or count them, and the
+        // queue entry itself is only ever removed by this teardown. Drop and
+        // report here, while the session is still around to report through:
+        // `Session::close` is reached via
+        // `RecvStream::reset`/`SendStream::handle_stop_sending`, neither of
+        // which has a `Connection` to do it itself.
+        wt.borrow_mut().drop_queued_datagrams(conn);
+
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         #[expect(
