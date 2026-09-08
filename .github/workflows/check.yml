@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+        uses: mozilla/actions/toolchains@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -188,7 +188,7 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+      - uses: mozilla/actions/crap@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
         with:
           lcov-path: lcov.info
           threshold: "30"

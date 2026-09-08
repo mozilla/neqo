@@ -9,7 +9,7 @@ permissions: {}
 
 jobs:
   sbom:
-    uses: mozilla/actions/.github/workflows/sbom.yml@f8e0d5c4cff5006ee24b6356272d47c9911450d1 # v2.0.6
+    uses: mozilla/actions/.github/workflows/sbom.yml@264c6b750df669adb58286a26c5d0e04e839e06b # v2.0.8
     permissions:
       actions: read # Required by anchore/sbom-action to read workflow run context.
       contents: write # Required to upload the SBOM as a release asset.
