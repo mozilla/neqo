@@ -7,7 +7,9 @@
 use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Encoder, event::Provider as _, to_u64};
-use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamId, streams::SendGroupId};
+use neqo_transport::{
+    ConnectionParameters, DatagramQueueOutcome, Output, StreamId, streams::SendGroupId,
+};
 use test_fixture::now;
 
 use crate::{
@@ -319,9 +321,9 @@ fn server_processes_a_connection_whose_only_pending_work_is_a_sent_count() {
     let mut t = t0;
     let out = loop {
         match wt.server.process_output(t) {
-            neqo_transport::Output::Datagram(d) => break d,
-            neqo_transport::Output::Callback(delay) => t += delay,
-            neqo_transport::Output::None => panic!("the server never sent the datagram"),
+            Output::Datagram(d) => break d,
+            Output::Callback(delay) => t += delay,
+            Output::None => panic!("the server never sent the datagram"),
         }
     };
     assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
@@ -438,6 +440,89 @@ fn datagram_expires_on_the_implementation_defined_default_max_age() {
 
     assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
     assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
+}
+
+/// A session reset by the peer leaves through `remove_extended_connect`,
+/// which must drop its queue so that nothing is left to come due.
+#[test]
+fn session_reset_by_peer_drops_queued_datagrams() {
+    const QUEUED: u64 = 20;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let t0 = now();
+
+    for id in 0..QUEUED {
+        assert_eq!(
+            wt.client.webtransport_send_datagram(
+                session_id,
+                DGRAM,
+                Some(id),
+                t0,
+                SendGroupId::new(0),
+                0
+            ),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+    assert!(wt.client.connection().next_datagram_expiry().is_some());
+
+    // Deliver the server's reset without letting the client send first;
+    // `WtTest::cancel_session_server` would exchange packets and flush the
+    // queue.  The client handles the reset inside `process_input`, before
+    // it could build a packet.
+    wt_session
+        .cancel_fetch(crate::Error::HttpNone.code())
+        .unwrap();
+    let mut t = t0;
+    let reset = loop {
+        match wt.server.process_output(t) {
+            Output::Datagram(d) => break d,
+            Output::Callback(delay) => t += delay,
+            Output::None => panic!("server had nothing to send"),
+        }
+        assert!(t < t0 + Duration::from_millis(50), "server sent no reset");
+    };
+    wt.client.process_input(reset, t);
+
+    assert!(
+        wt.client.events().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed { stream_id, .. })
+                if stream_id == session_id
+        )),
+        "SessionClosed never arrived"
+    );
+    assert_eq!(
+        wt.client.connection().next_datagram_expiry(),
+        None,
+        "nothing may stay queued for a closed session, or its expiry keeps coming due"
+    );
+}
+
+/// The server side of the same teardown: a client that resets the session
+/// takes the server's queued datagrams with it.
+#[test]
+fn session_reset_by_client_drops_the_servers_queued_datagrams() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    for id in 0..3 {
+        assert_eq!(
+            wt_session.send_datagram(DGRAM, Some(id), now(), SendGroupId::new(0), 0),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+    assert!(wt_session.next_datagram_expiry().is_some());
+    wt.client
+        .cancel_fetch(session_id, crate::Error::HttpNone.code())
+        .unwrap();
+    let reset = wt.client.process_output(now()).dgram().unwrap();
+    drop(wt.server.process(Some(reset), now()));
+
+    assert_eq!(wt_session.next_datagram_expiry(), None);
 }
 
 #[test]
