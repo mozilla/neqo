@@ -7,7 +7,9 @@
 use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Encoder, event::Provider as _, to_u64};
-use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamId, streams::SendGroupId};
+use neqo_transport::{
+    ConnectionParameters, DatagramQueueOutcome, Output, StreamId, streams::SendGroupId,
+};
 use test_fixture::now;
 
 use crate::{
@@ -396,6 +398,70 @@ fn datagram_expires_on_the_implementation_defined_default_max_age() {
     assert_eq!(
         server_datagram_outcomes(&wt, wt_session.stream_id()),
         vec![DatagramOutcome::Expired(13)]
+    );
+}
+
+/// A session reset by the peer is removed outright, and its outgoing datagram
+/// queue lives on `Connection`, so it outlives the session unless teardown
+/// drops it. The transport's own timer would still expire what is on it, but
+/// silently: no session is left to report a `Dropped`/`Expired` outcome or
+/// count it, and the queue entry sticks around until the connection ends.
+#[test]
+fn session_reset_by_peer_drops_queued_datagrams() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let t0 = now();
+
+    // Many packets' worth: a single `process_output` builds one packet, so most
+    // of these are still queued whichever way the sweep and the packet build
+    // interleave. A handful of small datagrams would all fit in one packet and
+    // the test would pass vacuously.
+    let big = vec![0x5a; 1000];
+    for id in 0..20 {
+        assert_eq!(
+            wt.client.webtransport_send_datagram(
+                session_id,
+                &big,
+                Some(id),
+                t0,
+                SendGroupId::new(0),
+                0
+            ),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+
+    // Deliver the server's reset without letting the client send: going
+    // through `WtTest::cancel_session_server` would exchange packets and flush
+    // the queue before the session ever closes.
+    wt_session
+        .cancel_fetch(crate::Error::HttpNone.code())
+        .unwrap();
+    let mut t = t0;
+    let reset = loop {
+        match wt.server.process_output(t) {
+            Output::Datagram(d) => break d,
+            Output::Callback(delay) => t += delay,
+            Output::None => panic!("server had nothing to send"),
+        }
+        assert!(t < t0 + Duration::from_millis(50), "server sent no reset");
+    };
+    wt.client.process_input(reset, t);
+    drop(wt.client.process_output(t));
+
+    let outcomes = client_datagram_outcomes(&mut wt, session_id);
+    assert!(!outcomes.is_empty(), "expected datagrams to be left queued");
+    assert!(
+        outcomes
+            .iter()
+            .all(|o| matches!(o, DatagramOutcome::Dropped(_))),
+        "every datagram left queued at close must be reported dropped, got {outcomes:?}"
+    );
+    assert_eq!(
+        wt.client.connection().next_datagram_expiry(),
+        None,
+        "nothing may stay queued for a closed session, or its expiry keeps coming due"
     );
 }
 
