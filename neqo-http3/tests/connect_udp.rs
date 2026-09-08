@@ -14,7 +14,7 @@ use neqo_http3::{
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
     webtransport::ClientSession as _,
 };
-use neqo_transport::{ConnectionParameters, StreamType};
+use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamType};
 use nss::AuthenticationStatus;
 use test_fixture::{
     DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
@@ -730,7 +730,7 @@ fn establish_capsule_session(
     // `datagram_size(0)` forces the HTTP DATAGRAM Capsule path.
     let mut proxy_params = ConnectionParameters::default().datagram_size(0);
     if let Some(v) = proxy_max_stream_data {
-        proxy_params = proxy_params.max_stream_data(StreamType::BiDi, true, v);
+        proxy_params = proxy_params.max_stream_data(StreamDataLimit::BiDiRemote, v);
     }
     let mut client = http3_client_with_params(
         Http3Parameters::default()
