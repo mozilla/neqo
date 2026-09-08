@@ -34,20 +34,30 @@ fn disabled_by_default() {
 }
 
 fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
-    let conn_params = ConnectionParameters::default()
+    initiate_new_session_with_client_params(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(1500),
+    )
+}
+
+fn initiate_new_session_with_client_params(
+    client_conn_params: ConnectionParameters,
+) -> (Http3Client, Http3Server, neqo_http3::StreamId) {
+    let proxy_conn_params = ConnectionParameters::default()
         .pmtud(true)
         .datagram_size(1500);
 
     let mut client = http3_client_with_params(
         Http3Parameters::default()
             .connect(true)
-            .connection_parameters(conn_params.clone()),
+            .connection_parameters(client_conn_params),
     );
 
     let mut proxy = http3_server_with_params(
         Http3Parameters::default()
             .connect(true)
-            .connection_parameters(conn_params),
+            .connection_parameters(proxy_conn_params),
     );
 
     // Connect client and proxy.
@@ -75,7 +85,23 @@ fn establish_new_session() -> (
     neqo_http3::StreamId,
     ServerSession,
 ) {
-    let (mut client, mut proxy, connect_udp_session_id) = initiate_new_session();
+    establish_new_session_with_client_params(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(1500),
+    )
+}
+
+fn establish_new_session_with_client_params(
+    client_conn_params: ConnectionParameters,
+) -> (
+    Http3Client,
+    Http3Server,
+    neqo_http3::StreamId,
+    ServerSession,
+) {
+    let (mut client, mut proxy, connect_udp_session_id) =
+        initiate_new_session_with_client_params(client_conn_params);
     exchange_packets(&mut client, &mut proxy, false, None);
     let proxy_session = proxy
         .events()
@@ -494,79 +520,8 @@ fn connect_udp_operation_on_fetch_stream() {
 }
 
 #[test]
-#[expect(clippy::too_many_lines, reason = "OK for a test.")]
 fn session_lifecycle_with_http_datagram_capsule() {
-    fixture_init();
-    neqo_common::log::init(None);
-
-    let conn_params = ConnectionParameters::default().datagram_size(0);
-
-    let mut client = http3_client_with_params(
-        Http3Parameters::default()
-            .connect(true)
-            .connection_parameters(conn_params.clone()),
-    );
-
-    let mut proxy = http3_server_with_params(
-        Http3Parameters::default()
-            .connect(true)
-            .connection_parameters(conn_params),
-    );
-
-    let out = test_fixture::connect_peers(&mut client, &mut proxy);
-    if let Some(dgram) = out {
-        let out = proxy.process(Some(dgram), now()).dgram();
-        if let Some(dgram) = out {
-            client.process_input(dgram, now());
-        }
-    }
-
-    let session_id = client
-        .connect_udp_create_session(
-            now(),
-            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
-                .parse::<Uri>()
-                .unwrap(),
-            &[],
-        )
-        .unwrap();
-
-    exchange_packets(&mut client, &mut proxy, false, None);
-
-    let proxy_session = proxy
-        .events()
-        .find_map(|event| {
-            if let Http3ServerEvent::ConnectUdp(ServerEvent::NewSession { session, headers }) =
-                event
-            {
-                assert_eq!(session.stream_id(), session_id);
-                assert!(
-                    headers.contains_header(":method", "CONNECT")
-                        && headers.contains_header(":protocol", "connect-udp")
-                        && headers.contains_header("capsule-protocol", "?1")
-                );
-                session
-                    .response(&SessionAcceptAction::Accept, now())
-                    .unwrap();
-                Some(session)
-            } else {
-                None
-            }
-        })
-        .unwrap();
-
-    exchange_packets(&mut client, &mut proxy, false, None);
-
-    client
-        .events()
-        .find(|e| {
-            matches!(
-                e,
-                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { stream_id, status, ..})
-                if *stream_id == session_id && *status == 200
-            )
-        })
-        .unwrap();
+    let (mut client, mut proxy, session_id, proxy_session) = establish_capsule_session(None);
 
     qinfo!("Testing Capsule send (client -> server)");
     client
@@ -714,5 +669,224 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
     assert_eq!(
         client.webtransport_create_stream(session_id, StreamType::UniDi),
         Err(Error::InvalidStreamId)
+    );
+}
+
+/// Backpressure surfaces end-to-end through connect-udp: once
+/// `connect_udp_send_datagram` fills the outgoing QUIC datagram queue and
+/// returns `Ok(false)`, draining it must deliver
+/// [`OutgoingDatagramSpaceAvailable`], so a datagram sender that backs off on
+/// `Ok(false)` learns it can resume.
+///
+/// [`OutgoingDatagramSpaceAvailable`]: neqo_http3::Http3ClientEvent::OutgoingDatagramSpaceAvailable
+#[test]
+fn outgoing_datagram_space_available_forwarded() {
+    fixture_init();
+    let (mut client, mut proxy, session_id, _proxy_session) =
+        establish_new_session_with_client_params(
+            ConnectionParameters::default()
+                .pmtud(true)
+                .datagram_size(1500)
+                .outgoing_datagram_queue(1),
+        );
+
+    // Drain session-setup events so the assertions below only observe the
+    // datagram backpressure signal.
+    while client.next_event().is_some() {}
+
+    assert_eq!(
+        client.connect_udp_send_datagram(session_id, PING, None, now()),
+        Ok(false)
+    );
+    assert!(
+        !client
+            .events()
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+        "resume event fired before the queue drained"
+    );
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+        "OutgoingDatagramSpaceAvailable was not forwarded through connect-udp"
+    );
+}
+
+/// Establish a connect-udp session over the HTTP DATAGRAM Capsule path, granting
+/// the client only `proxy_max_stream_data` bytes of control-stream flow control.
+fn establish_capsule_session(
+    proxy_max_stream_data: Option<u64>,
+) -> (
+    Http3Client,
+    Http3Server,
+    neqo_http3::StreamId,
+    ServerSession,
+) {
+    fixture_init();
+    neqo_common::log::init(None);
+
+    // `datagram_size(0)` forces the HTTP DATAGRAM Capsule path.
+    let mut proxy_params = ConnectionParameters::default().datagram_size(0);
+    if let Some(v) = proxy_max_stream_data {
+        proxy_params = proxy_params.max_stream_data(StreamType::BiDi, true, v);
+    }
+    let mut client = http3_client_with_params(
+        Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(ConnectionParameters::default().datagram_size(0)),
+    );
+    let mut proxy = http3_server_with_params(
+        Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(proxy_params),
+    );
+
+    let out = test_fixture::connect_peers(&mut client, &mut proxy);
+    if let Some(dgram) = out
+        && let Some(dgram) = proxy.process(Some(dgram), now()).dgram()
+    {
+        client.process_input(dgram, now());
+    }
+
+    let session_id = client
+        .connect_udp_create_session(
+            now(),
+            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
+                .parse::<Uri>()
+                .unwrap(),
+            &[],
+        )
+        .unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let proxy_session = proxy
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::ConnectUdp(ServerEvent::NewSession { session, headers }) =
+                event
+            {
+                assert_eq!(session.stream_id(), session_id);
+                assert!(
+                    headers.contains_header(":method", "CONNECT")
+                        && headers.contains_header(":protocol", "connect-udp")
+                        && headers.contains_header("capsule-protocol", "?1")
+                );
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    client
+        .events()
+        .find(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { stream_id, status, .. })
+                    if *stream_id == session_id && *status == 200)
+        })
+        .unwrap();
+
+    (client, proxy, session_id, proxy_session)
+}
+
+/// A datagram capsule that would exceed the control stream's flow-control window
+/// is refused with `FlowControlLimit` rather than silently dropped, and the
+/// sender receives a resume event once the window reopens.
+#[test]
+fn datagram_capsule_flow_control_error_and_resume() {
+    let (mut client, mut proxy, session_id, _proxy_session) = establish_capsule_session(Some(2000));
+
+    // Fill the control stream's flow-control window with datagram capsules until
+    // one is refused; a refusal is an error, never a silent drop.
+    let payload = vec![0x2c; 500];
+    let mut refused = false;
+    for _ in 0..100 {
+        match client.connect_udp_send_datagram(session_id, &payload, None, now()) {
+            Ok(_) => {}
+            Err(Error::FlowControlLimit) => {
+                refused = true;
+                break;
+            }
+            Err(e) => panic!("unexpected error: {e:?}"),
+        }
+    }
+    assert!(
+        refused,
+        "the control stream never reached its flow-control limit"
+    );
+    assert!(
+        !client
+            .events()
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+        "resume event fired before the window reopened"
+    );
+
+    // The proxy reads the buffered capsules and grants more flow-control credit,
+    // reopening the control stream, which must surface the resume event.
+    exchange_packets(&mut client, &mut proxy, false, None);
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+        "resume event not emitted after control-stream flow control reopened"
+    );
+}
+
+/// A datagram whose payload fits the window but whose capsule and DATA frame
+/// framing does not must be refused, not accepted and then truncated and lost.
+#[test]
+fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
+    const WINDOW: u64 = 150;
+
+    let (mut client, mut proxy, session_id, _proxy_session) =
+        establish_capsule_session(Some(WINDOW));
+
+    // A guard that counts only the payload keeps accepting after the framing stops
+    // fitting, and the overflowing capsule is truncated and lost.
+    let mut sent = 0;
+    while client.connect_udp_send_datagram(session_id, &[0x2c; 1], None, now()) == Ok(true) {
+        sent += 1;
+    }
+    assert!(sent > 0, "no send space to fill");
+
+    assert!(
+        !client
+            .events()
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+        "resume event fired while the window was still closed"
+    );
+
+    // Count before sending anything else: a later send would flush a stranded tail
+    // out of the send buffer and hide the loss.
+    exchange_packets(&mut client, &mut proxy, false, None);
+    let received = proxy
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                Http3ServerEvent::ConnectUdp(ServerEvent::Datagram { .. })
+            )
+        })
+        .count();
+    assert_eq!(
+        received, sent,
+        "a datagram was accepted and then lost: the guard under-counts the framing"
+    );
+
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+        "resume event not emitted after the window reopened"
     );
 }
