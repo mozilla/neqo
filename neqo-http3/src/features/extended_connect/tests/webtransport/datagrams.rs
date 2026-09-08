@@ -4,14 +4,19 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{num::NonZeroUsize, time::Duration};
+use std::{
+    num::NonZeroUsize,
+    time::{Duration, Instant},
+};
 
-use neqo_common::{Encoder, event::Provider as _, to_u64};
-use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamId, streams::SendGroupId};
+use neqo_common::{Datagram, Encoder, event::Provider as _, to_u64};
+use neqo_transport::{
+    ConnectionParameters, DatagramQueueOutcome, Output, StreamId, streams::SendGroupId,
+};
 use test_fixture::now;
 
 use crate::{
-    Http3ClientEvent, Http3ServerEvent, SessionAcceptAction, WebTransportEvent,
+    Http3ClientEvent, Http3Server, Http3ServerEvent, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
@@ -267,6 +272,16 @@ fn outgoing_datagram_space_available_forwarded() {
     );
 }
 
+fn next_dgram(server: &mut Http3Server, mut t: Instant) -> (Datagram, Instant) {
+    loop {
+        match server.process_output(t) {
+            Output::Datagram(d) => return (d, t),
+            Output::Callback(delay) => t += delay,
+            Output::None => panic!("the server had nothing to send"),
+        }
+    }
+}
+
 #[test]
 fn close_session_stats_include_datagrams_expired_since_the_last_sweep() {
     let mut wt = WtTest::new();
@@ -486,6 +501,57 @@ fn datagram_expires_on_the_implementation_defined_default_max_age() {
 
     assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
     assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
+}
+
+/// A session reset by the peer leaves through `remove_extended_connect`,
+/// which must drop its queue so that nothing is left to come due.
+#[test]
+fn session_reset_by_peer_drops_queued_datagrams() {
+    const QUEUED: u64 = 20;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let t0 = now();
+
+    for id in 0..QUEUED {
+        assert_eq!(
+            wt.client.webtransport_send_datagram(
+                session_id,
+                DGRAM,
+                Some(id),
+                t0,
+                SendGroupId::new(0),
+                0
+            ),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+    assert!(wt.client.connection().next_datagram_expiry().is_some());
+
+    // Deliver the server's reset without letting the client send first;
+    // `WtTest::cancel_session_server` would exchange packets and flush the
+    // queue.  The client handles the reset inside `process_input`, before
+    // it could build a packet.
+    wt_session
+        .cancel_fetch(crate::Error::HttpNone.code())
+        .unwrap();
+    let (reset, t) = next_dgram(&mut wt.server, t0);
+    wt.client.process_input(reset, t);
+
+    assert!(
+        wt.client.events().any(|e| matches!(
+            e,
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed { stream_id, .. })
+                if stream_id == session_id
+        )),
+        "SessionClosed never arrived"
+    );
+    assert_eq!(
+        wt.client.connection().next_datagram_expiry(),
+        None,
+        "nothing may stay queued for a closed session, or its expiry keeps coming due"
+    );
 }
 
 #[test]
