@@ -264,6 +264,8 @@ where
     /// Retired items.
     retired: u64,
     frame_pending: bool,
+    /// The peer reported being blocked at `max_allowed`.
+    peer_blocked: bool,
 }
 
 impl<T> ReceiverFlowControl<T>
@@ -280,6 +282,7 @@ where
             consumed: 0,
             retired: 0,
             frame_pending: false,
+            peer_blocked: false,
         }
     }
 
@@ -299,6 +302,7 @@ where
     /// This function is called when `STREAM_DATA_BLOCKED` frame is received.
     /// The flow control will try to send an update if possible.
     pub const fn send_flowc_update(&mut self) {
+        self.peer_blocked = true;
         if self.retired + self.max_active > self.max_allowed {
             self.frame_pending = true;
         }
@@ -335,6 +339,7 @@ where
     const fn frame_sent(&mut self, new_max: u64) {
         self.max_allowed = new_max;
         self.frame_pending = false;
+        self.peer_blocked = false;
     }
 
     pub const fn set_max_active(&mut self, max: u64) {
@@ -382,6 +387,15 @@ where
         else {
             // RTT is zero, no need for tuning.
             return;
+        };
+
+        // If the peer was blocked on its credit, part of `elapsed` was spent
+        // waiting for this update rather than sending. Count at most one RTT
+        // of sending, or the wait would suppress the growth needed to end it.
+        let elapsed = if self.peer_blocked || self.consumed >= self.max_allowed {
+            min(elapsed, rtt.get())
+        } else {
+            elapsed
         };
 
         // Scale the max_active window down by
@@ -768,7 +782,7 @@ mod test {
     use crate::{
         ConnectionParameters, Error, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA, Res,
         connection::params::{MAX_LOCAL_MAX_DATA, MAX_LOCAL_MAX_STREAM_DATA},
-        fc::WINDOW_UPDATE_FRACTION,
+        fc::{WINDOW_INCREASE_MULTIPLIER, WINDOW_UPDATE_FRACTION},
         packet, recovery,
         stats::FrameStats,
         stream_id::{StreamId, StreamType},
@@ -1231,6 +1245,41 @@ mod test {
         assert!(
             previous_max_active < fc.max_active(),
             "expect receiver to auto-tune (i.e. increase) max_active"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn auto_tuning_blocked_peer_ignores_wait_time() -> Res<()> {
+        let rtt = Duration::from_millis(40);
+        let mut now = test_fixture::now();
+        let window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA);
+        let mut fc = ReceiverFlowControl::new(StreamId::new(0), window);
+
+        // Send first window update to give auto-tuning algorithm a baseline.
+        let consumed = fc.set_consumed(fc.next_limit())?;
+        fc.add_retired(consumed);
+        assert_eq!(write_frames(&mut fc, rtt, now), 1);
+
+        // Nearly all credit used over 4 RTT is below the target rate: no growth.
+        now += 4 * rtt;
+        let consumed = fc.set_consumed(fc.next_limit() - 1)?;
+        fc.add_retired(consumed);
+        assert_eq!(write_frames(&mut fc, rtt, now), 1);
+        assert_eq!(fc.max_active(), window);
+
+        // Same consumption and wait, but the peer reported being blocked: only
+        // one RTT of the wait counts as sending time, so the window grows.
+        now += 4 * rtt;
+        let consumed = fc.set_consumed(fc.next_limit() - 1)?;
+        fc.add_retired(consumed);
+        fc.send_flowc_update();
+        assert_eq!(write_frames(&mut fc, rtt, now), 1);
+        let excess = consumed - window * (WINDOW_UPDATE_FRACTION - 1) / WINDOW_UPDATE_FRACTION;
+        assert_eq!(
+            fc.max_active(),
+            window + excess * WINDOW_INCREASE_MULTIPLIER
         );
 
         Ok(())
