@@ -356,7 +356,7 @@ jobs:
                  | ["pr", "base"]
                    | map(. as $ref
                          | ($g[] | select(.name | endswith("-" + $ref)))
-                         | "[\($ref)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))")
+                         | "[\($ref)](https://github.com/\(env.REPOSITORY)/actions/runs/\(env.RUN_ID)/artifacts/\(.id))")
                    | "- \($name): \(join(" · "))"),
                 "\n</details>\n"
             ' artifacts.json
