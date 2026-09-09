@@ -582,7 +582,7 @@ mod tests {
     use std::time::Instant;
 
     use neqo_common::expect_usize;
-    use neqo_transport::{ConnectionParameters, StreamId, StreamType};
+    use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamId, StreamType};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server, handshake,
         new_server, now,
@@ -648,9 +648,9 @@ mod tests {
             new_server::<CountingConnectionIdGenerator, &str>(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
-                    .max_stream_data(StreamType::UniDi, true, max)
-                    .max_stream_data(StreamType::BiDi, true, max)
-                    .max_stream_data(StreamType::BiDi, false, max),
+                    .max_stream_data(StreamDataLimit::UniDi, max)
+                    .max_stream_data(StreamDataLimit::BiDiRemote, max)
+                    .max_stream_data(StreamDataLimit::BiDiLocal, max),
             )
         });
         handshake(&mut conn, &mut peer_conn);
