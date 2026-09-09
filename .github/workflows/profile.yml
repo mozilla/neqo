@@ -345,7 +345,7 @@ jobs:
           gh api --paginate --slurp "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" |
             jq '[.[].artifacts[]]' > artifacts.json
           section() {
-            jq -r --arg prefix "$1" --arg title "$2" --arg run_id "$RUN_ID" '
+            jq -r --arg prefix "$1" --arg title "$2" '
               [.[] | select(.name | startswith($prefix))]
               | group_by(.name | sub("-(pr|base)$"; ""))
               | select(length > 0)
@@ -356,10 +356,7 @@ jobs:
                  | ["pr", "base"]
                    | map(. as $ref
                          | ($g[] | select(.name | endswith("-" + $ref)))
-                         | "[\($ref)](\(.archive_download_url
-                             | sub("api.github.com/repos"; "github.com")
-                             | sub("/actions/artifacts/"; "/actions/runs/\($run_id)/artifacts/")
-                             | sub("/zip$"; "")))")
+                         | "[\($ref)](https://github.com/\(env.REPOSITORY)/actions/runs/\(env.RUN_ID)/artifacts/\(.id))")
                    | "- \($name): \(join(" · "))"),
                 "\n</details>\n"
             ' artifacts.json
