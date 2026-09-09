@@ -137,23 +137,48 @@ impl RangeTracker {
     /// Find the first unmarked range. If all are contiguous, this will return
     /// (`highest_offset()`, None).
     fn first_unmarked_range(&mut self) -> (u64, Option<u64>) {
+        self.assert_cache_valid();
         if let Some(first_unmarked) = self.first_unmarked {
             return first_unmarked;
         }
 
-        let mut prev_end = self.acked;
+        let res = Self::scan_first_unmarked_range(self.acked, &self.used);
+        self.first_unmarked = Some(res);
+        res
+    }
 
-        for (&cur_off, &(cur_len, _)) in &self.used {
+    /// Scan `used` for the first unmarked range, ignoring the cache.
+    fn scan_first_unmarked_range(
+        acked: u64,
+        used: &BTreeMap<u64, (u64, RangeState)>,
+    ) -> (u64, Option<u64>) {
+        let mut prev_end = acked;
+        for (&cur_off, &(cur_len, _)) in used {
             if prev_end == cur_off {
                 prev_end = cur_off + cur_len;
             } else {
-                let res = (prev_end, Some(cur_off - prev_end));
-                self.first_unmarked = Some(res);
-                return res;
+                return (prev_end, Some(cur_off - prev_end));
             }
         }
-        self.first_unmarked = Some((prev_end, None));
         (prev_end, None)
+    }
+
+    /// Drop the `first_unmarked` cache if it satisfies `pred`.
+    fn invalidate_cache_if(&mut self, pred: impl FnOnce((u64, Option<u64>)) -> bool) {
+        if self.first_unmarked.is_some_and(pred) {
+            self.first_unmarked = None;
+        }
+    }
+
+    /// Compiled out in release builds. Panics if the cache disagrees with a fresh scan.
+    fn assert_cache_valid(&self) {
+        #[cfg(debug_assertions)]
+        if let Some(cached) = self.first_unmarked {
+            assert_eq!(
+                cached,
+                Self::scan_first_unmarked_range(self.acked, &self.used)
+            );
+        }
     }
 
     /// When the range of acknowledged bytes from zero increases, we need to drop any
@@ -205,13 +230,17 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
         if new_off == self.acked {
             self.acked += new_len;
             self.coalesce_acked();
+            let acked = self.acked;
+            self.invalidate_cache_if(|(off, _)| off < acked); // clear if before the new self.acked
             return;
         }
         let mut new_end = new_off + new_len;
+
+        // Only relabels ranges below the cached gap unless the ack reaches into or past it.
+        self.invalidate_cache_if(|(cached_off, _)| new_end > cached_off);
 
         // Get all existing ranges that start within this new range.
         let mut covered = self
@@ -308,7 +337,14 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // Advance the cached first unmarked range if this fills it, exactly or partially.
+        self.first_unmarked = match self.first_unmarked {
+            Some((off, None)) if off == new_off => Some((new_end, None)),
+            Some((off, Some(len))) if off == new_off && new_len < len => {
+                Some((new_end, Some(len - new_len)))
+            }
+            _ => None,
+        };
 
         // Get all existing ranges that start within this new range.
         let covered = self
@@ -391,7 +427,8 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // A gap widens whenever the unmark starts at or before its end.
+        self.invalidate_cache_if(|(c_off, c_len)| off <= c_off + c_len.unwrap_or(0));
         let len = to_u64(len);
         let end_off = off + len;
 
@@ -3309,6 +3346,97 @@ mod tests {
         // Nothing is pending after retransmitting it.
         txb.mark_as_sent(1000, 1000);
         assert!(txb.next_bytes().is_none());
+    }
+
+    #[test]
+    fn mark_sent_updates_cache_on_exact_fill() {
+        let mut rt = RangeTracker::default();
+        assert_eq!(rt.first_unmarked_range(), (0, None));
+        rt.mark_sent(0, 10);
+        // Updated in place, not invalidated.
+        assert_eq!(rt.first_unmarked, Some((10, None)));
+    }
+
+    #[test]
+    fn mark_sent_advances_cache_on_partial_fill() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 5);
+        rt.mark_sent(10, 5); // Leaves an unmarked range at [5, 10).
+        assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
+        rt.mark_sent(5, 2); // Partially fills the cached gap.
+        assert_eq!(rt.first_unmarked, Some((7, Some(3))));
+    }
+
+    #[test]
+    fn mark_acked_preserves_cache_beyond_new_acked() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 20);
+        rt.mark_sent(30, 10); // Leaves an unmarked range at [20, 30).
+        assert_eq!(rt.first_unmarked_range(), (20, Some(10)));
+        rt.mark_acked(0, 5); // Acks a prefix well before the cached range.
+        assert_eq!(rt.first_unmarked, Some((20, Some(10))));
+    }
+
+    #[test]
+    fn mark_acked_invalidates_cache_on_non_prefix_ack_into_gap() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 10);
+        rt.mark_sent(20, 10); // Leaves an unmarked range at [10, 20).
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+        rt.mark_acked(12, 3); // Non-prefix ack landing inside the cached gap.
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (10, Some(2)));
+    }
+
+    #[test]
+    fn mark_acked_invalidates_cache_before_new_acked() {
+        let mut rt = RangeTracker::default();
+        assert_eq!(rt.first_unmarked_range(), (0, None));
+        // Acking past it moves the scan's start, so it must invalidate.
+        rt.mark_acked(0, 5);
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (5, None));
+    }
+
+    #[test]
+    fn mark_acked_preserves_cache_at_new_acked_boundary() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 10);
+        rt.mark_sent(20, 10); // Leaves an unmarked range at [10, 20).
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+        rt.mark_acked(0, 10); // New self.acked lands exactly on the cached offset.
+        assert_eq!(rt.first_unmarked, Some((10, Some(10))));
+    }
+
+    #[test]
+    fn unmark_range_invalidates_cache_at_or_before_unmarked_range() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 10);
+        assert_eq!(rt.first_unmarked_range(), (10, None));
+        rt.unmark_range(5, 3); // Starts before the cached range.
+        assert_eq!(rt.first_unmarked, None);
+    }
+
+    #[test]
+    fn unmark_range_preserves_cache_strictly_after_unmarked_range() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(0, 5);
+        rt.mark_sent(10, 5); // Leaves an unmarked range at [5, 10).
+        rt.mark_sent(20, 5);
+        assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
+        rt.unmark_range(20, 5); // Starts strictly after the cached range's end.
+        assert_eq!(rt.first_unmarked, Some((5, Some(5))));
+    }
+
+    #[test]
+    fn unmark_range_invalidates_cache_at_end_of_unmarked_range() {
+        let mut rt = RangeTracker::default();
+        rt.mark_acked(0, 5);
+        rt.mark_sent(10, 5);
+        assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
+        rt.unmark_range(10, 5); // Widens the cached gap.
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (5, None));
     }
 
     #[test]
