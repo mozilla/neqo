@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -515,7 +515,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.30.1",
+ "test-fixture 0.31.1",
 ]
 
 [[package]]
@@ -686,6 +686,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "mach2"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -720,7 +729,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -742,32 +751,34 @@ dependencies = [
  "rustc-hash",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.30.1",
+ "test-fixture 0.31.1",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
  "env_logger",
  "hex",
+ "libc",
  "log",
+ "mach2",
  "qlog",
  "sha1",
  "static_assertions",
  "strum",
- "test-fixture 0.30.1",
+ "test-fixture 0.31.1",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -783,13 +794,13 @@ dependencies = [
  "sfv",
  "static_assertions",
  "strum",
- "test-fixture 0.30.1",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -797,13 +808,13 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.30.1",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -819,13 +830,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.30.1",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -942,9 +953,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76150b617afc75e6e21ac5f39bc196e80b65415ae48d62dbef8e2519d040ce42"
+checksum = "3ca72c3f2792761ab5fa848490694cbc728c7f659669ed4320c4c79c12150966"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1245,7 +1256,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.30.1"
+version = "0.31.1"
 dependencies = [
  "log",
  "neqo-common",

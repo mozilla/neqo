@@ -1125,7 +1125,7 @@ impl SendStream {
                 RecoveryToken {
                     id,
                     offset,
-                    length,
+                    length: u32::try_from(length).expect("STREAM frame fits in a datagram"),
                     fin,
                 },
             )));
@@ -1417,7 +1417,8 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub const fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+        qdebug!("[{self}] low watermark {watermark}, avail {}", self.avail());
         self.writable_event_low_watermark = watermark;
     }
 
@@ -1731,6 +1732,10 @@ impl SendStream {
             return;
         }
 
+        qtrace!(
+            "[{self}] writable, low watermark {low_watermark}, avail {}",
+            self.avail()
+        );
         self.conn_events.send_stream_writable(self.stream_id);
     }
 }
@@ -2118,7 +2123,7 @@ impl SendStreams {
 
     pub fn acked(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
-            ss.mark_as_acked(token.offset, token.length, token.fin);
+            ss.mark_as_acked(token.offset, expect_usize(token.length), token.fin);
             self.has_ended |= ss.is_ended();
         }
     }
@@ -2132,7 +2137,7 @@ impl SendStreams {
 
     pub fn lost(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
-            ss.mark_as_lost(token.offset, token.length, token.fin);
+            ss.mark_as_lost(token.offset, expect_usize(token.length), token.fin);
         }
     }
 
@@ -2416,7 +2421,7 @@ impl<'a> IntoIterator for &'a mut SendStreams {
 pub struct RecoveryToken {
     id: StreamId,
     offset: u64,
-    length: usize,
+    length: u32, // `u32`, because a STREAM frame cannot be larger than an IP datagram
     fin: bool,
 }
 

@@ -12,7 +12,7 @@ use crate::{
     send_stream,
     stateless_reset::Token as Srt,
     stream_id::{StreamId, StreamType},
-    tracking::AckToken,
+    tracking::PacketRange,
 };
 
 pub type Tokens = Vec<Token>;
@@ -52,7 +52,7 @@ pub enum StreamRecoveryToken {
 #[derive(Debug, Clone)]
 pub enum Token {
     Stream(StreamRecoveryToken),
-    Ack(AckToken),
+    Ack(Box<[PacketRange]>),
     Crypto(CryptoRecoveryToken),
     HandshakeDone,
     KeepAlive, // Special PING.

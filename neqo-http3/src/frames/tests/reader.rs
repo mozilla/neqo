@@ -17,7 +17,7 @@ use neqo_transport::{Connection, StreamId, StreamType};
 use test_fixture::{connect, now};
 
 use crate::{
-    Error, PushId, Res,
+    Error, Res,
     frames::{
         FrameReader, HFrame, HFrameType, StreamReaderConnectionWrapper, WebTransportFrame,
         capsule::{Capsule, MAX_DATAGRAM_BYTES},
@@ -130,30 +130,6 @@ fn frame_reading_with_stream_settings2() {
     }
 }
 
-// Test receiving byte by byte for a PUSH_PROMISE frame.
-#[test]
-fn frame_reading_with_stream_push_promise() {
-    let mut fr = FrameReaderTest::new();
-
-    // Read push-promise frame 05054101010203
-    for i in &[0x05, 0x05, 0x41, 0x01, 0x01, 0x02] {
-        assert!(fr.process::<HFrame>(&[*i]).is_none());
-    }
-    let frame = fr.process(&[0x3]);
-
-    assert!(frame.is_some());
-    if let HFrame::PushPromise {
-        push_id,
-        header_block,
-    } = frame.unwrap()
-    {
-        assert_eq!(push_id, PushId::new(257));
-        assert_eq!(header_block, &[0x1, 0x2, 0x3]);
-    } else {
-        panic!("wrong frame type");
-    }
-}
-
 /// Assert that a declared length one byte over `cap` is rejected before buffering,
 /// while exactly `cap` is accepted (i.e. the check is `>`, not `>=`).
 fn assert_cap_boundary<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFrameType, cap: usize) {
@@ -166,7 +142,8 @@ fn assert_cap_boundary<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFram
     assert_eq!(Ok((None, false)), fr.try_process::<T>(&at));
 }
 
-/// Each buffered `HFrame` type paired with the cap that applies to it.
+/// Each buffered `HFrame` type paired with the cap that applies to it. The (unsupported) server
+/// push frames are buffered and capped too, so that they can be recognized and then rejected.
 const HFRAME_CAPS: &[(usize, &[HFrameType])] = &[
     (
         MAX_HEADER_BYTES,
@@ -175,8 +152,8 @@ const HFRAME_CAPS: &[(usize, &[HFrameType])] = &[
     (
         MAX_SINGLE_VARINT_FRAME_BYTES,
         &[
-            HFrameType::CANCEL_PUSH,
             HFrameType::GOAWAY,
+            HFrameType::CANCEL_PUSH,
             HFrameType::MAX_PUSH_ID,
         ],
     ),
@@ -246,14 +223,43 @@ fn unknown_frame() {
     buf.resize(UNKNOWN_FRAME_LEN + buf.len(), 0);
     assert!(fr.process::<HFrame>(&buf).is_none());
 
-    // now receive a CANCEL_PUSH frame to see that frame reader is ok.
-    let frame = fr.process(&[0x03, 0x01, 0x05]);
+    // now receive a GOAWAY frame to see that frame reader is ok.
+    let frame = fr.process(&[0x07, 0x01, 0x05]);
     assert!(frame.is_some());
-    if let HFrame::CancelPush { push_id } = frame.unwrap() {
-        assert_eq!(push_id, PushId::new(5));
+    if let HFrame::Goaway { stream_id } = frame.unwrap() {
+        assert_eq!(stream_id, StreamId::new(5));
     } else {
         panic!("wrong frame type");
     }
+}
+
+// Server push is not supported. The frame reader recognizes push frames (ignoring their contents)
+// so that the role-aware stream handlers can reject them; the reader itself does not error.
+#[test]
+fn server_push_frames_are_recognized() {
+    let mut fr = FrameReaderTest::new();
+    assert_eq!(
+        fr.process::<HFrame>(&[0x03, 0x01, 0x05]),
+        Some(HFrame::CancelPush)
+    );
+
+    let mut fr = FrameReaderTest::new();
+    assert_eq!(
+        fr.process::<HFrame>(&[0x05, 0x05, 0x04, 0x61, 0x62, 0x63, 0x64]),
+        Some(HFrame::PushPromise)
+    );
+
+    let mut fr = FrameReaderTest::new();
+    assert_eq!(
+        fr.process::<HFrame>(&[0x0d, 0x01, 0x05]),
+        Some(HFrame::MaxPushId)
+    );
+
+    let mut fr = FrameReaderTest::new();
+    assert_eq!(
+        fr.process::<HFrame>(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x0a]),
+        Some(HFrame::PriorityUpdatePush)
+    );
 }
 
 // Test receiving byte by byte for a WT_FRAME_CLOSE_SESSION frame.
@@ -512,15 +518,6 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // HFrameType::CANCEL_PUSH
-    let f = HFrame::CancelPush {
-        push_id: PushId::new(5),
-    };
-    let mut enc = Encoder::default();
-    f.encode(&mut enc);
-    let buf: Vec<_> = enc.into();
-    test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
-
     // HFrameType::SETTINGS
     let f = HFrame::Settings {
         settings: HSettings::new(&[HSetting::new(HSettingType::MaxHeaderListSize, 4)]),
@@ -530,28 +527,9 @@ fn complete_and_incomplete_frames() {
     let buf: Vec<_> = enc.into();
     test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
 
-    // HFrameType::PUSH_PROMISE
-    let f = HFrame::PushPromise {
-        push_id: PushId::new(4),
-        header_block: HEADER_BLOCK.to_vec(),
-    };
-    let mut enc = Encoder::default();
-    f.encode(&mut enc);
-    let buf: Vec<_> = enc.into();
-    test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
-
     // HFrameType::GOAWAY
     let f = HFrame::Goaway {
         stream_id: StreamId::new(5),
-    };
-    let mut enc = Encoder::default();
-    f.encode(&mut enc);
-    let buf: Vec<_> = enc.into();
-    test_complete_and_incomplete_frame::<HFrame>(&buf, buf.len());
-
-    // HFrameType::MAX_PUSH_ID
-    let f = HFrame::MaxPushId {
-        push_id: PushId::new(5),
     };
     let mut enc = Encoder::default();
     f.encode(&mut enc);

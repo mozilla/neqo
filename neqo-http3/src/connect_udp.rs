@@ -62,18 +62,25 @@ pub trait ClientSession {
 
     /// Send a connect-udp datagram.
     ///
+    /// # Returns
+    ///
+    /// `Ok(false)` when the outgoing QUIC datagram queue is full; the sender
+    /// should then wait for an [`OutgoingDatagramSpaceAvailable`] event.
+    ///
     /// # Errors
     ///
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ClientEvent::OutgoingDatagramSpaceAvailable
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl ClientSession for Http3Client {
@@ -118,7 +125,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -153,6 +160,7 @@ trait Handler {
         now: Instant,
     ) -> Res<()>;
 
+    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &self,
         conn: &mut Connection,
@@ -160,7 +168,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl Handler for Http3Connection {
@@ -232,7 +240,7 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.extended_connect_send_datagram(session_id, conn, buf, id, now)
     }
 }
@@ -256,6 +264,7 @@ pub(crate) trait ServerHandler {
         now: Instant,
     ) -> Res<()>;
 
+    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -263,7 +272,7 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<bool>;
 }
 
 impl ServerHandler for Http3ServerHandler {
@@ -300,7 +309,7 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -391,7 +400,7 @@ impl ServerSession {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -454,7 +463,7 @@ pub(crate) trait ServerEvents {
 
 impl ServerEvents for Http3ServerEvents {
     fn connect_udp_new_session(&self, session: ServerSession, headers: Vec<Header>) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::NewSession {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::NewSession {
             session,
             headers,
         }));
@@ -466,7 +475,7 @@ impl ServerEvents for Http3ServerEvents {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::SessionClosed {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::SessionClosed {
             session,
             reason,
             headers,
@@ -474,7 +483,7 @@ impl ServerEvents for Http3ServerEvents {
     }
 
     fn connect_udp_datagram(&self, session: ServerSession, datagram: Bytes) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
             session,
             datagram,
         }));

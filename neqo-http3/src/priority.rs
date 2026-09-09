@@ -100,15 +100,13 @@ impl fmt::Display for Priority {
 
 #[derive(Debug)]
 pub struct PriorityHandler {
-    push_stream: bool,
     priority: Priority,
     last_send_priority: Priority,
 }
 
 impl PriorityHandler {
-    pub const fn new(push_stream: bool, priority: Priority) -> Self {
+    pub const fn new(priority: Priority) -> Self {
         Self {
-            push_stream,
             priority,
             last_send_priority: priority,
         }
@@ -136,11 +134,6 @@ impl PriorityHandler {
     pub fn maybe_encode_frame(&self, stream_id: StreamId) -> Option<HFrame> {
         if self.priority == self.last_send_priority {
             None
-        } else if self.push_stream {
-            Some(HFrame::PriorityUpdatePush {
-                element_id: stream_id.as_u64(),
-                priority: self.priority,
-            })
         } else {
             Some(HFrame::PriorityUpdateRequest {
                 element_id: stream_id.as_u64(),
@@ -159,7 +152,7 @@ mod test {
 
     #[test]
     fn priority_updates_ignore_same() {
-        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        let mut p = PriorityHandler::new(Priority::new(5, false));
         assert!(!p.maybe_update_priority(Priority::new(5, false)));
         // updating with the same priority -> there should not be any priority frame sent
         assert!(p.maybe_encode_frame(StreamId::new(4)).is_none());
@@ -167,7 +160,7 @@ mod test {
 
     #[test]
     fn priority_updates_send_update() {
-        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        let mut p = PriorityHandler::new(Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(6, false)));
         // updating with the a different priority -> there should be a priority frame sent
         assert!(p.maybe_encode_frame(StreamId::new(4)).is_some());
@@ -175,7 +168,7 @@ mod test {
 
     #[test]
     fn multiple_priority_updates_ignore_same() {
-        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        let mut p = PriorityHandler::new(Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(6, false)));
         assert!(p.maybe_update_priority(Priority::new(5, false)));
         // initial and last priority same -> there should not be any priority frame sent
@@ -184,7 +177,7 @@ mod test {
 
     #[test]
     fn multiple_priority_updates_send_update() {
-        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        let mut p = PriorityHandler::new(Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(6, false)));
         assert!(p.maybe_update_priority(Priority::new(7, false)));
         // updating two times with a different priority -> the last priority update should be in the
@@ -198,7 +191,7 @@ mod test {
 
     #[test]
     fn priority_updates_incremental() {
-        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        let mut p = PriorityHandler::new(Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(5, true)));
         // updating the incremental parameter -> there should be a priority frame sent
         let expected = HFrame::PriorityUpdateRequest {
@@ -210,7 +203,7 @@ mod test {
 
     #[test]
     fn priority_update_sent_clears_pending() {
-        let mut p = PriorityHandler::new(false, Priority::new(5, false));
+        let mut p = PriorityHandler::new(Priority::new(5, false));
         assert!(p.maybe_update_priority(Priority::new(6, false)));
         assert!(p.maybe_encode_frame(StreamId::new(4)).is_some());
         p.priority_update_sent();
@@ -231,13 +224,5 @@ mod test {
     #[test]
     fn priority_display_urgency_and_incremental() {
         assert_eq!(Priority::new(5, true).to_string(), "u=5,i");
-    }
-
-    #[test]
-    fn priority_update_push_stream() {
-        let mut p = PriorityHandler::new(true, Priority::new(5, false));
-        assert!(p.maybe_update_priority(Priority::new(6, false)));
-        let frame = p.maybe_encode_frame(StreamId::new(4));
-        assert!(matches!(frame, Some(HFrame::PriorityUpdatePush { .. })));
     }
 }

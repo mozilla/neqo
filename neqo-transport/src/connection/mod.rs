@@ -46,7 +46,7 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
-    packet::{self},
+    packet,
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
@@ -3563,23 +3563,24 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[sent::Packet]) {
         for lost in lost_packets {
+            let space = lost.space();
             for token in lost.tokens() {
                 qdebug!("[{self}] Lost: {token:?}");
                 match token {
-                    recovery::Token::Ack(ack_token) => {
+                    recovery::Token::Ack(_) => {
                         // If we lost an ACK frame during the handshake, send another one.
-                        if ack_token.space() != PacketNumberSpace::ApplicationData {
-                            self.acks.immediate_ack(ack_token.space(), lost.time_sent());
+                        if space != PacketNumberSpace::ApplicationData {
+                            self.acks.immediate_ack(space, lost.time_sent());
                         }
                     }
-                    recovery::Token::Crypto(ct) => self.crypto.lost(ct),
+                    recovery::Token::Crypto(ct) => self.crypto.lost(space, ct),
                     recovery::Token::HandshakeDone => self.state_signaling.handshake_done(),
                     recovery::Token::NewToken(seqno) => self.new_token.lost(*seqno),
                     recovery::Token::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
                     recovery::Token::RetireConnectionId(seqno) => {
                         self.paths.lost_retire_cid(*seqno);
                     }
-                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
+                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(*rate),
                     recovery::Token::KeepAlive => self.idle_timeout.lost_keep_alive(),
                     recovery::Token::Stream(stream_token) => self.streams.lost(stream_token),
                     recovery::Token::Datagram(dgram_tracker) => {
@@ -3647,14 +3648,14 @@ impl Connection {
             for token in acked.tokens() {
                 match token {
                     recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
-                    recovery::Token::Ack(at) => self.acks.acked(at),
-                    recovery::Token::Crypto(ct) => self.crypto.acked(ct),
+                    recovery::Token::Ack(at) => self.acks.acked(space, at),
+                    recovery::Token::Crypto(ct) => self.crypto.acked(space, ct),
                     recovery::Token::NewToken(seqno) => self.new_token.acked(*seqno),
                     recovery::Token::NewConnectionId(entry) => self.cid_manager.acked(entry),
                     recovery::Token::RetireConnectionId(seqno) => {
                         self.paths.acked_retire_cid(*seqno);
                     }
-                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
+                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(*rate),
                     recovery::Token::KeepAlive => self.idle_timeout.ack_keep_alive(),
                     recovery::Token::Datagram(dgram_tracker) => self
                         .events
@@ -4095,6 +4096,12 @@ impl Connection {
 
     /// Queue a datagram for sending.
     ///
+    /// The QUIC datagram is always queued. Returns `Ok(true)` if space remains
+    /// afterwards, or `Ok(false)` if the outgoing QUIC datagram queue is now
+    /// full. On `Ok(false)` the application should stop sending and wait for an
+    /// [`OutgoingDatagramSpaceAvailable`] event before sending again; nothing
+    /// already queued is dropped.
+    ///
     /// # Errors
     ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
@@ -4105,9 +4112,10 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<()> {
-        self.quic_datagrams
-            .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
+    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<bool> {
+        self.quic_datagrams.add_datagram(buf, id.into())
     }
 
     /// Return the PLMTU of the primary path.

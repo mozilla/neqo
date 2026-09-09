@@ -1,7 +1,6 @@
 [package]
 name = "neqo-http3"
 authors.workspace = true
-homepage.workspace = true
 repository.workspace = true
 version.workspace = true
 edition.workspace = true

@@ -4,11 +4,23 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+//! Outbound QUIC datagram queueing and backpressure:
+//!
+//! [`QuicDatagrams::add_datagram`] queues the datagram (unless it exceeds the
+//! peer's datagram-size limit) and reports whether the queue still had room:
+//! `Ok(true)` if so, or `Ok(false)` once a send has filled it. `Ok(false)` is a
+//! high-watermark signal to stop, not a rejection: the datagram is still queued
+//! and nothing already queued is dropped. A single [`OutgoingDatagramSpaceAvailable`]
+//! event fires once the queue drops back below capacity, whether a slot was freed
+//! by sending a datagram or by dropping one too big for any packet.
+//!
+//! [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
+
 // https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
 
 use std::{cmp::min, collections::VecDeque};
 
-use neqo_common::{Buffer, Encoder, qdebug, to_u64};
+use neqo_common::{Buffer, Encoder, qdebug, qtrace, to_u64};
 
 use crate::{
     ConnectionEvents, Error, Res, Stats,
@@ -66,6 +78,9 @@ pub struct QuicDatagrams {
     /// The max size of a datagram that would be acceptable by the peer.
     remote_datagram_size: u64,
     max_queued_outgoing_datagrams: usize,
+    /// Set once a send fills the queue; cleared when a freed slot emits the
+    /// resume event. See the [module documentation](self).
+    blocked: bool,
     /// Datagram queued for sending.
     datagrams: VecDeque<QuicDatagram>,
     conn_events: ConnectionEvents,
@@ -81,6 +96,7 @@ impl QuicDatagrams {
             local_datagram_size,
             remote_datagram_size: 0,
             max_queued_outgoing_datagrams,
+            blocked: false,
             datagrams: VecDeque::with_capacity(max_queued_outgoing_datagrams),
             conn_events,
         }
@@ -127,37 +143,49 @@ impl QuicDatagrams {
                 debug_assert!(builder.len() <= builder.limit());
                 stats.frame_tx.datagram += 1;
                 tokens.push(recovery::Token::Datagram(*dgram.tracking()));
+                qtrace!(
+                    "Sent QUIC datagram, {} remaining in queue.",
+                    self.datagrams.len()
+                );
             } else if tokens.is_empty() {
                 // If the packet is empty, except packet headers, and the
                 // datagram cannot fit, drop it.
                 // Also continue trying to write the next QuicDatagram.
-                qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
+                qdebug!(
+                    "QUIC datagram ({}) does not fit MTU, dropping it, {} remaining in queue.",
+                    dgram.data.len(),
+                    self.datagrams.len()
+                );
                 self.conn_events
                     .datagram_outcome(dgram.tracking(), OutgoingDatagramOutcome::DroppedTooBig);
                 stats.datagram_tx.dropped_too_big += 1;
             } else {
                 self.datagrams.push_front(dgram);
-                // Try later on an empty packet.
-                return;
+                // The datagram did not fit and no slot was freed, so leave the
+                // queue as is and try later on an emptier packet.
+                break;
             }
+        }
+        // A send or drop above may have freed a slot and brought the queue below
+        // capacity; resume a blocked application if so. See the module docs.
+        if self.blocked && self.datagrams.len() < self.max_queued_outgoing_datagrams {
+            self.blocked = false;
+            self.conn_events.datagram_space_available();
         }
     }
 
-    /// Add a datagram to the send queue.
+    /// Queue a datagram for sending. See the [module documentation](self) for
+    /// the backpressure contract.
+    ///
+    /// Returns `Ok(true)` if the queue still has room afterwards, or `Ok(false)`
+    /// if this datagram filled it. The datagram is queued in either case.
     ///
     /// # Error
     ///
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The function does not check if the
-    /// datagram can fit into a packet (i.e. MTU limit). This is checked during
-    /// creation of an actual packet and the datagram will be dropped if it does
-    /// not fit into the packet.
-    pub fn add_datagram(
-        &mut self,
-        data: Vec<u8>,
-        tracking: DatagramTracking,
-        stats: &mut Stats,
-    ) -> Res<()> {
+    /// Returns `TooMuchData` if the supply buffer is bigger than the allowed
+    /// remote datagram size. Whether the datagram fits into a packet (the MTU
+    /// limit) is only checked at send time, where it is dropped if it does not.
+    pub fn add_datagram(&mut self, data: Vec<u8>, tracking: DatagramTracking) -> Res<bool> {
         if to_u64(data.len()) > self.remote_datagram_size {
             qdebug!(
                 "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
@@ -166,19 +194,17 @@ impl QuicDatagrams {
             );
             return Err(Error::TooMuchData);
         }
-        if self.datagrams.len() == self.max_queued_outgoing_datagrams {
-            qdebug!("QUIC datagram queue full, dropping first datagram in queue (head-drop).");
-            self.conn_events.datagram_outcome(
-                self.datagrams
-                    .pop_front()
-                    .ok_or(Error::Internal)?
-                    .tracking(),
-                OutgoingDatagramOutcome::DroppedQueueFull,
-            );
-            stats.datagram_tx.dropped_queue_full += 1;
-        }
         self.datagrams.push_back(QuicDatagram { data, tracking });
-        Ok(())
+        if self.datagrams.len() < self.max_queued_outgoing_datagrams {
+            return Ok(true);
+        }
+        qdebug!(
+            "QUIC datagram queue full (len {} / max {}), applying backpressure.",
+            self.datagrams.len(),
+            self.max_queued_outgoing_datagrams
+        );
+        self.blocked = true;
+        Ok(false)
     }
 
     pub fn handle_datagram(&self, data: &[u8]) -> Res<()> {
