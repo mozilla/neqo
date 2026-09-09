@@ -110,51 +110,86 @@ pub enum Output {
     Callback(Duration),
 }
 
-impl TryFrom<OutputBatch> for Output {
-    type Error = ();
+/// Source, destination, ECN marking and GSO segment size of a [`datagram::Batch`].
+pub type BatchMeta = (SocketAddr, SocketAddr, Tos, NonZeroUsize);
 
-    fn try_from(value: OutputBatch) -> Result<Self, Self::Error> {
-        match value {
-            OutputBatch::None => Ok(Self::None),
-            OutputBatch::DatagramBatch(dg) => Ok(Self::Datagram(dg.try_into()?)),
-            OutputBatch::Callback(t) => Ok(Self::Callback(t)),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum OutputBatch {
+#[derive(Debug, PartialEq, Eq)]
+pub enum OutputBatch<'a> {
     /// Connection requires no action.
     None,
     /// Connection requires the datagram batch be sent.
-    DatagramBatch(datagram::Batch),
+    DatagramBatch(datagram::Batch<'a>),
     /// Connection requires `process_input()` be called when the `Duration`
     /// elapses.
     Callback(Duration),
 }
 
-impl From<Output> for OutputBatch {
-    fn from(value: Output) -> Self {
-        match value {
-            Output::None => Self::None,
-            Output::Datagram(dg) => Self::DatagramBatch(datagram::Batch::from(dg)),
-            Output::Callback(t) => Self::Callback(t),
-        }
-    }
-}
-
-impl OutputBatch {
+impl<'a> OutputBatch<'a> {
     /// Convert into an [`Option<datagram::Batch>`].
     #[must_use]
-    pub fn dgram(self) -> Option<datagram::Batch> {
+    pub const fn dgram(self) -> Option<datagram::Batch<'a>> {
         match self {
             Self::DatagramBatch(dg) => Some(dg),
             _ => None,
         }
     }
+
+    /// [`Self::meta`] of a single-datagram batch, else the non-datagram [`Output`].
+    fn single(self) -> Result<BatchMeta, Output> {
+        match self {
+            Self::DatagramBatch(b) => {
+                debug_assert_eq!(b.num_datagrams(), 1, "max_datagrams is 1");
+                Ok(b.meta())
+            }
+            Self::None => Err(Output::None),
+            Self::Callback(t) => Err(Output::Callback(t)),
+        }
+    }
+
+    /// Metadata, so the buffer's borrow can end before [`Self::rebuild`].
+    #[must_use]
+    pub const fn meta(&self) -> Option<BatchMeta> {
+        match self {
+            Self::DatagramBatch(b) => Some(b.meta()),
+            _ => None,
+        }
+    }
+
+    /// Rebuild a batch over `buffer` from [`Self::meta`], or [`Self::None`].
+    #[must_use]
+    pub fn rebuild(meta: Option<&BatchMeta>, buffer: &'a mut Vec<u8>) -> Self {
+        let Some(&(src, dst, tos, datagram_size)) = meta else {
+            return Self::None;
+        };
+        // A batch was written, so the buffer holds it.
+        debug_assert!(!buffer.is_empty());
+        Self::DatagramBatch(datagram::Batch::new(
+            src,
+            dst,
+            tos,
+            datagram_size,
+            buffer.as_mut_slice(),
+        ))
+    }
 }
 
 impl Output {
+    /// Own the buffer `f` filled, for the single-datagram APIs.
+    ///
+    /// `f` gets the one datagram it may produce, so the buffer is that datagram.
+    #[must_use]
+    pub fn owned<F>(f: F) -> Self
+    where
+        F: for<'b> FnOnce(&'b mut Vec<u8>, NonZeroUsize) -> OutputBatch<'b>,
+    {
+        let mut send_buffer = Vec::new();
+        match f(&mut send_buffer, NonZeroUsize::MIN).single() {
+            // Only borrowed, so this moves.
+            Ok((src, dst, tos, _)) => Self::Datagram(Datagram::new(src, dst, tos, send_buffer)),
+            Err(o) => o,
+        }
+    }
+
     /// Convert into an [`Option<Datagram>`].
     #[must_use]
     pub fn dgram(self) -> Option<Datagram> {
@@ -190,14 +225,14 @@ impl From<Option<Datagram>> for Output {
 }
 
 /// Used by inner functions like `Connection::output`.
-enum SendOptionBatch {
+enum SendOptionBatch<'a> {
     /// Yes, please send this datagram.
-    Yes(datagram::Batch),
+    Yes(datagram::Batch<'a>),
     /// Don't send.  If this was blocked on the pacer (the arg is true).
     No(bool),
 }
 
-impl Default for SendOptionBatch {
+impl Default for SendOptionBatch<'_> {
     fn default() -> Self {
         Self::No(false)
     }
@@ -1233,25 +1268,26 @@ impl Connection {
 
     /// Wrapper around [`Connection::process_multiple_output`] that processes a
     /// single output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, 1.try_into().expect(">0"))
-            .try_into()
-            .expect("max_datagrams is 1")
+        Output::owned(|b, max| self.process_multiple_output(now, b, max))
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
     /// by the application.
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
+    ///
+    /// `send_buffer` is cleared first; pass the same one each call, to grow it once.
     #[must_use = "OutputBatch of the process_multiple_output function must be handled"]
-    pub fn process_multiple_output(
+    pub fn process_multiple_output<'b>(
         &mut self,
         now: Instant,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<'b> {
         qtrace!("[{self}] process_output {:?} {now:?}", self.state);
+        send_buffer.clear();
 
         match (&self.state, self.role) {
             (State::Init, Role::Client) => {
@@ -1266,7 +1302,7 @@ impl Connection {
             }
         }
 
-        match self.output(now, max_datagrams) {
+        match self.output(now, send_buffer, max_datagrams) {
             SendOptionBatch::Yes(dgram) => OutputBatch::DatagramBatch(dgram),
             SendOptionBatch::No(paced) => match self.state {
                 State::Init | State::Closed(_) => OutputBatch::None,
@@ -1293,26 +1329,24 @@ impl Connection {
 
     /// Wrapper around [`Connection::process_multiple`], processing a single
     /// input and single output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process function must be handled"]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
-            .try_into()
-            .expect("max_datagrams is 1")
+        Output::owned(|b, max| self.process_multiple(dgram, now, b, max))
     }
 
     /// Process input and generate output.
     #[must_use = "OutputBatch of the process_multiple function must be handled"]
-    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>>(
+    pub fn process_multiple<'b, A: AsRef<[u8]> + AsMut<[u8]>>(
         &mut self,
         dgram: Option<Datagram<A>>,
         now: Instant,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<'b> {
         if let Some(d) = dgram {
             // Snapshot timer type before ACKs can alter loss state.
             if let Some(path) = self.paths.primary() {
@@ -1321,7 +1355,7 @@ impl Connection {
             self.input(d, now, now);
             self.process_saved(now);
         }
-        let output = self.process_multiple_output(now, max_datagrams);
+        let output = self.process_multiple_output(now, send_buffer, max_datagrams);
         #[cfg(feature = "build-fuzzing-corpus")]
         if self.test_frame_writer.is_none()
             && let OutputBatch::DatagramBatch(batch) = &output
@@ -2265,7 +2299,12 @@ impl Connection {
         }
     }
 
-    fn output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> SendOptionBatch {
+    fn output<'b>(
+        &mut self,
+        now: Instant,
+        send_buffer: &'b mut Vec<u8>,
+        max_datagrams: NonZeroUsize,
+    ) -> SendOptionBatch<'b> {
         qtrace!("[{self}] output {now:?}");
         let res = match &self.state {
             State::Init
@@ -2276,7 +2315,13 @@ impl Connection {
             | State::Confirmed => self.paths.select_path().map_or_else(
                 || Ok(SendOptionBatch::default()),
                 |path| {
-                    let res = self.output_dgram_batch_on_path(&path, now, None, max_datagrams);
+                    let res = self.output_dgram_batch_on_path(
+                        &path,
+                        now,
+                        None,
+                        send_buffer,
+                        max_datagrams,
+                    );
                     self.capture_error(Some(path), now, FrameType::Padding, res)
                 },
             ),
@@ -2297,6 +2342,7 @@ impl Connection {
                                 &path,
                                 now,
                                 Some(&details),
+                                send_buffer,
                                 max_datagrams,
                             )
                         };
@@ -2309,21 +2355,17 @@ impl Connection {
     }
 
     #[expect(clippy::too_many_arguments, reason = "no easy way to simplify")]
-    fn build_packet_header<'a>(
+    fn build_packet_header<B: Buffer>(
         path: &Path,
         epoch: Epoch,
-        encoder: Encoder<&'a mut Vec<u8>>,
+        encoder: Encoder<B>,
         tx: &CryptoDxState,
         address_validation: &AddressValidationInfo,
         version: Version,
         grease_quic_bit: bool,
         limit: usize,
         largest_acknowledged: Option<packet::Number>,
-    ) -> (
-        packet::Type,
-        packet::Builder<&'a mut Vec<u8>>,
-        packet::Number,
-    ) {
+    ) -> (packet::Type, packet::Builder<B>, packet::Number) {
         let pt = packet::Type::from(epoch);
         let mut builder = if pt == packet::Type::Short {
             qdebug!("Building Short dcid {:?}", path.remote_cid());
@@ -2374,9 +2416,9 @@ impl Connection {
 
     /// Write the frames that are exchanged in the application data space.
     /// The order of calls here determines the relative priority of frames.
-    fn write_appdata_frames(
+    fn write_appdata_frames<B: Buffer>(
         &mut self,
-        builder: &mut packet::Builder<&mut Vec<u8>>,
+        builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         now: Instant,
     ) {
@@ -2516,12 +2558,12 @@ impl Connection {
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
-    fn write_frames(
+    fn write_frames<B: Buffer>(
         &mut self,
         path: &PathRef,
         space: PacketNumberSpace,
         profile: &SendProfile,
-        builder: &mut packet::Builder<&mut Vec<u8>>,
+        builder: &mut packet::Builder<B>,
         coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
@@ -2592,7 +2634,10 @@ impl Connection {
             #[cfg(test)]
             if let Some(w) = &mut self.test_frame_writer {
                 assert!(!builder.is_full(), "test_frame_writer set on full packet");
-                w.write_frames(builder);
+                // `FrameWriter` is not generic over the buffer, so write via a copy.
+                let mut b = builder.copy_to_vec();
+                w.write_frames(&mut b);
+                builder.restore_from(b);
             }
         }
 
@@ -2652,19 +2697,29 @@ impl Connection {
     }
 
     /// Build batch of datagrams to be sent on the provided path.
-    fn output_dgram_batch_on_path(
+    fn output_dgram_batch_on_path<'b>(
         &mut self,
         path: &PathRef,
         now: Instant,
         mut closing_frame: Option<&ClosingFrame>,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> Res<SendOptionBatch> {
+    ) -> Res<SendOptionBatch<'b>> {
+        // GSO segmentation and `Batch::num_datagrams` count from offset 0.
+        debug_assert!(send_buffer.is_empty());
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = Vec::new();
-        let mut max_datagram_size = None;
+
+        let mut datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
         let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
+        // A PMTUD probe exceeds the PLPMTU, so reserve for it, to not realloc.
+        let first_datagram = if path.borrow().pmtud().needs_probe() {
+            path.borrow().pmtud().probe_size()
+        } else {
+            mtu
+        };
+        send_buffer.reserve(first_datagram);
 
         loop {
             if max_datagrams.get() <= num_datagrams {
@@ -2679,33 +2734,36 @@ impl Connection {
                 break;
             }
 
-            let send_buffer_len_before = send_buffer.len();
+            let send_buffer_len_before = send_buffer.position();
 
             // Check if we can fit another PMTUD sized datagram into the batch.
-            if max_datagram_size.is_some_and(|datagram_size| {
+            if datagram_size.is_some_and(|ds| {
                 // GSO requires that all datagrams in a batch are of equal size.
                 // The last datagram can be smaller. The datagrams already in
-                // the batch are each `datagram_size` large. The next datagram
+                // the batch are each `ds` large. The next datagram
                 // can be up to `mtu` large. Break in case the next could be
                 // larger than the ones already in the batch.
-                datagram_size < mtu
+                ds < mtu
                 // GSO allows total datagram batch size up to the address family
                 // max MTU. If the next datagram could exceed that limit, break.
                 //
                 // See for example Linux kernel:
                 // https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402
-                || address_family_max_mtu - send_buffer.len() < mtu
+                || address_family_max_mtu - send_buffer.position() < mtu
             }) {
                 break;
             }
 
-            match self.output_dgram_on_path(
+            let res = self.output_dgram_on_path(
                 path,
                 now,
                 closing_frame.take(),
-                Encoder::new_borrowed_vec(&mut send_buffer),
+                Encoder::new(&mut *send_buffer),
                 packet_tos,
-            )? {
+            );
+            // Discard any bytes already written, so a reused buffer stays clean.
+            let res = res.inspect_err(|_| send_buffer.clear())?;
+            match res {
                 SendOption::Yes => {
                     debug_assert_eq!(
                         mtu,
@@ -2713,14 +2771,13 @@ impl Connection {
                         "MTU does not change within batch"
                     );
                     num_datagrams += 1;
-                    let datagram_size = send_buffer.len() - send_buffer_len_before;
-                    let max_datagram_size = *max_datagram_size.get_or_insert(datagram_size);
-
-                    // GSO requires that all datagrams in a batch are of equal
-                    // size. Only the last datagram can be smaller.
-                    debug_assert!(datagram_size <= max_datagram_size);
-                    if datagram_size < max_datagram_size {
-                        // This packet was smaller. Make sure it is the last by
+                    let this_size = send_buffer.position() - send_buffer_len_before;
+                    let ds = *datagram_size.get_or_insert(this_size);
+                    debug_assert!(this_size <= ds);
+                    if this_size < ds {
+                        // GSO requires that all packets in a batch are of equal
+                        // size. Only the last packet can be smaller. This
+                        // packet was smaller. Make sure it was the last by
                         // breaking the loop.
                         break;
                     }
@@ -2736,11 +2793,16 @@ impl Connection {
         }
 
         debug_assert!(!send_buffer.is_empty());
+        // Checked before borrowing `send_buffer`, so this path can still clear it.
+        let Some(datagram_size) = datagram_size else {
+            send_buffer.clear();
+            return Err(Error::Internal);
+        };
         let batch = path.borrow_mut().datagram_batch(
-            send_buffer,
+            send_buffer.as_mut_slice(),
             packet_tos,
             num_datagrams,
-            max_datagram_size.ok_or(Error::Internal)?,
+            datagram_size,
             &mut self.stats.borrow_mut(),
         );
 
@@ -2750,12 +2812,12 @@ impl Connection {
     /// Build a datagram, possibly from multiple packets (for different PN
     /// spaces) and each containing 1+ frames.
     #[expect(clippy::too_many_lines, reason = "Yeah, that's just the way it is.")]
-    fn output_dgram_on_path(
+    fn output_dgram_on_path<B: Buffer>(
         &mut self,
         path: &PathRef,
         now: Instant,
         closing_frame: Option<&ClosingFrame>,
-        mut encoder: Encoder<&mut Vec<u8>>,
+        mut encoder: Encoder<B>,
         packet_tos: Tos,
     ) -> Res<SendOption> {
         let mut initial_sent = None;
@@ -2937,9 +2999,9 @@ impl Connection {
         }
     }
 
-    fn pad_initial(
+    fn pad_initial<B: Buffer>(
         &self,
-        encoder: &mut Encoder<&mut Vec<u8>>,
+        encoder: &mut Encoder<B>,
         initial: &mut sent::Packet,
         profile: &SendProfile,
     ) {
@@ -4073,7 +4135,7 @@ impl Connection {
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
         let mut buffer = Vec::new();
-        let encoder = Encoder::new_borrowed_vec(&mut buffer);
+        let encoder = Encoder::new(&mut buffer);
 
         let (_, builder, _) = Self::build_packet_header(
             &path.borrow(),

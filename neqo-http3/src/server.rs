@@ -120,36 +120,43 @@ impl Http3Server {
 
     /// Wrapper around [`Http3Server::process_multiple`] that processes a single
     /// output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
         dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
-            .try_into()
-            .expect("max_datagrams is 1")
+        Output::owned(|b, max| self.process_multiple(dgrams, now, b, max))
     }
 
-    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
+    pub fn process_multiple<
+        'b,
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
         dgrams: I,
         now: Instant,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<'b> {
         qtrace!("[{self}] Process");
-        let out = self.server.process_multiple_input(dgrams, now);
+        // Metadata only, so the borrow ends here.
+        let written = self
+            .server
+            .process_multiple_input(dgrams, now, &mut *send_buffer)
+            .meta();
         self.process_http3(now);
-        // If we do not that a dgram already try again after process_http3.
-        match out {
-            OutputBatch::DatagramBatch(d) => {
-                qtrace!("[{self}] Send packet: {d:?}");
-                OutputBatch::DatagramBatch(d)
-            }
-            _ => self
-                .server
-                .process_multiple(Option::<Datagram>::None, now, max_datagrams),
+        if written.is_some() {
+            qtrace!("[{self}] Send packet: {written:?}");
+            return OutputBatch::rebuild(written.as_ref(), send_buffer);
         }
+        // Input produced no datagram, so try again after `process_http3`.
+        self.server.process_multiple(
+            std::iter::empty::<Datagram<Vec<u8>>>(),
+            now,
+            send_buffer,
+            max_datagrams,
+        )
     }
 
     /// Process HTTP3 layer.

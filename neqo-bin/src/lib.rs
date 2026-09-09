@@ -25,6 +25,9 @@ mod send_data;
 pub mod server;
 pub mod udp;
 
+/// A borrow of the long-lived UDP send buffer, handed to `process_*` per call.
+pub type SendBuf<'a> = &'a mut Vec<u8>;
+
 /// Firefox default value
 ///
 /// See `network.buffer.cache.size` pref <https://searchfox.org/mozilla-central/rev/f6e3b81aac49e602f06c204f9278da30993cdc8a/modules/libpref/init/all.js#3212>
