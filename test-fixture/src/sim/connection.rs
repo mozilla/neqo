@@ -302,20 +302,23 @@ impl Goal for SendData {
 #[derive(Debug, Clone)]
 pub struct ReceiveData {
     remaining: usize,
+    buf: [u8; 4096],
 }
 
 impl ReceiveData {
     #[must_use]
     pub const fn new(amount: usize) -> Self {
-        Self { remaining: amount }
+        Self {
+            remaining: amount,
+            buf: [0; 4096],
+        }
     }
 
     fn recv(&mut self, c: &mut Connection, stream_id: StreamId) -> GoalStatus {
-        let mut buf = vec![0; 4096];
         let mut status = GoalStatus::Waiting;
         loop {
-            let end = min(self.remaining, buf.len());
-            let (recvd, _) = c.stream_recv(stream_id, &mut buf[..end]).unwrap();
+            let end = min(self.remaining, self.buf.len());
+            let (recvd, _) = c.stream_recv(stream_id, &mut self.buf[..end]).unwrap();
             qtrace!("received {recvd} remaining {}", self.remaining);
             if recvd == 0 {
                 return status;
