@@ -15,7 +15,7 @@ use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
 };
-use neqo_transport::{CloseReason, ConnectionParameters, Error, Output, StreamType};
+use neqo_transport::{CloseReason, ConnectionParameters, Error, Output, StreamDataLimit};
 use nss::{AuthenticationStatus, ResumptionToken};
 use test_fixture::*;
 
@@ -228,7 +228,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
 
     // Create a client and a server.
     let mut hconn_c = http3_client_with_params(Http3Parameters::default().connection_parameters(
-        ConnectionParameters::default().max_stream_data(StreamType::BiDi, false, STREAM_LIMIT),
+        ConnectionParameters::default().max_stream_data(StreamDataLimit::BiDiLocal, STREAM_LIMIT),
     ));
     let mut hconn_s = default_http3_server();
     drop(connect_peers(&mut hconn_c, &mut hconn_s));
@@ -301,7 +301,7 @@ fn data_writable_events() {
     const DATA_AMOUNT: usize = 10000;
 
     let mut hconn_c = http3_client_with_params(Http3Parameters::default().connection_parameters(
-        ConnectionParameters::default().max_stream_data(StreamType::BiDi, false, STREAM_LIMIT),
+        ConnectionParameters::default().max_stream_data(StreamDataLimit::BiDiLocal, STREAM_LIMIT),
     ));
     let mut hconn_s = default_http3_server();
 

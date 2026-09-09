@@ -8,7 +8,11 @@ env:
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
-  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
+  # `cycles:u` stays first: samply makes the first `-e` event its sample table, the rest markers.
+  # Per-symbol IPC comes from the `perf report` dumps. No cache or TLB events: only 4 counters.
+  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
+  # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
+  PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
@@ -45,10 +49,13 @@ jobs:
           benches: "true"
           baseline-ref: origin/${{ env.BASE_REF }}
 
+  build-samply:
+    uses: $/.github/workflows/build-samply.yml
+
   bench:
     name: cargo bench
     runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
-    needs: [build]
+    needs: [build, build-samply]
     defaults:
       run:
         shell: bash
@@ -82,9 +89,11 @@ jobs:
         uses: $/.github/actions/install-build-deps
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: inferno, samply
+          tools: inferno
           nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
           rust-cache: "false"
+
+      - uses: $/.github/actions/install-samply
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -94,9 +103,6 @@ jobs:
       - name: Set up build artifacts
         run: |
           chmod +x dist/neqo/* dist/neqo-baseline/*
-          mkdir -p binaries/neqo binaries/neqo-baseline
-          cp dist/neqo/* binaries/neqo/
-          cp dist/neqo-baseline/* binaries/neqo-baseline/
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
@@ -113,7 +119,8 @@ jobs:
         env:
           BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
         run: |
-          bench_exec() { sudo nice -n -20 env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
+          # `MTU` is part of the benchmark names `--exact` matches; `LC_ALL=C` keeps perf parseable.
+          bench_exec() { sudo nice -n -20 env "MTU=$MTU" "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
           filter_cset() { grep -v '^cset' || test $? = 1; }
           shopt -s extglob nullglob
 
@@ -124,17 +131,19 @@ jobs:
           if [ -d target ]; then
             sudo chown -R --no-dereference "$(id -u)" target
           fi
-          rm -rf target/criterion
+          # Start empty, so a removed benchmark leaves no stale file to compare against.
+          rm -rf target/criterion ../profiles ../stats ../results.txt ../results-baseline.txt
           # Run baseline and PR builds interleaved.
           sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
+          variants() { "$1" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true; }
           for PR_BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
             BIN_NAME=$(basename "$PR_BENCH")
             BASELINE_BENCH="../dist/neqo-baseline/$BIN_NAME"
             [ -f "$BASELINE_BENCH" ] || BASELINE_BENCH=""
-            VARIANTS=$("$PR_BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+            VARIANTS=$(variants "$PR_BENCH")
             if [ -n "$VARIANTS" ]; then
               BASELINE_VARIANTS=""
-              [ -n "$BASELINE_BENCH" ] && BASELINE_VARIANTS=$("$BASELINE_BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+              [ -n "$BASELINE_BENCH" ] && BASELINE_VARIANTS=$(variants "$BASELINE_BENCH")
               while IFS= read -r VARIANT; do
                 if [ -n "$BASELINE_BENCH" ] && grep -qxF "$VARIANT" <<< "$BASELINE_VARIANTS"; then
                   bench_exec "$BASELINE_BENCH" -- --bench --save-baseline baseline --noplot --exact "$VARIANT" | filter_cset | tee -a ../results-baseline.txt
@@ -147,31 +156,37 @@ jobs:
               bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
             fi
           done
-          profile_dir() {
-            local dir="$1" outdir
-            outdir=$(basename "$dir")
+          # Run `perf $1` over every benchmark in $2 for $5 seconds, writing $4 under $3/<side>/.
+          perf_dir() {
+            local subcmd="$1" dir="$2" out ext="$4" secs="$5"
+            out="$3/$(basename "$dir")"
             local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
-            mkdir -p "../profiles/$outdir"
+            mkdir -p "$out"
             for BENCH in "$dir"/!(neqo-client|neqo-server); do
               BIN_NAME=$(basename "$BENCH")
-              VARIANTS=$("$BENCH" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true)
+              VARIANTS=$(variants "$BENCH")
               if [ -n "$VARIANTS" ]; then
                 while IFS= read -r VARIANT; do
                   SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
                   # shellcheck disable=SC2086
-                  bench_exec perf -- $PERF_OPT -o "../profiles/$outdir/$SAFE_NAME.perf" "$BENCH" --bench --noplot --discard-baseline --exact "$VARIANT" | filter_cset
+                  bench_exec perf -- $subcmd -o "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" --exact "$VARIANT" | filter_cset
                 done <<< "$VARIANTS"
               else
                 # shellcheck disable=SC2086
-                bench_exec perf -- $PERF_OPT -o "../profiles/$outdir/$BIN_NAME.perf" "$BENCH" --bench --noplot --discard-baseline | filter_cset
+                bench_exec perf -- $subcmd -o "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" | filter_cset
               fi
             done
           }
-          profile_dir ../dist/neqo
-          # Also profile the baseline
-          profile_dir ../dist/neqo-baseline
+          # `stat` for both sides first, so `record`'s overhead cannot skew the IPC comparison.
+          for SIDE in ../dist/neqo ../dist/neqo-baseline; do
+            perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt 5
+          done
+          # Longer, because the flamegraphs need samples, not just an exact ratio.
+          for SIDE in ../dist/neqo ../dist/neqo-baseline; do
+            perf_dir "$PERF_OPT" "$SIDE" ../profiles perf 15
+          done
           # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
-          sudo chown -R "$(id -u)" target/criterion ../profiles
+          sudo chown -R "$(id -u)" target/criterion ../profiles ../stats
 
       # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
@@ -181,7 +196,10 @@ jobs:
             # Convert for profiler.firefox.com
             samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
             # Generate flamegraphs from the cycles event (perf.data has multiple events)
-            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f//.perf/.svg}"
+            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
+            # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
+            perf report -i "$f" --stdio --no-children -g none \
+              -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
           done
 
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
@@ -199,7 +217,7 @@ jobs:
         run: |
           SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
           echo "$SHA" > baseline-sha.txt
-          python3 neqo/.github/scripts/format-bench-results.py results.txt
+          python3 neqo/.github/scripts/format-bench-results.py results.txt stats
           # Build final markdown output
           {
             echo "### Benchmark results"
@@ -216,8 +234,12 @@ jobs:
             cat all-bench-results.md
             echo
             echo "</details>"
+            if [ -s perf-stat.md ]; then
+              echo
+              cat perf-stat.md
+            fi
           } > results.md
-          rm -f all-bench-results.md significant-results.md
+          rm -f all-bench-results.md significant-results.md perf-stat.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
           echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
@@ -229,8 +251,6 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-samply
           path: |
             profiles/*/*.samply.json.gz
-            profiles/*/*.syms.json
-            binaries
           compression-level: 9
 
       - name: Export performance data
@@ -240,6 +260,8 @@ jobs:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-bench-perf
           path: |
             profiles/*/*.svg
+            profiles/*/*.report.txt
+            stats/*/*.txt
             *.txt
             *.md
             event.json
@@ -269,4 +291,4 @@ jobs:
         if: always()
         run: |
           rm -- * || true
-          rm -r -- binaries dist profiles comment-data || true
+          rm -r -- dist profiles stats comment-data || true

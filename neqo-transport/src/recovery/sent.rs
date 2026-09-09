@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{packet, recovery};
+use crate::{packet, recovery, tracking::PacketNumberSpace};
 
 /// The reason a packet was declared lost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +71,12 @@ impl Packet {
     #[must_use]
     pub const fn packet_type(&self) -> packet::Type {
         self.pt
+    }
+
+    /// The packet number space of this packet.
+    #[must_use]
+    pub fn space(&self) -> PacketNumberSpace {
+        PacketNumberSpace::from(self.pt)
     }
 
     /// The number of the packet.

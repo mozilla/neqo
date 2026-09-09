@@ -11,12 +11,8 @@ use std::{cmp::max, time::Duration};
 use neqo_common::{Buffer, qtrace, to_u64};
 
 use crate::{
-    connection::params::ConnectionParameters,
-    frame::FrameType,
-    packet,
-    recovery::{self},
-    stats::FrameStats,
-    tracking::DEFAULT_REMOTE_ACK_DELAY,
+    connection::params::ConnectionParameters, frame::FrameType, packet, recovery,
+    stats::FrameStats, tracking::DEFAULT_REMOTE_ACK_DELAY,
 };
 
 #[derive(Debug, Clone)]

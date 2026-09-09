@@ -1630,6 +1630,7 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1637,7 +1638,7 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
             .send_datagram(conn, buf, id, now)
@@ -1699,6 +1700,7 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    HSettingType::EnableConnect,
                     // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
                     // requires a client that stored SETTINGS_H3_DATAGRAM with its
                     // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR

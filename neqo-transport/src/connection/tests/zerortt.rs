@@ -15,7 +15,7 @@ use super::{
     default_server, exchange_ticket, new_server, resumed_server,
 };
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamType, Version,
+    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamDataLimit, StreamType, Version,
     events::ConnectionEvent,
 };
 
@@ -221,8 +221,8 @@ fn zero_rtt_update_flow_control() {
     let mut client = default_client();
     let mut server = new_server(
         ConnectionParameters::default()
-            .max_stream_data(StreamType::UniDi, true, LOW)
-            .max_stream_data(StreamType::BiDi, true, LOW),
+            .max_stream_data(StreamDataLimit::UniDi, LOW)
+            .max_stream_data(StreamDataLimit::BiDiRemote, LOW),
     );
     connect(&mut client, &mut server);
 
@@ -233,8 +233,8 @@ fn zero_rtt_update_flow_control() {
         .expect("should set token");
     let mut server = new_server(
         ConnectionParameters::default()
-            .max_stream_data(StreamType::UniDi, true, HIGH)
-            .max_stream_data(StreamType::BiDi, true, HIGH)
+            .max_stream_data(StreamDataLimit::UniDi, HIGH)
+            .max_stream_data(StreamDataLimit::BiDiRemote, HIGH)
             .versions(client.version, Version::all()),
     );
 
