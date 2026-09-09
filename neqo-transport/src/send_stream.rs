@@ -1125,7 +1125,7 @@ impl SendStream {
                 RecoveryToken {
                     id,
                     offset,
-                    length,
+                    length: u32::try_from(length).expect("STREAM frame fits in a datagram"),
                     fin,
                 },
             )));
@@ -2123,7 +2123,7 @@ impl SendStreams {
 
     pub fn acked(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
-            ss.mark_as_acked(token.offset, token.length, token.fin);
+            ss.mark_as_acked(token.offset, expect_usize(token.length), token.fin);
             self.has_ended |= ss.is_ended();
         }
     }
@@ -2137,7 +2137,7 @@ impl SendStreams {
 
     pub fn lost(&mut self, token: &RecoveryToken) {
         if let Some(ss) = self.map.get_mut(&token.id) {
-            ss.mark_as_lost(token.offset, token.length, token.fin);
+            ss.mark_as_lost(token.offset, expect_usize(token.length), token.fin);
         }
     }
 
@@ -2421,7 +2421,7 @@ impl<'a> IntoIterator for &'a mut SendStreams {
 pub struct RecoveryToken {
     id: StreamId,
     offset: u64,
-    length: usize,
+    length: u32, // `u32`, because a STREAM frame cannot be larger than an IP datagram
     fin: bool,
 }
 
