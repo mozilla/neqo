@@ -91,6 +91,7 @@
           - gnuplot
           - gyp
           - htop
+          - libc6-dbg
           - libclang-dev
           - libicu-dev
           - linux-tools-common
