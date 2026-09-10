@@ -72,7 +72,7 @@ EOF
 # handshake message that does not start at offset 0. Without the ClientHello it never learns the
 # client random, so it cannot apply the keylog and only the Initial packets end up decrypted.
 client="./target/debug/neqo-client $flags --no-sni-slicing --output-dir $tmp --stats https://$addr:$port$path"
-server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags $addr:$port"
+server="SSLKEYLOGFILE=$tmp/test.tlskey ./target/debug/neqo-server $flags --stats $addr:$port"
 
 tcpdump -U -i "$iface" -w "$tmp/test.pcap" host $addr and port $port \
         >/dev/null 2>"$tmp/tcpdump.log" &

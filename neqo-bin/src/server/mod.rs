@@ -35,7 +35,9 @@ use futures::{
 };
 use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::Http3Server;
-use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress};
+use neqo_transport::{
+    Connection, OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress,
+};
 use neqo_udp::{DatagramIter, RecvBuf};
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey,
@@ -45,7 +47,7 @@ use nss::{
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now, send_data::SendData};
+use crate::{SharedArgs, now, report_stats, send_data::SendData};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -207,6 +209,26 @@ impl Args {
                 "retry" => self.retry = true,
                 _ => exit(127),
             }
+        }
+    }
+}
+
+/// Reports the stats of closed connections.
+pub(super) struct StatsReporter {
+    enabled: bool,
+    /// Where to append to, or `None` to log.
+    path: Option<PathBuf>,
+}
+
+impl StatsReporter {
+    pub(super) const fn new(enabled: bool, path: Option<PathBuf>) -> Self {
+        Self { enabled, path }
+    }
+
+    /// Reports `conn`'s stats. Callers report each connection once.
+    pub(super) fn report(&self, conn: &RefCell<Connection>) {
+        if self.enabled {
+            report_stats(&conn.borrow().stats(), self.path.as_deref());
         }
     }
 }
@@ -605,11 +627,52 @@ pub fn run(
     }
 }
 
+/// Test helpers shared by `http09::tests` and `http3::tests`.
+#[cfg(test)]
+pub(super) mod test_support {
+    use std::fs;
+
+    use test_fixture::{ProcessServer, default_client, handshake_with_server, now};
+
+    use super::Args;
+    use crate::temp_dir::TempDir;
+
+    /// The inner server [`reported_on_close`] drives.
+    pub(super) trait StatsServer: super::HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer;
+    }
+
+    /// Connect to `make`'s server and close, returning the records it wrote.
+    pub(super) fn reported_on_close<S: StatsServer>(make: impl FnOnce(&Args) -> S) -> usize {
+        let dir = TempDir::new();
+        let file = dir.path().join("stats.json");
+
+        let mut args = Args::default();
+        args.shared.alpn = test_fixture::DEFAULT_ALPN[0].to_string();
+        args.shared.stats_file = Some(file.clone());
+        let mut server = make(&args);
+
+        let mut client = default_client();
+        handshake_with_server(&mut client, server.transport());
+        server.process_events(now());
+        assert!(!file.exists(), "must only report on close");
+
+        client.close(now(), 0, "bye");
+        let out = client.process_output(now());
+        _ = server.transport().process(out.dgram(), now());
+
+        server.process_events(now()); // Twice: a repeat would append a line.
+        server.process_events(now());
+        fs::read_to_string(&file).map_or(0, |s| s.lines().count())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt;
 
     use neqo_common::{Tos, datagram};
+    use test_fixture::{default_client, fixture_init};
     use tokio::time::timeout;
 
     use super::*;
@@ -687,6 +750,15 @@ mod tests {
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "server stopped serving"))??;
 
         Ok(())
+    }
+
+    #[test]
+    fn reports_nothing_without_the_stats_flag() {
+        fixture_init();
+        let dir = crate::temp_dir::TempDir::new();
+        let file = dir.path().join("stats.json");
+        StatsReporter::new(false, Some(file.clone())).report(&RefCell::new(default_client()));
+        assert!(!file.exists());
     }
 
     #[test]

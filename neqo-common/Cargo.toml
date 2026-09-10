@@ -21,6 +21,7 @@ env_logger = { version = "0.10", default-features = false }
 hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
+serde = { workspace = true }
 sha1 = { version = "0.10", default-features = false, optional = true }
 static_assertions = { workspace = true }
 strum = { workspace = true }

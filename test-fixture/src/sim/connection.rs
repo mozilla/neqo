@@ -176,7 +176,10 @@ impl sim::Node for Node {
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!("{test_name}: {:?}", self.c.stats());
+        qinfo!(
+            "{test_name}: {}",
+            serde_json::to_string(&self.c.stats()).unwrap()
+        );
     }
 }
 

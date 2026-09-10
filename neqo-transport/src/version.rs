@@ -6,12 +6,13 @@
 
 use enum_map::Enum;
 use neqo_common::qdebug;
+use serde::Serialize;
 
 use crate::{Error, Res};
 
 pub type Wire = u32;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Enum)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Enum, Serialize)]
 #[repr(u32)]
 pub enum Version {
     Version2 = 0x6b33_43cf,

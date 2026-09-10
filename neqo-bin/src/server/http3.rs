@@ -15,7 +15,7 @@ use std::{
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
 use neqo_http3::{
-    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, StreamId,
+    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, StreamId,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
@@ -25,6 +25,7 @@ use super::Args;
 use crate::{
     now,
     send_data::{SendData, SendResult},
+    server::StatsReporter,
 };
 
 pub struct HttpServer {
@@ -34,6 +35,7 @@ pub struct HttpServer {
     /// Tracks POST requests: (bytes received, optional response size from path)
     posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
+    stats: StatsReporter,
 }
 
 impl HttpServer {
@@ -108,6 +110,7 @@ impl HttpServer {
             remaining_data: HashMap::default(),
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
+            stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
         }
     }
 }
@@ -208,6 +211,11 @@ impl super::HttpServer for HttpServer {
                         self.send_response(&stream, response, now);
                     }
                 }
+                // `Closing` occurs once; `Closed` is dropped before it is seen.
+                Http3ServerEvent::StateChange {
+                    conn,
+                    state: Http3State::Closing(_),
+                } => self.stats.report(&conn.connection()),
                 _ => {}
             }
         }
@@ -215,5 +223,36 @@ impl super::HttpServer for HttpServer {
 
     fn has_events(&self) -> bool {
         self.server.has_events()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_transport::RandomConnectionIdGenerator;
+    use test_fixture::{ProcessServer, anti_replay, fixture_init};
+
+    use super::{Args, HttpServer};
+    use crate::server::test_support::{StatsServer, reported_on_close};
+
+    fn make_server(args: &Args) -> HttpServer {
+        fixture_init();
+        HttpServer::new(
+            args,
+            anti_replay(),
+            Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10))),
+        )
+    }
+
+    impl StatsServer for HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer {
+            &mut self.server
+        }
+    }
+
+    #[test]
+    fn reports_stats_once_on_close() {
+        assert_eq!(reported_on_close(make_server), 1);
     }
 }
