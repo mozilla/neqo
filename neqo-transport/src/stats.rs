@@ -316,7 +316,7 @@ impl DerefMut for DscpCount {
 
 /// Connection statistics
 #[skip_serializing_none]
-#[derive(Default, Clone, PartialEq, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
 pub struct Stats {
     pub info: String,
 
@@ -458,7 +458,7 @@ impl Stats {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct StatsCell {
     stats: Rc<RefCell<Stats>>,
 }
