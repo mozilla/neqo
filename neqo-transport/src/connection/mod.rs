@@ -2513,6 +2513,23 @@ impl Connection {
         probe
     }
 
+    /// Whether to make this packet a PMTUD probe.
+    fn make_pmtud_probe(
+        &self,
+        path: &PathRef,
+        space: PacketNumberSpace,
+        profile: &SendProfile,
+        coalesced: bool,
+    ) -> bool {
+        let path = path.borrow();
+        space == PacketNumberSpace::ApplicationData
+            && self.state.connected()
+            && !coalesced // Only send PMTUD probes using non-coalesced packets.
+            && path.is_primary()
+            && !profile.ack_only() // We could only send ACKs.
+            && path.can_send_pmtud_probe()
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
@@ -2522,7 +2539,7 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        coalesced: bool, // Whether this packet is coalesced behind another one.
+        make_pmtud_probe: bool,
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
         let mut tokens = recovery::Tokens::new();
@@ -2544,7 +2561,12 @@ impl Connection {
 
         // Avoid sending path validation probes until the handshake completes,
         // but send them even when we don't have space.
-        let full_mtu = profile.limit() == path.borrow().plpmtu();
+        let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
+        // PMTUD must not record a success for a packet that was never probe-sized.
+        debug_assert!(
+            !make_pmtud_probe
+                || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
+        );
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Path validation probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
@@ -2565,11 +2587,7 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
-                    && path.borrow().pmtud().needs_probe()
-                    && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
+                if make_pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2670,7 +2688,7 @@ impl Connection {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+            if path.borrow().can_send_pmtud_probe() && num_datagrams != 0 {
                 // Next datagram will be larger due to PMTUD probing.  GSO
                 // requires that all datagrams in a batch are of equal size.
                 // Only the last datagram can be smaller. Given that this would
@@ -2770,6 +2788,9 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
+            let coalesced = !encoder.is_empty(); // Whether this packet is coalesced behind another one.
+            let make_pmtud_probe = self.make_pmtud_probe(path, space, &profile, coalesced);
+
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
             else {
@@ -2780,7 +2801,7 @@ impl Connection {
             let header_start = encoder.len();
 
             // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
+            let limit = if make_pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
                 path.borrow().pmtud().probe_size()
@@ -2829,7 +2850,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, make_pmtud_probe, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
