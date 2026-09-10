@@ -5,6 +5,7 @@
 // except according to those terms.
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 use std::{
     fs::OpenOptions,
     io::Write as _,
@@ -68,11 +69,13 @@ pub struct SharedArgs {
     #[command(flatten)]
     quic_parameters: QuicParameters,
 
-    /// Print connection stats when a connection closes. Optionally give a
-    /// filename to append the stats to (as JSON), instead of logging them.
-    #[arg(name = "stats", long, require_equals = true)]
-    #[expect(clippy::option_option, reason = "clap shape for flag with opt value")]
-    stats: Option<Option<PathBuf>>,
+    /// Log connection stats as JSON when a connection closes.
+    #[arg(name = "stats", long)]
+    stats: bool,
+
+    /// Append connection stats to this file as JSON, one record per line. Implies `--stats`.
+    #[arg(name = "stats-file", long)]
+    stats_file: Option<PathBuf>,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -88,7 +91,8 @@ impl Default for SharedArgs {
             ciphers: vec![],
             qns_test: None,
             quic_parameters: QuicParameters::default(),
-            stats: None,
+            stats: false,
+            stats_file: None,
         }
     }
 }
@@ -97,6 +101,11 @@ impl SharedArgs {
     #[must_use]
     pub fn get_alpn(&self) -> &str {
         &self.alpn
+    }
+
+    /// Whether to report connection stats; `--stats-file` implies `--stats`.
+    const fn stats_enabled(&self) -> bool {
+        self.stats || self.stats_file.is_some()
     }
 }
 
@@ -300,10 +309,8 @@ fn now() -> Instant {
     Instant::now()
 }
 
-/// Report `stats` as JSON: appended to `path` as one record per line (i.e. JSON
-/// Lines) if given, or logged via `qinfo!` in indented form otherwise. Failures
-/// to serialize or to write to `path` are logged.
-pub fn report_stats(stats: &Stats, path: Option<&Path>) {
+/// Report `stats` as JSON: a line appended to `path`, or indented into the log.
+pub(crate) fn report_stats(stats: &Stats, path: Option<&Path>) {
     let json = if path.is_some() {
         serde_json::to_string(stats)
     } else {
@@ -331,9 +338,9 @@ pub fn report_stats(stats: &Stats, path: Option<&Path>) {
     }
 }
 
+/// A directory that deletes itself.
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
+pub(crate) mod temp_dir {
     use std::{
         fs,
         path::PathBuf,
@@ -341,30 +348,28 @@ mod tests {
         time::SystemTime,
     };
 
-    use crate::{Stats, client, report_stats, server};
-
-    struct TempDir {
+    pub struct TempDir {
         path: PathBuf,
     }
 
     impl TempDir {
-        fn new() -> Self {
-            // Tests run concurrently, so the name has to be unique per instance:
-            // sharing one means the first `Drop` deletes the other's directory.
+        pub fn new() -> Self {
+            // The name has to be unique per instance and process.
             static SEQ: AtomicUsize = AtomicUsize::new(0);
             let dir = std::env::temp_dir().join(format!(
-                "neqo-bin-test-{}-{}",
+                "neqo-bin-test-{}-{}-{}",
+                std::process::id(),
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
-                    .as_nanos(),
+                    .as_millis(),
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 
-        fn path(&self) -> PathBuf {
+        pub fn path(&self) -> PathBuf {
             self.path.clone()
         }
     }
@@ -376,6 +381,14 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::fs;
+
+    use crate::{Stats, client, report_stats, server, temp_dir::TempDir};
 
     #[tokio::test]
     #[cfg_attr(target_os = "netbsd", ignore = "FIXME: Test fails on NetBSD.")]
@@ -430,7 +443,6 @@ mod tests {
 
     #[test]
     fn report_stats_to_unwritable_path_is_not_fatal() {
-        // A directory can't be opened for appending.
         let dir = TempDir::new();
         report_stats(&Stats::default(), Some(&dir.path()));
     }

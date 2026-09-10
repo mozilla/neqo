@@ -110,7 +110,7 @@ impl HttpServer {
             remaining_data: HashMap::default(),
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
-            stats: StatsReporter::new(&args.shared),
+            stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
         }
     }
 }
@@ -211,9 +211,10 @@ impl super::HttpServer for HttpServer {
                         self.send_response(&stream, response, now);
                     }
                 }
+                // `Closing` occurs once; `Closed` is dropped before it is seen.
                 Http3ServerEvent::StateChange {
                     conn,
-                    state: Http3State::Closing(_) | Http3State::Closed(_),
+                    state: Http3State::Closing(_),
                 } => self.stats.report(&conn.connection()),
                 _ => {}
             }
@@ -233,10 +234,7 @@ mod tests {
     use test_fixture::{ProcessServer, anti_replay, fixture_init};
 
     use super::{Args, HttpServer};
-    use crate::server::{
-        StatsReporter,
-        test_support::{StatsServer, reported_on_close, stats_args, stats_tests},
-    };
+    use crate::server::test_support::{StatsServer, reported_on_close};
 
     fn make_server(args: &Args) -> HttpServer {
         fixture_init();
@@ -247,5 +245,14 @@ mod tests {
         )
     }
 
-    stats_tests!(make_server);
+    impl StatsServer for HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer {
+            &mut self.server
+        }
+    }
+
+    #[test]
+    fn reports_stats_once_on_close() {
+        assert_eq!(reported_on_close(make_server), 1);
+    }
 }

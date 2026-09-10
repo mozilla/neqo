@@ -18,7 +18,6 @@ use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
 use serde::{Serialize, Serializer, ser::SerializeMap as _};
 use serde_with::skip_serializing_none;
-use strum::IntoEnumIterator as _;
 
 use crate::{cc::CongestionTrigger, ecn, packet, version::Version};
 
@@ -204,8 +203,7 @@ pub struct CongestionControlStats {
     pub w_max: Option<f64>,
 }
 
-/// Serialize a [`Duration`] as fractional milliseconds, the unit RTTs are
-/// compared in. serde's default is a `{"secs": _, "nanos": _}` pair.
+/// Serialize a [`Duration`] as fractional milliseconds, not `{secs, nanos}`.
 fn ms<S: Serializer>(d: &Duration, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_f64(d.as_secs_f64() * 1000.0)
 }
@@ -219,13 +217,7 @@ fn opt_ms<S: Serializer>(d: &Option<Duration>, serializer: S) -> Result<S::Ok, S
     }
 }
 
-/// A map key, serialized as its [`Debug`] form.
-///
-/// JSON object keys have to be strings, but `serde` renders a key variant that
-/// carries data — such as [`ecn::ValidationOutcome::NotCapable`] — as an object,
-/// which `serde_json` rejects. Going through [`Debug`] keeps that off the table
-/// for every key type, present and future. For the unit-only key enums it emits
-/// the same variant name `serde` would.
+/// A map key rendered with [`Debug`]: JSON keys have to be strings.
 struct Key<K>(K);
 
 impl<K: Debug> Serialize for Key<K> {
@@ -296,22 +288,6 @@ impl Deref for EcnTransitions {
 impl DerefMut for EcnTransitions {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-/// Transitions recorded for a single "from" ECN mark, keyed by "to" mark.
-struct EcnTransitionRow(EnumMap<Ecn, Option<(packet::Type, packet::Number)>>);
-
-impl Serialize for EcnTransitionRow {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serialize_sparse(self.0, Option::is_none, serializer)
-    }
-}
-
-impl Serialize for EcnTransitions {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let rows = Ecn::iter().map(|from| (from, EcnTransitionRow(self.0[from])));
-        serialize_sparse(rows, |row| row.0.values().all(Option::is_none), serializer)
     }
 }
 
@@ -440,6 +416,8 @@ pub struct Stats {
     pub ecn_rx: EcnCount,
     /// Packet numbers of the first observed (received) ECN mark transition between two marks.
     pub ecn_last_mark: Option<Ecn>,
+    /// Not serialized; only useful next to the packets themselves.
+    #[serde(skip)]
     pub ecn_rx_transition: EcnTransitions,
 
     /// Counters for DSCP values received.
@@ -508,7 +486,7 @@ mod tests {
         stats::{CongestionControlStats, DscpCount, SearchResetStats},
     };
 
-    /// The JSON `Stats` serializes to, as it is written to a `--stats` file.
+    /// The JSON that `--stats-file` writes.
     fn to_json<T: Serialize>(value: &T) -> String {
         serde_json::to_string(value).expect("serializes")
     }
@@ -554,21 +532,11 @@ mod tests {
     }
 
     #[test]
-    fn ecn_transitions_json_skips_rows_with_no_transitions() {
-        assert_eq!(to_json(&EcnTransitions::default()), "{}");
-
-        let mut trans = EcnTransitions::default();
-        trans[Ecn::Ect0][Ecn::Ce] = Some((packet::Type::Short, 42));
-        assert_eq!(to_json(&trans), r#"{"Ect0":{"Ce":["Short",42]}}"#);
-    }
-
-    #[test]
     fn dscp_count_json_skips_zero_entries() {
         assert_eq!(to_json(&DscpCount::default()), "{}");
     }
 
-    /// Serializing a default [`Stats`] exercises every field's serializer, so
-    /// this covers fields added later without needing to be told about them.
+    /// A default [`Stats`] exercises every field's serializer, old and new.
     #[test]
     fn stats_json_round_trips() {
         let json = to_json(&Stats::default());
@@ -587,13 +555,13 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_value(&stats).expect("serializes");
-        // The unit is part of the key, so a consumer needs no out-of-band schema.
         assert_eq!(json["min_rtt_ms"], json!(1.5));
         assert_eq!(json["cc"]["search_first_rtt_ms"], json!(2.5));
+        assert!(json["cc"].get("search_second_rtt_ms").is_none());
     }
 
     #[test]
-    fn optional_durations_are_milliseconds_or_null() {
+    fn opt_ms_in_isolation() {
         let value = |d| opt_ms(&d, serde_json::value::Serializer).expect("serializes");
         assert_eq!(value(Some(Duration::from_micros(1500))), json!(1.5));
         assert_eq!(value(None), Value::Null);

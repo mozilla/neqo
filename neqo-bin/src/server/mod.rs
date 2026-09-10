@@ -23,7 +23,7 @@ use std::{
     path::PathBuf,
     pin::Pin,
     process::exit,
-    rc::{Rc, Weak},
+    rc::Rc,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -213,44 +213,23 @@ impl Args {
     }
 }
 
-/// Reports the stats of closed connections to wherever `--stats` asked for
-/// them, at most once per connection.
+/// Reports the stats of closed connections.
 pub(super) struct StatsReporter {
-    #[expect(clippy::option_option, reason = "clap flag-with-optional-value shape")]
-    path: Option<Option<PathBuf>>,
-    /// Connections already reported. `Weak`, so that entries for connections
-    /// the server has since dropped can be pruned.
-    reported: Vec<Weak<RefCell<Connection>>>,
+    enabled: bool,
+    /// Where to append to, or `None` to log.
+    path: Option<PathBuf>,
 }
 
 impl StatsReporter {
-    pub(super) fn new(args: &SharedArgs) -> Self {
-        Self {
-            path: args.stats.clone(),
-            reported: Vec::new(),
-        }
+    pub(super) const fn new(enabled: bool, path: Option<PathBuf>) -> Self {
+        Self { enabled, path }
     }
 
-    /// Reports `conn`'s stats, unless `--stats` was not given or `conn` was
-    /// reported already.
-    pub(super) fn report(&mut self, conn: &Rc<RefCell<Connection>>) {
-        let Some(path) = &self.path else {
-            return;
-        };
-        let conn_weak = Rc::downgrade(conn);
-        self.reported.retain(|w| w.strong_count() > 0);
-        if self.reported.iter().any(|w| Weak::ptr_eq(w, &conn_weak)) {
-            return;
+    /// Reports `conn`'s stats. Callers report each connection once.
+    pub(super) fn report(&self, conn: &RefCell<Connection>) {
+        if self.enabled {
+            report_stats(&conn.borrow().stats(), self.path.as_deref());
         }
-        self.reported.push(conn_weak);
-        report_stats(&conn.borrow().stats(), path.as_deref());
-    }
-
-    /// How many of the connections reported so far are still alive: entries for
-    /// connections the server has dropped are pruned by [`Self::report`].
-    #[cfg(test)]
-    pub(super) const fn count(&self) -> usize {
-        self.reported.len()
     }
 }
 
@@ -648,73 +627,44 @@ pub fn run(
     }
 }
 
-/// Test helpers shared by `http09::tests` and `http3::tests`: both drive a
-/// handshake against their respective server type (`neqo_transport::server::Server`
-/// and `Http3Server`) before exercising `--stats` close-detection.
+/// Test helpers shared by `http09::tests` and `http3::tests`.
 #[cfg(test)]
 pub(super) mod test_support {
+    use std::fs;
+
     use test_fixture::{ProcessServer, default_client, handshake_with_server, now};
 
-    use super::{Args, StatsReporter};
+    use super::Args;
+    use crate::temp_dir::TempDir;
 
-    pub(super) fn stats_args(stats: bool) -> Args {
-        let mut args = Args::default();
-        args.shared.alpn = test_fixture::DEFAULT_ALPN[0].to_string();
-        args.shared.stats = stats.then_some(None); // Some(None): log, not a file
-        args
-    }
-
-    /// What [`reported_on_close`] needs of a server beyond [`super::HttpServer`]: the inner server
-    /// to hand to [`handshake_with_server`], and the reporter to inspect.
+    /// The inner server [`reported_on_close`] drives.
     pub(super) trait StatsServer: super::HttpServer {
         fn transport(&mut self) -> &mut dyn ProcessServer;
-        fn stats(&self) -> &StatsReporter;
     }
 
-    /// Connect to `server` and close the connection again, returning the number
-    /// of connections `server` reported stats for. Asserts that processing the
-    /// closed connection's events a second time doesn't report it again.
-    pub(super) fn reported_on_close(server: &mut impl StatsServer) -> usize {
+    /// Connect to `make`'s server and close, returning the records it wrote.
+    pub(super) fn reported_on_close<S: StatsServer>(make: impl FnOnce(&Args) -> S) -> usize {
+        let dir = TempDir::new();
+        let file = dir.path().join("stats.json");
+
+        let mut args = Args::default();
+        args.shared.alpn = test_fixture::DEFAULT_ALPN[0].to_string();
+        args.shared.stats_file = Some(file.clone());
+        let mut server = make(&args);
+
         let mut client = default_client();
         handshake_with_server(&mut client, server.transport());
         server.process_events(now());
-        assert_eq!(server.stats().count(), 0, "must only report on close");
+        assert!(!file.exists(), "must only report on close");
 
         client.close(now(), 0, "bye");
         let out = client.process_output(now());
-        _ = server.transport().process_dgram(out.dgram(), now());
+        _ = server.transport().process(out.dgram(), now());
 
+        server.process_events(now()); // Twice: a repeat would append a line.
         server.process_events(now());
-        let reported = server.stats().count();
-        server.process_events(now());
-        assert_eq!(server.stats().count(), reported, "must not double-report");
-        reported
+        fs::read_to_string(&file).map_or(0, |s| s.lines().count())
     }
-
-    /// The `--stats` tests for one server type, which differ only in how the
-    /// server is built. Expects `$make` to take [`Args`] and return a
-    /// `HttpServer` whose inner server field is named `server` and whose
-    /// reporter field is named `stats`.
-    macro_rules! stats_tests {
-        ($make:ident) => {
-            impl StatsServer for HttpServer {
-                fn transport(&mut self) -> &mut dyn ProcessServer {
-                    &mut self.server
-                }
-
-                fn stats(&self) -> &StatsReporter {
-                    &self.stats
-                }
-            }
-
-            #[test]
-            fn reports_stats_once_on_close_when_enabled() {
-                assert_eq!(reported_on_close(&mut $make(&stats_args(true))), 1);
-            }
-        };
-    }
-
-    pub(super) use stats_tests;
 }
 
 #[cfg(test)]
@@ -725,7 +675,7 @@ mod tests {
     use test_fixture::{default_client, fixture_init};
     use tokio::time::timeout;
 
-    use super::{test_support::stats_args, *};
+    use super::*;
 
     #[derive(Default)]
     struct MockServer {
@@ -802,59 +752,13 @@ mod tests {
         Ok(())
     }
 
-    fn reporter(stats: bool) -> StatsReporter {
-        fixture_init();
-        StatsReporter::new(&stats_args(stats).shared)
-    }
-
-    #[test]
-    fn reports_each_connection_once() {
-        let mut stats = reporter(true);
-        let a = Rc::new(RefCell::new(default_client()));
-        let b = Rc::new(RefCell::new(default_client()));
-
-        stats.report(&a);
-        assert_eq!(stats.count(), 1, "first sighting must report");
-        stats.report(&a);
-        assert_eq!(stats.count(), 1, "must not report twice");
-        stats.report(&b);
-        assert_eq!(stats.count(), 2, "a different connection must report");
-    }
-
-    #[test]
-    fn dropped_connections_are_pruned() {
-        let mut stats = reporter(true);
-        let live = Rc::new(RefCell::new(default_client()));
-        stats.report(&Rc::new(RefCell::new(default_client())));
-        stats.report(&live);
-        assert_eq!(stats.count(), 1, "only the connection still held is kept");
-    }
-
     #[test]
     fn reports_nothing_without_the_stats_flag() {
-        let mut stats = reporter(false);
-        stats.report(&Rc::new(RefCell::new(default_client())));
-        assert_eq!(stats.count(), 0);
-    }
-
-    #[test]
-    fn stats_flag_defaults_to_none() {
-        let args = Args::parse_from(["neqo-server"]);
-        assert_eq!(args.shared.stats, None);
-    }
-
-    #[test]
-    fn stats_flag_parses_bare_and_with_filename() {
-        assert_eq!(
-            Args::parse_from(["neqo-server", "--stats"]).shared.stats,
-            Some(None)
-        );
-        assert_eq!(
-            Args::parse_from(["neqo-server", "--stats=out.json"])
-                .shared
-                .stats,
-            Some(Some(PathBuf::from("out.json")))
-        );
+        fixture_init();
+        let dir = crate::temp_dir::TempDir::new();
+        let file = dir.path().join("stats.json");
+        StatsReporter::new(false, Some(file.clone())).report(&RefCell::new(default_client()));
+        assert!(!file.exists());
     }
 
     #[test]

@@ -304,58 +304,51 @@ pub fn connect() -> (Connection, Connection) {
 }
 
 /// The part of a multi-connection server that [`handshake_with_server`] drives.
-///
-/// The method names differ from the inherent ones they forward to: sharing them
-/// would leave the bodies below resolving to the inherent methods only by
-/// preference, so renaming or extending either one would turn these into
-/// unbounded recursion rather than a compile error.
 pub trait ProcessServer {
-    fn set_addr_validation(&self, v: ValidateAddress);
-    fn process_dgram(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+    fn set_validation(&self, v: ValidateAddress);
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
 }
 
 impl ProcessServer for Server {
-    fn set_addr_validation(&self, v: ValidateAddress) {
+    fn set_validation(&self, v: ValidateAddress) {
         self.set_validation(v);
     }
-    fn process_dgram(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         self.process(dgram, now)
     }
 }
 
 impl ProcessServer for Http3Server {
-    fn set_addr_validation(&self, v: ValidateAddress) {
+    fn set_validation(&self, v: ValidateAddress) {
         self.set_validation(v);
     }
-    fn process_dgram(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
         self.process(dgram, now)
     }
 }
 
-/// Complete a handshake between `client` and a multi-connection `server`,
-/// asserting the shape of each flight. This is [`handshake`] for servers that
-/// hold more than one connection.
+/// [`handshake`] for a server that holds more than one connection.
 ///
 /// # Panics
 ///
 /// When the handshake doesn't proceed as expected.
 pub fn handshake_with_server(client: &mut Connection, server: &mut dyn ProcessServer) {
-    server.set_addr_validation(ValidateAddress::Never);
+    server.set_validation(ValidateAddress::Never);
 
     assert_eq!(*client.state(), State::Init);
     let out = client.process_output(now()); // ClientHello
     let out2 = client.process_output(now()); // ClientHello
     assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
-    _ = server.process_dgram(out.dgram(), now()); // ACK
-    let out = server.process_dgram(out2.dgram(), now()); // ServerHello...
+    _ = server.process(out.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
     assert!(out.as_dgram_ref().is_some());
 
     // Ingest the server Certificate.
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
-    let out = server.process_dgram(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     let out = client.process(out.dgram(), now());
-    let out = server.process_dgram(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
 
     // Now mark the server as authenticated.
@@ -363,7 +356,7 @@ pub fn handshake_with_server(client: &mut Connection, server: &mut dyn ProcessSe
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*client.state(), State::Connected);
-    let out = server.process_dgram(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
 
     // Have the client process the HANDSHAKE_DONE.

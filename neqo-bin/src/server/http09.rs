@@ -68,7 +68,7 @@ impl HttpServer {
             read_state: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
-            stats: StatsReporter::new(&args.shared),
+            stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
         })
     }
 
@@ -233,7 +233,10 @@ impl super::HttpServer for HttpServer {
                             .send_ticket(now, b"hi!")
                             .unwrap();
                     }
-                    ConnectionEvent::StateChange(state) if state.closed() => {
+                    // Exactly one of these occurs; `Closed` is dropped before it is seen.
+                    ConnectionEvent::StateChange(
+                        State::Closing { .. } | State::Draining { .. },
+                    ) => {
                         self.stats.report(&acr.connection());
                     }
                     ConnectionEvent::StateChange(_)
@@ -265,10 +268,7 @@ mod tests {
     use test_fixture::{ProcessServer, anti_replay, fixture_init};
 
     use super::{Args, HttpServer};
-    use crate::server::{
-        StatsReporter,
-        test_support::{StatsServer, reported_on_close, stats_args, stats_tests},
-    };
+    use crate::server::test_support::{StatsServer, reported_on_close};
 
     fn make_server(args: &Args) -> HttpServer {
         fixture_init();
@@ -280,7 +280,16 @@ mod tests {
         .expect("build server")
     }
 
-    stats_tests!(make_server);
+    impl StatsServer for HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer {
+            &mut self.server
+        }
+    }
+
+    #[test]
+    fn reports_stats_once_on_close() {
+        assert_eq!(reported_on_close(make_server), 1);
+    }
 
     // Issue 1 (FIN-only frame after buffered partial data) is exercised by
     // the QNS zerortt interop test end-to-end; unit testing it would require

@@ -424,6 +424,15 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
+        let res = self.transfer().await;
+        if self.args.shared.stats_enabled() {
+            report_stats(&self.client.stats(), self.args.shared.stats_file.as_deref());
+        }
+        res?;
+        Ok(self.handler.take_token())
+    }
+
+    async fn transfer(&mut self) -> Res<()> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
             self.process_output().await?;
@@ -451,11 +460,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
         }
 
-        if let Some(path) = &self.args.shared.stats {
-            report_stats(&self.client.stats(), path.as_deref());
-        }
-
-        Ok(self.handler.take_token())
+        Ok(())
     }
 
     async fn process_output(&mut self) -> Result<(), io::Error> {

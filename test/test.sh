@@ -86,7 +86,6 @@ tmux \
         split-window -v -f "\
                 until [ -e $tmp/done ]; do sleep 1; done; \
                 echo $tmp; ls -l $tmp; echo; \
-                tail -n +1 $tmp/*-stats.json; echo; \
                 tshark -r $tmp/test.pcap -o tls.keylog_file:$tmp/test.tlskey \
                         -o gui.column.format:'$columns' -X lua_script:$tmp/quic-trace.lua" \; \
         set remain-on-exit on
