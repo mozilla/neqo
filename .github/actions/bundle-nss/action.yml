@@ -1,12 +1,17 @@
-name: Bundle NSS libraries
+name: Bundle NSS runtime files
 description: >
-  Copy the NSS shared libraries that neqo binaries link against into <path>/lib.
-  Requires install-build-deps to have run first, which sets NSS_DIR.
+  Copy what neqo binaries need at runtime into <path>: the NSS shared libraries they link
+  against into lib/, and the test-fixture certificate database into test-fixture/db.
+  Requires install-build-deps to have run first, which sets NSS_DIR, and a Cargo workspace at
+  <working-directory> to resolve test-fixture from.
 
 inputs:
   path:
-    description: Directory to create lib/ under
+    description: Directory to create lib/ and test-fixture/ under
     required: true
+  working-directory:
+    description: Directory containing the Cargo.toml that pins test-fixture
+    default: "."
 
 runs:
   using: composite
@@ -14,6 +19,7 @@ runs:
     - shell: bash
       env:
         DEST: ${{ inputs.path }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: |
         mkdir -p "$DEST/lib"
         if [ -d "$NSS_DIR/../dist/Release/lib" ]; then
@@ -28,3 +34,11 @@ runs:
           echo "::error::No NSS libraries found (NSS_DIR=${NSS_DIR:-unset})"
           exit 1
         fi
+        # Without TEST_FIXTURE_DB, test-fixture falls back to the cargo checkout path.
+        NSS_DB=$(cd "$WORKING_DIRECTORY" && cargo metadata --format-version 1 | jq -r 'first(.packages[] | select(.name == "test-fixture" and (.source // "" | startswith("git+"))) | .manifest_path | rtrimstr("/Cargo.toml"))')/db
+        if [ ! -d "$NSS_DB" ]; then
+          echo "::error::No nss-rs test-fixture db found (looked in $NSS_DB)"
+          exit 1
+        fi
+        mkdir -p "$DEST/test-fixture"
+        cp -r "$NSS_DB" "$DEST/test-fixture/"

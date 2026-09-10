@@ -1,0 +1,55 @@
+name: Record perf
+description: Run a client/server transfer under perf, recording both sides.
+
+inputs:
+  name:
+    description: Base name for the recorded perf files
+    required: true
+  server-cmd:
+    description: Server command line
+    required: true
+  client-cmd:
+    description: Client command line
+    required: true
+  lib-path:
+    description: Value for LD_LIBRARY_PATH
+    required: true
+  db-path:
+    description: Value for TEST_FIXTURE_DB
+    required: true
+  perf-opt:
+    description: Arguments to pass to perf
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        BENCH_NAME: ${{ inputs.name }}
+        SERVER_CMD: ${{ inputs.server-cmd }}
+        CLIENT_CMD: ${{ inputs.client-cmd }}
+        LD_LIBRARY_PATH: ${{ inputs.lib-path }}
+        TEST_FIXTURE_DB: ${{ inputs.db-path }}
+        PERF_OPT: ${{ inputs.perf-opt }}
+      run: |
+        # shellcheck disable=SC2206
+        PERF=(sudo env "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" perf $PERF_OPT)
+        # Some commands wrap the binary in `bash -c "..."`; the quoting has to survive word splitting.
+        eval "set -- $SERVER_CMD"
+        # pkill matches against comm, which the kernel truncates to 15 characters.
+        SERVER_TAG=$(basename "$1" | cut -c1-15)
+        "${PERF[@]}" -o "$BENCH_NAME.server.perf" -- "$@" &
+        SERVER_PID=$!
+        sleep 1
+        eval "set -- $CLIENT_CMD"
+        "${PERF[@]}" -o "$BENCH_NAME.client.perf" -- "$@" || echo "::warning::client exited with status $?"
+        sudo kill "$SERVER_PID" 2>/dev/null || true
+        # Wait for perf to finish writing its data file.
+        wait "$SERVER_PID" || true
+        # `$SERVER_PID` is sudo's, so the server itself can outlive the wait above and would
+        # then burn CPU during the next recording on this runner.
+        sudo pkill -9 -x "$SERVER_TAG" 2>/dev/null || true
+        for role in server client; do
+          [ -f "$BENCH_NAME.$role.perf" ] || { echo "::error::perf produced no data for $role ($BENCH_NAME)"; exit 1; }
+        done

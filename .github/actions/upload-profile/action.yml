@@ -1,0 +1,22 @@
+name: Upload profile
+description: >
+  Upload one ref's profiles as <name>-<ref>; the pr-comment job pairs refs by that suffix.
+
+inputs:
+  name:
+    description: Artifact name without the ref suffix
+    required: true
+  ref:
+    description: Which ref was profiled, pr or base
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.name }}-${{ inputs.ref }}
+        # Matches both `<bench>-<ref>.samply.json.gz` and `<combo>-<ref>.<role>.samply.json.gz`.
+        path: "*-${{ inputs.ref }}.*samply.json.gz"
+        retention-days: 90
+        if-no-files-found: ignore

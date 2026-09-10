@@ -1,0 +1,27 @@
+name: Process perf data
+description: >
+  Convert every perf.data file in the workspace into a profiler.firefox.com profile.
+  A sample-less `*-base.*` recording only warns, so the base ref cannot fail the PR's profile.
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        fail=
+        for f in *.perf; do
+          [ -e "$f" ] || continue
+          # perf runs under sudo, so it writes these as root.
+          sudo chown "$(id -u)" "$f"
+          if [ -z "$(perf script -i "$f" | head -n1)" ]; then
+            case "$f" in
+              *-base.*) echo "::warning::perf recorded no samples for $f" ;;
+              *) echo "::error::perf recorded no samples for $f"; fail=1 ;;
+            esac
+            continue
+          fi
+          echo "Processing $f..."
+          samply import "$f" -o "${f%.perf}.samply.json.gz" --save-only --presymbolicate ||
+            { echo "::error::samply import failed for $f"; fail=1; }
+        done
+        [ -z "$fail" ]
