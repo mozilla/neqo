@@ -399,42 +399,34 @@ impl RangeTracker {
         let mut to_add = None;
 
         // Walk backwards through possibly affected existing ranges
-        for (cur_off, (cur_len, cur_state)) in self.used.range_mut(..off + len).rev() {
-            // Maybe fixup range preceding the removed range
-            if *cur_off < off {
-                // Check for overlap
-                if *cur_off + *cur_len > off {
-                    if *cur_state == RangeState::Acked {
-                        qdebug!(
-                            "Attempted to unmark Acked range {cur_off}-{cur_len} with unmark_range {off}-{}",
-                            off + len
-                        );
-                    } else {
-                        *cur_len = off - cur_off;
-                    }
-                }
-                break;
+        for (cur_off, (cur_len, cur_state)) in self.used.range_mut(..end_off).rev() {
+            let cur_end_off = *cur_off + *cur_len;
+            // Only the last range examined can start below `off`, and it keeps its head.
+            let head = *cur_off < off;
+            if head && cur_end_off <= off {
+                break; // It does not even overlap.
             }
 
             if *cur_state == RangeState::Acked {
                 qdebug!(
-                    "Attempted to unmark Acked range {cur_off}-{cur_len} with unmark_range {off}-{}",
-                    off + len
+                    "Attempted to unmark Acked range {cur_off}-{cur_len} with unmark_range {off}-{end_off}"
                 );
-                continue;
+            } else {
+                if cur_end_off > end_off {
+                    // The range spans the unmarked one, so keep its tail.
+                    assert_eq!(to_add, None);
+                    to_add = Some((end_off, cur_end_off - end_off, *cur_state));
+                }
+                if head {
+                    *cur_len = off - cur_off; // Cut, rather than remove.
+                } else {
+                    to_remove.push(*cur_off);
+                }
             }
 
-            // Add a new range for old subrange extending beyond
-            // to-be-unmarked range
-            let cur_end_off = cur_off + *cur_len;
-            if cur_end_off > end_off {
-                let new_cur_off = off + len;
-                let new_cur_len = cur_end_off - end_off;
-                assert_eq!(to_add, None);
-                to_add = Some((new_cur_off, new_cur_len, *cur_state));
+            if head {
+                break;
             }
-
-            to_remove.push(*cur_off);
         }
 
         for remove_off in to_remove {
@@ -3284,6 +3276,39 @@ mod tests {
 
         let res = rt.first_unmarked_range();
         assert_eq!(res, (15, None));
+    }
+
+    /// Unmarking inside a range keeps the tail beyond it, which is still `Sent`.
+    #[test]
+    fn unmark_range_keeps_tail_of_spanning_range() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 30);
+
+        rt.unmark_range(10, 10);
+
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+        assert_eq!(rt.highest_offset(), 30);
+    }
+
+    /// Losing a frame inside a coalesced range retransmits only that frame.
+    #[test]
+    fn tx_buffer_lost_frame_retransmits_only_that_frame() {
+        let mut txb = TxBuffer::new();
+        assert_eq!(txb.send(&[1; 3000]), 3000);
+        // Three frames coalesce into one `Sent` range.
+        txb.mark_as_sent(0, 1000);
+        txb.mark_as_sent(1000, 1000);
+        txb.mark_as_sent(2000, 1000);
+
+        txb.mark_as_lost(1000, 1000);
+
+        assert_eq!(
+            txb.next_bytes().map(|(off, data)| (off, data.len())),
+            Some((1000, 1000))
+        );
+        // Nothing is pending after retransmitting it.
+        txb.mark_as_sent(1000, 1000);
+        assert!(txb.next_bytes().is_none());
     }
 
     #[test]

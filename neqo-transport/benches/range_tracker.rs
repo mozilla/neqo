@@ -70,8 +70,8 @@ fn mark_sent_sequential(c: &mut Criterion) {
     });
 }
 
-/// After packet loss, `mark_as_lost` removes the affected bytes from `used` before `mark_sent` is
-/// called again.  The range scan is therefore still empty for the retransmit.
+/// Retransmission — `mark_as_lost` cuts a gap into the coalesced Sent entry for every loss,
+/// so each retransmit fills a gap and merges it with the neighbouring Sent entries.
 fn mark_sent_retransmit(c: &mut Criterion) {
     const SENDS: usize = 500;
     c.bench_function("RangeTracker::mark_sent retransmit", |b| {
