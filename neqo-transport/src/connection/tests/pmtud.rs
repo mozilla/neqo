@@ -64,13 +64,14 @@ fn gso_with_max_mtu() {
     }
 }
 
+/// Use an IPv6 address since the default test connection uses IPv6.
+const VPN_ADDR: SocketAddr = SocketAddr::new(
+    IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+    12345,
+);
+
 /// Simulates VPN by changing the source address of a datagram to an IPv6 VPN endpoint.
 fn via_vpn(d: &Datagram) -> Datagram {
-    // Use an IPv6 address since the default test connection uses IPv6.
-    const VPN_ADDR: SocketAddr = SocketAddr::new(
-        IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
-        12345,
-    );
     Datagram::new(VPN_ADDR, d.destination(), d.tos(), &d[..])
 }
 
@@ -190,4 +191,91 @@ fn vpn_migration_triggers_pmtud() {
     let expected_vpn_mtu = 1380 - header_size;
     assert_eq!(server.plpmtu(), expected_vpn_mtu);
     assert_eq!(client.plpmtu(), expected_vpn_mtu);
+}
+
+/// A probe that cannot be sent yet must not raise the size of the packets sent meanwhile.
+#[test]
+fn deferred_probe_respects_amplification_limit() {
+    fixture_init();
+    let now = now();
+    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let mut server = new_server(ConnectionParameters::default().pmtud(true));
+    connect(&mut client, &mut server);
+
+    // The server will fill whatever limit it is given.
+    let stream = server.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut server, stream);
+
+    // A small packet from a new client address migrates the server to an unvalidated path.
+    let c_stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(c_stream, &[0x42; 150]).unwrap();
+    let small = client.process_output(now).dgram().unwrap();
+    server.process_input(via_vpn(&small), now);
+
+    let limit = {
+        let path = server.paths.primary().unwrap();
+        let path = path.borrow();
+        assert!(!path.is_valid(), "path is unvalidated");
+        assert!(path.pmtud().needs_probe(), "PMTUD wants to probe");
+        assert!(
+            path.pmtud().probe_size() > path.amplification_limit(),
+            "the probe does not fit, so it cannot be sent yet"
+        );
+        path.amplification_limit()
+    };
+
+    let pmtud_tx = server.stats().pmtud_tx;
+    let d = server.process_output(now).dgram().unwrap();
+    assert_eq!(d.destination(), VPN_ADDR, "sent on the unvalidated path");
+    assert_eq!(server.stats().pmtud_tx, pmtud_tx, "no probe was sent");
+    assert!(
+        d.len() <= limit,
+        "sent {} bytes against an amplification limit of {limit}",
+        d.len()
+    );
+}
+
+/// A probe must wait for a budget that covers the probe, not just the PLPMTU, which is
+/// what `send_profile()` clamps any larger budget to.
+#[test]
+fn probe_waits_for_budget_covering_probe_size() {
+    fixture_init();
+    let now = now();
+    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let mut server = new_server(ConnectionParameters::default().pmtud(true));
+    connect(&mut client, &mut server);
+
+    // The server will fill whatever limit it is given.
+    let stream = server.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut server, stream);
+
+    // Sized so the amplification limit lands between the PLPMTU and the probe size.
+    let c_stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(c_stream, &[0x42; 400]).unwrap();
+    let small = client.process_output(now).dgram().unwrap();
+    server.process_input(via_vpn(&small), now);
+
+    let limit = {
+        let path = server.paths.primary().unwrap();
+        let path = path.borrow();
+        let limit = path.amplification_limit();
+        assert!(!path.is_valid(), "path is unvalidated");
+        assert!(path.pmtud().needs_probe(), "PMTUD wants to probe");
+        assert!(
+            path.plpmtu() < limit && limit < path.pmtud().probe_size(),
+            "budget {limit} must sit between PLPMTU {} and probe size {}",
+            path.plpmtu(),
+            path.pmtud().probe_size()
+        );
+        limit
+    };
+
+    let pmtud_tx = server.stats().pmtud_tx;
+    let d = server.process_output(now).dgram().unwrap();
+    assert_eq!(server.stats().pmtud_tx, pmtud_tx, "no probe was sent");
+    assert!(
+        d.len() <= limit,
+        "sent {} bytes against an amplification limit of {limit}",
+        d.len()
+    );
 }
