@@ -16,7 +16,7 @@ use crate::{
     CloseReason, Connection, ConnectionParameters, Error, MAX_DATAGRAM_FRAME_SIZE,
     MIN_INITIAL_PACKET_SIZE, Pmtud, Stats, StreamId, StreamType,
     connection::tests::DEFAULT_ADDR,
-    datagram_queue::{DatagramQueueOutcome, default_max_age},
+    datagram_queue::{DatagramQueueOutcome, DroppedDatagrams, default_max_age},
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet, recovery,
@@ -896,7 +896,7 @@ fn drop_session_datagrams_removes_only_that_sessions_entries() {
     _ = client.enqueue_datagram(session_a, vec![1], Some(1), now, SendGroupId::new(0), 0);
     _ = client.enqueue_datagram(session_b, vec![2], Some(2), now, SendGroupId::new(0), 0);
 
-    assert_eq!(client.drop_session_datagrams(session_a), 1);
+    assert_eq!(client.drop_session_datagrams(session_a).queued, 1);
     assert_eq!(
         client.datagram_queue_capacity(session_a).queued_datagrams,
         0
@@ -1352,5 +1352,60 @@ fn dropped_too_big_unblocks() {
             .count(),
         1,
         "resume must be signalled exactly once after the queue was emptied by a drop"
+    );
+}
+
+#[test]
+fn sent_count_covers_only_datagrams_written_into_a_packet() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    _ = client.enqueue_datagram(
+        session,
+        DATA_BIGGER_THAN_MTU.to_vec(),
+        Some(1),
+        now,
+        SendGroupId::new(0),
+        0,
+    );
+    _ = client.enqueue_datagram(session, vec![1], Some(2), now, SendGroupId::new(0), 0);
+    assert!(client.process_output(now).dgram().is_some());
+
+    assert_eq!(
+        client.take_session_sent_datagrams(session),
+        1,
+        "the datagram dropped as too big must not count as sent"
+    );
+    assert_eq!(client.take_session_sent_datagrams(session), 0);
+    assert_eq!(client.take_session_sent_datagrams(StreamId::new(8)), 0);
+}
+
+#[test]
+fn drop_session_datagrams_returns_the_counts_not_yet_taken() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+    _ = client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0);
+    assert!(client.process_output(now).dgram().is_some());
+    let later = now + Duration::from_millis(1);
+    _ = client.enqueue_datagram(session, vec![2], Some(2), later, SendGroupId::new(0), 0);
+    _ = client.enqueue_datagram(session, vec![3], Some(3), later, SendGroupId::new(0), 0);
+    client.process_timer(later + Duration::from_millis(5));
+    _ = client.enqueue_datagram(session, vec![4], None, later, SendGroupId::new(0), 0);
+
+    assert_eq!(
+        client.drop_session_datagrams(session),
+        DroppedDatagrams {
+            queued: 1,
+            sent: 1,
+            expired: 2,
+        }
+    );
+    assert_eq!(
+        client.drop_session_datagrams(session),
+        DroppedDatagrams::default()
     );
 }

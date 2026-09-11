@@ -396,7 +396,7 @@ impl Session {
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
-        conn.drop_session_datagrams(self.id);
+        _ = conn.drop_session_datagrams(self.id);
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
             self.control_stream_send

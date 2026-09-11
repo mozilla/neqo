@@ -43,7 +43,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
-    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome, DroppedDatagrams},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
@@ -4219,6 +4219,23 @@ impl Connection {
         self.quic_datagrams.has_pending_counts()
     }
 
+    /// Remove `session`'s queue, e.g. because the session is closing. Returns
+    /// how many datagrams were still queued, and the sent and expiry counts
+    /// not yet taken.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> DroppedDatagrams {
+        self.quic_datagrams.drop_session_datagrams(session)
+    }
+
+    /// The number of `session`'s datagrams written into a QUIC packet since
+    /// the last call.  Not a delivery signal: the packet can still be lost,
+    /// and a DATAGRAM frame is never retransmitted.  Tracked datagrams also
+    /// get a [`ConnectionEvent::OutgoingDatagramOutcome`] for that.
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramOutcome`]: crate::ConnectionEvent::OutgoingDatagramOutcome
+    pub fn take_session_sent_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_sent_count(session)
+    }
+
     /// The instant at which the oldest datagram queued on any session
     /// crosses its effective max-age, if any session has one queued.
     ///
@@ -4231,12 +4248,6 @@ impl Connection {
     #[must_use]
     pub fn next_datagram_expiry(&self) -> Option<Instant> {
         self.quic_datagrams.next_datagram_expiry(self.min_rtt())
-    }
-
-    /// Remove every datagram queued on `session`'s behalf, e.g. because the
-    /// session is closing. Returns how many were removed.
-    pub fn drop_session_datagrams(&mut self, session: StreamId) -> usize {
-        self.quic_datagrams.drop_session_datagrams(session)
     }
 
     /// Return the PLMTU of the primary path.
