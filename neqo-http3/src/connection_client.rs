@@ -1287,7 +1287,8 @@ mod tests {
                 conn: default_server_h3(),
                 control_stream_id: None,
                 encoder: Rc::clone(&qpack),
-                encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack),
+                encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack)
+                    .unwrap(),
                 encoder_stream_id: None,
                 decoder_stream_id: None,
             }
@@ -1308,7 +1309,8 @@ mod tests {
                 conn,
                 control_stream_id: None,
                 encoder: Rc::clone(&qpack),
-                encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack),
+                encoder_receiver: EncoderRecvStream::new(CLIENT_SIDE_DECODER_STREAM_ID, qpack)
+                    .unwrap(),
                 encoder_stream_id: None,
                 decoder_stream_id: None,
             }
@@ -1319,7 +1321,8 @@ mod tests {
             self.encoder_stream_id = Some(self.conn.stream_create(StreamType::UniDi).unwrap());
             self.encoder
                 .borrow_mut()
-                .add_send_stream(self.encoder_stream_id.unwrap());
+                .add_send_stream(self.encoder_stream_id.unwrap())
+                .unwrap();
             self.encoder
                 .borrow_mut()
                 .send_encoder_updates(&mut self.conn)
