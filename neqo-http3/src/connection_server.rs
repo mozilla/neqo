@@ -218,10 +218,14 @@ impl Http3ServerHandler {
     /// Whether this connection has events to process, data to send, or a
     /// per-session datagram sweep due (see
     /// [`Http3Connection::datagram_sweep_due`]). Without the last check, a
-    /// connection whose only pending work is an expired datagram is never
-    /// processed here: `Connection::process_timer` still expires it (so it
-    /// is never sent late), but nothing runs the per-session sweep that
-    /// counts it and reports its outcome.
+    /// connection whose only pending work is datagrams is never processed
+    /// here again once its initial `needs_processing` flag is consumed:
+    /// `Connection::process_timer`/`write_frames` still expire and send
+    /// them on their own schedule (so they are never sent late or left
+    /// unsent), but nothing runs the per-session sweep that counts and
+    /// reports the outcome.  The sweep runs before packets are built, so a
+    /// sent count reaches the session's stats on the next call; only tests
+    /// read server-side stats today.
     ///
     /// The sweep check is gated on `active()`: the transport stops expiring
     /// queues once it is closing or draining, so a stale deadline or count

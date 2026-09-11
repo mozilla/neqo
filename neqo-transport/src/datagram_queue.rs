@@ -425,6 +425,14 @@ impl DatagramQueue {
         self.sent += 1;
     }
 
+    /// Whether [`Self::take_sent_count`] would return nonzero.  A send
+    /// produces no event of its own, so a caller that sweeps only when given
+    /// a reason uses this as that reason.
+    #[must_use]
+    pub const fn has_sent(&self) -> bool {
+        self.sent > 0
+    }
+
     /// Return and reset the count of datagrams sent since the last call.
     pub fn take_sent_count(&mut self) -> u64 {
         mem::take(&mut self.sent)

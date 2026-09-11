@@ -1708,8 +1708,12 @@ impl Http3Connection {
         conn.next_datagram_expiry().is_some_and(|e| e <= now) || conn.has_pending_datagram_counts()
     }
 
-    /// Expire stale outgoing datagrams on every active extended-CONNECT
-    /// session's queue and count them per session. Called once per
+    /// Expire stale outgoing datagrams on every extended-CONNECT session's
+    /// queue and count them per session, picking up each session's
+    /// actually-sent count while there.  Not only active ones: a session
+    /// that has left `Active` but still has a queue would otherwise keep
+    /// [`Self::datagram_sweep_due`] true, and this connection processed,
+    /// for nothing. Called once per
     /// `process_http3` tick, i.e. on every packet received or sent, so the
     /// scan of every receive stream is skipped unless
     /// [`Self::datagram_sweep_due`]. The transport counts expiries on the
@@ -1726,8 +1730,11 @@ impl Http3Connection {
         self.recv_streams
             .values()
             .filter_map(|s| s.extended_connect_session())
-            .filter(|s| s.borrow().is_active())
-            .map(|s| s.borrow_mut().expire_datagrams(conn, now))
+            .map(|s| {
+                let mut s = s.borrow_mut();
+                s.report_sent_datagrams(conn);
+                s.expire_datagrams(conn, now)
+            })
             .sum()
     }
 

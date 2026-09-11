@@ -4204,10 +4204,12 @@ impl Connection {
         self.quic_datagrams.take_session_expired_count(session)
     }
 
-    /// Whether any session has an expiry count waiting to be picked up by
-    /// [`Self::expire_session_datagrams`]. `process_timer` sheds stale
-    /// datagrams on its own schedule, so a caller that sweeps only when given
-    /// a reason to needs this to learn that there is now something to count.
+    /// Whether any session has an expiry or sent count waiting to be picked
+    /// up by [`Self::expire_session_datagrams`] or
+    /// [`Self::take_session_sent_datagrams`]. `process_timer` sheds stale
+    /// datagrams and `process_output` builds packets on their own schedule,
+    /// so a caller that sweeps only when given a reason to needs this to
+    /// learn that there is now something to count.
     ///
     /// A queue's counts clear only when drained or when
     /// [`Self::drop_session_datagrams`] removes the queue. A caller that

@@ -1409,3 +1409,20 @@ fn drop_session_datagrams_returns_the_counts_not_yet_taken() {
         DroppedDatagrams::default()
     );
 }
+
+#[test]
+fn a_sent_count_is_pending_until_taken() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    _ = client.enqueue_datagram(session, vec![1], None, now, SendGroupId::new(0), 0);
+    assert!(!client.has_pending_datagram_counts());
+    assert!(client.process_output(now).dgram().is_some());
+    assert!(
+        client.has_pending_datagram_counts(),
+        "a send gives no other signal that there is a count to take"
+    );
+    assert_eq!(client.take_session_sent_datagrams(session), 1);
+    assert!(!client.has_pending_datagram_counts());
+}
