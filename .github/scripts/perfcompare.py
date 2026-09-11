@@ -157,7 +157,8 @@ def setup(cfg):
         check=True,
         stderr=subprocess.DEVNULL,
     )
-    for s in (cfg.size, cfg.size * 20):
+    # The warm-up size, which the file-serving implementations need to exist.
+    for s in (cfg.size, cfg.size * 20, cfg.size // 32):
         sh(["truncate", "-s", str(s), str(tmp / str(s))], check=True)
     return tmp
 
@@ -241,14 +242,13 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
     ws = shlex.quote(str(cfg.workspace))
     out_dir.mkdir(exist_ok=True)
 
-    def with_stats(cmd: str, role: str) -> str:
-        """Have neqo append one record per connection, attributing a slow run to a PTO
-        (`pto_counts`) or loss (`lost`). The server reports on close, before it is killed."""
-        if f"neqo-{role}" not in cmd:
-            return cmd
-        return f"{cmd} --stats-file {shlex.quote(str(out_dir / f'{name}.{role}.jsonl'))}"
-
-    scmd, ccmd = with_stats(scmd, "server"), with_stats(ccmd, "client")
+    # Untimed, so start-up cost lands before the sample; `&&` fails `--prepare` (not a cold
+    # run) on failure. Only stderr is logged: stdout can be a response body without a disk flag.
+    warmup_log = shlex.quote(str(out_dir / f"{name}.warmup.log"))
+    warmup = (
+        f"{ws}/{ccmd.replace(f'/{cfg.size}', f'/{cfg.size // 32}')}"
+        f" >/dev/null 2>{warmup_log} && "
+    )
     # Both hooks run outside the timed region, so this is a before/after pair per run.
     rcvbuf = (
         "awk '/^Udp:/{if(!h){for(i=2;i<=NF;i++)if($i==\"RcvbufErrors\")c=i;h=1}else print $c}'"
@@ -274,7 +274,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--prepare",
         (
             f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2;"
-            f" {rcvbuf}"
+            f" echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {warmup} {rcvbuf}"
         ),
         "--conclude",
         f"pkill -9 {tag}; {rcvbuf}",
@@ -283,7 +283,14 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
     cmd.append(f"echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {ws}/{ccmd}")
     before = _udp_counters()
-    result = sh(cmd, check=True, stderr=subprocess.PIPE, text=True)
+    result = sh(cmd, stderr=subprocess.PIPE, text=True)
+    if result.returncode:
+        print(result.stderr, end="")
+        # hyperfine reports only *that* `--prepare` failed; the warm-up's log says why.
+        log = out_dir / f"{name}.warmup.log"
+        if log.exists():
+            print(log.read_text(encoding="utf-8"), end="")
+        result.check_returncode()
     # `*RcvbufErrors` tells whether loss was a receive-queue overrun. Only what moved.
     after = _udp_counters()
     deltas = {key: after.get(key, value) - value for key, value in before.items()}
@@ -299,9 +306,18 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
 
 
 def perf(cfg, scmd, ccmd, name):
-    """Run perf profiling with 20x larger file."""
+    """Run perf profiling with 20x larger file, also capturing per-connection stats."""
     tag, ws = _tag(scmd), cfg.workspace
     ccmd = ccmd.replace(str(cfg.size), str(cfg.size * 20))
+
+    def with_stats(cmd: str, role: str) -> str:
+        """Have neqo report PTOs and loss for this profiled transfer, not the timed hyperfine
+        command, where serializing them would cost neqo I/O the other implementations don't pay."""
+        if f"neqo-{role}" not in cmd:
+            return cmd
+        return f"{cmd} --stats-file {shlex.quote(f'{ws}/hyperfine/{name}.{role}.jsonl')}"
+
+    scmd, ccmd = with_stats(scmd, "server"), with_stats(ccmd, "client")
 
     def perf_cmd(cset, out, exe):
         return (
