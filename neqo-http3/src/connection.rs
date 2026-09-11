@@ -380,10 +380,10 @@ impl Http3Connection {
         qdebug!("[{self}] create_qpack_streams");
         self.qpack_encoder
             .borrow_mut()
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?)?;
         self.qpack_decoder
             .borrow_mut()
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?)?;
         Ok(())
     }
 
@@ -723,7 +723,7 @@ impl Http3Connection {
                     Box::new(DecoderRecvStream::new(
                         stream_id,
                         Rc::clone(&self.qpack_decoder),
-                    )),
+                    )?),
                 );
             }
             NewStreamType::Encoder => {
@@ -734,7 +734,7 @@ impl Http3Connection {
                     Box::new(EncoderRecvStream::new(
                         stream_id,
                         Rc::clone(&self.qpack_encoder),
-                    )),
+                    )?),
                 );
             }
             NewStreamType::Http(_) => {

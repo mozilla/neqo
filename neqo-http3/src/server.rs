@@ -666,7 +666,9 @@ mod tests {
                 .max_tracked_streams(4096),
             true,
         );
-        encoder.add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap());
+        encoder
+            .add_send_stream(neqo_trans_conn.stream_create(StreamType::UniDi).unwrap())
+            .unwrap();
         encoder.send_encoder_updates(&mut neqo_trans_conn).unwrap();
         let decoder_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
         sent = neqo_trans_conn.stream_send(decoder_stream, &[0x3]);
