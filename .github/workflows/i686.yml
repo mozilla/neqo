@@ -1,0 +1,45 @@
+name: i686
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches: ["main"] # Only to populate the Rust cache
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-32bit:
+    name: Check i686-unknown-linux-gnu
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+        with:
+          version: stable
+          targets: i686-unknown-linux-gnu
+          tools: cargo-hack
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install 32-bit host toolchain
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib
+      - uses: mozilla/nss-rs/install-nss@11fa92f3bbaf966db23262d47a5e39127855652f # i686 support, post-0.14.6 (nss-rs#167)
+        with:
+          target: i686-unknown-linux-gnu
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compile (no-run)
+        run: cargo test --locked --no-run --target i686-unknown-linux-gnu
