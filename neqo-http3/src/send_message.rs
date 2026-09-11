@@ -168,8 +168,8 @@ impl SendMessage {
         hframe.encode(encoder);
     }
 
-    fn stream_id(&self) -> StreamId {
-        Option::<StreamId>::from(&self.stream).expect("stream has ID")
+    const fn stream_id(&self) -> StreamId {
+        self.stream_info.stream_id()
     }
 }
 

@@ -163,6 +163,11 @@ impl Session {
         self.protocol.connect_type()
     }
 
+    /// Returns the stream ID of this extended CONNECT session.
+    pub(crate) const fn id(&self) -> StreamId {
+        self.id
+    }
+
     /// Mark session as draining. Returns `true` if this was the first call
     /// (i.e. the session was not already draining).
     pub(crate) const fn set_draining(&mut self) -> bool {

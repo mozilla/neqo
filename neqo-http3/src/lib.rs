@@ -535,6 +535,10 @@ impl Http3StreamInfo {
         }
     }
 
+    pub(crate) const fn stream_type(&self) -> Http3StreamType {
+        self.stream_type
+    }
+
     #[must_use]
     pub fn is_http(&self) -> bool {
         self.stream_type == Http3StreamType::Http
