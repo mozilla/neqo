@@ -17,6 +17,7 @@
 
 use std::{
     collections::{BTreeMap, VecDeque},
+    mem,
     num::NonZeroUsize,
     time::{Duration, Instant},
 };
@@ -146,6 +147,20 @@ pub enum DatagramQueueOutcome {
     /// larger than what any one eviction frees. `dropped` is the total
     /// number evicted, tracked or not, for aggregate stats.
     Overflowed { dropped: usize },
+}
+
+/// What removing a session's queue took with it, for the caller to report.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DroppedDatagrams {
+    /// Datagrams still queued, now discarded unsent.
+    pub queued: usize,
+    /// Datagrams sent since the queue's sent count was last taken.
+    pub sent: u64,
+    /// Datagrams expired since the queue's expiry count was last taken.
+    pub expired: u64,
+    /// Datagrams dropped as too big for the path MTU since that count was
+    /// last taken.
+    pub too_big: u64,
 }
 
 /// A snapshot of this session's outgoing-datagram queue state, e.g. for
@@ -384,6 +399,12 @@ pub struct DatagramQueue {
     /// order, and whoever drains this next counts every one of them exactly
     /// once.
     expired: u64,
+    /// Datagrams written into a packet since the last [`Self::take_sent_count`].
+    sent: u64,
+    /// Datagrams dropped at packet-build time for not fitting the path MTU
+    /// since the last [`Self::take_too_big_count`].  Enqueueing only checks
+    /// the peer's limit, which can exceed the path MTU.
+    too_big: u64,
 }
 
 impl DatagramQueue {
@@ -399,6 +420,28 @@ impl DatagramQueue {
     /// `outgoingMaxAge` if it set one, else `default_max_age`.
     fn effective_max_age(&self, default_max_age: Duration) -> Duration {
         self.max_age.unwrap_or(default_max_age)
+    }
+
+    /// Count a datagram from [`Self::take_next`] as written into a packet.
+    pub const fn record_sent(&mut self) {
+        self.sent += 1;
+    }
+
+    /// Return and reset the count of datagrams sent since the last call.
+    pub fn take_sent_count(&mut self) -> u64 {
+        mem::take(&mut self.sent)
+    }
+
+    /// Count a datagram from [`Self::take_next`] as dropped for not fitting
+    /// the path MTU.
+    pub const fn record_too_big(&mut self) {
+        self.too_big += 1;
+    }
+
+    /// Return and reset the count of datagrams dropped as too big since the
+    /// last call.
+    pub fn take_too_big_count(&mut self) -> u64 {
+        mem::take(&mut self.too_big)
     }
 
     /// `None` disables the count-based mark entirely, leaving only the byte
@@ -475,7 +518,7 @@ impl DatagramQueue {
     /// Return and reset the number of datagrams expired since the last call,
     /// by whichever caller ran [`Self::expire`].
     pub fn take_expired_count(&mut self) -> u64 {
-        std::mem::take(&mut self.expired)
+        mem::take(&mut self.expired)
     }
 
     /// Whether [`Self::take_expired_count`] would return a nonzero count,
@@ -781,7 +824,7 @@ impl DatagramQueue {
         self.total_bytes = 0;
         self.rr_next = SendGroupId::new(0);
         self.blocked = None;
-        std::mem::take(&mut self.groups)
+        mem::take(&mut self.groups)
             .into_values()
             .flat_map(|group| group.by_order.into_values().flatten())
     }
@@ -839,6 +882,8 @@ impl Default for DatagramQueue {
             blocked: None,
             max_age: None,
             expired: 0,
+            sent: 0,
+            too_big: 0,
         }
     }
 }

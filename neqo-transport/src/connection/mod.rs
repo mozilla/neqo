@@ -43,7 +43,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
-    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome, DroppedDatagrams},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
@@ -4219,10 +4219,28 @@ impl Connection {
         self.quic_datagrams.has_pending_counts()
     }
 
-    /// Remove every datagram queued on `session`'s behalf, e.g. because the
-    /// session is closing. Returns how many were removed.
-    pub fn drop_session_datagrams(&mut self, session: StreamId) -> usize {
+    /// Remove `session`'s queue, e.g. because the session is closing. Returns
+    /// how many datagrams were still queued, and the sent, expiry and
+    /// too-big counts not yet taken.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> DroppedDatagrams {
         self.quic_datagrams.drop_session_datagrams(session)
+    }
+
+    /// The number of `session`'s datagrams written into a QUIC packet since
+    /// the last call.  Not a delivery signal: the packet can still be lost,
+    /// and a DATAGRAM frame is never retransmitted.  Tracked datagrams get
+    /// their delivery outcome via [`ConnectionEvent::OutgoingDatagramOutcome`].
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramOutcome`]: crate::ConnectionEvent::OutgoingDatagramOutcome
+    pub fn take_session_sent_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_sent_count(session)
+    }
+
+    /// The number of `session`'s datagrams dropped at packet-build time since
+    /// the last call, for not fitting the path MTU.  Enqueueing only checks
+    /// the peer's `max_datagram_frame_size`, which can exceed the path MTU.
+    pub fn take_session_too_big_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_too_big_count(session)
     }
 
     /// Return the PLMTU of the primary path.
