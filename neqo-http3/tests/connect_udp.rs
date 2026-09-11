@@ -79,12 +79,7 @@ fn initiate_new_session_with_client_params(
     (client, proxy, connect_udp_session_id)
 }
 
-fn establish_new_session() -> (
-    Http3Client,
-    Http3Server,
-    neqo_http3::StreamId,
-    ServerSession,
-) {
+fn establish_new_session() -> (Http3Client, Http3Server, ServerSession) {
     establish_new_session_with_client_params(
         ConnectionParameters::default()
             .pmtud(true)
@@ -94,12 +89,7 @@ fn establish_new_session() -> (
 
 fn establish_new_session_with_client_params(
     client_conn_params: ConnectionParameters,
-) -> (
-    Http3Client,
-    Http3Server,
-    neqo_http3::StreamId,
-    ServerSession,
-) {
+) -> (Http3Client, Http3Server, ServerSession) {
     let (mut client, mut proxy, connect_udp_session_id) =
         initiate_new_session_with_client_params(client_conn_params);
     exchange_packets(&mut client, &mut proxy, false, None);
@@ -134,7 +124,7 @@ fn establish_new_session_with_client_params(
             Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { stream_id, status, ..}) if *stream_id == connect_udp_session_id && *status == 200)
         )
         .unwrap();
-    (client, proxy, connect_udp_session_id, proxy_session)
+    (client, proxy, proxy_session)
 }
 
 fn exchange_packets_through_proxy(
@@ -142,9 +132,10 @@ fn exchange_packets_through_proxy(
     client_inner: &mut Http3Client,
     proxy: &mut Http3Server,
     server: &mut Http3Server,
-    connect_udp_session_id: neqo_http3::StreamId,
     proxy_session: &ServerSession,
 ) {
+    let connect_udp_session_id = proxy_session.stream_id();
+
     qinfo!("Processing client_inner");
     while let Some(dgram) = client_inner.process_output(now()).dgram() {
         client_outer
@@ -232,7 +223,8 @@ fn session_lifecycle(client_closes: bool) {
     fixture_init();
     neqo_common::log::init(None);
 
-    let (mut client, mut proxy, session_id, proxy_session) = establish_new_session();
+    let (mut client, mut proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
 
     client
         .connect_udp_send_datagram(session_id, PING, None, now())
@@ -333,8 +325,7 @@ fn connect_via_proxy() {
     let mut client_inner = default_http3_client();
     let mut server = default_http3_server();
 
-    let (mut client_outer, mut proxy, connect_udp_session_id, proxy_session) =
-        establish_new_session();
+    let (mut client_outer, mut proxy, proxy_session) = establish_new_session();
 
     let mut needs_auth = false;
     // Establish inner connection on top of connect-udp session.
@@ -359,7 +350,6 @@ fn connect_via_proxy() {
             &mut client_inner,
             &mut proxy,
             &mut server,
-            connect_udp_session_id,
             &proxy_session,
         );
     }
@@ -382,7 +372,6 @@ fn connect_via_proxy() {
             &mut client_inner,
             &mut proxy,
             &mut server,
-            connect_udp_session_id,
             &proxy_session,
         );
     }
@@ -497,7 +486,7 @@ fn server_stream_reset_results_in_client_session_close() {
 
 #[test]
 fn connect_udp_operation_on_fetch_stream() {
-    let (mut client, _proxy, _session_id, _proxy_session) = establish_new_session();
+    let (mut client, _proxy, _proxy_session) = establish_new_session();
     let fetch_stream = client
         .fetch(
             now(),
@@ -621,7 +610,8 @@ fn session_lifecycle_with_http_datagram_capsule() {
 #[test]
 fn connect_udp_session_protocol_is_not_webtransport() {
     fixture_init();
-    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    let (mut client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
     assert_eq!(
         client.webtransport_session_protocol(session_id).unwrap(),
         None,
@@ -639,7 +629,8 @@ fn connect_udp_session_protocol_is_not_webtransport() {
 #[test]
 fn connect_udp_session_has_no_webtransport_stats() {
     fixture_init();
-    let (client, _proxy, session_id, _proxy_session) = establish_new_session();
+    let (client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
     assert_eq!(
         client.webtransport_session_stats(session_id),
         Err(Error::InvalidStreamId)
@@ -652,7 +643,8 @@ fn connect_udp_session_has_no_webtransport_stats() {
 #[test]
 fn connect_udp_session_rejected_by_webtransport_close_session() {
     fixture_init();
-    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    let (mut client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
     assert_eq!(
         client.webtransport_close_session(session_id, 0, "", now()),
         Err(Error::InvalidStreamId)
@@ -665,7 +657,8 @@ fn connect_udp_session_rejected_by_webtransport_close_session() {
 #[test]
 fn connect_udp_session_rejected_by_webtransport_create_stream() {
     fixture_init();
-    let (mut client, _proxy, session_id, _proxy_session) = establish_new_session();
+    let (mut client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
     assert_eq!(
         client.webtransport_create_stream(session_id, StreamType::UniDi),
         Err(Error::InvalidStreamId)
@@ -682,13 +675,13 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
 #[test]
 fn outgoing_datagram_space_available_forwarded() {
     fixture_init();
-    let (mut client, mut proxy, session_id, _proxy_session) =
-        establish_new_session_with_client_params(
-            ConnectionParameters::default()
-                .pmtud(true)
-                .datagram_size(1500)
-                .outgoing_datagram_queue(1),
-        );
+    let (mut client, mut proxy, proxy_session) = establish_new_session_with_client_params(
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(1500)
+            .outgoing_datagram_queue(1),
+    );
+    let session_id = proxy_session.stream_id();
 
     // Drain session-setup events so the assertions below only observe the
     // datagram backpressure signal.

@@ -1540,7 +1540,6 @@ impl Http3Connection {
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
-            session_id,
             (send_events, recv_events),
             true,
             send_group,
@@ -1562,7 +1561,6 @@ impl Http3Connection {
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
-            session_id,
             (send_events, recv_events),
             false,
             None,
@@ -1574,7 +1572,6 @@ impl Http3Connection {
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
-        session_id: StreamId,
         events: (Box<dyn SendStreamEvents>, Box<dyn RecvStreamEvents>),
         local: bool,
         send_group: Option<SendGroupId>,
@@ -1590,7 +1587,6 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportSendStream::new(
                         stream_id,
-                        session_id,
                         send_events,
                         webtransport_session,
                         true,
@@ -1602,7 +1598,6 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportRecvStream::new(
                         stream_id,
-                        session_id,
                         recv_events,
                         webtransport_session,
                     )),
@@ -1613,7 +1608,6 @@ impl Http3Connection {
                 stream_id,
                 Box::new(WebTransportSendStream::new(
                     stream_id,
-                    session_id,
                     send_events,
                     Rc::clone(&webtransport_session),
                     local,
@@ -1621,7 +1615,6 @@ impl Http3Connection {
                 )),
                 Box::new(WebTransportRecvStream::new(
                     stream_id,
-                    session_id,
                     recv_events,
                     webtransport_session,
                 )),
