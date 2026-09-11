@@ -964,3 +964,25 @@ fn datagram_over_the_peers_limit_including_context_id_is_rejected() {
         Err(Error::Transport(neqo_transport::Error::TooMuchData))
     );
 }
+
+/// The datagram queue setters are `WebTransport` attributes; a connect-udp
+/// session must be rejected rather than silently given a mark.
+#[test]
+fn connect_udp_session_rejected_by_webtransport_datagram_setters() {
+    fixture_init();
+    let (mut client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
+    assert_eq!(
+        client
+            .webtransport_set_datagram_high_water_mark(session_id, std::num::NonZeroUsize::new(1)),
+        Err(Error::InvalidStreamId)
+    );
+    assert_eq!(
+        client.webtransport_set_datagram_max_age(
+            session_id,
+            Some(std::time::Duration::from_millis(1)),
+            now()
+        ),
+        Err(Error::InvalidStreamId)
+    );
+}

@@ -8,11 +8,10 @@ use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
     mem,
+    num::NonZeroUsize,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
-#[cfg(test)]
-use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
@@ -1647,36 +1646,38 @@ impl Http3Connection {
             .send_datagram(conn, buf, id, now, send_group_id, send_order)
     }
 
-    /// Test-only: not yet exposed to a production caller.
-    #[cfg(test)]
-    pub(crate) fn extended_connect_set_datagram_high_water_mark(
+    /// `WebTransport` only, unlike the shared
+    /// [`Self::extended_connect_send_datagram`]: `outgoingMaxBufferedDatagrams`
+    /// is a `WebTransport` attribute, and connect-udp has no equivalent to
+    /// reach its own queue through.
+    pub(crate) fn webtransport_session_set_datagram_high_water_mark(
         &self,
-        session_id: StreamId,
         conn: &mut Connection,
+        session_id: StreamId,
         mark: Option<NonZeroUsize>,
     ) -> Res<()> {
-        self.validate_extended_connect_session(session_id)?
+        self.webtransport_session(session_id)?
             .borrow()
             .set_datagram_high_water_mark(conn, mark);
         Ok(())
     }
 
-    /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
-    #[cfg(test)]
-    pub(crate) fn extended_connect_set_datagram_max_age(
+    /// `WebTransport` only; see
+    /// [`Self::webtransport_session_set_datagram_high_water_mark`].
+    pub(crate) fn webtransport_session_set_datagram_max_age(
         &self,
-        session_id: StreamId,
         conn: &mut Connection,
+        session_id: StreamId,
         max_age: Option<Duration>,
         now: Instant,
     ) -> Res<()> {
-        self.validate_extended_connect_session(session_id)?
-            .borrow()
+        self.webtransport_session(session_id)?
+            .borrow_mut()
             .set_datagram_max_age(conn, max_age, now);
         Ok(())
     }
 
-    /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
+    /// Test-only; see [`Self::webtransport_session_set_datagram_high_water_mark`].
     #[cfg(test)]
     pub(crate) fn extended_connect_datagram_queue_capacity(
         &self,
