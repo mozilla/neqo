@@ -1684,29 +1684,27 @@ impl Http3Connection {
             .datagram_queue_capacity(conn))
     }
 
-    /// Expire stale outgoing datagrams on every active extended-CONNECT
-    /// session's queue and count them per session. Called once per
-    /// `process_http3` tick, i.e. on every packet received or sent, so the
-    /// scan of every receive stream is skipped unless a queued datagram has
-    /// reached its max-age or a queue holds an uncollected expiry count. The
-    /// transport counts expiries on the queue itself, whether its own timer
-    /// sweep or this one sheds them, so this sweep picks up the right number
-    /// regardless of whether it runs before or after
+    /// Expire stale outgoing datagrams on each extended-CONNECT session's
+    /// queue that the transport reports as needing a sweep, count them per
+    /// session, and pick up each such session's sent and too-big counts.
+    /// Called once per `process_http3` tick, i.e. on every packet received or
+    /// sent, so it only visits those sessions rather than every receive
+    /// stream. The transport counts expiries on the queue itself, whether its
+    /// own timer sweep or this one sheds them, so this sweep picks up the
+    /// right number regardless of whether it runs before or after
     /// `Connection::process_output` within a tick.
     ///
     /// Returns the total number of datagrams expired, for the caller to fold
     /// into a stats counter.
     pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> u64 {
-        if !conn.has_pending_datagram_counts()
-            && conn.next_datagram_expiry().is_none_or(|e| e > now)
-        {
-            return 0;
-        }
-        self.recv_streams
-            .values()
-            .filter_map(|s| s.extended_connect_session())
-            .filter(|s| s.borrow().is_active())
-            .map(|s| s.borrow_mut().expire_datagrams(conn, now))
+        conn.datagram_sessions_needing_sweep(now)
+            .into_iter()
+            .filter_map(|id| self.recv_streams.get(&id)?.extended_connect_session())
+            .map(|s| {
+                let mut s = s.borrow_mut();
+                s.report_sent_datagrams(conn);
+                s.expire_datagrams(conn, now)
+            })
             .sum()
     }
 

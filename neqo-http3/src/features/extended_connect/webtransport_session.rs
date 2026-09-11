@@ -247,8 +247,16 @@ impl Protocol for Session {
         Some(&self.stats)
     }
 
+    fn record_sent_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.datagrams_sent_outgoing += count;
+    }
+
     fn record_expired_outgoing_datagrams(&mut self, count: u64) {
         self.stats.datagrams_expired_outgoing += count;
+    }
+
+    fn record_dropped_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.datagrams_dropped_outgoing += count;
     }
 
     fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {

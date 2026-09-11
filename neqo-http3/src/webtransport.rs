@@ -551,17 +551,9 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        // Collect expiries and snapshot the stats before tearing the session down,
-        // so the caller sees the final values.  This also rejects non-WebTransport
-        // sessions.
-        //
-        // `extended_connect_close_session` then checks the type again. That is
-        // deliberate: it is shared with connect-udp, which needs the check for its own
-        // close path, so it cannot rely on this one having happened.
-        self.webtransport_session(session_id)?
-            .borrow_mut()
-            .expire_datagrams(conn, now);
-        let stats = self.webtransport_session_stats(session_id)?;
+        // Closing expires and drops the session's queue, counting both; the `Rc` keeps the
+        // stats readable even if the close removes the session.
+        let session = self.webtransport_session(session_id)?;
         self.extended_connect_close_session(
             conn,
             session_id,
@@ -570,7 +562,8 @@ impl Handler for Http3Connection {
             message,
             now,
         )?;
-        Ok(stats)
+        let stats = session.borrow().stats();
+        stats.ok_or(Error::InvalidStreamId)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
@@ -935,6 +928,19 @@ impl ServerSession {
                 max_age,
                 now,
             )
+    }
+
+    /// The session itself, which stays readable after the connection removes it.
+    ///
+    /// Test-only.
+    #[cfg(test)]
+    pub(crate) fn session(&self) -> Rc<RefCell<extended_connect::session::Session>> {
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .webtransport_session(self.stream_handler.stream_id())
+            .expect("test session must exist")
     }
 
     /// This session's statistics, e.g. `datagrams_expired_outgoing`.
