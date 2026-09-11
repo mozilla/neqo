@@ -400,16 +400,30 @@ impl QuicDatagrams {
             .map_or(0, DatagramQueue::take_expired_count)
     }
 
-    /// Whether any session has a count waiting to be picked up by
-    /// [`Self::expire_session_datagrams`] or
-    /// [`Self::take_session_expired_count`]. Only those, or
+    /// Whether any session has an expired, sent or too-big count waiting to
+    /// be picked up by [`Self::expire_session_datagrams`],
+    /// [`Self::take_session_expired_count`],
+    /// [`Self::take_session_sent_count`] or
+    /// [`Self::take_session_too_big_count`]. Only those, or
     /// [`Self::drop_session_datagrams`], ever clear a queue's counts.
-    ///
-    /// Sent counts are not included yet: nothing drains them, so including
-    /// them would leave this `true` after the first send.
     #[must_use]
     pub fn has_pending_counts(&self) -> bool {
-        self.queues.values().any(DatagramQueue::has_expired)
+        self.queues.values().any(DatagramQueue::has_pending_counts)
+    }
+
+    /// The sessions whose queue has a count waiting to be taken (see
+    /// [`Self::has_pending_counts`]) or a datagram at or past its max-age at
+    /// `now`.
+    #[must_use]
+    pub fn sessions_needing_sweep(&self, now: Instant, min_rtt: Duration) -> Vec<StreamId> {
+        let default_max_age = default_max_age(min_rtt);
+        self.queues
+            .iter()
+            .filter(|(_, q)| {
+                q.has_pending_counts() || q.next_expiry(default_max_age).is_some_and(|e| e <= now)
+            })
+            .map(|(id, _)| *id)
+            .collect()
     }
 
     /// Expire `queue`'s stale entries and, if that unblocks it, fire the
