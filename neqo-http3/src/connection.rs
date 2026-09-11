@@ -1690,7 +1690,8 @@ impl Http3Connection {
     }
 
     /// Expire stale outgoing datagrams on every active extended-CONNECT
-    /// session's queue, reporting how many were shed per session. Called
+    /// session's queue, reporting how many were shed per session, and pick
+    /// up each session's actually-sent count for the same reason. Called
     /// once per `process_http3` tick; `Connection::process_timer` (driven by
     /// `next_delay`) already guarantees a tick happens by the time any
     /// datagram's max-age is up, so this poll-based sweep never needs to
@@ -1703,7 +1704,11 @@ impl Http3Connection {
             .values()
             .filter_map(|s| s.extended_connect_session())
             .filter(|s| s.borrow().is_active())
-            .map(|s| s.borrow_mut().expire_datagrams(conn, now).len())
+            .map(|s| {
+                let mut s = s.borrow_mut();
+                s.report_sent_datagrams(conn);
+                s.expire_datagrams(conn, now).len()
+            })
             .sum()
     }
 

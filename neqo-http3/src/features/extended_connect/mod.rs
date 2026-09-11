@@ -66,6 +66,12 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     /// resume event instead originates in `neqo-transport` and is forwarded to
     /// the HTTP/3 event by the connection.
     fn capsule_space_available(&self);
+    fn datagram_outcome(
+        &self,
+        session_id: StreamId,
+        outcome: DatagramOutcome,
+        connect_type: ExtendedConnectType,
+    );
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq, strum::Display)]
