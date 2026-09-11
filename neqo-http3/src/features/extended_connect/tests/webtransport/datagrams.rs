@@ -11,7 +11,7 @@ use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, streams::SendGr
 use test_fixture::now;
 
 use crate::{
-    Http3ClientEvent, Http3ServerEvent, WebTransportEvent,
+    Http3ClientEvent, Http3ServerEvent, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
@@ -89,7 +89,9 @@ fn datagram_expires_before_being_sent() {
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
@@ -147,22 +149,30 @@ fn datagram_of_exactly_the_peers_limit_is_accepted() {
     assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
 }
 
+/// With a mark of 2 already set, the first datagram `send` queues is `Ok`
+/// and the second crosses the mark.
+fn assert_second_datagram_crosses_a_mark_of_two(
+    mut send: impl FnMut(u64) -> Result<DatagramQueueOutcome, crate::Error>,
+) {
+    assert_eq!(send(1), Ok(DatagramQueueOutcome::Ok));
+    assert_eq!(
+        send(2),
+        Ok(DatagramQueueOutcome::MaxBufferedReached),
+        "the second datagram crosses the max-buffered limit"
+    );
+}
+
 #[test]
 fn max_buffered_datagrams_signals_backpressure() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
-    let t0 = now();
 
-    wt_session.set_max_buffered_datagrams(Some(NonZeroUsize::new(2).unwrap()));
-    assert_eq!(
-        wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::Ok)
-    );
-    assert_eq!(
-        wt_session.send_datagram(DGRAM, Some(2), t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::MaxBufferedReached),
-        "the second datagram crosses the max-buffered limit"
-    );
+    wt_session
+        .set_max_buffered_datagrams(Some(NonZeroUsize::new(2).unwrap()))
+        .unwrap();
+    assert_second_datagram_crosses_a_mark_of_two(|id| {
+        wt_session.send_datagram(DGRAM, Some(id), now(), SendGroupId::new(0), 0)
+    });
 }
 
 /// Draining a queue that reported `MaxBufferedReached` must surface the resume
@@ -176,13 +186,8 @@ fn outgoing_datagram_space_available_forwarded() {
     let session_id = wt_session.stream_id();
     let t0 = now();
 
-    let (conn, handler) = wt.client.connection_and_handler();
-    handler
-        .extended_connect_set_max_buffered_datagrams(
-            session_id,
-            conn,
-            Some(NonZeroUsize::new(1).unwrap()),
-        )
+    wt.client
+        .webtransport_set_max_buffered_datagrams(session_id, Some(NonZeroUsize::new(1).unwrap()))
         .unwrap();
     assert_eq!(
         wt.client
@@ -196,7 +201,9 @@ fn outgoing_datagram_space_available_forwarded() {
         "client resume event fired before the queue drained"
     );
 
-    wt_session.set_max_buffered_datagrams(Some(NonZeroUsize::new(1).unwrap()));
+    wt_session
+        .set_max_buffered_datagrams(Some(NonZeroUsize::new(1).unwrap()))
+        .unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::MaxBufferedReached)
@@ -230,7 +237,9 @@ fn close_session_stats_include_datagrams_expired_since_the_last_sweep() {
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
@@ -240,6 +249,26 @@ fn close_session_stats_include_datagrams_expired_since_the_last_sweep() {
         .close_session(0, "", t0 + Duration::from_millis(10))
         .unwrap();
     assert_eq!(stats.datagrams_expired_outgoing, 1);
+}
+
+#[test]
+fn shrinking_max_age_counts_expired_datagrams_immediately() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    wt_session
+        .set_datagram_max_age(
+            Some(Duration::from_millis(5)),
+            t0 + Duration::from_millis(10),
+        )
+        .unwrap();
+
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
 }
 
 /// A client that resets the session takes the server's queued datagrams
@@ -453,4 +482,108 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
         low_priority_ids[total_evicted..total_evicted + received_low.len()],
         "surviving low-priority datagrams must be exactly the oldest ones eviction spared, in FIFO order"
     );
+}
+
+#[test]
+fn client_set_max_buffered_datagrams_signals_backpressure() {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+
+    wt.client
+        .webtransport_set_max_buffered_datagrams(session_id, Some(NonZeroUsize::new(2).unwrap()))
+        .unwrap();
+    assert_second_datagram_crosses_a_mark_of_two(|id| {
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(id),
+            now(),
+            SendGroupId::new(0),
+            0,
+        )
+    });
+}
+
+/// Raising the mark over a blocked queue resumes the sender with nothing
+/// sent; lowering it below the queue's occupancy does not (no sender was
+/// waiting), it only makes the next send report `MaxBufferedReached`.
+#[test]
+fn client_changing_the_max_buffered_limit_resumes_only_a_blocked_queue() {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+    let t0 = now();
+    let mark = |wt: &mut WtTest, n| {
+        wt.client
+            .webtransport_set_max_buffered_datagrams(session_id, NonZeroUsize::new(n))
+            .unwrap();
+    };
+    let send = |wt: &mut WtTest, id| {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), t0, SendGroupId::new(0), 0)
+            .unwrap()
+    };
+    // Read the transport's events directly: building a packet (as every
+    // HTTP/3 `process_*` path would) sends the datagram, which resumes the
+    // sender on its own.
+    let resumed = |wt: &mut WtTest| {
+        wt.client.connection_mut().events().any(|e| {
+            matches!(
+                e,
+                neqo_transport::ConnectionEvent::OutgoingDatagramSpaceAvailable
+            )
+        })
+    };
+
+    mark(&mut wt, 1);
+    assert_eq!(send(&mut wt, 1), DatagramQueueOutcome::MaxBufferedReached);
+    assert!(!resumed(&mut wt));
+
+    mark(&mut wt, 3);
+    assert!(
+        resumed(&mut wt),
+        "raising the mark must resume a blocked sender"
+    );
+
+    assert_eq!(send(&mut wt, 2), DatagramQueueOutcome::Ok);
+    mark(&mut wt, 1);
+    assert!(!resumed(&mut wt), "no sender was waiting");
+    assert_eq!(send(&mut wt, 3), DatagramQueueOutcome::MaxBufferedReached);
+}
+
+/// The setters must work before the CONNECT response arrives.
+#[test]
+fn client_setters_work_before_the_connect_response() {
+    let mut wt = WtTest::new();
+    let session_id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+
+    wt.client
+        .webtransport_set_max_buffered_datagrams(session_id, Some(NonZeroUsize::new(2).unwrap()))
+        .unwrap();
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, Some(Duration::from_secs(1)), now())
+        .unwrap();
+
+    wt.exchange_packets();
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+            session
+                .response(&SessionAcceptAction::Accept, now())
+                .unwrap();
+        }
+    }
+    wt.exchange_packets();
+
+    assert_second_datagram_crosses_a_mark_of_two(|id| {
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(id),
+            now(),
+            SendGroupId::new(0),
+            0,
+        )
+    });
 }

@@ -7,12 +7,11 @@
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
+    num::NonZeroUsize,
     rc::Rc,
     str::from_utf8,
-    time::Instant,
+    time::{Duration, Instant},
 };
-#[cfg(test)]
-use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
 #[cfg(test)]
@@ -514,8 +513,8 @@ impl Session {
         Ok(outcome)
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_max_buffered_datagrams`.
-    #[cfg(test)]
+    /// Set the outgoing-datagram queue's `outgoingMaxBufferedDatagrams`, or
+    /// clear it back to no limit with `None`.
     pub(crate) fn set_max_buffered_datagrams(
         &self,
         conn: &mut Connection,
@@ -524,18 +523,23 @@ impl Session {
         conn.set_max_buffered_datagrams(self.id, mark);
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_max_buffered_datagrams`.
-    #[cfg(test)]
+    /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
+    /// to the implementation-defined default with `None`. Shrinking the
+    /// limit can immediately push already-queued datagrams past it; those
+    /// are expired on the spot and counted here rather than at the next
+    /// sweep, so the stats a caller reads right after reflect them.
     pub(crate) fn set_datagram_max_age(
-        &self,
+        &mut self,
         conn: &mut Connection,
         max_age: Option<Duration>,
         now: Instant,
     ) {
         conn.set_datagram_max_age(self.id, max_age, now);
+        self.protocol
+            .record_expired_outgoing_datagrams(conn.take_session_expired_datagrams(self.id));
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_max_buffered_datagrams`.
+    /// Test-only.
     #[cfg(test)]
     #[must_use]
     pub(crate) fn datagram_queue_capacity(&self, conn: &Connection) -> DatagramQueueCapacity {
