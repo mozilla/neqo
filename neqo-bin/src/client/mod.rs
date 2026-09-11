@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 use std::{
     collections::VecDeque,
     fmt::Display,
@@ -166,7 +164,11 @@ pub struct Args {
 impl Args {
     #[must_use]
     #[cfg(any(test, feature = "bench"))]
-    #[expect(clippy::missing_panics_doc, reason = "This is example code.")]
+    #[expect(
+        clippy::missing_panics_doc,
+        clippy::unwrap_used,
+        reason = "This is example code."
+    )]
     pub fn new(
         server_addr: Option<SocketAddr>,
         num_requests: usize,
@@ -395,7 +397,6 @@ trait Client {
 }
 
 struct Runner<'a, H: Handler> {
-    local_addr: SocketAddr,
     socket: &'a mut crate::udp::Socket,
     client: H::Client,
     handler: H,
@@ -406,14 +407,12 @@ struct Runner<'a, H: Handler> {
 
 impl<'a, H: Handler> Runner<'a, H> {
     fn new(
-        local_addr: SocketAddr,
         socket: &'a mut crate::udp::Socket,
         client: H::Client,
         handler: H,
         args: &'a Args,
     ) -> Self {
         Self {
-            local_addr,
             socket,
             client,
             handler,
@@ -511,7 +510,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process_multiple_input(&mut self) -> Res<()> {
-        while let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? {
+        while let Some(dgrams) = self.socket.recv(&mut self.recv_buf)? {
             self.client.process_multiple_input(dgrams, now());
             self.process_output().await?;
         }
@@ -606,7 +605,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             qinfo!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
             args.shared.quic_parameters.no_pmtud = true;
         }
-        let real_local = socket.local_addr().unwrap();
+        let real_local = socket.local_addr();
         qinfo!(
             "{} Client connecting: {real_local:?} -> {remote_addr:?}",
             args.shared.alpn
@@ -640,14 +639,14 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http3::Handler::new(to_request, args.clone());
 
-                Box::pin(Runner::new(real_local, &mut socket, client, handler, &args).run()).await?
+                Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
             } else {
                 let client = http09::create_client(&args, real_local, remote_addr, &host, token)
                     .expect("failed to create client");
 
                 let handler = http09::Handler::new(to_request, &args);
 
-                Box::pin(Runner::new(real_local, &mut socket, client, handler, &args).run()).await?
+                Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
             };
         }
 
