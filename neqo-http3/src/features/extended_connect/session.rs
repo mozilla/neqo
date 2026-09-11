@@ -4,14 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::time::Duration;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
     rc::Rc,
     str::from_utf8,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
@@ -509,21 +507,23 @@ impl Session {
         Ok(outcome)
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
-    #[cfg(test)]
+    /// Set the outgoing-datagram queue's `outgoingHighWaterMark`, or clear
+    /// it back to no limit with `None`.
     pub(crate) fn set_datagram_high_water_mark(&self, conn: &mut Connection, mark: Option<usize>) {
         conn.set_datagram_high_water_mark(self.id, mark);
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
-    #[cfg(test)]
+    /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
+    /// to the implementation-defined default with `None`.
     pub(crate) fn set_datagram_max_age(
-        &self,
+        &mut self,
         conn: &mut Connection,
         max_age: Option<Duration>,
         now: Instant,
-    ) -> Vec<Option<DatagramId>> {
-        conn.set_datagram_max_age(self.id, max_age, now)
+    ) {
+        let expired = conn.set_datagram_max_age(self.id, max_age, now);
+        self.protocol
+            .record_expired_outgoing_datagrams(u64::try_from(expired.len()).unwrap_or(u64::MAX));
     }
 
     /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
