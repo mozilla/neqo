@@ -711,10 +711,8 @@ fn wt_export_keying_material_transport_error() {
 /// Covers the snapshot-before-teardown plumbing: `webtransport_close_session` must
 /// return the stats as they were before the session was dismantled.
 ///
-/// The only counter in `SessionStats` so far is `datagrams_expired_outgoing`, and
-/// nothing expires datagrams yet, so both snapshots are currently the default. The
-/// datagram send below is scaffolding: once outgoing expiry is wired up it gives the
-/// comparison something non-zero to catch.
+/// The datagram sent below is counted in `outgoing_datagrams.sent`, so the
+/// comparison has something non-zero to catch.
 #[test]
 fn wt_stats_at_session_close() {
     const DATAGRAM_DATA: &[u8] = &[1, 2, 3, 4, 5];

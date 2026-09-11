@@ -552,18 +552,8 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        // Collect expiries and snapshot the stats before tearing the session down,
-        // so the caller sees the final values.  This also rejects non-WebTransport
-        // sessions.
-        //
-        // `extended_connect_close_session` then checks the type again. That is
-        // deliberate: it is shared with connect-udp, which needs the check for its own
-        // close path, so it cannot rely on this one having happened.
-        self.webtransport_session(session_id)?
-            .borrow_mut()
-            .expire_datagrams(conn, now);
-        let stats = self.webtransport_session_stats(session_id)?;
-        self.extended_connect_close_session(
+        // Read the stats after closing, which counts the queue's expired and dropped datagrams.
+        let session = self.extended_connect_close_session(
             conn,
             session_id,
             extended_connect::ExtendedConnectType::WebTransport,
@@ -571,7 +561,8 @@ impl Handler for Http3Connection {
             message,
             now,
         )?;
-        Ok(stats)
+        let stats = session.borrow().stats();
+        stats.ok_or(Error::InvalidStreamId)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
@@ -938,7 +929,7 @@ impl ServerSession {
             )
     }
 
-    /// This session's statistics, e.g. `datagrams_expired_outgoing`.
+    /// This session's statistics, e.g. `outgoing_datagrams.expired`.
     #[cfg(test)]
     pub(crate) fn stats(&self) -> extended_connect::stats::SessionStats {
         let session_id = self.stream_handler.stream_id();

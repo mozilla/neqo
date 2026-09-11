@@ -525,13 +525,6 @@ impl DatagramQueue {
         std::mem::take(&mut self.expired)
     }
 
-    /// Whether [`Self::take_expired_count`] would return a nonzero count,
-    /// without consuming it.
-    #[must_use]
-    pub const fn has_expired(&self) -> bool {
-        self.expired > 0
-    }
-
     /// The `(send_order, group_id)` key of the globally lowest-priority
     /// occupied bucket: lowest `send_order` across all groups, ties broken by
     /// `group_id` (lowest first) for determinism.
@@ -1584,14 +1577,11 @@ mod tests {
         q.set_max_age(Some(Duration::from_millis(10)), t0, NO_DEFAULT);
         enq(&mut q, vec![1], 1, t0, 0, 0);
         enq(&mut q, vec![2], 2, t0 + Duration::from_millis(5), 0, 0);
-        assert!(!q.has_expired());
 
         assert_eq!(q.expire(t0 + Duration::from_millis(10), NO_DEFAULT), 1);
-        assert!(q.has_expired());
         assert_eq!(q.expire(t0 + Duration::from_millis(15), NO_DEFAULT), 1);
 
         assert_eq!(q.take_expired_count(), 2);
-        assert!(!q.has_expired());
         assert_eq!(q.take_expired_count(), 0);
     }
 
