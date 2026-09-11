@@ -353,6 +353,28 @@ impl Http3Server {
                             datagram,
                         );
                     }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                        session_id,
+                        outcome,
+                    }) => {
+                        self.events.webtransport_datagram_outcome(
+                            ServerSession::new(conn.clone(), Rc::clone(handler), session_id),
+                            outcome,
+                        );
+                    }
+                    Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                        session_id,
+                        outcome,
+                    }) => {
+                        self.events.connect_udp_datagram_outcome(
+                            connect_udp::ServerSession::new(
+                                conn.clone(),
+                                Rc::clone(handler),
+                                session_id,
+                            ),
+                            outcome,
+                        );
+                    }
                 }
             }
         }
