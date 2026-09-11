@@ -443,10 +443,12 @@ impl<'a, H: Handler> Runner<'a, H> {
             match (handler_done, self.client.is_closed()?) {
                 // more work; or no more work, already closing connection
                 (true, CloseState::Closing) | (false, _) => {}
-                // no more work, closing connection
+                // no more work, close and stop
                 (true, CloseState::NotClosing) => {
                     self.client.close(now(), 0, "kthxbye!");
-                    continue;
+                    // Skip the closing period (RFC 9000 Section 10.2) after flushing.
+                    self.process_output().await?;
+                    break;
                 }
                 // no more work, connection closed, terminating
                 (true, CloseState::Closed) => break,
