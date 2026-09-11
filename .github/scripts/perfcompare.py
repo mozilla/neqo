@@ -203,11 +203,57 @@ def _sudo_nice_env() -> list[str]:
     return ["sudo", "nice", "-n", "-20"] + (["env"] + env_args if env_args else [])
 
 
+def _read_proc(path: str) -> str:
+    """Contents of a `/proc` file, empty if absent, e.g. IPv6 off. Says so, as empty
+    counters otherwise read as "nothing moved"."""
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"note: {path} unreadable ({e}), its counters will be missing")
+        return ""
+
+
+def _udp_counters() -> dict[str, int]:
+    """UDP counters keyed by name, both families, as `--host` picks one."""
+    counters: dict[str, int] = {}
+    # IPv4 spells these as a `Udp:` line naming the fields, then a `Udp:` line of values.
+    udp = [
+        line.split()[1:]
+        for line in _read_proc("/proc/net/snmp").splitlines()
+        if line.startswith("Udp: ")
+    ]
+    for names, values in zip(udp[::2], udp[1::2], strict=False):
+        counters.update(
+            (f"Udp{n}", int(v)) for n, v in zip(names, values, strict=False)
+        )
+    # IPv6 spells them one `Udp6<name> <value>` per line.
+    counters.update(
+        (fields[0], int(fields[1]))
+        for line in _read_proc("/proc/net/snmp6").splitlines()
+        if len(fields := line.split()) == 2 and fields[0].startswith("Udp6")
+    )
+    return counters
+
+
 def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
     """Run hyperfine benchmark."""
     tag = shlex.quote(_tag(scmd))
     ws = shlex.quote(str(cfg.workspace))
     out_dir.mkdir(exist_ok=True)
+
+    def with_stats(cmd: str, role: str) -> str:
+        """Have neqo append one record per connection, attributing a slow run to a PTO
+        (`pto_counts`) or loss (`lost`). The server reports on close, before it is killed."""
+        if f"neqo-{role}" not in cmd:
+            return cmd
+        return f"{cmd} --stats-file {shlex.quote(str(out_dir / f'{name}.{role}.jsonl'))}"
+
+    scmd, ccmd = with_stats(scmd, "server"), with_stats(ccmd, "client")
+    # Both hooks run outside the timed region, so this is a before/after pair per run.
+    rcvbuf = (
+        "awk '/^Udp:/{if(!h){for(i=2;i<=NF;i++)if($i==\"RcvbufErrors\")c=i;h=1}else print $c}'"
+        f" /proc/net/snmp >> {shlex.quote(str(out_dir / f'{name}.rcvbuferrors'))}"
+    )
     cmd = [
         *_sudo_nice_env(),
         "setarch",
@@ -226,14 +272,25 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--min-runs",
         str(cfg.runs),
         "--prepare",
-        f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2",
+        (
+            f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2;"
+            f" {rcvbuf}"
+        ),
         "--conclude",
-        f"pkill -9 {tag}",
+        f"pkill -9 {tag}; {rcvbuf}",
     ]
     if md:
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
     cmd.append(f"echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {ws}/{ccmd}")
+    before = _udp_counters()
     result = sh(cmd, check=True, stderr=subprocess.PIPE, text=True)
+    # `*RcvbufErrors` tells whether loss was a receive-queue overrun. Only what moved.
+    after = _udp_counters()
+    deltas = {key: after.get(key, value) - value for key, value in before.items()}
+    (out_dir / f"{name}.udp").write_text(
+        "".join(f"{key} {delta}\n" for key, delta in deltas.items() if delta),
+        encoding="utf-8",
+    )
     # Surface hyperfine's own outlier warnings in the PR summary, not just the raw log.
     if result.stderr:
         print(result.stderr, end="")
