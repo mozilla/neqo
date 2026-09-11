@@ -575,7 +575,7 @@ impl Session {
     /// Drop this session's queue, which lives on `conn` and would otherwise
     /// outlive the session.
     pub(crate) fn drop_queued_datagrams(&self, conn: &mut Connection) {
-        conn.drop_session_datagrams(self.id);
+        _ = conn.drop_session_datagrams(self.id);
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
