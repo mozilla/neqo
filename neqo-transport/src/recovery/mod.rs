@@ -114,6 +114,12 @@ impl SendProfile {
     pub const fn limit(&self) -> usize {
         self.limit
     }
+
+    /// Whether the next packet can be `plpmtu`-sized.
+    #[must_use]
+    pub const fn permits_full_mtu(&self, plpmtu: usize) -> bool {
+        self.limit >= plpmtu
+    }
 }
 
 #[derive(Debug)]
@@ -1032,7 +1038,7 @@ impl Loss {
         {
             profile
         } else {
-            let limit = min(sender.cwnd_avail(), path.amplification_limit());
+            let limit = path.send_budget();
             if limit > mtu {
                 // More than an MTU available; we might need to pace.
                 if sender
