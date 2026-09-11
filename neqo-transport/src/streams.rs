@@ -111,7 +111,7 @@ impl Streams {
             remote_stream_limits: RemoteStreamLimits::new(limit_bidi, limit_uni, role),
             local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
-            recv: RecvStreams::default(),
+            recv: RecvStreams::new(role),
         }
     }
 
@@ -406,7 +406,7 @@ impl Streams {
         // send counterpart just disappeared may now be clearable too.
         self.recv.set_ended(self.send.remove_ended());
 
-        let (removed_bidi, removed_uni) = self.recv.remove_ended(&self.send, self.role);
+        let (removed_bidi, removed_uni) = self.recv.remove_ended(&self.send);
 
         // Send max_streams updates if we removed remote-initiated recv streams.
         // The updates will be send if any streams has been removed.

@@ -33,15 +33,26 @@ use crate::{
     stream_id::StreamId,
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct RecvStreams {
     streams: BTreeMap<StreamId, RecvStream>,
     keep_alive: Weak<()>,
     /// Set when any stream has ended; cleared by `remove_ended`.
     has_ended: bool,
+    role: Role,
 }
 
 impl RecvStreams {
+    #[must_use]
+    pub const fn new(role: Role) -> Self {
+        Self {
+            streams: BTreeMap::new(),
+            keep_alive: Weak::new(),
+            has_ended: false,
+            role,
+        }
+    }
+
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
@@ -154,7 +165,7 @@ impl RecvStreams {
         }
     }
 
-    pub fn remove_ended(&mut self, send_streams: &SendStreams, role: Role) -> (u64, u64) {
+    pub fn remove_ended(&mut self, send_streams: &SendStreams) -> (u64, u64) {
         if !self.has_ended {
             return (0, 0);
         }
@@ -165,7 +176,7 @@ impl RecvStreams {
         let mut removed_uni = 0;
         self.streams.retain(|id, s| {
             let dead = s.is_ended() && (id.is_uni() || !send_streams.exists(*id));
-            if dead && id.is_remote_initiated(role) {
+            if dead && id.is_remote_initiated(self.role) {
                 if id.is_bidi() {
                     removed_bidi += 1;
                 } else {

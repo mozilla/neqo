@@ -1709,14 +1709,12 @@ impl Connection {
     }
 
     /// After a Initial, Handshake, `ZeroRtt`, or Short packet is successfully processed.
-    #[expect(clippy::too_many_arguments, reason = "Yes, but they're needed.")]
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
         tos: Tos,
         remote: SocketAddr,
         packet: &packet::Decrypted,
-        packet_number: packet::Number,
         migrate: bool,
         now: Instant,
     ) {
@@ -1727,7 +1725,7 @@ impl Connection {
             last_ecn_mark != ecn_mark && stats.ecn_rx_transition[last_ecn_mark][ecn_mark].is_none()
         }) {
             stats.ecn_rx_transition[last_ecn_mark][ecn_mark] =
-                Some((packet.packet_type(), packet_number));
+                Some((packet.packet_type(), packet.pn()));
         }
 
         stats.ecn_last_mark = Some(ecn_mark);
@@ -1751,13 +1749,12 @@ impl Connection {
             };
             self.set_state(new_state, now);
             if self.role == Role::Server && self.state == State::Handshaking {
-                self.zero_rtt_state =
-                    if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
-                        qdebug!("[{self}] Accepted 0-RTT");
-                        ZeroRttState::AcceptedServer
-                    } else {
-                        ZeroRttState::Rejected
-                    };
+                self.zero_rtt_state = if self.crypto.enable_0rtt(self.version) == Ok(true) {
+                    qdebug!("[{self}] Accepted 0-RTT");
+                    ZeroRttState::AcceptedServer
+                } else {
+                    ZeroRttState::Rejected
+                };
             }
         }
 
@@ -1870,7 +1867,7 @@ impl Connection {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
-                                        path, tos, remote, &payload, pn, migrate, now,
+                                        path, tos, remote, &payload, migrate, now,
                                     );
                                 }
                                 Err(e) => {
@@ -2522,9 +2519,9 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
+        let coalesced = builder.is_coalesced();
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2829,7 +2826,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2995,7 +2992,7 @@ impl Connection {
         qdebug!("[{self}] client_start");
         debug_assert_eq!(self.role, Role::Client);
         if let Some(path) = self.paths.primary() {
-            qlog::client_connection_started(&mut self.qlog, &path, now);
+            qlog::connection_started(&mut self.qlog, &path, now);
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
@@ -3018,7 +3015,7 @@ impl Connection {
 
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial, now);
-        self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
+        self.zero_rtt_state = if self.crypto.enable_0rtt(self.version)? {
             qdebug!("[{self}] Enabled 0-RTT");
             ZeroRttState::Sending
         } else {
@@ -3314,7 +3311,7 @@ impl Connection {
             if self.crypto.tls().has_secret(Epoch::Handshake) {
                 self.compatible_upgrade(packet_version)?;
             }
-            if self.crypto.install_keys(self.role)? {
+            if self.crypto.install_keys()? {
                 self.saved_datagrams.make_available(Epoch::Handshake);
             }
         }
@@ -3718,7 +3715,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&mut self.qlog, &path, now);
+            qlog::connection_started(&mut self.qlog, &path, now);
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),

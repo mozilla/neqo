@@ -105,15 +105,7 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
     );
 }
 
-pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    connection_started(qlog, path, now);
-}
-
-pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    connection_started(qlog, path, now);
-}
-
-fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+pub fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     qlog.add_event_at(
         || {
             let p = path.deref().borrow();
