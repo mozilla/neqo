@@ -354,6 +354,8 @@ pub struct Stats {
     pub pmtud_peer_max_udp_payload: Option<usize>,
     /// Probed PMTU of the current path.
     pub pmtud_pmtu: usize,
+    /// The connection-level receive window, as auto-tuned.
+    pub fc_max_active: u64,
 
     /// Whether the connection was resumed successfully.
     pub resumed: bool,

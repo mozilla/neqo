@@ -22,7 +22,7 @@ use crate::{
     recovery::{self, StreamRecoveryToken},
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
-    stats::FrameStats,
+    stats::{FrameStats, Stats},
     stream_id::{StreamId, StreamType},
     tparams::{
         TransportParameterId::{
@@ -384,6 +384,10 @@ impl Streams {
     pub fn clear_streams(&mut self) {
         self.send.clear();
         self.recv.clear();
+    }
+
+    pub fn update_stats(&self, stats: &mut Stats) {
+        stats.fc_max_active = self.receiver_fc.borrow().max_active();
     }
 
     /// # Errors
