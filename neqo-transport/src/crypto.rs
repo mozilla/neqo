@@ -149,6 +149,11 @@ impl Crypto {
         &self.protocols
     }
 
+    /// Whether the local role is that of a server.
+    const fn is_server(&self) -> bool {
+        matches!(self.tls, Agent::Server(_))
+    }
+
     pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         tphandler: TpHandler,
@@ -203,7 +208,7 @@ impl Crypto {
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
-            if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
+            if space == PacketNumberSpace::Initial && self.is_server() {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
             }
             let rec = Record {
@@ -232,22 +237,23 @@ impl Crypto {
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
-    pub fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
+    pub fn enable_0rtt(&mut self, version: Version) -> Res<bool> {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
         let Some(cipher) = info.early_data_cipher() else {
             return Ok(false);
         };
-        let (dir, secret) = match role {
-            Role::Client => (
-                CryptoDxDirection::Write,
-                self.tls.write_secret(Epoch::ZeroRtt),
-            ),
-            Role::Server => (
+        let (dir, secret) = if self.is_server() {
+            (
                 CryptoDxDirection::Read,
                 self.tls.read_secret(Epoch::ZeroRtt),
-            ),
+            )
+        } else {
+            (
+                CryptoDxDirection::Write,
+                self.tls.write_secret(Epoch::ZeroRtt),
+            )
         };
         let secret = secret.ok_or(Error::Internal)?;
         self.states.set_0rtt_keys(version, dir, &secret, cipher)?;
@@ -262,12 +268,12 @@ impl Crypto {
     }
 
     /// Returns true if new handshake keys were installed.
-    pub fn install_keys(&mut self, role: Role) -> Res<bool> {
+    pub fn install_keys(&mut self) -> Res<bool> {
         if self.tls.state().is_final() {
             Ok(false)
         } else {
             let installed_hs = self.install_handshake_keys()?;
-            if role == Role::Server {
+            if self.is_server() {
                 self.maybe_install_application_write_key(self.version)?;
             }
             Ok(installed_hs)
