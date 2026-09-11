@@ -346,17 +346,13 @@ pub struct Runner<S> {
     now: Box<dyn Fn() -> Instant>,
     server: S,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, crate::udp::Socket)>,
+    sockets: Vec<crate::udp::Socket>,
     recv_buf: RecvBuf,
 }
 
 impl<S: HttpServer + Unpin> Runner<S> {
     #[must_use]
-    pub fn new(
-        server: S,
-        now: Box<dyn Fn() -> Instant>,
-        sockets: Vec<(SocketAddr, crate::udp::Socket)>,
-    ) -> Self {
+    pub fn new(server: S, now: Box<dyn Fn() -> Instant>, sockets: Vec<crate::udp::Socket>) -> Self {
         Self {
             now,
             server,
@@ -370,20 +366,20 @@ impl<S: HttpServer + Unpin> Runner<S> {
     pub fn local_addresses(&self) -> Vec<SocketAddr> {
         self.sockets
             .iter()
-            .map(|(_, s)| s.local_addr().unwrap())
+            .map(crate::udp::Socket::local_addr)
             .collect()
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
     fn find_socket(
-        sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        sockets: &mut [crate::udp::Socket],
         addr: SocketAddr,
     ) -> &mut crate::udp::Socket {
-        let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
-        rest.iter_mut()
-            .map(|(_host, socket)| socket)
-            .find(|socket| socket.local_addr().is_ok_and(|a| a == addr))
-            .unwrap_or(first_socket)
+        let index = sockets
+            .iter()
+            .position(|socket| socket.local_addr() == addr)
+            .unwrap_or_default();
+        &mut sockets[index]
     }
 
     // Free function (i.e. not taking `&mut self: ServerRunner`) to be callable by
@@ -392,7 +388,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
     async fn process_inner(
         server: &mut S,
         timeout: &mut Option<Pin<Box<Sleep>>>,
-        sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        sockets: &mut [crate::udp::Socket],
         now: &dyn Fn() -> Instant,
         mut input_dgrams: Option<DatagramIter<'_>>,
     ) -> Result<(), io::Error> {
@@ -406,7 +402,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
         // used with a single socket only.
         let smallest_max_gso_segments = sockets
             .iter()
-            .map(|(_, socket)| socket.max_gso_segments())
+            .map(crate::udp::Socket::max_gso_segments)
             .min()
             .expect("At least one socket must be present")
             .try_into()
@@ -468,8 +464,8 @@ impl<S: HttpServer + Unpin> Runner<S> {
 
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
-            let (host, socket) = &mut self.sockets[sockets_index];
-            let input_dgrams = match socket.recv(*host, &mut self.recv_buf) {
+            let socket = &mut self.sockets[sockets_index];
+            let input_dgrams = match socket.recv(&mut self.recv_buf) {
                 Ok(Some(input_dgrams)) => input_dgrams,
                 Ok(None) => break,
                 Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
@@ -513,7 +509,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
         let sockets_ready = select_all(
             self.sockets
                 .iter()
-                .map(|(_host, socket)| Box::pin(socket.readable())),
+                .map(|socket| Box::pin(socket.readable())),
         )
         .map(|(res, inx, _)| match res {
             Ok(()) => Ok(Ready::Socket(inx)),
@@ -591,16 +587,13 @@ pub fn run(
         qerror!("No valid hosts defined");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
-    let sockets: Vec<(SocketAddr, crate::udp::Socket)> = hosts
+    let sockets: Vec<crate::udp::Socket> = hosts
         .into_iter()
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
-            qinfo!(
-                "Server waiting for connection on: {:?}",
-                socket.local_addr()
-            );
+            qinfo!("Server waiting for connection on: {}", socket.local_addr());
 
-            Ok((host, socket))
+            Ok(socket)
         })
         .collect::<Result<_, io::Error>>()?;
 
@@ -680,7 +673,7 @@ mod tests {
     #[derive(Default)]
     struct MockServer {
         batches: Vec<datagram::Batch>,
-        received: usize,
+        destinations: Vec<SocketAddr>,
     }
 
     impl Display for MockServer {
@@ -696,7 +689,9 @@ mod tests {
             _now: Instant,
             _max_datagrams: NonZeroUsize,
         ) -> OutputBatch {
-            self.received += dgrams.into_iter().count();
+            for d in dgrams {
+                self.destinations.push(d.destination());
+            }
             self.batches
                 .pop()
                 .map_or(OutputBatch::None, OutputBatch::DatagramBatch)
@@ -716,17 +711,13 @@ mod tests {
     #[tokio::test]
     async fn ignore_connection_reset() -> Result<(), io::Error> {
         let socket = crate::udp::Socket::bind("127.0.0.1:0")?;
-        let local_addr = socket.local_addr()?;
+        let local_addr = socket.local_addr();
 
         let closed = std::net::UdpSocket::bind("127.0.0.1:0")?;
         let closed_addr = closed.local_addr()?;
         drop(closed);
 
-        let mut runner = Runner::new(
-            MockServer::default(),
-            Box::new(now),
-            vec![(local_addr, socket)],
-        );
+        let mut runner = Runner::new(MockServer::default(), Box::new(now), vec![socket]);
 
         // Draw an ICMP "port unreachable" from the closed port.
         for _ in 0..10 {
@@ -739,7 +730,7 @@ mod tests {
         // Whatever that did to the socket, this datagram from a live peer has to arrive.
         std::net::UdpSocket::bind("127.0.0.1:0")?.send_to(b"ping", local_addr)?;
         timeout(Duration::from_secs(10), async {
-            while runner.server.received == 0 {
+            while runner.server.destinations.is_empty() {
                 if let Ready::Socket(i) = runner.ready().await? {
                     runner.read_and_process(i).await?;
                 }
@@ -748,6 +739,8 @@ mod tests {
         })
         .await
         .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "server stopped serving"))??;
+
+        assert!(runner.server.destinations.iter().all(|d| *d == local_addr));
 
         Ok(())
     }
