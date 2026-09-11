@@ -528,6 +528,15 @@ impl DatagramQueue {
         self.expired > 0
     }
 
+    /// Whether [`Self::take_expired_count`], [`Self::take_sent_count`] or
+    /// [`Self::take_too_big_count`] would return nonzero.  Neither a send nor
+    /// a too-big drop produces an event of its own, so a caller that sweeps
+    /// only when given a reason uses this as that reason.
+    #[must_use]
+    pub const fn has_pending_counts(&self) -> bool {
+        self.has_expired() || self.sent > 0 || self.too_big > 0
+    }
+
     /// The `(send_order, group_id)` key of the globally lowest-priority
     /// occupied bucket: lowest `send_order` across all groups, ties broken by
     /// `group_id` (lowest first) for determinism.
