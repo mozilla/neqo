@@ -39,13 +39,11 @@ pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
     url_handler: UrlHandler,
     token: Option<ResumptionToken>,
-    output_read_data: bool,
     read_buffer: Vec<u8>,
 }
 
 impl Handler {
     pub(crate) fn new(url_queue: VecDeque<Url>, args: Args) -> Self {
-        let output_read_data = args.output_read_data;
         let url_handler = UrlHandler {
             url_queue,
             handled_urls: Vec::new(),
@@ -57,7 +55,6 @@ impl Handler {
         Self {
             url_handler,
             token: None,
-            output_read_data,
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
@@ -204,7 +201,6 @@ impl super::Handler for Handler {
                                 stream_id,
                                 fin,
                                 &self.read_buffer[..sz],
-                                self.output_read_data,
                             )?;
 
                             if fin {
@@ -265,13 +261,7 @@ impl super::Handler for Handler {
 }
 
 trait StreamHandler {
-    fn process_data_readable(
-        &mut self,
-        stream_id: StreamId,
-        fin: bool,
-        data: &[u8],
-        output_read_data: bool,
-    ) -> Res<()>;
+    fn process_data_readable(&mut self, stream_id: StreamId, fin: bool, data: &[u8]) -> Res<()>;
     fn process_data_writable(
         &mut self,
         client: &mut Http3Client,
@@ -282,23 +272,15 @@ trait StreamHandler {
 
 struct DownloadStreamHandler {
     out_file: Option<BufWriter<File>>,
+    output_read_data: bool,
 }
 
 impl StreamHandler for DownloadStreamHandler {
-    fn process_data_readable(
-        &mut self,
-        stream_id: StreamId,
-        fin: bool,
-        data: &[u8],
-        output_read_data: bool,
-    ) -> Res<()> {
+    fn process_data_readable(&mut self, stream_id: StreamId, fin: bool, data: &[u8]) -> Res<()> {
         if let Some(out_file) = &mut self.out_file {
-            if !data.is_empty() {
-                out_file.write_all(data)?;
-            }
-            return Ok(());
+            out_file.write_all(data)?;
         } else if log::log_enabled!(log::Level::Debug) {
-            if !output_read_data {
+            if !self.output_read_data {
                 qdebug!("READ[{stream_id}]: {} bytes", data.len());
             } else if let Ok(txt) = std::str::from_utf8(data) {
                 qdebug!("READ[{stream_id}]: {txt}");
@@ -335,13 +317,7 @@ struct UploadStreamHandler {
 }
 
 impl StreamHandler for UploadStreamHandler {
-    fn process_data_readable(
-        &mut self,
-        stream_id: StreamId,
-        _fin: bool,
-        data: &[u8],
-        _output_read_data: bool,
-    ) -> Res<()> {
+    fn process_data_readable(&mut self, stream_id: StreamId, _fin: bool, data: &[u8]) -> Res<()> {
         if let Ok(txt) = std::str::from_utf8(data) {
             let trimmed_txt = txt.trim_end_matches(char::from(0));
             let parsed: usize = trimmed_txt.parse().map_err(|_| Error::InvalidInput)?;
@@ -427,7 +403,10 @@ impl UrlHandler {
                             &mut self.all_paths,
                         );
                         _ = client.stream_close_send(client_stream_id, now); // Stream may be closed; ignore errors.
-                        Box::new(DownloadStreamHandler { out_file })
+                        Box::new(DownloadStreamHandler {
+                            out_file,
+                            output_read_data: self.args.output_read_data,
+                        })
                     }
                     "POST" => Box::new(UploadStreamHandler {
                         data: SendData::zeroes(self.args.upload_size),
@@ -469,5 +448,37 @@ impl UrlHandler {
         }
         self.stream_handlers.clear();
         self.all_paths.clear();
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use crate::temp_dir::TempDir;
+
+    /// A `fin` data event must make the download durable and release the handle immediately.
+    #[test]
+    fn download_stream_handler_flushes_on_fin() {
+        let dir = TempDir::new();
+        let path = dir.path().join("download");
+        let mut handler = DownloadStreamHandler {
+            out_file: Some(BufWriter::new(File::create(&path).unwrap())),
+            output_read_data: false,
+        };
+
+        handler
+            .process_data_readable(StreamId::new(0), false, b"hello")
+            .unwrap();
+        assert!(fs::read(&path).unwrap().is_empty(), "still buffered");
+
+        handler
+            .process_data_readable(StreamId::new(0), true, b"")
+            .unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), b"hello");
+        assert!(handler.out_file.is_none(), "fin consumes the file handle");
     }
 }
