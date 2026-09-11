@@ -12,6 +12,8 @@ env:
   # Per-symbol IPC comes from the `perf report` dumps. No cache or TLB events: only 4 counters.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
+  # Tracepoints cost none of the four counters. With the `lo` deltas: sends per byte.
+  PERF_TRACEPOINTS: syscalls:sys_enter_sendmsg,syscalls:sys_enter_sendmmsg,syscalls:sys_enter_recvmsg,syscalls:sys_enter_recvmmsg
   PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
   MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
   CFLAGS: -fno-omit-frame-pointer
@@ -156,7 +158,22 @@ jobs:
               bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
             fi
           done
+          lo_stat() { cat "/sys/class/net/lo/statistics/$1"; }
+          # Run `perf $1` on the benchmark in $3.., writing to $2, and append the `lo` deltas
+          # like `perf stat`'s own lines: into its output, or beside the binary `perf.data`.
+          measure() {
+            local sub="$1" out="$2" tx pkt; shift 2
+            tx=$(lo_stat tx_bytes); pkt=$(lo_stat tx_packets)
+            # shellcheck disable=SC2086
+            bench_exec perf -- $sub -o "$out" "$@" | filter_cset
+            [ "${out##*.}" = txt ] || out="$out.lo"
+            printf '%20s      lo-tx-bytes\n%20s      lo-tx-packets\n' \
+              "$(( $(lo_stat tx_bytes) - tx ))" "$(( $(lo_stat tx_packets) - pkt ))" \
+              | sudo tee -a "$out" >/dev/null
+          }
           # Run `perf $1` over every benchmark in $2 for $5 seconds, writing $4 under $3/<side>/.
+          # The transfers run over `[::1]`, so `lo` sees exactly them. Compare per byte:
+          # criterion fits whole iterations in, so the sides do different amounts of work.
           perf_dir() {
             local subcmd="$1" dir="$2" out ext="$4" secs="$5"
             out="$3/$(basename "$dir")"
@@ -168,15 +185,20 @@ jobs:
               if [ -n "$VARIANTS" ]; then
                 while IFS= read -r VARIANT; do
                   SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
-                  # shellcheck disable=SC2086
-                  bench_exec perf -- $subcmd -o "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" --exact "$VARIANT" | filter_cset
+                  measure "$subcmd" "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" --exact "$VARIANT"
                 done <<< "$VARIANTS"
               else
-                # shellcheck disable=SC2086
-                bench_exec perf -- $subcmd -o "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" | filter_cset
+                measure "$subcmd" "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs"
               fi
             done
           }
+          # `perf stat` fails outright on an event it cannot open, so add the tracepoints
+          # only once they open. Probe them alone, or another event's failure is blamed here.
+          if bench_exec perf -- stat -e "$PERF_TRACEPOINTS" -- true >/dev/null 2>&1; then
+            PERF_STAT_OPT="$PERF_STAT_OPT,$PERF_TRACEPOINTS"
+          else
+            echo "::warning::syscall tracepoints unavailable, continuing without them"
+          fi
           # `stat` for both sides first, so `record`'s overhead cannot skew the IPC comparison.
           for SIDE in ../dist/neqo ../dist/neqo-baseline; do
             perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt 5
@@ -261,6 +283,7 @@ jobs:
           path: |
             profiles/*/*.svg
             profiles/*/*.report.txt
+            profiles/*/*.lo
             stats/*/*.txt
             *.txt
             *.md
