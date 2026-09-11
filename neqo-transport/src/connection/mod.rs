@@ -976,6 +976,7 @@ impl Connection {
         if let Some(p) = self.paths.primary() {
             p.borrow().update_stats(&mut v);
         }
+        self.streams.update_stats(&mut v);
         v
     }
 
