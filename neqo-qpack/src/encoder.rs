@@ -48,6 +48,8 @@ impl LocalStreamState {
 pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
+    /// Peer-advertised capacity used for the Required Insert Count modulus.
+    peer_max_table_size: u64,
     instruction_reader: DecoderInstructionReader,
     local_stream: LocalStreamState,
     max_blocked_streams: u16,
@@ -72,6 +74,7 @@ impl Encoder {
         Self {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
+            peer_max_table_size: 0,
             instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
@@ -110,6 +113,7 @@ impl Encoder {
             return Err(Error::EncoderStream);
         }
 
+        self.peer_max_table_size = cap;
         if cap == self.table.capacity() {
             return Ok(());
         }
@@ -434,7 +438,7 @@ impl Encoder {
         let mut encoded_h = HeaderEncoder::new(
             self.table.base(),
             self.use_huffman,
-            self.table.capacity() / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE),
+            self.peer_max_table_size / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE),
         );
 
         // Avoid the dynamic table unless we have space to track.
@@ -784,6 +788,30 @@ mod tests {
 
         assert!(encoder.encoder.set_max_capacity(200).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_200);
+    }
+
+    #[test]
+    fn required_insert_count_uses_peer_capacity() {
+        for local_capacity in [64, 128] {
+            let mut encoder = connect(false);
+            encoder.encoder.max_table_size = local_capacity;
+            encoder.encoder.set_max_capacity(128).unwrap();
+            encoder.encoder.send_encoder_updates(&mut encoder.conn).unwrap();
+            assert_eq!(encoder.encoder.table.capacity(), local_capacity);
+
+            // Four acknowledged insertions wrap the smaller local table's modulus,
+            // but not the modulus advertised by the decoder.
+            for value in [b"a", b"b", b"c", b"d"] {
+                encoder.encoder.table.insert(b"x", value).unwrap();
+                encoder.encoder.table.increment_acked(1).unwrap();
+            }
+            let block = encoder.encoder.encode_header_block(
+                &mut encoder.conn,
+                &[Header::new("x", "d")],
+                STREAM_1,
+            );
+            assert_eq!(block.as_ref()[0], 5);
+        }
     }
 
     struct TestElement {
