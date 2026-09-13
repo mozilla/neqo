@@ -19,12 +19,12 @@ permissions:
 env:
   LINUX_BINDGEN_ARGS: >-
     --allowlist-type rtattr|rtmsg|ifinfomsg|nlmsghdr
-    --generate-cstr --explicit-padding --with-derive-default
+    --generate-cstr --explicit-padding --with-derive-default --disable-header-comment
   # Shared across macOS (generate-bindings) and FreeBSD/NetBSD/OpenBSD/Solaris (check-vm).
   BSD_BINDGEN_ARGS: >-
     --allowlist-type rt_msghdr|rt_metrics|if_data
     --allowlist-item RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP
-    --generate-cstr --explicit-padding --with-derive-default
+    --generate-cstr --explicit-padding --with-derive-default --disable-header-comment
 
 jobs:
   check-netns:
