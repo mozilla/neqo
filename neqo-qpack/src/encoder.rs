@@ -796,7 +796,10 @@ mod tests {
             let mut encoder = connect(false);
             encoder.encoder.max_table_size = local_capacity;
             encoder.encoder.set_max_capacity(128).unwrap();
-            encoder.encoder.send_encoder_updates(&mut encoder.conn).unwrap();
+            encoder
+                .encoder
+                .send_encoder_updates(&mut encoder.conn)
+                .unwrap();
             assert_eq!(encoder.encoder.table.capacity(), local_capacity);
 
             // Four acknowledged insertions wrap the smaller local table's modulus,
