@@ -16,11 +16,9 @@ use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
-    StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramQueueCapacity, DatagramQueueOutcome,
+    DatagramTracking, State, StreamId, StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -1674,6 +1672,23 @@ impl Http3Connection {
             .borrow_mut()
             .set_datagram_max_age(conn, max_age, now);
         Ok(())
+    }
+
+    /// A snapshot of this session's outgoing-datagram queue state, for
+    /// driving a content-process credit grant.
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub fn webtransport_datagram_queue_capacity(
+        &self,
+        conn: &Connection,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity> {
+        Ok(self
+            .webtransport_session(session_id)?
+            .borrow()
+            .datagram_queue_capacity(conn))
     }
 
     /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
