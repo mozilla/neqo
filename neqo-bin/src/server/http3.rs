@@ -211,7 +211,7 @@ impl super::HttpServer for HttpServer {
                         self.send_response(&stream, response, now);
                     }
                 }
-                // `Closing` occurs once; `Closed` is dropped before it is seen.
+                // `Closing` fires immediately; `Closed` only after the drain timeout.
                 Http3ServerEvent::StateChange {
                     conn,
                     state: Http3State::Closing(_),
