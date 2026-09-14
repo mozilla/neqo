@@ -150,12 +150,13 @@ impl Http3Server {
                 .process_multiple(Option::<Datagram>::None, now, max_datagrams);
             if !matches!(out, OutputBatch::DatagramBatch(_)) {
                 self.http3_handlers.retain(|c, _| {
-                    let State::Closed(error) = c.borrow().state().clone() else {
-                        return true;
-                    };
-                    self.events
-                        .connection_state_change(c.clone(), Http3State::Closed(error));
-                    false
+                    if let State::Closed(error) = c.borrow().state().clone() {
+                        self.events
+                            .connection_state_change(c.clone(), Http3State::Closed(error));
+                        false
+                    } else {
+                        true
+                    }
                 });
             }
             out
@@ -637,21 +638,24 @@ mod tests {
 
         let mut closed_count = 0;
         for i in 0..5 {
-            while let Some(e) = server.next_event() {
-                if let Http3ServerEvent::StateChange {
-                    state: Http3State::Closed(_),
-                    ..
-                } = e
-                {
-                    closed_count += 1;
-                }
-            }
             _ = server.process_output(t + Duration::from_millis(i + 1));
+            closed_count += server
+                .events()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        Http3ServerEvent::StateChange {
+                            state: Http3State::Closed(_),
+                            ..
+                        }
+                    )
+                })
+                .count();
         }
         assert_eq!(closed_count, 1, "Closed must be emitted exactly once");
     }
 
-    /// A handler must not outlive its connection.
+    /// A handler must not be retained once its connection is closed.
     #[test]
     fn handlers_do_not_accumulate() {
         const CONNECTIONS: usize = 5;
@@ -669,13 +673,19 @@ mod tests {
             "{} handlers left for {CONNECTIONS} closed connections",
             server.http3_handlers.len()
         );
-        assert!(server.events().any(|e| matches!(
-            e,
-            Http3ServerEvent::StateChange {
-                state: Http3State::Closed(_),
-                ..
-            }
-        )));
+        let closed_count = server
+            .events()
+            .filter(|e| {
+                matches!(
+                    e,
+                    Http3ServerEvent::StateChange {
+                        state: Http3State::Closed(_),
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(closed_count, 1, "dropping a handler must deliver `Closed`");
     }
 
     fn connect_and_receive_settings() -> (Http3Server, Connection, ResumptionToken) {
