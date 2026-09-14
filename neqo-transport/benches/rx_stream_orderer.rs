@@ -125,9 +125,32 @@ fn inbound_duplicates(c: &mut Criterion) {
     });
 }
 
+/// In-order delivery with the reader lagging, so ranges coalesce and buffers get reused.
+fn inbound_lagging_reader(c: &mut Criterion) {
+    c.bench_function("RxStreamOrderer::inbound_frame lagging-reader", |b| {
+        b.iter_batched(
+            RxStreamOrderer::new,
+            |mut rx| {
+                let mut drain = Vec::new();
+                for i in 0..FRAMES {
+                    rx.inbound_frame(i * to_u64(CHUNK), &PAYLOAD).unwrap();
+                    if i % 32 == 31 {
+                        rx.read_to_end(&mut drain);
+                        drain.clear();
+                    }
+                }
+                rx.read_to_end(&mut drain);
+                black_box(rx)
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
 criterion_group! {
     name = benches;
     config = { neqo_common::log::init(None); Criterion::default() };
-    targets = inbound_in_order, inbound_with_loss, inbound_reordered, inbound_duplicates
+    targets = inbound_in_order, inbound_lagging_reader, inbound_with_loss, inbound_reordered,
+        inbound_duplicates
 }
 criterion_main!(benches);
