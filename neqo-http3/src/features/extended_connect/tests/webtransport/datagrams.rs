@@ -88,7 +88,9 @@ fn datagram_expires_before_being_sent() {
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
@@ -133,7 +135,7 @@ fn datagram_high_water_mark_signals_backpressure() {
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_high_water_mark(Some(2));
+    wt_session.set_datagram_high_water_mark(Some(2)).unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
@@ -156,7 +158,7 @@ fn outgoing_datagram_space_available_forwarded() {
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_high_water_mark(Some(1));
+    wt_session.set_datagram_high_water_mark(Some(1)).unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::AboveWatermark)
@@ -187,7 +189,9 @@ fn server_processes_a_connection_whose_only_pending_work_is_an_expired_datagram(
     // Enqueue without marking the connection as needing processing: the
     // datagram's own expiry must be enough on its own to get this
     // connection processed later, with nothing else giving it a reason.
-    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
     wt_session
         .send_datagram_without_marking_needs_processing(DGRAM, Some(1), t0)
         .unwrap();
@@ -353,4 +357,40 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
             "evicted low-priority datagram {id} must not be sent"
         );
     }
+}
+
+#[test]
+fn client_set_datagram_high_water_mark_signals_backpressure() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let t0 = now();
+
+    wt.client
+        .webtransport_set_datagram_high_water_mark(session_id, Some(2))
+        .unwrap();
+
+    assert_eq!(
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(1),
+            t0,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(2),
+            t0,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::AboveWatermark),
+        "the second datagram crosses the high water mark"
+    );
 }

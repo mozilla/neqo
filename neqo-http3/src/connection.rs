@@ -4,27 +4,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::time::Duration;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
     mem,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
-#[cfg(test)]
-use neqo_transport::{DatagramId, DatagramQueueCapacity};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
 
@@ -1647,35 +1645,35 @@ impl Http3Connection {
             .send_datagram(conn, buf, id, now, send_group_id, send_order)
     }
 
-    /// Test-only: no production caller sets these yet (nothing threads them
-    /// through to a public FFI surface), but the underlying queue behavior
-    /// needs real, non-unit test coverage.
-    #[cfg(test)]
+    /// `WebTransport` only, unlike the shared
+    /// [`Self::extended_connect_send_datagram`]: `outgoingHighWaterMark` is a
+    /// `WebTransport` attribute, and connect-udp has no equivalent to reach
+    /// its own queue through.
     pub(crate) fn extended_connect_set_datagram_high_water_mark(
         &self,
         session_id: StreamId,
         conn: &mut Connection,
         mark: Option<usize>,
     ) -> Res<()> {
-        self.validate_extended_connect_session(session_id)?
+        self.webtransport_session(session_id)?
             .borrow()
             .set_datagram_high_water_mark(conn, mark);
         Ok(())
     }
 
-    /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
-    #[cfg(test)]
+    /// `WebTransport` only; see
+    /// [`Self::extended_connect_set_datagram_high_water_mark`].
     pub(crate) fn extended_connect_set_datagram_max_age(
         &self,
         session_id: StreamId,
         conn: &mut Connection,
         max_age: Option<Duration>,
         now: Instant,
-    ) -> Res<Vec<Option<DatagramId>>> {
-        Ok(self
-            .validate_extended_connect_session(session_id)?
-            .borrow()
-            .set_datagram_max_age(conn, max_age, now))
+    ) -> Res<()> {
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .set_datagram_max_age(conn, max_age, now);
+        Ok(())
     }
 
     /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
