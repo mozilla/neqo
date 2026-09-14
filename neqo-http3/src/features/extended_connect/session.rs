@@ -14,7 +14,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
+use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
 #[cfg(test)]
 use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
@@ -424,10 +424,13 @@ impl Session {
     ///
     /// Returns an error if:
     /// - The session is not in Active state (`Error::Unavailable`).
+    /// - The peer supports neither QUIC DATAGRAM nor the HTTP DATAGRAM Capsule fallback
+    ///   (`Error::Transport(neqo_transport::Error::NotAvailable)`).
     /// - `send_group_id` is neither `SendGroupId::new(0)` (ungrouped) nor a group already
     ///   registered for this session's streams (`Error::InvalidInput`).
-    /// - HTTP DATAGRAM Capsule sending fails (the QUIC-datagram path itself cannot fail here:
-    ///   MTU/size limits are applied later, at packet-build time, same as queued stream data).
+    /// - The encoded datagram (including the session-id/protocol prefix) exceeds the peer's
+    ///   `max_datagram_frame_size` (`Error::Transport(neqo_transport::Error::TooMuchData)`).
+    /// - HTTP DATAGRAM Capsule sending fails.
     ///
     /// On success, returns the queue's backpressure signal (see
     /// [`DatagramQueueOutcome`]) so the caller can throttle further writes.
@@ -446,21 +449,29 @@ impl Session {
             return Err(Error::Unavailable);
         }
 
-        if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
-            qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
-            // The Capsule path errors when the control stream's flow-control
-            // window is exhausted, then emits a resume event once the stream is
-            // writable again (see `stream_writable`).
-            let res =
-                self.protocol
-                    .write_datagram_capsule(&mut self.control_stream_send, conn, buf, now);
-            if matches!(res, Err(Error::FlowControlLimit)) {
-                self.datagram_capsule_blocked = true;
+        let remote_datagram_size = conn.remote_datagram_size();
+        if remote_datagram_size == 0 {
+            if self.protocol.datagram_capsule_support() {
+                qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
+                // The Capsule path errors when the control stream's flow-control
+                // window is exhausted, then emits a resume event once the stream is
+                // writable again (see `stream_writable`).
+                let res = self.protocol.write_datagram_capsule(
+                    &mut self.control_stream_send,
+                    conn,
+                    buf,
+                    now,
+                );
+                if matches!(res, Err(Error::FlowControlLimit)) {
+                    self.datagram_capsule_blocked = true;
+                }
+                res?;
+                // This path never touches the queue, so it carries no
+                // backpressure signal.
+                return Ok(DatagramQueueOutcome::Ok);
             }
-            res?;
-            // This path never touches the queue, so it carries no
-            // backpressure signal.
-            return Ok(DatagramQueueOutcome::Ok);
+            qdebug!("[{self}]: peer supports neither QUIC DATAGRAM nor the Capsule fallback");
+            return Err(Error::Transport(neqo_transport::Error::NotAvailable));
         }
 
         if send_group_id != SendGroupId::new(0) && !self.validate_send_group(send_group_id) {
@@ -472,6 +483,15 @@ impl Session {
         dgram_data.encode_varint(self.id.as_u64() / 4);
         self.protocol.write_datagram_prefix(&mut dgram_data);
         dgram_data.encode(buf);
+
+        if to_u64(dgram_data.len()) > remote_datagram_size {
+            qdebug!(
+                "[{self}]: datagram ({} bytes incl. prefix) exceeds the peer's \
+                 max_datagram_frame_size ({remote_datagram_size})",
+                dgram_data.len()
+            );
+            return Err(Error::Transport(neqo_transport::Error::TooMuchData));
+        }
 
         let id = match id.into() {
             DatagramTracking::None => None,
