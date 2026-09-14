@@ -4,12 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Encoder, event::Provider as _, to_u64};
-use neqo_transport::ConnectionParameters;
+use neqo_common::{Encoder, to_u64};
+use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, streams::SendGroupId};
 use test_fixture::now;
 
 use crate::{
-    Http3ClientEvent, Http3ServerEvent,
     features::extended_connect::tests::webtransport::{
         DATAGRAM_SIZE, WtTest, wt_default_parameters,
     },
@@ -28,8 +27,14 @@ fn do_datagram_test(wt: &mut WtTest, wt_session: &ServerSession) {
         Ok(DATAGRAM_SIZE - to_u64(Encoder::varint_len(wt_session.stream_id().as_u64())))
     );
 
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(true));
-    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(true));
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, None, now(), SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(
+        wt.send_datagram(wt_session.stream_id(), DGRAM),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     wt.exchange_packets();
     wt.check_datagram_received_client(wt_session.stream_id(), DGRAM);
@@ -77,48 +82,20 @@ fn max_datagram_size_smaller_than_session_prefix() {
     assert_eq!(wt.max_datagram_size(wt_session.stream_id()), Ok(0));
 }
 
-/// Draining a full outgoing QUIC datagram queue must surface the resume event
-/// on both sides: [`Http3ClientEvent::OutgoingDatagramSpaceAvailable`] to the
-/// client and [`Http3ServerEvent::OutgoingDatagramSpaceAvailable`] to the
-/// server.
 #[test]
-fn outgoing_datagram_space_available_forwarded() {
-    let params = || {
-        wt_default_parameters().connection_parameters(
-            ConnectionParameters::default()
-                .datagram_size(DATAGRAM_SIZE)
-                .outgoing_datagram_queue(1),
-        )
-    };
-    let mut wt = WtTest::new_with_params(params(), params());
+fn datagram_high_water_mark_signals_backpressure() {
+    let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
+    let t0 = now();
 
-    assert_eq!(wt.send_datagram(wt_session.stream_id(), DGRAM), Ok(false));
-    assert_eq!(wt_session.send_datagram(DGRAM, None, now()), Ok(false));
-    assert!(
-        !wt.client
-            .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
-        "client resume event fired before the queue drained"
+    wt_session.set_datagram_high_water_mark(Some(2));
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
     );
-    assert!(
-        !wt.server
-            .events()
-            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
-        "server resume event fired before the queue drained"
-    );
-
-    wt.exchange_packets();
-    assert!(
-        wt.client
-            .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
-        "OutgoingDatagramSpaceAvailable was not forwarded to the HTTP/3 client"
-    );
-    assert!(
-        wt.server
-            .events()
-            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
-        "OutgoingDatagramSpaceAvailable was not forwarded to the HTTP/3 server"
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, Some(2), t0, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::AboveWatermark),
+        "the second datagram crosses the high water mark"
     );
 }

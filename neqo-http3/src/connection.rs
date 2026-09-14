@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(test)]
+use std::time::Duration;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -17,9 +19,12 @@ use neqo_common::{
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
+#[cfg(test)]
+use neqo_transport::{DatagramId, DatagramQueueCapacity};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
 
@@ -1623,7 +1628,10 @@ impl Http3Connection {
         Ok(())
     }
 
-    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors send_datagram's own params plus session_id/conn"
+    )]
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1631,10 +1639,74 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool> {
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now)
+            .send_datagram(conn, buf, id, now, send_group_id, send_order)
+    }
+
+    /// Test-only: no production caller sets these yet (nothing threads them
+    /// through to a public FFI surface), but the underlying queue behavior
+    /// needs real, non-unit test coverage.
+    #[cfg(test)]
+    pub(crate) fn extended_connect_set_datagram_high_water_mark(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        mark: Option<usize>,
+    ) -> Res<()> {
+        self.validate_extended_connect_session(session_id)?
+            .borrow()
+            .set_datagram_high_water_mark(conn, mark);
+        Ok(())
+    }
+
+    /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
+    #[cfg(test)]
+    pub(crate) fn extended_connect_set_datagram_max_age(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) -> Res<Vec<Option<DatagramId>>> {
+        Ok(self
+            .validate_extended_connect_session(session_id)?
+            .borrow()
+            .set_datagram_max_age(conn, max_age, now))
+    }
+
+    /// Test-only; see [`Self::extended_connect_set_datagram_high_water_mark`].
+    #[cfg(test)]
+    pub(crate) fn extended_connect_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+        conn: &Connection,
+    ) -> Res<DatagramQueueCapacity> {
+        Ok(self
+            .validate_extended_connect_session(session_id)?
+            .borrow()
+            .datagram_queue_capacity(conn))
+    }
+
+    /// Expire stale outgoing datagrams on every active extended-CONNECT
+    /// session's queue, reporting how many were shed per session. Called
+    /// once per `process_http3` tick; `Connection::process_timer` (driven by
+    /// `next_delay`) already guarantees a tick happens by the time any
+    /// datagram's max-age is up, so this poll-based sweep never needs to
+    /// race an async transport event to catch an expiry promptly.
+    ///
+    /// Returns the total number of datagrams expired, for the caller to fold
+    /// into a stats counter.
+    pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> usize {
+        self.recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().is_active())
+            .map(|s| s.borrow_mut().expire_datagrams(conn, now).len())
+            .sum()
     }
 
     /// Frames whose handling is specific to the client and server (`Goaway`,
