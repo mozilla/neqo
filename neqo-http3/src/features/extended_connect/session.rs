@@ -16,7 +16,8 @@ use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_
 #[cfg(test)]
 use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    AppError, Connection, DatagramId, DatagramQueueOutcome, DatagramTracking, StreamId,
+    AppError, Connection, DatagramId, DatagramOutcome, DatagramQueueOutcome, DatagramTracking,
+    StreamId,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::FxHashSet as HashSet;
@@ -377,6 +378,9 @@ impl Session {
             &mut self.control_stream_recv,
             now,
         )? {
+            if new_state.closing_state() {
+                self.drop_queued_datagrams(conn);
+            }
             self.state = new_state;
         }
         Ok(())
@@ -395,7 +399,7 @@ impl Session {
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
-        conn.drop_session_datagrams(self.id);
+        self.drop_queued_datagrams(conn);
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
             self.control_stream_send
@@ -465,7 +469,10 @@ impl Session {
                 }
                 res?;
                 // This path never touches the queue, so it carries no
-                // backpressure signal.
+                // backpressure signal, and is handed straight to the
+                // control stream's send buffer rather than a packet
+                // builder: count it sent immediately.
+                self.protocol.record_sent_outgoing_datagrams(1);
                 return Ok(DatagramQueueOutcome::Ok);
             }
             qdebug!("[{self}]: peer supports neither QUIC DATAGRAM nor the Capsule fallback");
@@ -504,7 +511,55 @@ impl Session {
             send_order,
         );
         qtrace!("[{self}] enqueued datagram: {outcome:?}");
+        match &outcome {
+            DatagramQueueOutcome::Ok | DatagramQueueOutcome::AboveWatermark => {}
+            DatagramQueueOutcome::Rejected => self.report_dropped(&[id]),
+            DatagramQueueOutcome::Overflowed { dropped } => self.report_dropped(dropped),
+        }
         Ok(outcome)
+    }
+
+    /// Report an outcome through this session's own `events`/`connect_type`,
+    /// rather than returning it to the caller: keeps a connect-udp session's
+    /// outcomes from being mis-tagged as `WebTransport` by a caller that
+    /// only knows about `WebTransport`.
+    fn report_datagram_outcome(&self, outcome: DatagramOutcome) {
+        self.events
+            .datagram_outcome(self.id, outcome, self.protocol.connect_type());
+    }
+
+    /// Count `dropped.len()` outgoing datagrams discarded without being sent
+    /// and without expiring, and report a `Dropped` outcome for each tracked
+    /// one (`None` entries are untracked, but still counted).
+    fn report_dropped(&mut self, dropped: &[Option<DatagramId>]) {
+        self.protocol
+            .record_dropped_outgoing_datagrams(u64::try_from(dropped.len()).unwrap_or(u64::MAX));
+        for id in dropped.iter().copied().flatten() {
+            self.report_datagram_outcome(DatagramOutcome::Dropped(id));
+        }
+    }
+
+    /// Count `expired.len()` outgoing datagrams that expired before being
+    /// sent, and report an `Expired` outcome for each tracked one (`None`
+    /// entries are untracked, but still counted).
+    fn report_expired(&mut self, expired: &[Option<DatagramId>]) {
+        self.protocol
+            .record_expired_outgoing_datagrams(u64::try_from(expired.len()).unwrap_or(u64::MAX));
+        for id in expired.iter().copied().flatten() {
+            self.report_datagram_outcome(DatagramOutcome::Expired(id));
+        }
+    }
+
+    /// Remove and report every datagram still queued when this session
+    /// closes: nothing will ever call [`Self::expire_datagrams`] again to
+    /// pick them up.
+    pub(crate) fn drop_queued_datagrams(&mut self, conn: &mut Connection) {
+        // Removing the queue takes its sent counter with it, so pick that up
+        // first: a datagram built since the last sweep would otherwise never
+        // reach `datagrams_sent_outgoing`.
+        self.report_sent_datagrams(conn);
+        let dropped = conn.drop_session_datagrams(self.id);
+        self.report_dropped(&dropped);
     }
 
     /// Set the outgoing-datagram queue's `outgoingHighWaterMark`, or clear
@@ -514,7 +569,9 @@ impl Session {
     }
 
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
-    /// to the implementation-defined default with `None`.
+    /// to the implementation-defined default with `None`. Shrinking the
+    /// limit can immediately push already-queued datagrams past it; those
+    /// are expired on the spot, reported the same as any other expiry.
     pub(crate) fn set_datagram_max_age(
         &mut self,
         conn: &mut Connection,
@@ -522,8 +579,7 @@ impl Session {
         now: Instant,
     ) {
         let expired = conn.set_datagram_max_age(self.id, max_age, now);
-        self.protocol
-            .record_expired_outgoing_datagrams(u64::try_from(expired.len()).unwrap_or(u64::MAX));
+        self.report_expired(&expired);
     }
 
     /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
@@ -547,9 +603,15 @@ impl Session {
         now: Instant,
     ) -> Vec<Option<DatagramId>> {
         let expired = conn.expire_session_datagrams(self.id, now);
-        self.protocol
-            .record_expired_outgoing_datagrams(u64::try_from(expired.len()).unwrap_or(u64::MAX));
+        self.report_expired(&expired);
         expired
+    }
+
+    /// Count this session's own datagrams actually handed to the packet
+    /// builder since the last call. See `Connection::take_session_sent_datagrams`.
+    pub(crate) fn report_sent_datagrams(&mut self, conn: &mut Connection) {
+        let sent = conn.take_session_sent_datagrams(self.id);
+        self.protocol.record_sent_outgoing_datagrams(sent);
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
@@ -756,9 +818,19 @@ pub(crate) trait Protocol: Debug + Display {
         None
     }
 
+    /// Record that `count` outgoing datagrams were actually handed to the
+    /// packet builder. A no-op default for protocols that don't track
+    /// [`SessionStats`].
+    fn record_sent_outgoing_datagrams(&mut self, _count: u64) {}
+
     /// Record that `count` outgoing datagrams expired before being sent.
     /// A no-op default for protocols that don't track [`SessionStats`].
     fn record_expired_outgoing_datagrams(&mut self, _count: u64) {}
+
+    /// Record that `count` outgoing datagrams were discarded without being
+    /// sent and without expiring. A no-op default for protocols that don't
+    /// track [`SessionStats`].
+    fn record_dropped_outgoing_datagrams(&mut self, _count: u64) {}
 
     fn protocol(&self) -> Option<&str> {
         None

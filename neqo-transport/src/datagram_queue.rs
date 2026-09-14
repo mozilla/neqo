@@ -18,6 +18,7 @@
 use std::{
     cmp::max,
     collections::{BTreeMap, VecDeque},
+    mem,
     time::{Duration, Instant},
 };
 
@@ -117,10 +118,10 @@ pub type DatagramId = u64;
 
 /// The fate of a tracked outgoing datagram.
 ///
-/// Deliberately has no `Sent` variant: unlike `Expired`/`Dropped`, a tracked
-/// datagram actually being sent has no per-datagram detail worth reporting
-/// beyond an aggregate sent-count counter, which covers tracked and
-/// untracked datagrams alike.
+/// Deliberately has no `Sent` variant: unlike `Expired`/`Dropped`, a
+/// tracked datagram actually being sent has no per-datagram detail worth
+/// reporting beyond the aggregate `datagrams_sent_outgoing` counter, which
+/// already covers tracked and untracked datagrams alike.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatagramOutcome {
     Expired(DatagramId),
@@ -337,6 +338,12 @@ pub struct DatagramQueue {
     /// not observable from script: the attribute reports the application's
     /// value, so it stays null.
     max_age: Option<Duration>,
+    /// Datagrams actually handed to the packet builder since the last
+    /// [`Self::take_sent_count`], i.e. via [`Self::take_next`] at
+    /// packet-build time, not merely accepted into this queue. Not
+    /// incremented for a datagram taken but then dropped for not fitting
+    /// the MTU.
+    sent: u64,
 }
 
 impl DatagramQueue {
@@ -351,6 +358,7 @@ impl DatagramQueue {
             high_water_mark: None,
             blocked: false,
             max_age: None,
+            sent: 0,
         }
     }
 
@@ -360,6 +368,26 @@ impl DatagramQueue {
     fn below_watermark(&self) -> bool {
         self.high_water_mark
             .is_none_or(|mark| self.total_count < mark)
+    }
+
+    /// Record that a datagram taken via [`Self::take_next`] was actually
+    /// handed to the packet builder, rather than dropped for not fitting.
+    pub const fn record_sent(&mut self) {
+        self.sent += 1;
+    }
+
+    /// Whether [`Self::take_sent_count`] would return a nonzero count,
+    /// without consuming it: a caller that only polls this queue when it is
+    /// otherwise given a reason to needs one for a send that, on its own,
+    /// gives no other signal that there is now something to report.
+    #[must_use]
+    pub const fn has_sent(&self) -> bool {
+        self.sent > 0
+    }
+
+    /// Return and reset the count of datagrams sent since the last call.
+    pub fn take_sent_count(&mut self) -> u64 {
+        mem::take(&mut self.sent)
     }
 
     pub fn set_high_water_mark(&mut self, mark: Option<usize>) {
@@ -654,7 +682,7 @@ impl DatagramQueue {
         self.total_bytes = 0;
         self.rr_next = SendGroupId::new(0);
         self.blocked = false;
-        std::mem::take(&mut self.groups)
+        mem::take(&mut self.groups)
             .into_values()
             .flat_map(|group| group.by_order.into_values().flatten())
             .collect()

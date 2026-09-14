@@ -4232,6 +4232,19 @@ impl Connection {
         self.quic_datagrams.drop_session_datagrams(session)
     }
 
+    /// The number of `session`'s queued datagrams actually handed to the
+    /// packet builder since the last call, i.e. sent, not merely queued.
+    pub fn take_session_sent_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_sent_count(session)
+    }
+
+    /// Whether any session has a sent count waiting to be picked up by
+    /// [`Self::take_session_sent_datagrams`].
+    #[must_use]
+    pub fn has_pending_sent_datagrams(&self) -> bool {
+        self.quic_datagrams.has_pending_sent()
+    }
+
     /// The instant at which the oldest datagram queued on any session
     /// crosses its effective max-age, if any session has one queued.
     ///

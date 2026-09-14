@@ -14,7 +14,7 @@ use neqo_http3::{
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
     webtransport::ClientSession as _,
 };
-use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamType};
+use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamDataLimit, StreamType};
 use nss::AuthenticationStatus;
 use test_fixture::{
     DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
@@ -695,7 +695,7 @@ fn send_datagram_queues_with_no_high_water_mark_set() {
 
     assert_eq!(
         client.connect_udp_send_datagram(session_id, PING, None, now()),
-        Ok(true)
+        Ok(DatagramQueueOutcome::Ok)
     );
 }
 
@@ -839,7 +839,9 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
     // A guard that counts only the payload keeps accepting after the framing stops
     // fitting, and the overflowing capsule is truncated and lost.
     let mut sent = 0;
-    while client.connect_udp_send_datagram(session_id, &[0x2c; 1], None, now()) == Ok(true) {
+    while client.connect_udp_send_datagram(session_id, &[0x2c; 1], None, now())
+        == Ok(DatagramQueueOutcome::Ok)
+    {
         sent += 1;
     }
     assert!(sent > 0, "no send space to fill");

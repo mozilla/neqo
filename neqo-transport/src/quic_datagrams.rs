@@ -234,10 +234,10 @@ impl QuicDatagrams {
                 unreachable!("next_active_session_from only returns non-empty sessions")
             };
             if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
-                let dgram = self.take_from_session_queue(session);
+                let dgram = self.take_from_session_queue(session, true);
                 Self::encode_datagram(&dgram.data, dgram.id.into(), builder, tokens, stats);
             } else if tokens.is_empty() {
-                let dgram = self.take_from_session_queue(session);
+                let dgram = self.take_from_session_queue(session, false);
                 qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
                 self.conn_events
                     .datagram_outcome(&dgram.id.into(), OutgoingDatagramOutcome::DroppedTooBig);
@@ -263,10 +263,12 @@ impl QuicDatagrams {
     }
 
     /// Take the next datagram off `session`'s queue, resuming a blocked
-    /// sender and advancing the round-robin cursor past it. Must only be
+    /// sender and advancing the round-robin cursor past it. `sent` records
+    /// whether the datagram is actually being handed to the packet builder,
+    /// as opposed to being dropped for not fitting the MTU. Must only be
     /// called immediately after a [`DatagramQueue::peek_next_len`] on the
     /// same session that returned `Some`, with no other mutation in between.
-    fn take_from_session_queue(&mut self, session: StreamId) -> QueuedDatagram {
+    fn take_from_session_queue(&mut self, session: StreamId, sent: bool) -> QueuedDatagram {
         let queue = self
             .queues
             .get_mut(&session)
@@ -274,6 +276,9 @@ impl QuicDatagrams {
         let dgram = queue
             .take_next()
             .expect("just peeked Some above, with no intervening mutation");
+        if sent {
+            queue.record_sent();
+        }
         if queue.resume_if_unblocked() {
             self.conn_events.datagram_space_available();
         }
@@ -331,6 +336,20 @@ impl QuicDatagrams {
             || DatagramQueue::default().capacity(),
             DatagramQueue::capacity,
         )
+    }
+
+    /// See [`DatagramQueue::take_sent_count`].
+    pub fn take_session_sent_count(&mut self, session: StreamId) -> u64 {
+        self.queues
+            .get_mut(&session)
+            .map_or(0, DatagramQueue::take_sent_count)
+    }
+
+    /// Whether any session has a sent count waiting to be picked up. See
+    /// [`DatagramQueue::has_sent`].
+    #[must_use]
+    pub fn has_pending_sent(&self) -> bool {
+        self.queues.values().any(DatagramQueue::has_sent)
     }
 
     /// Remove every datagram queued on `session`'s behalf, e.g. because the
