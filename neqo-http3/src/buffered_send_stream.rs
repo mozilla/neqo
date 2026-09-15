@@ -43,7 +43,7 @@ impl BufferedStream {
 
     pub fn encode_with<F: FnOnce(&mut Encoder<&mut Vec<u8>>)>(&mut self, f: F) {
         if let Self::Initialized { buf, .. } = self {
-            f(&mut Encoder::new_borrowed_vec(buf));
+            f(&mut Encoder::new(buf));
         } else {
             debug_assert!(false, "Do not encode data before the stream is initialized");
         }
@@ -135,7 +135,7 @@ impl BufferedStream {
         let Some((stream_id, buf)) = self.prepare_atomic_send(conn, now)? else {
             return Ok(false);
         };
-        f(&mut Encoder::new_borrowed_vec(buf));
+        f(&mut Encoder::new(buf));
         let len = buf.len();
         let res = conn.stream_send_atomic(stream_id, buf);
         buf.clear();
