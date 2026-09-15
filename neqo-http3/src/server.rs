@@ -34,13 +34,18 @@ use crate::{
 
 type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 
-const MAX_EVENT_DATA_SIZE: usize = 1024;
+/// Maximum stream data per [`Http3ServerEvent::Data`], and the read buffer's size.
+///
+/// A tuning knob, kept in sync with `neqo_bin::STREAM_IO_BUFFER_SIZE`.
+const MAX_EVENT_DATA_SIZE: usize = 32 * 1024;
 
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
     http3_handlers: HashMap<ConnectionRef, HandlerRef>,
     events: Http3ServerEvents,
+    /// Reused across events, so only each event's exactly-sized copy is allocated.
+    read_buf: Vec<u8>,
 }
 
 impl Display for Http3Server {
@@ -77,6 +82,7 @@ impl Http3Server {
             http3_parameters,
             http3_handlers: HashMap::default(),
             events: Http3ServerEvents::default(),
+            read_buf: vec![0; MAX_EVENT_DATA_SIZE],
         })
     }
 
@@ -228,6 +234,7 @@ impl Http3Server {
                             handler,
                             now,
                             &self.events,
+                            &mut self.read_buf,
                         );
                     }
                     Http3ServerConnEvent::DataWritable { stream_info } => self
@@ -398,29 +405,25 @@ fn prepare_data(
     handler: &HandlerRef,
     now: Instant,
     events: &Http3ServerEvents,
+    read_buf: &mut [u8],
 ) {
+    debug_assert!(!read_buf.is_empty(), "read buffer must not be empty");
     loop {
-        let mut data = vec![0; MAX_EVENT_DATA_SIZE];
-        let res = handler_borrowed.read_data(
+        let Ok((amount, fin)) = handler_borrowed.read_data(
             &mut conn.borrow_mut(),
             now,
             stream_info.stream_id(),
-            &mut data,
-        );
-        if let Ok((amount, fin)) = res {
-            if amount > 0 || fin {
-                if amount < MAX_EVENT_DATA_SIZE {
-                    data.resize(amount, 0);
-                }
-
-                events.data(conn.clone(), Rc::clone(handler), stream_info, data, fin);
-            }
-            if amount < MAX_EVENT_DATA_SIZE || fin {
-                break;
-            }
-        } else {
+            read_buf,
+        ) else {
             // Any error will closed the handler, just ignore this event, the next event must
             // be a state change event.
+            break;
+        };
+        if amount > 0 || fin {
+            let data = read_buf[..amount].to_vec();
+            events.data(conn.clone(), Rc::clone(handler), stream_info, data, fin);
+        }
+        if amount < read_buf.len() || fin {
             break;
         }
     }
