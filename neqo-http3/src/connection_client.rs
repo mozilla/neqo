@@ -763,11 +763,8 @@ impl Http3Client {
 
     /// Wrapper around [`Http3Client::process_multiple_output`] that processes a single
     /// output datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, 1.try_into().expect(">0"))
-            .try_into()
-            .expect("max_datagrams is 1")
+        Output::owned(|b, max| self.process_multiple_output(now, b, max))
     }
 
     /// The function should be called to check if there are new UDP packets to be sent. It should
@@ -797,17 +794,20 @@ impl Http3Client {
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
-    pub fn process_multiple_output(
+    pub fn process_multiple_output<'b>(
         &mut self,
         now: Instant,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
+    ) -> OutputBatch<'b> {
         qtrace!("[{self}] Process output");
 
         // Maybe send() stuff on http3-managed streams
         self.process_http3(now);
 
-        let out = self.conn.process_multiple_output(now, max_datagrams);
+        let out = self
+            .conn
+            .process_multiple_output(now, send_buffer, max_datagrams);
 
         // Update H3 for any transport state changes and events
         self.process_http3(now);

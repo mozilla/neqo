@@ -38,7 +38,7 @@ use neqo_http3::Http3Server;
 use neqo_transport::{
     Connection, OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress,
 };
-use neqo_udp::{DatagramIter, RecvBuf};
+use neqo_udp::{DatagramIter, RecvBuf, SendBuf};
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -323,12 +323,13 @@ pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendDat
 
 #[expect(clippy::module_name_repetitions, reason = "This is OK.")]
 pub trait HttpServer: Display {
-    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+    fn process_multiple<'a, 'b, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
         dgrams: D,
         now: Instant,
+        send_buf: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch;
+    ) -> OutputBatch<'b>;
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
@@ -348,6 +349,7 @@ pub struct Runner<S> {
     timeout: Option<Pin<Box<Sleep>>>,
     sockets: Vec<crate::udp::Socket>,
     recv_buf: RecvBuf,
+    send_buf: SendBuf,
 }
 
 impl<S: HttpServer + Unpin> Runner<S> {
@@ -359,6 +361,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             timeout: None,
             sockets,
             recv_buf: RecvBuf::default(),
+            send_buf: SendBuf::default(),
         }
     }
 
@@ -389,6 +392,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
         server: &mut S,
         timeout: &mut Option<Pin<Box<Sleep>>>,
         sockets: &mut [crate::udp::Socket],
+        send_buf: &mut Vec<u8>,
         now: &dyn Fn() -> Instant,
         mut input_dgrams: Option<DatagramIter<'_>>,
     ) -> Result<(), io::Error> {
@@ -413,6 +417,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             match server.process_multiple(
                 input_dgrams.take().into_iter().flatten(),
                 now(),
+                send_buf,
                 smallest_max_gso_segments,
             ) {
                 OutputBatch::DatagramBatch(dgram) => {
@@ -484,6 +489,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                 &mut self.server,
                 &mut self.timeout,
                 &mut self.sockets,
+                &mut self.send_buf,
                 &self.now,
                 Some(input_dgrams),
             )
@@ -498,6 +504,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             &mut self.server,
             &mut self.timeout,
             &mut self.sockets,
+            &mut self.send_buf,
             &self.now,
             None,
         )
@@ -664,7 +671,8 @@ pub(super) mod test_support {
 mod tests {
     use std::fmt;
 
-    use neqo_common::{Tos, datagram};
+    use neqo_common::Tos;
+    use neqo_transport::BatchMeta;
     use test_fixture::{default_client, fixture_init};
     use tokio::time::timeout;
 
@@ -672,7 +680,8 @@ mod tests {
 
     #[derive(Default)]
     struct MockServer {
-        batches: Vec<datagram::Batch>,
+        /// A batch borrows its bytes, so queue what is needed to build one.
+        batches: Vec<(BatchMeta, Vec<u8>)>,
         destinations: Vec<SocketAddr>,
     }
 
@@ -683,18 +692,24 @@ mod tests {
     }
 
     impl HttpServer for MockServer {
-        fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+        fn process_multiple<'a, 'b, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
             &mut self,
             dgrams: D,
             _now: Instant,
+            send_buf: &'b mut Vec<u8>,
             _max_datagrams: NonZeroUsize,
-        ) -> OutputBatch {
+        ) -> OutputBatch<'b> {
+            // As the real server does; batches must not accumulate.
+            send_buf.clear();
             for d in dgrams {
                 self.destinations.push(d.destination());
             }
             self.batches
                 .pop()
-                .map_or(OutputBatch::None, OutputBatch::DatagramBatch)
+                .map_or(OutputBatch::None, |(meta, data)| {
+                    send_buf.extend_from_slice(&data);
+                    OutputBatch::rebuild(Some(&meta), send_buf)
+                })
         }
 
         fn process_events(&mut self, _now: Instant) {}
@@ -721,9 +736,17 @@ mod tests {
 
         // Draw an ICMP "port unreachable" from the closed port.
         for _ in 0..10 {
-            runner.server.batches.push(
-                Datagram::new(local_addr, closed_addr, Tos::default(), b"hello".to_vec()).into(),
-            );
+            let data = b"hello".to_vec();
+            let size = NonZeroUsize::new(data.len()).unwrap();
+            runner.server.batches.push((
+                BatchMeta {
+                    src: local_addr,
+                    dst: closed_addr,
+                    tos: Tos::default(),
+                    datagram_size: size,
+                },
+                data,
+            ));
             runner.process().await?;
         }
 
