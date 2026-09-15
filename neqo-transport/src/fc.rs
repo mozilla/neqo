@@ -285,6 +285,7 @@ where
 
     /// Retire some items and maybe send flow control
     /// update.
+    #[cfg(test)]
     pub const fn retire(&mut self, retired: u64) {
         if retired <= self.retired {
             return;

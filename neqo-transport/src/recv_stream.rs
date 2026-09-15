@@ -13,6 +13,7 @@ use std::{
     collections::{BTreeMap, btree_map::Entry},
     fmt::Debug,
     mem,
+    ops::{Deref, DerefMut},
     rc::{Rc, Weak},
     time::{Duration, Instant},
 };
@@ -190,16 +191,116 @@ impl RecvStreams {
     }
 }
 
+/// Buffers freed from reassembly, shared by a connection's streams.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct FreeList(Rc<RefCell<Inner>>);
+
+#[derive(Debug, Default)]
+struct Inner {
+    buffers: Vec<Vec<u8>>,
+    /// Total capacity of `buffers`: a count would mean far more on a large-MTU path.
+    retained: usize,
+}
+
+impl FreeList {
+    /// Smallest buffer worth keeping: one coalesced range.
+    const MIN: usize = RxStreamOrderer::RANGE_TARGET;
+
+    /// Bytes per list. Only a couple of ranges are live per stream, and nothing trims the list.
+    const LIMIT: usize = 32 * Self::MIN;
+
+    /// A buffer holding `data`, reusing a freed one if any.
+    fn alloc(&self, data: &[u8]) -> RangeBuf {
+        let mut buffer = {
+            let mut inner = self.0.borrow_mut();
+            // An absent buffer has zero capacity, so the accounting holds.
+            let buffer = inner.buffers.pop().unwrap_or_default();
+            inner.retained -= buffer.capacity();
+            buffer
+        };
+        buffer.extend_from_slice(data);
+        self.wrap(buffer)
+    }
+
+    /// A buffer sized to `data`, for a range that will not grow.
+    fn exact(&self, data: &[u8]) -> RangeBuf {
+        self.wrap(data.to_vec())
+    }
+
+    /// Tie `data` to this list, so dropping it returns the buffer.
+    fn wrap(&self, data: Vec<u8>) -> RangeBuf {
+        RangeBuf {
+            data,
+            free_list: self.clone(),
+        }
+    }
+
+    /// Keep a buffer, if it is big enough and the budget allows.
+    fn free(&self, mut buffer: Vec<u8>) {
+        let capacity = buffer.capacity();
+        let mut inner = self.0.borrow_mut();
+        if capacity >= Self::MIN && inner.retained + capacity <= Self::LIMIT {
+            buffer.clear();
+            inner.retained += capacity;
+            inner.buffers.push(buffer);
+        }
+    }
+
+    /// Whether both handles refer to one list.
+    #[cfg(test)]
+    pub(crate) fn is(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.0.borrow().buffers.len()
+    }
+
+    #[cfg(test)]
+    fn retained(&self) -> usize {
+        self.0.borrow().retained
+    }
+}
+
+/// A range's buffer, which rejoins the free list when dropped, so every discard recycles.
+#[derive(Debug)]
+pub(crate) struct RangeBuf {
+    data: Vec<u8>,
+    free_list: FreeList,
+}
+
+impl Drop for RangeBuf {
+    fn drop(&mut self) {
+        self.free_list.free(mem::take(&mut self.data));
+    }
+}
+
+impl Deref for RangeBuf {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl DerefMut for RangeBuf {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
+    }
+}
+
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
 #[derive(Debug, Default)]
 pub struct RxStreamOrderer {
-    data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
-    retired: u64,                        // Number of bytes the application has read
-    received: u64,                       // The number of bytes stored in `data_ranges`
+    data_ranges: BTreeMap<u64, RangeBuf>, // (start_offset, data)
+    retired: u64,                         // Number of bytes the application has read
+    received: u64,                        // The number of bytes stored in `data_ranges`
     /// Exclusive end offset of the rightmost received range (the end of the
     /// last entry in `data_ranges`, or `retired` if the map is empty).
     end: u64,
+    free_list: FreeList,
 }
 
 impl RxStreamOrderer {
@@ -233,7 +334,7 @@ impl RxStreamOrderer {
     }
 
     /// Add a range, which is the only thing that can take the entry count over the limit.
-    fn insert_range(&mut self, start: u64, data: Vec<u8>) -> Res<()> {
+    fn insert_range(&mut self, start: u64, data: RangeBuf) -> Res<()> {
         self.data_ranges.insert(start, data);
         self.check_gap_limit()
     }
@@ -241,6 +342,22 @@ impl RxStreamOrderer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Take the buffered data, keeping the free list.
+    fn take(&mut self) -> Self {
+        mem::replace(self, Self::with_free_list(self.free_list.clone()))
+    }
+
+    #[must_use]
+    pub(crate) const fn with_free_list(free_list: FreeList) -> Self {
+        Self {
+            data_ranges: BTreeMap::new(),
+            retired: 0,
+            received: 0,
+            end: 0,
+            free_list,
+        }
     }
 
     /// Process an incoming stream frame off the wire. This may result in data
@@ -292,16 +409,20 @@ impl RxStreamOrderer {
             let adjacent = new_start == self.end;
             // new_end > new_start >= end, so direct assignment is correct.
             self.end = new_end;
-            return if adjacent
-                && let Some(mut e) = self
-                    .data_ranges
-                    .last_entry()
-                    .filter(|e| e.get().len() < Self::RANGE_TARGET)
+            if !adjacent {
+                // Refilling a gap would pin a range-sized buffer per byte a peer sends.
+                return self.insert_range(new_start, self.free_list.exact(new_data));
+            }
+            return if let Some(mut e) = self
+                .data_ranges
+                .last_entry()
+                .filter(|e| e.get().len() < Self::RANGE_TARGET)
             {
                 e.get_mut().extend_from_slice(new_data);
                 Ok(())
             } else {
-                self.insert_range(new_start, new_data.to_vec())
+                // An in-order chunk start, which is what the list holds.
+                self.insert_range(new_start, self.free_list.alloc(new_data))
             };
         }
 
@@ -414,10 +535,12 @@ impl RxStreamOrderer {
                 };
                 if let Some(buf) = self.data_ranges.get_mut(&prev_start) {
                     buf.extend_from_slice(to_add);
-                    buf.extend_from_slice(next.as_deref().unwrap_or_default());
+                    if let Some(next) = &next {
+                        buf.extend_from_slice(next);
+                    }
                 }
             } else {
-                return self.insert_range(new_start, to_add.to_vec());
+                return self.insert_range(new_start, self.free_list.exact(to_add));
             }
         }
 
@@ -553,8 +676,9 @@ impl RxStreamOrderer {
                 keep = true;
             }
             if keep {
-                let mut keep = self.data_ranges.split_off(&range_start);
-                mem::swap(&mut self.data_ranges, &mut keep);
+                // After the swap, `consumed` holds what was read out.
+                let mut consumed = self.data_ranges.split_off(&range_start);
+                mem::swap(&mut self.data_ranges, &mut consumed);
                 return copied;
             }
         }
@@ -629,14 +753,15 @@ enum RecvStreamState {
 }
 
 impl RecvStreamState {
-    fn new(
+    const fn new(
         max_bytes: u64,
         stream_id: StreamId,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+        free_list: FreeList,
     ) -> Self {
         Self::Recv {
             fc: ReceiverFlowControl::new(stream_id, max_bytes),
-            recv_buf: RxStreamOrderer::new(),
+            recv_buf: RxStreamOrderer::with_free_list(free_list),
             session_fc,
         }
     }
@@ -742,15 +867,16 @@ pub struct RecvStream {
 }
 
 impl RecvStream {
-    pub fn new(
+    pub(crate) const fn new(
         stream_id: StreamId,
         max_stream_data: u64,
         session_fc: Rc<RefCell<ReceiverFlowControl<()>>>,
+        free_list: FreeList,
         conn_events: ConnectionEvents,
     ) -> Self {
         Self {
             stream_id,
-            state: RecvStreamState::new(max_stream_data, stream_id, session_fc),
+            state: RecvStreamState::new(max_stream_data, stream_id, session_fc, free_list),
             conn_events,
             keep_alive: None,
         }
@@ -845,7 +971,7 @@ impl RecvStream {
                 if fin {
                     let all_recv =
                         fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready());
-                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    let buf = recv_buf.take();
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
                     if all_recv {
@@ -870,7 +996,7 @@ impl RecvStream {
             } => {
                 recv_buf.inbound_frame(offset, data)?;
                 if fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready()) {
-                    let buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                    let buf = recv_buf.take();
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
                     self.set_state(RecvStreamState::DataRecvd {
@@ -958,7 +1084,7 @@ impl RecvStream {
                 );
                 let fc = mem::take(fc);
                 let session_fc = mem::take(session_fc);
-                let recv_buf = mem::replace(recv_buf, RxStreamOrderer::new());
+                let recv_buf = recv_buf.take();
                 self.set_state(RecvStreamState::SizeKnownAt {
                     fc,
                     session_fc,
@@ -1202,6 +1328,12 @@ impl RecvStream {
     /// `false` if the stream transitions to `AbortReading` or was already
     /// in a terminal or aborting state.
     #[must_use]
+    /// This stream's free list, if it is still buffering.
+    #[cfg(test)]
+    pub(crate) fn free_list(&self) -> Option<&FreeList> {
+        self.state.recv_buf().map(|b| &b.free_list)
+    }
+
     pub fn stop_sending(&mut self, err: AppError) -> bool {
         qtrace!("stop_sending called when in state {}", self.state);
         match &mut self.state {
@@ -1382,7 +1514,7 @@ mod tests {
     use static_assertions::const_assert;
     use test_fixture::now;
 
-    use super::{RecvStream, RecvStreamState};
+    use super::{FreeList, RecvStream, RecvStreamState};
     use crate::{
         ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
         events::ConnectionEvent,
@@ -1689,6 +1821,7 @@ mod tests {
             StreamId::from(567),
             1024,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), 1024 * 1024))),
+            FreeList::default(),
             conn_events,
         );
 
@@ -1917,6 +2050,7 @@ mod tests {
             StreamId::from(67),
             to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
             Rc::new(RefCell::new(ReceiverFlowControl::new((), session_fc))),
+            FreeList::default(),
             conn_events,
         )
     }
@@ -2031,6 +2165,99 @@ mod tests {
         assert_eq!(rx_ord.retired(), 2);
     }
 
+    /// The reused buffer keeps the capacity it grew to.
+    #[test]
+    fn stream_orderer_reuses_freed_buffer() {
+        const TARGET: usize = RxStreamOrderer::RANGE_TARGET;
+        let mut rx_ord = RxStreamOrderer::new();
+
+        rx_ord.inbound_frame(0, &[1; TARGET]).unwrap();
+        let grown = rx_ord.data_ranges[&0].capacity();
+        assert!(grown >= TARGET);
+
+        let mut buf = vec![0; TARGET];
+        assert_eq!(rx_ord.read(&mut buf), TARGET);
+        assert_eq!(rx_ord.free_list.len(), 1, "buffer kept");
+
+        rx_ord.inbound_frame(to_u64(TARGET), &[2; 16]).unwrap();
+        assert_eq!(rx_ord.free_list.len(), 0, "buffer reused");
+        assert_eq!(rx_ord.data_ranges[&to_u64(TARGET)].capacity(), grown);
+    }
+
+    #[test]
+    fn stream_orderer_drops_small_buffer() {
+        let mut rx_ord = RxStreamOrderer::new();
+
+        rx_ord.inbound_frame(1000, &[1; 10]).unwrap();
+        rx_ord.discard_after(0);
+        assert_eq!(rx_ord.free_list.len(), 0);
+    }
+
+    /// Recycling does not depend on the application reading.
+    #[test]
+    fn stream_orderer_recycles_unread_buffer() {
+        const TARGET: usize = RxStreamOrderer::RANGE_TARGET;
+        let mut rx_ord = RxStreamOrderer::new();
+
+        rx_ord.inbound_frame(0, &[1; TARGET]).unwrap();
+        rx_ord.discard_after(0);
+        assert_eq!(rx_ord.free_list.len(), 1);
+    }
+
+    #[test]
+    fn stream_orderer_reuses_across_streams() {
+        const TARGET: usize = RxStreamOrderer::RANGE_TARGET;
+        let free_list = FreeList::default();
+        let mut first = RxStreamOrderer::with_free_list(free_list.clone());
+        let mut second = RxStreamOrderer::with_free_list(free_list.clone());
+
+        first.inbound_frame(0, &[1; TARGET]).unwrap();
+        let grown = first.data_ranges[&0].capacity();
+        assert_eq!(first.read(&mut vec![0; TARGET]), TARGET);
+        assert_eq!(free_list.len(), 1);
+
+        second.inbound_frame(0, &[2; 16]).unwrap();
+        assert_eq!(free_list.len(), 0, "the other stream's buffer was refilled");
+        assert_eq!(second.data_ranges[&0].capacity(), grown);
+    }
+
+    /// Bounded by bytes, so large ranges pin no more than small ones.
+    #[test]
+    fn stream_orderer_free_list_is_capped() {
+        const TARGET: usize = RxStreamOrderer::RANGE_TARGET;
+        let ranges = FreeList::LIMIT / TARGET + 2;
+        let mut rx_ord = RxStreamOrderer::new();
+
+        for i in 0..ranges {
+            rx_ord
+                .inbound_frame(to_u64(i * TARGET), &[1; TARGET])
+                .unwrap();
+        }
+        assert_eq!(rx_ord.read(&mut vec![0; ranges * TARGET]), ranges * TARGET);
+        assert!(rx_ord.free_list.retained() <= FreeList::LIMIT);
+        assert!(
+            rx_ord.free_list.retained() + TARGET > FreeList::LIMIT,
+            "filled to the cap"
+        );
+        assert!(rx_ord.free_list.len() < ranges);
+    }
+
+    #[test]
+    fn stream_orderer_gap_does_not_take_buffer() {
+        const TARGET: usize = RxStreamOrderer::RANGE_TARGET;
+        let mut rx_ord = RxStreamOrderer::new();
+
+        rx_ord.inbound_frame(0, &[1; TARGET]).unwrap();
+        assert_eq!(rx_ord.read(&mut vec![0; TARGET]), TARGET);
+        assert_eq!(rx_ord.free_list.len(), 1);
+
+        rx_ord.inbound_frame(to_u64(TARGET * 4), &[9; 1]).unwrap();
+        let gap = &rx_ord.data_ranges[&to_u64(TARGET * 4)];
+        assert_eq!(gap.len(), 1);
+        assert!(gap.capacity() < TARGET, "gap pinned {}", gap.capacity());
+        assert_eq!(rx_ord.free_list.len(), 1, "buffer left for a chunk start");
+    }
+
     #[test]
     fn no_stream_flowc_event_after_exiting_recv() {
         let mut s = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
@@ -2053,6 +2280,7 @@ mod tests {
             StreamId::from(567),
             fc_limit,
             session_fc,
+            FreeList::default(),
             ConnectionEvents::default(),
         )
     }
@@ -2127,6 +2355,7 @@ mod tests {
             StreamId::from(567),
             to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
             Rc::clone(&session_fc),
+            FreeList::default(),
             ConnectionEvents::default(),
         );
 
@@ -2769,6 +2998,7 @@ mod tests {
             RR_STREAM,
             INITIAL_LOCAL_MAX_STREAM_DATA as u64,
             Rc::new(RefCell::new(ReceiverFlowControl::new((), 1024 * 1024))),
+            FreeList::default(),
             events,
         )
     }
