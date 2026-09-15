@@ -166,7 +166,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@6334c835de4c04a59fe59f0f8f071e02a2f0bab3 # v1.4.7
+      uses: vmactions/netbsd-vm@7f23a491dcc69c34195721ab67934917707f84c7 # v1.4.9
       with:
         usesh: true
         disable-cache: true
