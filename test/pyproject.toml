@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "packaging",
+    "semantic-version",
     "tomlkit",
 ]
 
@@ -23,6 +24,10 @@ dev = ["mypy", "ruff"]
 
 [tool.mypy]
 exclude = "mozlog"
+
+[[tool.mypy.overrides]]
+module = "semantic_version"
+ignore_missing_imports = true
 
 [build-system]
 requires = ["hatchling"]
