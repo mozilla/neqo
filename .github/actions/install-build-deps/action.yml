@@ -65,7 +65,7 @@ runs:
         token: ${{ inputs.token || github.token }}
 
     - if: ${{ inputs.nss == 'true' }}
-      uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
+      uses: mozilla/nss-rs/install-nss@ba8a3f6acffc7e25749054969ccbbb3ca615df7f # 0.16.1
       with:
         working-directory: ${{ inputs.working-directory }}
         target: ${{ inputs.target }}
