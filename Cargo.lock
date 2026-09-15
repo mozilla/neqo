@@ -735,7 +735,6 @@ dependencies = [
  "clap",
  "clap-verbosity-flag",
  "codspeed-criterion-compat",
- "futures",
  "hex",
  "http",
  "libc",
