@@ -29,7 +29,7 @@ use neqo_common::{
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
-    agent::{CertificateCompressor, CertificateInfo},
+    cert::{CertificateCompressor, CertificateInfo},
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
