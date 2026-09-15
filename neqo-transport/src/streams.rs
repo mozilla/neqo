@@ -39,7 +39,10 @@ pub type SendOrder = i64;
 ///
 /// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
 /// cannot be passed where a send-group id is expected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// `Ord`/`PartialOrd` are derived (numeric on the wrapped `u64`) so this can key a
+/// `BTreeMap`, used by the outgoing-datagram queue for deterministic round-robin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SendGroupId(u64);
 
 impl SendGroupId {
