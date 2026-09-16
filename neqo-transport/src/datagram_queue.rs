@@ -14,9 +14,6 @@
 //! one `DatagramQueue` per session (keyed by an opaque handle) and
 //! round-robins between them at packet-build time, so a datagram is never
 //! buffered anywhere without this age policy applying to it.
-//!
-//! Not yet wired up: `QuicDatagrams` still holds a single unbounded
-//! `VecDeque` per connection; see #3983.
 
 use std::{
     collections::{BTreeMap, VecDeque},
