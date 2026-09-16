@@ -13,15 +13,13 @@ use super::{
     AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
 };
 use crate::{
-    CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud, Stats,
-    StreamId, StreamType,
+    CloseReason, Connection, ConnectionParameters, Error, MAX_DATAGRAM_FRAME_SIZE,
+    MIN_INITIAL_PACKET_SIZE, Pmtud, Stats, StreamId, StreamType,
     connection::tests::DEFAULT_ADDR,
     datagram_queue::{DatagramQueueOutcome, default_max_age},
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
-    packet,
-    quic_datagrams::QuicDatagram,
-    recovery,
+    packet, recovery,
     send_stream::{RetransmissionPriority, TransmissionPriority},
     streams::SendGroupId,
 };
@@ -44,7 +42,6 @@ const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE];
 const_assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
 const DATA_SMALLER_THAN_MTU_2: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE / 2];
 const_assert!(DATA_SMALLER_THAN_MTU_2.len() < DATA_SMALLER_THAN_MTU.len());
-const OUTGOING_QUEUE: usize = 2;
 
 struct InsertDatagram<'a> {
     data: &'a [u8],
@@ -66,6 +63,15 @@ impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
     }
 }
 
+fn connect_datagram() -> (Connection, Connection) {
+    let mut client =
+        new_client(ConnectionParameters::default().datagram_size(MAX_DATAGRAM_FRAME_SIZE));
+    let mut server =
+        new_server(ConnectionParameters::default().datagram_size(MAX_DATAGRAM_FRAME_SIZE));
+    connect_force_idle(&mut client, &mut server);
+    (client, server)
+}
+
 #[test]
 fn datagram_disabled_both() {
     let mut client = new_client(ConnectionParameters::default().datagram_size(0));
@@ -75,17 +81,34 @@ fn datagram_disabled_both() {
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), None),
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
         Err(Error::TooMuchData)
     );
     assert_eq!(server.stats().frame_tx.datagram, 0);
     assert_eq!(
-        server.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), None),
+        server.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
         Err(Error::TooMuchData)
     );
     assert_eq!(server.stats().frame_tx.datagram, 0);
 }
 
+/// A side that advertises no datagram support can still send to a peer that
+/// does, and the peer's limit, when below the MTU, is what `max_datagram_size`
+/// reports.
 #[test]
 fn datagram_enabled_on_client() {
     let mut client =
@@ -99,13 +122,27 @@ fn datagram_enabled_on_client() {
         Ok(DATAGRAM_LEN_SMALLER_THAN_MTU)
     );
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
         Err(Error::TooMuchData)
     );
     let dgram_sent = server.stats().frame_tx.datagram;
     assert_eq!(
-        server.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        server.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
     let out = server.process_output(now()).dgram().unwrap();
     assert_eq!(server.stats().frame_tx.datagram, dgram_sent + 1);
@@ -130,13 +167,27 @@ fn datagram_enabled_on_server() {
     );
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
-        server.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
+        server.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
         Err(Error::TooMuchData)
     );
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
     let out = client.process_output(now()).dgram().unwrap();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
@@ -146,18 +197,6 @@ fn datagram_enabled_on_server() {
         server.next_event().unwrap(),
         ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
     ));
-}
-
-fn connect_datagram() -> (Connection, Connection) {
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .datagram_size(QuicDatagram::MAX_SIZE)
-            .outgoing_datagram_queue(OUTGOING_QUEUE),
-    );
-    let mut server =
-        new_server(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
-    connect_force_idle(&mut client, &mut server);
-    (client, server)
 }
 
 #[test]
@@ -181,8 +220,15 @@ fn limit_data_size() {
     // Datagram can be queued because they are smaller than allowed by the peer,
     // but they cannot be sent.
     assert_eq!(
-        server.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        server.enqueue_datagram(
+            StreamId::new(0),
+            DATA_BIGGER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
 
     let dgram_dropped_s = server.stats().datagram_tx.dropped_too_big;
@@ -200,8 +246,15 @@ fn limit_data_size() {
 
     // The same test for the client side.
     assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_BIGGER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
     let dgram_sent_c = client.stats().frame_tx.datagram;
     assert!(client.process_output(now()).dgram().is_none());
@@ -216,16 +269,30 @@ fn limit_data_size() {
 fn after_dgram_dropped_continue_writing_frames() {
     let (mut client, _) = connect_datagram();
 
-    // Datagram can be queued because they are smaller than allowed by the peer,
-    // but they cannot be sent.
+    // Both are queued: the first is too big for any packet and will be
+    // dropped when the write loop reaches it, but that must not stop the
+    // second, smaller one from being written in the same call.
     assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_BIGGER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
-    // Fills the 2-slot queue: queued, but reports no space remains.
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(2)),
-        Ok(false)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(2),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
 
     let datagram_dropped = |e| {
@@ -252,8 +319,15 @@ fn datagram_acked() {
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
     let out = client.process_output(now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
@@ -307,7 +381,17 @@ fn datagram_after_stream_data() {
 
     // Write a datagram first.
     let dgram_sent = client.stats().frame_tx.datagram;
-    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(1)), Ok(true));
+    assert_eq!(
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     // Create a stream with normal priority and send some data.
     let stream_id = client.stream_create(StreamType::BiDi).unwrap();
@@ -349,7 +433,17 @@ fn datagram_before_stream_data() {
 
     // Write a datagram.
     let dgram_sent = client.stats().frame_tx.datagram;
-    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(1)), Ok(true));
+    assert_eq!(
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
 
     if let ConnectionEvent::Datagram(data) =
         &send_packet_and_get_server_event(&mut client, &mut server)
@@ -372,8 +466,15 @@ fn datagram_lost() {
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
     let _out = client.process_output(now()).dgram(); // This packet will be lost.
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
@@ -402,8 +503,15 @@ fn datagram_sent_once() {
 
     let dgram_sent = client.stats().frame_tx.datagram;
     assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
+        client.enqueue_datagram(
+            StreamId::new(0),
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
     let _out = client.process_output(now()).dgram();
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
@@ -446,321 +554,19 @@ fn dgram_unsupported() {
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
 }
 
-#[test]
-fn outgoing_datagram_queue_full() {
-    let (mut client, mut server) = connect_datagram();
-
-    let dgram_sent = client.stats().frame_tx.datagram;
-    // Queue capacity is `OUTGOING_QUEUE` == 2. The first datagram leaves space.
-    assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
-    );
-    // The second fills the queue: it is queued, but `false` signals the queue
-    // is now full and the producer should stop.
-    assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
-        Ok(false)
-    );
-
-    // A datagram produced while the queue is full is still accepted (queued),
-    // not dropped; `false` is a high-watermark signal, not a rejection. The
-    // queue now holds three datagrams, one over capacity, and no event has been
-    // emitted yet.
-    assert_eq!(client.send_datagram(DATA_MTU.to_vec(), Some(3)), Ok(false));
-    assert!(client.next_event().is_none());
-
-    // Send the first datagram (id 1). That frees one slot, but the queue still
-    // holds two, i.e. it is still at capacity. The application must NOT be told
-    // space is available yet, or it would send straight back into a full queue.
-    let out = client.process_output(now()).dgram();
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
-    assert!(
-        !client
-            .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-        "resume signalled while the queue was still at capacity"
-    );
-    server.process_input(out.unwrap(), now());
-    assert!(matches!(
-        server.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
-    ));
-
-    // Send the second datagram (id 2). The queue now drops below capacity, so
-    // the resume signal fires.
-    let dgram_sent = client.stats().frame_tx.datagram;
-    let out = client.process_output(now()).dgram();
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
-    assert!(
-        client
-            .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-        "resume not signalled after the queue dropped below capacity"
-    );
-    server.process_input(out.unwrap(), now());
-    assert!(matches!(
-        server.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU_2
-    ));
-
-    // Send the third datagram (id 3), the one accepted while the queue was
-    // full. Nothing was dropped.
-    let dgram_sent = client.stats().frame_tx.datagram;
-    let out = client.process_output(now()).dgram();
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
-    server.process_input(out.unwrap(), now());
-    assert!(matches!(
-        server.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == DATA_MTU
-    ));
-
-    // The resume fired exactly once, when the queue first dropped below
-    // capacity; draining the rest must not signal it again.
-    assert!(
-        !client
-            .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-        "resume signalled more than once"
-    );
-}
-
-/// A datagram too big to share a packet with other frames is deferred
-/// (`push_front`), a path that skips the resume guard. With the queue full, a
-/// blocked sender must still be released once a later packet drops the datagram.
-#[test]
-fn too_big_datagram_deferred_then_unblocks() {
-    let (mut client, mut server) = connect_datagram();
-
-    // Fill the 2-slot queue. The first datagram is larger than any packet, so it
-    // can never be sent and is ultimately dropped as too big. The second fills
-    // the queue, blocking the application.
-    assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
-    );
-    assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(2)),
-        Ok(false)
-    );
-
-    // Give the next packet some stream data. It is written before datagrams, so
-    // the oversized datagram at the front of the queue cannot fit alongside it:
-    // it is deferred (`push_front`) and the packet leaves carrying only stream
-    // data. No queue slot is freed, so the sender stays blocked and no resume
-    // event fires yet.
-    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    client
-        .stream_send(stream_id, &[7; MIN_INITIAL_PACKET_SIZE])
-        .unwrap();
-
-    let dgram_sent = client.stats().frame_tx.datagram;
-    let dropped = client.stats().datagram_tx.dropped_too_big;
-    let out = client.process_output(now()).dgram();
-    server.process_input(out.expect("a packet with stream data"), now());
-    assert_eq!(
-        client.stats().frame_tx.datagram,
-        dgram_sent,
-        "no datagram is sent while the oversized one blocks the front of the queue"
-    );
-    assert_eq!(
-        client.stats().datagram_tx.dropped_too_big,
-        dropped,
-        "the oversized datagram is deferred, not yet dropped"
-    );
-    assert!(
-        !client
-            .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-        "resume must not fire while the queue is still full"
-    );
-
-    // Drain the rest. Once a packet has no other frames, the oversized datagram
-    // is dropped (freeing a slot) and the second datagram is sent, so the sender
-    // is released exactly once and nothing is stranded.
-    let mut released = 0;
-    for _ in 0..10 {
-        let Some(out) = client.process_output(now()).dgram() else {
-            break;
-        };
-        released += client
-            .events()
-            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
-            .count();
-        server.process_input(out, now());
-    }
-    assert_eq!(released, 1, "the blocked sender is released exactly once");
-    assert_eq!(
-        client.stats().datagram_tx.dropped_too_big,
-        dropped + 1,
-        "the oversized datagram is eventually dropped"
-    );
-    assert_eq!(
-        client.stats().frame_tx.datagram,
-        dgram_sent + 1,
-        "the second datagram is eventually sent"
-    );
-}
-
-/// A queue emptied entirely by [`OutgoingDatagramOutcome::DroppedTooBig`] must
-/// still release a blocked sender: the resume event has to fire even though no
-/// datagram was sent.
-#[test]
-fn dropped_too_big_unblocks() {
-    let (mut client, _server) = connect_datagram();
-
-    // Fill the 2-slot queue with datagrams within the peer's datagram-size
-    // limit (so they are accepted) but too big for any packet (so they are
-    // dropped at send time). The second fills the queue, blocking the app.
-    assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
-    );
-    assert_eq!(
-        client.send_datagram(DATA_BIGGER_THAN_MTU.to_vec(), Some(2)),
-        Ok(false)
-    );
-    assert!(client.next_event().is_none());
-
-    let dropped = client.stats().datagram_tx.dropped_too_big;
-    // Nothing fits, so no packet carrying a datagram is produced, but both
-    // datagrams are dropped as too big, which empties the queue.
-    assert!(client.process_output(now()).dgram().is_none());
-    assert_eq!(client.stats().datagram_tx.dropped_too_big, dropped + 2);
-
-    // The queue emptied while the application was blocked, so it must be
-    // released even though the slots were freed by drops rather than by a send,
-    // and signalled exactly once.
-    assert_eq!(
-        client
-            .events()
-            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
-            .count(),
-        1,
-        "resume must be signalled exactly once after the queue was emptied by drops"
-    );
-}
-
-/// The resume event must fire only in response to backpressure. If the queue was
-/// never full, sending a datagram must not raise a spurious
-/// [`ConnectionEvent::OutgoingDatagramSpaceAvailable`], or a sender that keys off it
-/// trying to send into a queue that was never constrained.
-#[test]
-fn no_space_available_event_when_never_blocked() {
-    let (mut client, mut server) = connect_datagram();
-
-    // Queue capacity is 2; a single datagram leaves space, so `send_datagram`
-    // never reports the queue as full.
-    assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU.to_vec(), Some(1)),
-        Ok(true)
-    );
-    let out = client.process_output(now()).dgram();
-    assert!(
-        !client
-            .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-        "resume signalled although the queue was never full"
-    );
-
-    // Sanity: the datagram was still delivered.
-    server.process_input(out.unwrap(), now());
-    assert!(matches!(
-        server.next_event().unwrap(),
-        ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
-    ));
-}
-
-/// Backpressure must be repeatable: every time the queue fills and then drains
-/// below capacity the resume event fires again. A one-shot signal would strand a
-/// sender on the second and later rounds.
-#[test]
-fn space_available_event_fires_on_each_fill_drain_cycle() {
-    let (mut client, mut server) = connect_datagram();
-
-    for cycle in 0..3 {
-        // Fill the 2-slot queue: the second send reports it full.
-        assert_eq!(
-            client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(1)),
-            Ok(true)
-        );
-        assert_eq!(
-            client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
-            Ok(false)
-        );
-
-        // Drain the queue onto the wire.
-        while let Some(out) = client.process_output(now()).dgram() {
-            server.process_input(out, now());
-        }
-
-        // The queue dropped below capacity, so this cycle must re-arm and emit.
-        assert!(
-            client
-                .events()
-                .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-            "resume not signalled on fill/drain cycle {cycle}"
-        );
-    }
-}
-
-/// End-to-end backpressure contract: a sender that strictly stops on `Ok(false)`
-/// and only resumes when it sees [`ConnectionEvent::OutgoingDatagramSpaceAvailable`]
-/// make progress. Every datagram it hands over is eventually delivered, with no
-/// stall (the loop is bounded so a stall fails instead of hanging) and no loss.
-#[test]
-fn backpressure_respecting_sender_never_stalls() {
-    const TOTAL: u64 = 50;
-
-    let (mut client, mut server) = connect_datagram();
-    let mut next_id: u64 = 1;
-    let mut received: u64 = 0;
-    let mut blocked = false;
-
-    // Each iteration delivers at least one datagram, so `TOTAL` iterations are
-    // enough; a stall would leave `received` short and fail the assertion below.
-    for _ in 0..TOTAL {
-        // Send while the queue accepts and we have not been told to stop.
-        while !blocked && next_id <= TOTAL {
-            let payload = vec![u8::try_from(next_id % 256).unwrap()];
-            // `false` means the queue is now full: stop until resumed.
-            blocked = !client
-                .send_datagram(payload, Some(next_id))
-                .expect("unexpected send error");
-            next_id += 1;
-        }
-
-        // Move one datagram-bearing packet to the server, if any.
-        if let Some(out) = client.process_output(now()).dgram() {
-            server.process_input(out, now());
-        }
-
-        // Count everything the server received.
-        for event in server.events() {
-            if matches!(event, ConnectionEvent::Datagram(_)) {
-                received += 1;
-            }
-        }
-
-        // Resume strictly on the transport's signal.
-        if client
-            .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
-        {
-            blocked = false;
-        }
-
-        if received == TOTAL {
-            break;
-        }
-    }
-
-    assert_eq!(received, TOTAL, "sender stalled or datagrams were lost");
-}
-
 fn send_datagram(sender: &mut Connection, receiver: &mut Connection, data: Vec<u8>) {
     let dgram_sent = sender.stats().frame_tx.datagram;
-    assert_eq!(sender.send_datagram(data, Some(1)), Ok(true));
+    assert_eq!(
+        sender.enqueue_datagram(
+            StreamId::new(0),
+            data,
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
     let out = sender.process_output(now()).dgram().unwrap();
     assert_eq!(sender.stats().frame_tx.datagram, dgram_sent + 1);
 
@@ -808,29 +614,6 @@ fn multiple_datagram_events() {
     });
     assert_eq!(datagrams.next().unwrap(), FOURTH_DATAGRAM);
     assert!(datagrams.next().is_none());
-}
-
-#[test]
-fn multiple_quic_datagrams_in_one_packet() {
-    let (mut client, mut server) = connect_datagram();
-
-    let dgram_sent = client.stats().frame_tx.datagram;
-    // Enqueue 2 datagrams that can fit in a single packet. The second fills the
-    // 2-slot queue, so it is queued but reports no space remains.
-    assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(1)),
-        Ok(true)
-    );
-    assert_eq!(
-        client.send_datagram(DATA_SMALLER_THAN_MTU_2.to_vec(), Some(2)),
-        Ok(false)
-    );
-
-    let out = client.process_output(now()).dgram();
-    assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 2);
-    server.process_input(out.unwrap(), now());
-    let datagram = |e: &_| matches!(e, ConnectionEvent::Datagram(..));
-    assert_eq!(server.events().filter(datagram).count(), 2);
 }
 
 /// Datagrams that are close to the capacity of the packet need special
@@ -1360,5 +1143,214 @@ fn resume_signal_fires_once_a_blocked_queue_drains_below_watermark() {
             .events()
             .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
         "draining a blocked queue back below its watermark must fire a resume signal"
+    );
+}
+
+/// With a high water mark above one, a send that leaves the queue still at
+/// the mark must not resume the sender, or it would write straight back into
+/// a full queue; the resume fires once, when the queue first drops below the
+/// mark, and not again for the rest of the drain.
+#[test]
+fn partial_drain_at_the_high_water_mark_does_not_resume() {
+    let (mut client, mut server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(2).unwrap()));
+    // Each is too big to share a packet with the next, so they go out one
+    // per `process_output`.
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(2),
+            now,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::AboveWatermark)
+    );
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            DATA_MTU.to_vec(),
+            Some(3),
+            now,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::AboveWatermark),
+        "a datagram queued above the mark is still accepted, not dropped"
+    );
+    assert!(client.next_event().is_none());
+
+    let resumed = |c: &mut Connection| {
+        c.events()
+            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
+            .count()
+    };
+
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    assert_eq!(
+        client.datagram_queue_capacity(session).queued_datagrams,
+        2,
+        "one datagram per packet"
+    );
+    assert_eq!(
+        resumed(&mut client),
+        0,
+        "resume signalled while the queue was still at the mark"
+    );
+
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    assert_eq!(client.datagram_queue_capacity(session).queued_datagrams, 1);
+    assert_eq!(
+        resumed(&mut client),
+        1,
+        "resume not signalled after the queue dropped below the mark"
+    );
+
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    assert_eq!(client.datagram_queue_capacity(session).queued_datagrams, 0);
+    assert_eq!(resumed(&mut client), 0, "resume signalled more than once");
+
+    let delivered = server
+        .events()
+        .filter(|e| matches!(e, ConnectionEvent::Datagram(_)))
+        .count();
+    assert_eq!(delivered, 3, "nothing queued above the mark may be dropped");
+}
+
+/// Each fill past the mark re-arms the resume signal, so a sender that
+/// alternates between filling and waiting is told to resume every time.
+#[test]
+fn space_available_event_fires_on_each_fill_drain_cycle() {
+    let (mut client, mut server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(2).unwrap()));
+    for cycle in 0..3 {
+        assert_eq!(
+            client.enqueue_datagram(
+                session,
+                DATA_SMALLER_THAN_MTU_2.to_vec(),
+                Some(1),
+                now,
+                SendGroupId::new(0),
+                0
+            ),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+        assert_eq!(
+            client.enqueue_datagram(
+                session,
+                DATA_SMALLER_THAN_MTU_2.to_vec(),
+                Some(2),
+                now,
+                SendGroupId::new(0),
+                0
+            ),
+            Ok(DatagramQueueOutcome::AboveWatermark)
+        );
+
+        while let Some(out) = client.process_output(now).dgram() {
+            server.process_input(out, now);
+        }
+
+        assert!(
+            client
+                .events()
+                .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            "resume not signalled on fill/drain cycle {cycle}"
+        );
+    }
+}
+
+/// A queue that never reported anything but `Ok` has no sender waiting, so
+/// draining it must not produce a resume signal.
+#[test]
+fn no_space_available_event_when_never_blocked() {
+    let (mut client, mut server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(2).unwrap()));
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            DATA_SMALLER_THAN_MTU.to_vec(),
+            Some(1),
+            now,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    let out = client.process_output(now).dgram();
+    assert!(
+        !client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+        "resume signalled although the queue was never above the mark"
+    );
+
+    server.process_input(out.unwrap(), now);
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data == DATA_SMALLER_THAN_MTU
+    ));
+}
+
+/// A queue emptied entirely by [`OutgoingDatagramOutcome::DroppedTooBig`] must
+/// still release a blocked sender: the resume signal has to fire even though no
+/// datagram was sent.
+#[test]
+fn dropped_too_big_unblocks() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let session = StreamId::new(0);
+
+    // Within the peer's datagram-size limit (so accepted) but too big for any
+    // packet (so dropped at send time); a high water mark of one makes it block
+    // the sender by itself.
+    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            DATA_BIGGER_THAN_MTU.to_vec(),
+            Some(1),
+            now,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::AboveWatermark)
+    );
+    assert!(client.next_event().is_none());
+
+    let dropped = client.stats().datagram_tx.dropped_too_big;
+    // Nothing fits, so no packet carrying a datagram is produced, but the
+    // datagram is dropped as too big, which empties the queue.
+    assert!(client.process_output(now).dgram().is_none());
+    assert_eq!(client.stats().datagram_tx.dropped_too_big, dropped + 1);
+
+    assert_eq!(
+        client
+            .events()
+            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
+            .count(),
+        1,
+        "resume must be signalled exactly once after the queue was emptied by a drop"
     );
 }
