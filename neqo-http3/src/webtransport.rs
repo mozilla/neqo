@@ -14,8 +14,8 @@ use std::{
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
 use neqo_transport::{
-    Connection, DatagramTracking, Error as TransportError, StreamId, StreamType, recv_stream,
-    send_stream, server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramTracking, StreamId, StreamType, recv_stream, send_stream,
+    server::ConnectionRef, streams::SendOrder,
 };
 
 use crate::{
@@ -385,11 +385,7 @@ impl ExportKeyingMaterial for Connection {
         wt_context.encode_vec(1, label);
         wt_context.encode_vec(1, context);
 
-        self.export_keying_material("EXPORTER-WebTransport", wt_context.as_ref(), out)
-            .map_err(|e| match e {
-                TransportError::InvalidInput => Error::InvalidInput,
-                other => Error::Transport(other),
-            })
+        Ok(self.export_keying_material("EXPORTER-WebTransport", wt_context.as_ref(), out)?)
     }
 }
 
