@@ -50,6 +50,17 @@ jobs:
         with:
           persist-credentials: false
 
+      # CodSpeed macro runners are persistent bare-metal machines, not fresh per job: a
+      # toolchain from a prior job can already be installed with a different profile,
+      # and reconciling against it here hits an EXDEV rename bug in rustup. Install
+      # into a fresh, job-local home instead of touching the runner's existing state.
+      - name: Use a fresh Rust toolchain home
+        run: |
+          {
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+          } >> "$GITHUB_ENV"
+
       - uses: $/.github/actions/install-build-deps
         with:
           version: stable
