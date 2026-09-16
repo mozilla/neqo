@@ -36,7 +36,7 @@ jobs:
 
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
-    runs-on: ${{ matrix.bench.runner }}
+    runs-on: ${{ matrix.bench.runner }} # zizmor: ignore[self-hosted-runner]
     # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
     # environment: codspeed
     needs: bench-matrix
