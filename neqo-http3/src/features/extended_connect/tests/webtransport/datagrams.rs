@@ -193,6 +193,67 @@ fn untracked_datagram_eviction_is_counted_in_aggregate_stats() {
     assert_eq!(stats.datagrams_dropped_outgoing, 1);
 }
 
+/// [`Http3Client::webtransport_datagram_queue_capacity`] must reflect this
+/// session's own byte-budgeted queue - the one a content-process credit
+/// grant should track - and not be bounded by the legacy count-limited FIFO,
+/// nor shared with any other session's queue. Both live in `neqo-transport`:
+/// `send_datagram` hands the datagram straight to the per-session queue, so
+/// nothing is ever held at the HTTP/3 layer.
+#[test]
+fn datagram_queue_capacity_reflects_the_session_queue_not_the_legacy_fifo() {
+    // A burst larger than the 10-slot legacy FIFO must still be reflected
+    // faithfully by the per-session queue's own count.
+    const BURST: u8 = 20;
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    // A second, untouched session: proves the queue is scoped per session
+    // rather than shared, since its capacity must stay untouched by the
+    // first session's burst below.
+    let other_session = wt.create_wt_session();
+    let other_session_id = other_session.stream_id();
+
+    let before = wt
+        .client
+        .webtransport_datagram_queue_capacity(session_id)
+        .unwrap();
+    assert_eq!(before.queued_datagrams, 0);
+
+    for i in 0..BURST {
+        _ = wt
+            .client
+            .webtransport_send_datagram(
+                session_id,
+                &[0, i],
+                Some(u64::from(i)),
+                now(),
+                SendGroupId::new(0),
+                0,
+            )
+            .unwrap();
+    }
+
+    let after = wt
+        .client
+        .webtransport_datagram_queue_capacity(session_id)
+        .unwrap();
+    assert_eq!(after.queued_datagrams, usize::from(BURST));
+    assert!(
+        after.remaining_bytes < before.remaining_bytes,
+        "enqueuing datagrams must consume some of the byte budget"
+    );
+
+    assert_eq!(
+        wt.client
+            .webtransport_datagram_queue_capacity(other_session_id)
+            .unwrap(),
+        before,
+        "another session's queue must be untouched by this session's burst"
+    );
+}
+
 #[test]
 fn datagram_high_water_mark_signals_backpressure() {
     let mut wt = WtTest::new();
