@@ -231,6 +231,28 @@ jobs:
         with:
           target: ${{ matrix.target }}
 
+  # Prove neqo builds for a 32-bit target. Covers 32-bit pointer width,
+  # not i686-pc-windows-msvc or Windows-specific neqo-udp/mtu paths.
+  check-i686:
+    name: Check i686-unknown-linux-gnu
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install 32-bit host toolchain
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib
+      - uses: ./.github/actions/install-build-deps
+        with:
+          target: i686-unknown-linux-gnu
+      - name: Compile
+        run: cargo test --locked --no-run --all-targets --target i686-unknown-linux-gnu
+
   check-vm:
     name: Run checks for VM-only platforms
     if: ${{ github.event_name != 'push' }}
