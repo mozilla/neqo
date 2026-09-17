@@ -8,6 +8,7 @@
 
 use std::{
     fs::OpenOptions,
+    future::pending,
     io::Write as _,
     net::{SocketAddr, ToSocketAddrs as _},
     path::{Path, PathBuf},
@@ -32,6 +33,19 @@ pub mod udp;
 ///
 /// See `network.buffer.cache.size` pref <https://searchfox.org/mozilla-central/rev/f6e3b81aac49e602f06c204f9278da30993cdc8a/modules/libpref/init/all.js#3212>
 const STREAM_IO_BUFFER_SIZE: usize = 32 * 1024;
+
+/// The deadline `timeout` from now, or `None` on overflow.
+fn deadline(timeout: Duration) -> Option<tokio::time::Instant> {
+    tokio::time::Instant::now().checked_add(timeout)
+}
+
+/// Completes at `deadline`, or never when there is none.
+async fn sleep_until(deadline: Option<tokio::time::Instant>) {
+    match deadline {
+        Some(d) => tokio::time::sleep_until(d).await,
+        None => pending().await,
+    }
+}
 
 #[derive(Clone, Debug, Parser)]
 pub struct SharedArgs {
