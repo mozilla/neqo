@@ -20,7 +20,7 @@ use crate::{
     frame::Frame,
     packet,
     recovery::{self, StreamRecoveryToken},
-    recv_stream::{RecvStream, RecvStreams},
+    recv_stream::{FreeList, RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::{FrameStats, Stats},
     stream_id::{StreamId, StreamType},
@@ -91,6 +91,7 @@ pub struct Streams {
     local_stream_limits: LocalStreamLimits,
     send: SendStreams,
     recv: RecvStreams,
+    free_list: FreeList,
 }
 
 impl Streams {
@@ -112,6 +113,7 @@ impl Streams {
             local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
             recv: RecvStreams::new(role),
+            free_list: FreeList::default(),
         }
     }
 
@@ -448,6 +450,7 @@ impl Streams {
                     next_stream_id,
                     recv_initial_max_stream_data,
                     Rc::clone(&self.receiver_fc),
+                    self.free_list.clone(),
                     self.events.clone(),
                 ),
             );
@@ -559,6 +562,7 @@ impl Streams {
                             new_id,
                             recv_initial_max_stream_data,
                             Rc::clone(&self.receiver_fc),
+                            self.free_list.clone(),
                             self.events.clone(),
                         ),
                     );
@@ -648,5 +652,63 @@ impl Streams {
     #[must_use]
     pub fn need_keep_alive(&self) -> bool {
         self.recv.need_keep_alive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_common::Role;
+    use test_fixture::fixture_init;
+
+    use super::Streams;
+    use crate::{
+        ConnectionEvents,
+        fc::RemoteStreamLimits,
+        stream_id::{StreamId, StreamType},
+        tparams::{
+            TransportParameterId::{InitialMaxData, InitialMaxStreamDataBidiRemote},
+            TransportParameters, TransportParametersHandler,
+        },
+        version,
+    };
+
+    /// Guards the `free_list` arguments that wire streams to the connection's list.
+    #[test]
+    fn streams_share_one_free_list() {
+        fixture_init();
+        let mut handler = TransportParametersHandler::new(Role::Server, version::Config::default());
+        handler
+            .local_mut()
+            .set_integer(InitialMaxStreamDataBidiRemote, 1024);
+        handler.local_mut().set_integer(InitialMaxData, 4096);
+        // `obtain_stream` reads the peer's parameters.
+        handler.set_remote_0rtt(Some(TransportParameters::default()));
+        let mut streams = Streams::new(
+            Rc::new(RefCell::new(handler)),
+            Role::Server,
+            ConnectionEvents::default(),
+        );
+        // A bare handler advertises no streams.
+        streams.remote_stream_limits = RemoteStreamLimits::new(2, 2, Role::Server);
+
+        // The two creation paths.
+        let peer = StreamId::new(0);
+        streams.obtain_stream(peer).unwrap();
+        streams.local_stream_limits[StreamType::BiDi].update(1);
+        let local = streams.stream_create(StreamType::BiDi).unwrap();
+
+        let shared = |streams: &mut Streams, id| {
+            streams
+                .recv
+                .get_mut(id)
+                .unwrap()
+                .free_list()
+                .expect("buffering")
+                .clone()
+        };
+        let (a, b) = (shared(&mut streams, peer), shared(&mut streams, local));
+        assert!(a.is(&b), "streams must share the connection's free list");
     }
 }
