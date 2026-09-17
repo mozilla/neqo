@@ -11,10 +11,10 @@ use std::{cell::RefCell, rc::Rc};
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
-    Http3ServerEvent, Http3State, SendGroupId, SessionAcceptAction, WebTransportEvent,
+    Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
-use neqo_transport::{ConnectionParameters, StreamId, StreamType};
+use neqo_transport::{ConnectionParameters, StreamId, StreamType, streams::SendGroupId};
 use nss::AuthenticationStatus;
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
