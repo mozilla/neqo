@@ -85,14 +85,6 @@ impl Default for SendBuf {
     }
 }
 
-impl Deref for SendBuf {
-    type Target = Vec<u8>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 impl AsMut<Vec<u8>> for SendBuf {
     fn as_mut(&mut self) -> &mut Vec<u8> {
         &mut self.0
