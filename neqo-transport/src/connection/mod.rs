@@ -19,6 +19,7 @@ use std::{
 
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
+    datagram::BatchMeta,
     event::Provider as EventProvider,
     expect_usize,
     hex::{Hex, HexSnipMiddle, HexWithLen},
@@ -29,7 +30,7 @@ use neqo_common::{
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
-    agent::{CertificateCompressor, CertificateInfo},
+    cert::{CertificateCompressor, CertificateInfo},
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -110,8 +111,6 @@ pub enum Output {
     Callback(Duration),
 }
 
-pub use neqo_common::datagram::BatchMeta;
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum OutputBatch<'a> {
     /// Connection requires no action.
@@ -137,7 +136,7 @@ impl<'a> OutputBatch<'a> {
     fn single(self) -> Result<BatchMeta, Output> {
         match self {
             Self::DatagramBatch(b) => {
-                debug_assert_eq!(b.num_datagrams(), 1, "max_datagrams is 1");
+                assert_eq!(b.num_datagrams(), 1, "max_datagrams is 1");
                 Ok(b.meta())
             }
             Self::None => Err(Output::None),
@@ -156,13 +155,15 @@ impl<'a> OutputBatch<'a> {
 
     /// Rebuild a batch over `buffer` from [`Self::meta`], or [`Self::None`].
     ///
-    /// `buffer` must hold exactly the batch `meta` describes.
+    /// `buffer` must start with the batch `meta` describes.
+    ///
+    /// # Panics
+    /// When `buffer` is shorter than `meta.len`.
     #[must_use]
     pub fn rebuild(meta: Option<&BatchMeta>, buffer: &'a mut Vec<u8>) -> Self {
         let Some(meta) = meta else {
             return Self::None;
         };
-        debug_assert!(meta.datagram_size.get() <= buffer.len());
         Self::DatagramBatch(datagram::Batch::from_meta(meta, buffer.as_mut_slice()))
     }
 }
@@ -171,6 +172,9 @@ impl Output {
     /// Own the buffer `f` filled, for the single-datagram APIs.
     ///
     /// `f` gets the one datagram it may produce, so the buffer is that datagram.
+    ///
+    /// # Panics
+    /// When `f` produces more than one datagram.
     #[must_use]
     pub fn owned<F>(f: F) -> Self
     where
@@ -179,8 +183,7 @@ impl Output {
         let mut send_buffer = Vec::new();
         match f(&mut send_buffer, NonZeroUsize::MIN).single() {
             Ok(meta) => {
-                // `single` only debug-asserts one datagram.
-                send_buffer.truncate(meta.datagram_size.get());
+                send_buffer.truncate(meta.len);
                 // Only borrowed, so this moves.
                 Self::Datagram(Datagram::new(meta.src, meta.dst, meta.tos, send_buffer))
             }

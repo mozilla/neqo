@@ -6,13 +6,12 @@
 
 use std::{
     fmt::{self, Debug, Formatter},
-    io,
     net::SocketAddr,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
 };
 
-use crate::{Buffer, Bytes, Tos, hex::HexWithLen};
+use crate::{Bytes, Tos, hex::HexWithLen};
 
 /// A UDP datagram.
 ///
@@ -136,13 +135,14 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
     }
 }
 
-/// Source, destination, ECN marking and GSO segment size of a [`Batch`].
+/// Metadata for a [`Batch`] occupying the first `len` bytes of its buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BatchMeta {
     pub src: SocketAddr,
     pub dst: SocketAddr,
     pub tos: Tos,
     pub datagram_size: NonZeroUsize,
+    pub len: usize,
 }
 
 /// A batch of [`Datagram`]s with the same metadata, e.g., destination.
@@ -175,6 +175,8 @@ impl Debug for Batch<'_> {
 }
 
 impl<'a> Batch<'a> {
+    /// # Panics
+    /// When `d` is empty.
     #[must_use]
     pub const fn new(
         src: SocketAddr,
@@ -183,6 +185,7 @@ impl<'a> Batch<'a> {
         datagram_size: NonZeroUsize,
         d: &'a mut [u8],
     ) -> Self {
+        assert!(!d.is_empty(), "Batch data cannot be empty");
         Self {
             src,
             dst,
@@ -193,40 +196,20 @@ impl<'a> Batch<'a> {
     }
 
     /// Rebuild a batch from its [`BatchMeta`] and the buffer it was written into.
+    ///
+    /// # Panics
+    /// When `meta` does not describe a prefix of `d`.
     #[must_use]
-    pub const fn from_meta(meta: &BatchMeta, d: &'a mut [u8]) -> Self {
+    pub fn from_meta(meta: &BatchMeta, d: &'a mut [u8]) -> Self {
+        assert!(meta.datagram_size.get() <= meta.len);
+        assert!(meta.len <= d.len());
         Self {
             src: meta.src,
             dst: meta.dst,
             tos: meta.tos,
             datagram_size: meta.datagram_size,
-            d,
+            d: &mut d[..meta.len],
         }
-    }
-
-    /// Copy `d` onto the end of `buffer`, returning a batch over just those bytes.
-    ///
-    /// For cold paths with an owned datagram, such as Retry.
-    ///
-    /// # Errors
-    /// When `buffer` cannot hold `d`.
-    pub fn copy_from<B: Buffer>(d: &Datagram, buffer: &'a mut B) -> Result<Self, io::Error> {
-        let start = buffer.position();
-        // `write_all` writes what fits before failing, so undo a partial write.
-        if let Err(e) = buffer.write_all(d) {
-            buffer.truncate(start);
-            return Err(e);
-        }
-        // Nothing was written if it is empty, so no undo.
-        let datagram_size =
-            NonZeroUsize::new(d.len()).ok_or_else(|| io::Error::other("Datagram is empty"))?;
-        Ok(Self::new(
-            d.source(),
-            d.destination(),
-            d.tos(),
-            datagram_size,
-            &mut buffer.as_mut()[start..],
-        ))
     }
 
     #[must_use]
@@ -261,6 +244,7 @@ impl<'a> Batch<'a> {
             dst: self.dst,
             tos: self.tos,
             datagram_size: self.datagram_size,
+            len: self.d.len(),
         }
     }
 
@@ -298,14 +282,13 @@ impl<'a> Batch<'a> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use std::{
-        io::Cursor,
         net::{IpAddr, Ipv6Addr, SocketAddr},
         num::NonZeroUsize,
     };
 
     use test_fixture::{DEFAULT_ADDR, datagram};
 
-    use crate::{Buffer, Datagram, Ecn, Tos, datagram};
+    use crate::{Datagram, Ecn, Tos, datagram};
 
     #[test]
     fn fmt_datagram() {
@@ -377,33 +360,18 @@ mod tests {
     }
 
     #[test]
-    fn batch_copy_from() {
-        let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
-        let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
-        let d = Datagram::new(src, dst, Ecn::Ce.into(), vec![1, 2, 3, 4, 5]);
-
-        let mut buf = Vec::new();
-        let batch = datagram::Batch::copy_from(&d, &mut buf).unwrap();
-        assert_eq!(batch.source(), src);
-        assert_eq!(batch.destination(), dst);
-        assert_eq!(batch.tos(), Ecn::Ce.into());
-        assert_eq!(batch.datagram_size().get(), d.len());
-        assert_eq!(batch.data(), &d[..]);
-        assert_eq!(batch.num_datagrams(), 1);
-    }
-
-    #[test]
-    fn batch_copy_from_too_small() {
+    fn batch_from_meta_uses_length() {
         let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
-        // Non-zero, so an undone write is visible.
-        let d = Datagram::new(addr, addr, Tos::default(), vec![0xAB; 10]);
-
-        let mut buf = [0; 4];
-        let mut cursor = Cursor::new(&mut buf[..]);
-        assert!(datagram::Batch::copy_from(&d, &mut cursor).is_err());
-        // A partial write is undone.
-        assert_eq!(Buffer::position(&cursor), 0);
-        assert_eq!(buf, [0; 4]);
+        let meta = datagram::BatchMeta {
+            src: addr,
+            dst: addr,
+            tos: Tos::default(),
+            datagram_size: NonZeroUsize::new(4).unwrap(),
+            len: 5,
+        };
+        let mut buf = [0; 8];
+        let batch = datagram::Batch::from_meta(&meta, &mut buf);
+        assert_eq!(batch.data().len(), 5);
     }
 
     #[test]

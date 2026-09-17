@@ -84,12 +84,8 @@ fn process_multiple_output_batch() {
         )
         .dgram()
         .expect("a datagram batch");
-    let num_datagrams = batch.num_datagrams();
-    assert!(num_datagrams > 1);
-    assert_eq!(
-        batch.data().len(),
-        batch.datagram_size().get() * num_datagrams
-    );
+    assert_eq!(batch.num_datagrams(), 4);
+    assert_eq!(batch.data().len(), batch.datagram_size().get() * 4);
 }
 
 #[test]

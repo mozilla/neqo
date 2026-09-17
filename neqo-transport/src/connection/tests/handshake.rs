@@ -1774,7 +1774,7 @@ fn grease_quic_bit_respects_current_handshake() {
 fn certificate_compression() {
     use std::sync::Mutex;
 
-    use nss::agent::CertificateCompressor;
+    use nss::cert::CertificateCompressor;
 
     // These statics work for concurrent test execution because the certificate is
     // effectively a fixed value. A more robust approach would use a hash-based lookup,

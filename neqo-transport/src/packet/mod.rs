@@ -184,7 +184,7 @@ impl Builder<Vec<u8>> {
 }
 
 impl<B: Buffer> Builder<B> {
-    /// Write a Version Negotiation packet into `send_buffer`.
+    /// Write a Version Negotiation packet into `send_buffer`, returning its length.
     ///
     /// # Panics
     /// When `send_buffer` has fixed capacity that cannot hold the packet.
@@ -194,7 +194,7 @@ impl<B: Buffer> Builder<B> {
         client_version: u32,
         versions: &[Version],
         send_buffer: B,
-    ) {
+    ) -> usize {
         let mut encoder = Encoder::new(send_buffer);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
@@ -215,7 +215,9 @@ impl<B: Buffer> Builder<B> {
         // by making the last byte differ from the client initial.
         grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
         encoder.encode(&grease[..4]);
+        encoder.len()
     }
+
     /// Start building a short header packet.
     ///
     /// This doesn't fail if there isn't enough space; instead it returns a builder that

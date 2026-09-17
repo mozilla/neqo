@@ -19,8 +19,8 @@ use std::{
 };
 
 use neqo_common::{
-    Buffer as _, Datagram, Role, Tos, datagram, event::Provider as _, hex::Hex, qdebug, qerror,
-    qinfo, qlog::Qlog, qtrace, qwarn,
+    Datagram, Role, Tos, event::Provider as _, hex::Hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
+    qwarn,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -30,10 +30,10 @@ use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
-    ConnectionParameters, OutputBatch, Res, Version,
+    BatchMeta, ConnectionParameters, OutputBatch, Res, Version,
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
-    connection::{BatchMeta, Connection, Output, State},
+    connection::{Connection, Output, State},
     packet::{self, MIN_INITIAL_PACKET_SIZE, Public},
     saved::SavedDatagram,
 };
@@ -294,13 +294,17 @@ impl Server {
                     Tos::default(),
                     p.len(),
                 );
-                // Retry needs its own scratch space for the pseudo-header, so copy.
-                let d = Datagram::new(dgram.destination(), dgram.source(), Tos::default(), p);
                 // Same offset-0 invariant as VN.
                 debug_assert!(send_buffer.is_empty());
-                datagram::Batch::copy_from(&d, send_buffer)
-                    .ok()
-                    .map(|b| b.meta())
+                send_buffer.extend_from_slice(&p);
+                let datagram_size = NonZeroUsize::new(p.len())?;
+                Some(BatchMeta {
+                    src: dgram.destination(),
+                    dst: dgram.source(),
+                    tos: Tos::default(),
+                    datagram_size,
+                    len: p.len(),
+                })
             }
         }
     }
@@ -494,24 +498,22 @@ impl Server {
                 }
 
                 qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-                // `rebuild` spans the whole buffer.
+                // `rebuild` starts at offset 0.
                 debug_assert!(send_buffer.is_empty());
-                // `version_negotiation` appends, so measure what it wrote.
-                let start = send_buffer.position();
-                packet::Builder::version_negotiation(
+                let vn_len = packet::Builder::version_negotiation(
                     &packet.scid()[..],
                     &packet.dcid()[..],
                     packet.wire_version(),
                     self.conn_params.get_versions().all(),
                     &mut *send_buffer,
                 );
-                let vn_len = send_buffer.position() - start;
                 qdebug!(
                     "[{self}] type={:?} path:{} {destination}->{source} {:?} len {vn_len}",
                     packet::Type::VersionNegotiation,
                     packet.dcid(),
                     Tos::default(),
                 );
+                let datagram_size = NonZeroUsize::new(vn_len)?;
 
                 crate::qlog::server_version_information_failed(
                     &mut self.create_qlog_trace(packet.dcid(), now),
@@ -522,13 +524,12 @@ impl Server {
 
                 self.save_for_later(dgrams, now);
 
-                // Always `Some`, as a Version Negotiation packet is not empty.
-                let datagram_size = NonZeroUsize::new(vn_len)?;
                 return Some(BatchMeta {
                     src: destination,
                     dst: source,
                     tos: Tos::default(),
                     datagram_size,
+                    len: vn_len,
                 });
             }
 

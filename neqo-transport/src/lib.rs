@@ -6,6 +6,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub use neqo_common::datagram::{Batch, BatchMeta};
 use neqo_common::qwarn;
 use nss::Error as CryptoError;
 use thiserror::Error;
@@ -62,7 +63,7 @@ pub use self::{
         EmptyConnectionIdGenerator, RandomConnectionIdGenerator,
     },
     connection::{
-        BatchMeta, Connection, Output, OutputBatch, State, ZeroRttState,
+        Connection, Output, OutputBatch, State, ZeroRttState,
         params::{
             ConnectionParameters, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
             MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,

@@ -744,6 +744,7 @@ mod tests {
                     dst: closed_addr,
                     tos: Tos::default(),
                     datagram_size: size,
+                    len: data.len(),
                 },
                 data,
             ));

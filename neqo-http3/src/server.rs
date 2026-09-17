@@ -154,9 +154,10 @@ impl Http3Server {
             .process_multiple_input(dgrams, now, &mut *send_buffer)
             .meta();
         self.process_http3(now);
-        if written.is_some() {
-            qtrace!("[{self}] Send packet: {written:?}");
-            return OutputBatch::rebuild(written.as_ref(), send_buffer);
+        if let Some(meta) = written {
+            let batch = OutputBatch::rebuild(Some(&meta), send_buffer);
+            qtrace!("[{self}] Send packet: {batch:?}");
+            return batch;
         }
         // Input produced no datagram, so try again after `process_http3`.
         let out = self

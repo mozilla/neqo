@@ -23,8 +23,8 @@ use http::Uri as Url;
 use neqo_common::{Datagram, event::Provider, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
-    AppError, CloseReason, Connection, EmptyConnectionIdGenerator, Error as TransportError,
-    OutputBatch, RandomConnectionIdGenerator, StreamId,
+    AppError, CloseReason, Connection, EmptyConnectionIdGenerator, OutputBatch,
+    RandomConnectionIdGenerator, StreamId,
 };
 use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
@@ -420,11 +420,7 @@ impl UrlHandler {
                 self.handled_urls.push(url);
                 true
             }
-            Err(
-                Error::Transport(TransportError::StreamLimit)
-                | Error::StreamLimit
-                | Error::Unavailable,
-            ) => {
+            Err(Error::StreamLimit | Error::Unavailable) => {
                 self.url_queue.push_front(url);
                 false
             }
