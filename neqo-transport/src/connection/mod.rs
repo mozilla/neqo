@@ -50,7 +50,7 @@ use crate::{
     packet,
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
+    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagrams},
     recovery::{self, SendProfile, sent},
     recv_stream,
     rtt::{DEFAULT_INITIAL_RTT, GRANULARITY, RttEstimate},
@@ -443,11 +443,7 @@ impl Connection {
 
         let stats = StatsCell::default();
         let events = ConnectionEvents::default();
-        let quic_datagrams = QuicDatagrams::new(
-            conn_params.get_datagram_size(),
-            conn_params.get_outgoing_datagram_queue(),
-            events.clone(),
-        );
+        let quic_datagrams = QuicDatagrams::new(conn_params.get_datagram_size(), events.clone());
 
         let c = Self {
             role,
@@ -4106,30 +4102,6 @@ impl Connection {
         Ok(min(data_len_possible, max_dgram_size))
     }
 
-    /// Queue a datagram for sending.
-    ///
-    /// The QUIC datagram is always queued. Returns `Ok(true)` if space remains
-    /// afterwards, or `Ok(false)` if the outgoing QUIC datagram queue is now
-    /// full. On `Ok(false)` the application should stop sending and wait for an
-    /// [`OutgoingDatagramSpaceAvailable`] event before sending again; nothing
-    /// already queued is dropped.
-    ///
-    /// # Errors
-    ///
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The function does not check if the
-    /// datagram can fit into a packet (i.e. MTU limit). This is checked during
-    /// creation of an actual packet and the datagram will be dropped if it does
-    /// not fit into the packet. The app is encourage to use `max_datagram_size`
-    /// to check the estimated max datagram size and to use smaller datagrams.
-    /// `max_datagram_size` is just a current estimate and will change over
-    /// time depending on the encoded size of the packet number, ack frames, etc.
-    ///
-    /// [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
-    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<bool> {
-        self.quic_datagrams.add_datagram(buf, id.into())
-    }
-
     /// [`crate::datagram_queue::default_max_age`] evaluated against this
     /// connection's current RTT estimate. Internal to `Connection` so
     /// per-session datagram-queue callers below do not each need their own
@@ -4149,16 +4121,16 @@ impl Connection {
     /// (in practice, a WebTransport session's control-stream `StreamId`).
     /// `send_group_id` of `SendGroupId::new(0)` means ungrouped.
     ///
-    /// Unlike [`Self::send_datagram`], this never fails: the *path* MTU is
-    /// applied later, at packet-build time, exactly like queued stream data.
+    /// This never fails: the *path* MTU is applied later, at packet-build
+    /// time, exactly like queued stream data.
     ///
     /// The peer's limit is not, though: the caller must not enqueue anything
     /// longer than [`Self::remote_datagram_size`], or anything at all while
     /// that is `0` (the peer sent no `max_datagram_frame_size` and so does
     /// not support DATAGRAM frames at all). Neither is checked here or at
     /// packet-build time, and sending either violates the peer's transport
-    /// parameters. Callers that want the check made for them should use
-    /// [`Self::send_datagram`], which has an error path for it.
+    /// parameters. The HTTP/3 layer makes this check for its own callers
+    /// before ever enqueueing (see `Session::send_datagram`).
     pub fn enqueue_datagram(
         &mut self,
         session: StreamId,
