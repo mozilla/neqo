@@ -11,7 +11,10 @@ mod streams;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _, to_u64};
-use neqo_transport::{ConnectionParameters, Pmtud, StreamId, StreamType, recv_stream, send_stream};
+use neqo_transport::{
+    ConnectionParameters, DatagramQueueOutcome, Pmtud, StreamId, StreamType, recv_stream,
+    send_stream,
+};
 use nss::AuthenticationStatus;
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
@@ -20,7 +23,7 @@ use test_fixture::{
 
 use crate::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters,
-    Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    Http3Server, Http3ServerEvent, Http3State, SendGroupId, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::CloseReason,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
@@ -619,9 +622,13 @@ impl WtTest {
         self.client.webtransport_max_datagram_size(stream_id)
     }
 
-    fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<bool, Error> {
+    fn send_datagram(
+        &mut self,
+        stream_id: StreamId,
+        buf: &[u8],
+    ) -> Result<DatagramQueueOutcome, Error> {
         self.client
-            .webtransport_send_datagram(stream_id, buf, None, now())
+            .webtransport_send_datagram(stream_id, buf, None, now(), SendGroupId::new(0), 0)
     }
 
     fn check_datagram_received_client(
