@@ -15,7 +15,7 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
-    slice::{self, ChunksMut},
+    slice::ChunksMut,
 };
 
 use log::{Level, log_enabled};
@@ -24,11 +24,13 @@ use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock;
 
-/// Receive buffer size
+/// Receive buffer size, per slot in [`RecvBuf`].
 ///
 /// Fits a maximum size UDP datagram, or, on platforms with segmentation
 /// offloading, multiple smaller datagrams.
-const RECV_BUF_SIZE: usize = u16::MAX as usize;
+///
+/// Rounded up so contiguous slots keep the same page offset.
+const RECV_BUF_SIZE: usize = u16::MAX as usize + 1;
 
 /// The number of buffers to pass to the OS on [`Socket::recv`].
 ///
@@ -48,12 +50,12 @@ const NUM_BUFS: usize = 1;
 // Value approximated based on neqo-bin "Download" benchmark only.
 const NUM_BUFS: usize = 16;
 
-/// A UDP receive buffer.
-pub struct RecvBuf(Vec<Vec<u8>>);
+/// A UDP receive buffer backed by one contiguous allocation.
+pub struct RecvBuf(Box<[u8]>);
 
 impl Default for RecvBuf {
     fn default() -> Self {
-        Self(vec![vec![0; RECV_BUF_SIZE]; NUM_BUFS])
+        Self(vec![0; RECV_BUF_SIZE * NUM_BUFS].into_boxed_slice())
     }
 }
 
@@ -151,7 +153,7 @@ pub fn recv_inner<'a, S: SocketRef>(
 ) -> Result<DatagramIter<'a>, io::Error> {
     let mut metas = [RecvMeta::default(); NUM_BUFS];
     let mut iovs: [IoSliceMut; NUM_BUFS] = {
-        let mut bufs = recv_buf.0.iter_mut().map(|b| IoSliceMut::new(b));
+        let mut bufs = recv_buf.0.chunks_mut(RECV_BUF_SIZE).map(IoSliceMut::new);
         array::from_fn(|_| bufs.next().expect("NUM_BUFS elements"))
     };
 
@@ -175,7 +177,10 @@ pub fn recv_inner<'a, S: SocketRef>(
 
     Ok(DatagramIter {
         current_buffer: None,
-        remaining_buffers: metas.into_iter().zip(recv_buf.0.iter_mut()).take(n),
+        remaining_buffers: metas
+            .into_iter()
+            .zip(recv_buf.0.chunks_mut(RECV_BUF_SIZE))
+            .take(n),
         local_address,
     })
 }
@@ -187,7 +192,7 @@ pub struct DatagramIter<'a> {
     /// Remaining buffers, each containing zero or more datagrams, one
     /// [`RecvMeta`] per buffer.
     remaining_buffers:
-        iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, slice::IterMut<'a, Vec<u8>>>>,
+        iter::Take<iter::Zip<array::IntoIter<RecvMeta, NUM_BUFS>, ChunksMut<'a, u8>>>,
     /// The local address of the UDP socket used to receive the datagrams.
     local_address: SocketAddr,
 }
