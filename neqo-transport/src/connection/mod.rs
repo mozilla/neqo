@@ -1086,10 +1086,8 @@ impl Connection {
 
         // Not gated on anything else needing to happen: expiry is not a
         // send, so stale datagrams must not wait on some other timer to
-        // also be due. `default_max_age` is a snapshot of the current RTT
-        // estimate here to avoid re-borrowing `self.paths` inside the loop.
-        let default_max_age = self.datagram_default_max_age();
-        _ = self.quic_datagrams.expire_datagrams(now, default_max_age);
+        // also be due.
+        _ = self.expire_datagrams(now);
 
         let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
@@ -4204,6 +4202,33 @@ impl Connection {
     #[must_use]
     pub fn datagram_queue_capacity(&self, session: StreamId) -> DatagramQueueCapacity {
         self.quic_datagrams.datagram_queue_capacity(session)
+    }
+
+    /// Expire stale datagrams on every session's queue, returning one entry
+    /// per expired datagram across all sessions (`Some(id)` for tracked
+    /// ones). `process_timer` already does this on its own schedule (so a
+    /// caller with no other reason to poll doesn't need to); this exists for
+    /// a caller that wants the expired IDs themselves, e.g. to report an
+    /// outcome tagged by application protocol.
+    ///
+    /// Connection-*wide*: a caller holding one session cannot tell which of
+    /// the returned IDs were its own, and must use
+    /// [`Self::expire_session_datagrams`] instead.
+    pub fn expire_datagrams(&mut self, now: Instant) -> Vec<Option<DatagramId>> {
+        let default_max_age = self.datagram_default_max_age();
+        self.quic_datagrams.expire_datagrams(now, default_max_age)
+    }
+
+    /// [`Self::expire_datagrams`] for a single session's queue, for a caller
+    /// that reports outcomes or counts per session.
+    pub fn expire_session_datagrams(
+        &mut self,
+        session: StreamId,
+        now: Instant,
+    ) -> Vec<Option<DatagramId>> {
+        let default_max_age = self.datagram_default_max_age();
+        self.quic_datagrams
+            .expire_session_datagrams(session, now, default_max_age)
     }
 
     /// Remove every datagram queued on `session`'s behalf, e.g. because the
