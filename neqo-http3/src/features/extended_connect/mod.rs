@@ -19,6 +19,9 @@ use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{Bytes, Header, Role, qdebug};
 use neqo_transport::StreamId;
+// Re-exported so other modules can write `extended_connect::DatagramOutcome`,
+// matching the `extended_connect::stats::SessionStats` convention.
+pub use neqo_transport::{DatagramOutcome, DatagramQueueOutcome};
 
 use crate::{
     Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
@@ -63,6 +66,12 @@ pub(crate) trait ExtendedConnectEvents: Debug {
     /// resume event instead originates in `neqo-transport` and is forwarded to
     /// the HTTP/3 event by the connection.
     fn capsule_space_available(&self);
+    fn datagram_outcome(
+        &self,
+        session_id: StreamId,
+        outcome: DatagramOutcome,
+        connect_type: ExtendedConnectType,
+    );
 }
 
 #[derive(Debug, PartialEq, Copy, Clone, Eq, strum::Display)]

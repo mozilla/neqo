@@ -569,6 +569,13 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
+        // Drop what is still queued first, so the snapshot below counts it:
+        // the teardown would do this anyway, but only after the caller has
+        // been handed its "final" stats. Doing it twice is harmless - the
+        // second call finds no queue left.
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .drop_queued_datagrams(conn);
         // Snapshot the stats before tearing the session down, so the caller sees
         // the final values. This also rejects non-WebTransport sessions.
         //
@@ -1088,6 +1095,7 @@ impl Deref for ServerSession {
 }
 
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum ServerEvent {
     NewSession {
         session: ServerSession,
@@ -1103,6 +1111,10 @@ pub enum ServerEvent {
         session: ServerSession,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -1115,6 +1127,11 @@ pub(crate) trait ServerEvents {
     );
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream);
     fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes);
+    fn webtransport_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    );
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -1149,5 +1166,15 @@ impl ServerEvents for Http3ServerEvents {
             session,
             datagram,
         }));
+    }
+
+    fn webtransport_datagram_outcome(
+        &self,
+        session: ServerSession,
+        outcome: extended_connect::DatagramOutcome,
+    ) {
+        self.push(Http3ServerEvent::WebTransport(
+            ServerEvent::DatagramOutcome { session, outcome },
+        ));
     }
 }

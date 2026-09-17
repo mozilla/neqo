@@ -9,7 +9,7 @@ use neqo_common::{
     event::{Provider as EventProvider, Queue as EventQueue},
     qtrace,
 };
-use neqo_transport::{AppError, StreamId, StreamType};
+use neqo_transport::{AppError, DatagramOutcome, StreamId, StreamType};
 use nss::ResumptionToken;
 
 use crate::{
@@ -21,6 +21,7 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum WebTransportEvent {
     Negotiated(
         /// Whether WebTransport was negotiated.
@@ -47,9 +48,14 @@ pub enum WebTransportEvent {
         session_id: StreamId,
         datagram: Bytes,
     },
+    DatagramOutcome {
+        session_id: StreamId,
+        outcome: DatagramOutcome,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[non_exhaustive]
 pub enum ConnectUdpEvent {
     Negotiated(
         /// Whether CONNECT-UDP was negotiated.
@@ -68,6 +74,10 @@ pub enum ConnectUdpEvent {
     Datagram {
         session_id: StreamId,
         datagram: Bytes,
+    },
+    DatagramOutcome {
+        session_id: StreamId,
+        outcome: DatagramOutcome,
     },
 }
 
@@ -295,6 +305,29 @@ impl ExtendedConnectEvents for Http3ClientEvents {
 
     fn capsule_space_available(&self) {
         self.datagram_space_available();
+    }
+
+    fn datagram_outcome(
+        &self,
+        session_id: StreamId,
+        outcome: DatagramOutcome,
+        connect_type: ExtendedConnectType,
+    ) {
+        let event = match connect_type {
+            ExtendedConnectType::WebTransport => {
+                Http3ClientEvent::WebTransport(WebTransportEvent::DatagramOutcome {
+                    session_id,
+                    outcome,
+                })
+            }
+            ExtendedConnectType::ConnectUdp => {
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::DatagramOutcome {
+                    session_id,
+                    outcome,
+                })
+            }
+        };
+        self.events.push(event);
     }
 }
 
