@@ -794,6 +794,8 @@ impl Http3Client {
     /// [1]: ../neqo_transport/enum.Output.html
     /// [2]: ../neqo_transport/struct.ConnectionEvents.html
     /// [3]: ../neqo_transport/struct.Connection.html#method.process_output
+    ///
+    /// `send_buffer` is cleared before writing; reuse it across calls.
     pub fn process_multiple_output<'b>(
         &mut self,
         now: Instant,

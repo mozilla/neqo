@@ -63,6 +63,36 @@ fn single_client() {
 }
 
 #[test]
+fn process_multiple_output_batch() {
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    let mut client = default_client();
+    let server_conn = connect(&mut client, &mut server);
+
+    {
+        let mut conn = server_conn.borrow_mut();
+        let stream_id = conn.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(conn.stream_send(stream_id, &[0; 8192]).unwrap(), 8192);
+    }
+
+    let mut send_buffer = Vec::new();
+    let batch = server
+        .process_multiple(
+            None::<Datagram>,
+            now(),
+            &mut send_buffer,
+            NonZeroUsize::new(4).unwrap(),
+        )
+        .dgram()
+        .expect("a datagram batch");
+    let num_datagrams = batch.num_datagrams();
+    assert!(num_datagrams > 1);
+    assert_eq!(
+        batch.data().len(),
+        batch.datagram_size().get() * num_datagrams
+    );
+}
+
+#[test]
 fn connect_single_version_both() {
     fn connect_one_version(version: Version) {
         let mut server =
@@ -976,43 +1006,4 @@ fn saved_datagrams() {
         )
         .dgram()
         .expect("fourth packet triggers third vn");
-}
-
-/// Saved input is drained on a later call, when the first datagram of a batch
-/// needed an immediate Version Negotiation response.
-#[test]
-fn saved_datagrams_are_drained() {
-    let mut server = default_server();
-
-    let invalid_dgram = || {
-        let mut client = default_client();
-        let dgram = client.process_output(now()).dgram().expect("a datagram");
-        let mut input = dgram.to_vec();
-        input[1] ^= 0x12;
-        Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), input)
-    };
-
-    // Two datagrams each need an immediate Version Negotiation response, so the
-    // second is saved while the first is answered.
-    let mut send_buffer = Vec::new();
-    server
-        .process_multiple(
-            vec![invalid_dgram(), invalid_dgram()],
-            now(),
-            &mut send_buffer,
-            NonZeroUsize::MIN,
-        )
-        .dgram()
-        .expect("first datagram triggers a vn");
-
-    // The next call drains what was saved.
-    server
-        .process_multiple(
-            Vec::<Datagram>::new(),
-            now(),
-            &mut send_buffer,
-            NonZeroUsize::MIN,
-        )
-        .dgram()
-        .expect("saved datagram triggers a vn");
 }

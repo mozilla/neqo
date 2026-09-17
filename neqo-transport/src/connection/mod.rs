@@ -2704,26 +2704,13 @@ impl Connection {
     ) -> Res<SendOptionBatch<'b>> {
         // GSO segmentation and `Batch::num_datagrams` count from offset 0.
         debug_assert!(send_buffer.is_empty());
-        let (packet_tos, mtu, address_family_max_mtu, first_datagram) = {
+        let (packet_tos, mtu, address_family_max_mtu) = {
             let p = path.borrow();
-            let mtu = p.plpmtu();
-            // A PMTUD probe exceeds the PLPMTU, so reserve for it, to not realloc.
-            let first_datagram = if p.pmtud().needs_probe() {
-                p.pmtud().probe_size()
-            } else {
-                mtu
-            };
-            (
-                p.tos(),
-                mtu,
-                p.pmtud().address_family_max_mtu(),
-                first_datagram,
-            )
+            (p.tos(), p.plpmtu(), p.pmtud().address_family_max_mtu())
         };
 
         let mut datagram_size = None;
         let mut num_datagrams = 0;
-        send_buffer.reserve(first_datagram);
 
         loop {
             if max_datagrams.get() <= num_datagrams {

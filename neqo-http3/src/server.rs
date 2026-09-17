@@ -134,6 +134,8 @@ impl Http3Server {
         Output::owned(|b, max| self.process_multiple(dgrams, now, b, max))
     }
 
+    /// Process input and produce output in `send_buffer`.
+    /// `send_buffer` is cleared before writing; reuse it across calls.
     pub fn process_multiple<
         'b,
         A: AsRef<[u8]> + AsMut<[u8]>,
@@ -157,12 +159,9 @@ impl Http3Server {
             return OutputBatch::rebuild(written.as_ref(), send_buffer);
         }
         // Input produced no datagram, so try again after `process_http3`.
-        let out = self.server.process_multiple(
-            std::iter::empty::<Datagram<Vec<u8>>>(),
-            now,
-            send_buffer,
-            max_datagrams,
-        );
+        let out = self
+            .server
+            .process_multiple(None::<Datagram>, now, send_buffer, max_datagrams);
         if !matches!(out, OutputBatch::DatagramBatch(_)) {
             self.http3_handlers.retain(|c, _| {
                 if let State::Closed(error) = c.borrow().state().clone() {

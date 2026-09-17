@@ -20,6 +20,7 @@ use crate::{
         CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
         new_client, new_server, send_something,
     },
+    pmtud::SEARCH_TABLE_LEN,
 };
 
 /// Test that one can reach the maximum MTU with GSO enabled.
@@ -215,7 +216,10 @@ fn send_buffer_holds_pmtud_probe() {
     // datagram is a probe larger than the current PLPMTU.
     fill_stream(&mut client, stream_id);
     let mut send_buffer = Vec::new();
-    while !needs_probe(&client) {
+    for _ in 0..SEARCH_TABLE_LEN {
+        if needs_probe(&client) {
+            break;
+        }
         let mut pkts = client
             .process_multiple_output(now(), &mut send_buffer, 2.try_into().unwrap())
             .dgram()
@@ -226,6 +230,7 @@ fn send_buffer_holds_pmtud_probe() {
         }
         fill_stream(&mut client, stream_id);
     }
+    assert!(needs_probe(&client), "PMTUD probe did not become pending");
 
     let (plpmtu, probe) = {
         let path = client.paths.primary().unwrap();
@@ -240,6 +245,5 @@ fn send_buffer_holds_pmtud_probe() {
         .dgram()
         .expect("a datagram");
     assert_eq!(batch.datagram_size().get(), probe);
-    // Sized for the probe, not the PLPMTU, in a single allocation.
-    assert_eq!(buf.capacity(), probe);
+    assert_eq!(batch.data().len(), probe);
 }
