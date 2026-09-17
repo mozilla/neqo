@@ -27,7 +27,7 @@ use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
     OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
-use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, agent::CertificateInfo};
+use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, cert::CertificateInfo};
 
 use crate::{
     Error, Http3Parameters, NewStreamType, Priority, ReceiveOutput, Res, SendGroupId,

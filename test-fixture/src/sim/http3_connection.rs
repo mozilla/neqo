@@ -455,15 +455,25 @@ mod tests {
         },
     };
 
-    #[test]
-    fn requests() {
+    fn run_requests(num_requests: usize, body_size: usize) {
         let nodes = boxed![
-            Node::default_client(boxed![Requests::new(20, 1_000)]),
+            Node::default_client(boxed![Requests::new(num_requests, body_size)]),
             TailDrop::dsl_uplink(),
-            Node::default_server(boxed![Responses::new(20, 1_000)]),
+            Node::default_server(boxed![Responses::new(num_requests, body_size)]),
             TailDrop::dsl_uplink(),
         ];
-        let sim = Simulator::new("", nodes);
-        sim.setup().run();
+        Simulator::new("", nodes).setup().run();
+    }
+
+    #[test]
+    fn requests() {
+        run_requests(20, 1_000);
+    }
+
+    // Body exceeds neqo_http3's read-buffer size, forcing multiple `Data` events per request.
+    #[test]
+    fn requests_with_body_larger_than_read_buffer() {
+        const READ_BUFFER_SIZE: usize = 32 * 1024;
+        run_requests(2, READ_BUFFER_SIZE + 8 * 1024);
     }
 }
