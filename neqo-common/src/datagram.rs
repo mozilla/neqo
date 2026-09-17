@@ -194,7 +194,7 @@ impl<'a> Batch<'a> {
 
     /// Rebuild a batch from its [`BatchMeta`] and the buffer it was written into.
     #[must_use]
-    pub const fn from_meta(meta: BatchMeta, d: &'a mut [u8]) -> Self {
+    pub const fn from_meta(meta: &BatchMeta, d: &'a mut [u8]) -> Self {
         Self {
             src: meta.src,
             dst: meta.dst,

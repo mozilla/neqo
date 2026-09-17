@@ -489,7 +489,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                 &mut self.server,
                 &mut self.timeout,
                 &mut self.sockets,
-                &mut self.send_buf,
+                self.send_buf.as_mut(),
                 &self.now,
                 Some(input_dgrams),
             )
@@ -504,7 +504,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             &mut self.server,
             &mut self.timeout,
             &mut self.sockets,
-            &mut self.send_buf,
+            self.send_buf.as_mut(),
             &self.now,
             None,
         )

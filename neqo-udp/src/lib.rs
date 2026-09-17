@@ -15,7 +15,7 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
-    ops::{Deref, DerefMut},
+    ops::Deref,
     slice::ChunksMut,
 };
 
@@ -93,8 +93,8 @@ impl Deref for SendBuf {
     }
 }
 
-impl DerefMut for SendBuf {
-    fn deref_mut(&mut self) -> &mut Self::Target {
+impl AsMut<Vec<u8>> for SendBuf {
+    fn as_mut(&mut self) -> &mut Vec<u8> {
         &mut self.0
     }
 }

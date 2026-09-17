@@ -119,7 +119,6 @@ impl From<Epoch> for Type {
     }
 }
 
-#[derive(Clone)]
 struct BuilderOffsets {
     /// The bits of the first octet that need masking.
     first_byte_mask: u8,

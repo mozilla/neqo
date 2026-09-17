@@ -234,10 +234,12 @@ fn send_buffer_holds_pmtud_probe() {
     };
     assert!(probe > plpmtu);
 
-    let mut buf = Vec::with_capacity(probe);
+    let mut buf = Vec::new();
     let batch = client
         .process_multiple_output(now(), &mut buf, NonZeroUsize::MIN)
         .dgram()
         .expect("a datagram");
     assert_eq!(batch.datagram_size().get(), probe);
+    // Sized for the probe, not the PLPMTU, in a single allocation.
+    assert_eq!(buf.capacity(), probe);
 }

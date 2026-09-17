@@ -481,7 +481,7 @@ impl<'a, H: Handler> Runner<'a, H> {
 
             match self
                 .client
-                .process_multiple_output(now(), &mut self.send_buf, max_datagrams)
+                .process_multiple_output(now(), self.send_buf.as_mut(), max_datagrams)
             {
                 OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
