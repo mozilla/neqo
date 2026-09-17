@@ -15,7 +15,6 @@ use std::{
     io::{self, IoSliceMut},
     iter,
     net::SocketAddr,
-    ops::Deref,
     slice::ChunksMut,
 };
 
