@@ -778,7 +778,7 @@ impl Http3Connection {
         qdebug!("[{self}] Close connection error {error:?}");
         self.state = Http3State::Closing(CloseReason::Application(error));
         if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
-            qwarn!("close(0) called when streams still active");
+            qdebug!("close(0) called when streams still active");
         }
         self.send_streams.clear();
         self.recv_streams.clear();

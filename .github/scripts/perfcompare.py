@@ -11,11 +11,10 @@ import subprocess
 import tempfile
 import time
 from dataclasses import dataclass
+from itertools import product
 from pathlib import Path
 from statistics import NormalDist, median
 from typing import NamedTuple
-
-from scipy.stats import mannwhitneyu
 
 
 class ImplConfig(NamedTuple):
@@ -61,8 +60,8 @@ class Cfg:
     runs: int
     workspace: Path
     perf_opt: str
-    server_set: str = "bench/server"
-    client_set: str = "bench/client"
+    server_cpu: int = 0
+    client_cpu: int = 1
 
 
 def _tag(cmd: str) -> str:
@@ -81,6 +80,9 @@ def is_significant(s1: list[float], s2: list[float], pct: float) -> bool:
     pct is the caller's already-computed percent change between the two
     samples' medians.
     """
+    # Deferred, so that listing units and merging their results needs no SciPy.
+    from scipy.stats import mannwhitneyu
+
     if not s1 or not s2 or abs(pct) < NOISE_FLOOR_PCT:
         return False
     return bool(mannwhitneyu(s1, s2, alternative="two-sided").pvalue < 0.05)
@@ -99,11 +101,17 @@ def sh(cmd, **kw):
     return subprocess.run(cmd, **kw)
 
 
-def mangle(cmd, cc, pacing, flags, disk):
-    """Replace placeholders, return (command, filename_extension)."""
+def _ext(cc, pacing):
+    """Name suffix for a congestion control configuration."""
     ext = f"-{cc}" if cc else ""
     if pacing is False:
         ext += "-nopacing"
+    return ext
+
+
+def mangle(cmd, cc, pacing, flags, disk):
+    """Replace placeholders, return (command, filename_extension)."""
+    ext = _ext(cc, pacing)
     cmd = (
         cmd.replace("_cc", f"--cc {cc}" if cc else "")
         .replace("_pacing", "" if pacing else "--no-pacing")
@@ -196,12 +204,17 @@ def verify(cfg, tmp, client, server_cmd, client_cmd):
     return out.exists() and out.stat().st_size >= cfg.size
 
 
-def _sudo_nice_env() -> list[str]:
-    """Prefix for elevated-priority subprocesses: sudo resets env, so restore
-    the vars that neqo binaries need to find NSS libraries and certificates."""
+def _pin(cpu: int) -> list[str]:
+    """Prefix that pins a subprocess, and anything it forks, to one CPU."""
+    return ["setarch", "--addr-no-randomize", "taskset", "-c", str(cpu)]
+
+
+def _sudo_env() -> list[str]:
+    """Prefix for `perf`, which needs root for the tracepoints: `sudo` resets the env, so
+    restore the vars that neqo binaries need to find NSS libraries and certificates."""
     env_vars = {k: os.environ[k] for k in ("LD_LIBRARY_PATH", "TEST_FIXTURE_DB") if k in os.environ}
     env_args = [f"{k}={v}" for k, v in env_vars.items()]
-    return ["sudo", "nice", "-n", "-20"] + (["env"] + env_args if env_args else [])
+    return ["sudo"] + (["env"] + env_args if env_args else [])
 
 
 def _read_proc(path: str) -> str:
@@ -254,10 +267,9 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "awk '/^Udp:/{if(!h){for(i=2;i<=NF;i++)if($i==\"RcvbufErrors\")c=i;h=1}else print $c}'"
         f" /proc/net/snmp >> {shlex.quote(str(out_dir / f'{name}.rcvbuferrors'))}"
     )
+    # Affinity survives fork and exec: pinning hyperfine pins the client it times.
     cmd = [
-        *_sudo_nice_env(),
-        "setarch",
-        "--addr-no-randomize",
+        *_pin(cfg.client_cpu),
         shutil.which("hyperfine") or "hyperfine",
         "--command-name",
         name,
@@ -272,16 +284,13 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "--min-runs",
         str(cfg.runs),
         "--prepare",
-        (
-            f"{ws}/{scmd} & echo $! >> /cpusets/{shlex.quote(cfg.server_set)}/tasks; sleep 0.2;"
-            f" echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {warmup} {rcvbuf}"
-        ),
+        f"taskset -c {cfg.server_cpu} {ws}/{scmd} & sleep 0.2; {warmup} {rcvbuf}",
         "--conclude",
         f"pkill -9 {tag}; {rcvbuf}",
     ]
     if md:
         cmd += ["--export-markdown", str(out_dir / f"{name}.md")]
-    cmd.append(f"echo $$ >> /cpusets/{shlex.quote(cfg.client_set)}/tasks; {ws}/{ccmd}")
+    cmd.append(f"{ws}/{ccmd}")
     before = _udp_counters()
     result = sh(cmd, stderr=subprocess.PIPE, text=True)
     if result.returncode:
@@ -319,22 +328,21 @@ def perf(cfg, scmd, ccmd, name):
 
     scmd, ccmd = with_stats(scmd, "server"), with_stats(ccmd, "client")
 
-    def perf_cmd(cset, out, exe):
+    def perf_cmd(cpu, out, exe):
         return (
-            [*_sudo_nice_env(), "setarch", "--addr-no-randomize",
-             "cset", "proc", f"--set={cset}", "--exec", "perf", "--"]
+            [*_sudo_env(), *_pin(cpu), "perf"]
             + shlex.split(cfg.perf_opt)
             + ["-o", f"{ws}/{out}"]
             + shlex.split(f"{ws}/{exe}")
         )
 
     proc = subprocess.Popen(
-        perf_cmd(cfg.server_set, f"{name}.server.perf", scmd),
+        perf_cmd(cfg.server_cpu, f"{name}.server.perf", scmd),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     time.sleep(0.2)
-    client_cmd = perf_cmd(cfg.client_set, f"{name}.client.perf", ccmd)
+    client_cmd = perf_cmd(cfg.client_cpu, f"{name}.client.perf", ccmd)
     sh(client_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     sh(["sudo", "pkill", tag])
     try:
@@ -406,79 +414,101 @@ def process(cfg, name, bold):
     return row
 
 
-def run(cfg, tmp):
-    """Run all comparisons."""
+class Unit(NamedTuple):
+    """One client/server pair in one congestion control configuration."""
+
+    client: str
+    server: str
+    cc: str
+    pacing: bool | None
+
+    @property
+    def name(self) -> str:
+        return f"{self.client}-{self.server}{_ext(self.cc, self.pacing)}"
+
+    @property
+    def bold(self) -> bool:
+        """Emphasize an implementation measured against itself."""
+        return self.client == self.server
+
+
+def units() -> list[Unit]:
+    """Every measurement the comparison is made of; one matrix job runs each."""
+    out = []
+    for server, client in product(IMPLS, repeat=2):
+        if client != server and "neqo" not in (client, server):
+            continue
+        if client == server == "neqo":
+            opts = [(cc, p) for cc in ("newreno", "cubic") for p in (True, False)]
+        elif "neqo" in (client, server):
+            opts = [("cubic", True)]
+        else:
+            opts = [("", None)]
+        out += [Unit(client, server, cc, pacing) for cc, pacing in opts]
+    return out
+
+
+def run_unit(cfg, tmp, unit):
+    """Run one unit's comparison and return its table row."""
 
     def fmt(t):
         return t.format(host=cfg.host, port=cfg.port, size=cfg.size, tmp=tmp)
 
-    steps = []
-    for server, scfg in IMPLS.items():
-        for client, ccfg in IMPLS.items():
-            if client != server and client != "neqo" and server != "neqo":
-                print(f"Skipping {client} vs. {server}")
-                continue
-            print(f"*** {client} vs. {server}")
+    print(f"*** {unit.name}")
+    ccfg, scfg = IMPLS[unit.client], IMPLS[unit.server]
+    for cmd in (ccfg.client_cmd, scfg.server_cmd):
+        src = cfg.workspace / cmd.split()[0]
+        if src.exists() and not (dst := cfg.workspace / "binaries" / src.name).exists():
+            shutil.copy2(src, dst)
+            dst.chmod(0o755)
 
-            for impl in (client, server):
-                impl_cfg = IMPLS[impl]
-                cmd = impl_cfg.client_cmd if impl == client else impl_cfg.server_cmd
-                src = cfg.workspace / cmd.split()[0]
-                if (
-                    src.exists()
-                    and not (dst := cfg.workspace / "binaries" / src.name).exists()
-                ):
-                    shutil.copy2(src, dst)
-                    dst.chmod(0o755)
+    # When neqo is the server, apply the client's interop flags to it.
+    # When neqo is the client, apply the server's interop flags to it.
+    cf = ccfg.interop_flag if unit.server == "neqo" else ""
+    sf = scfg.interop_flag if unit.client == "neqo" else ""
 
-            if client == "neqo" and server == "neqo":
-                opts = [
-                    ("newreno", True),
-                    ("newreno", False),
-                    ("cubic", True),
-                    ("cubic", False),
-                ]
-            elif client == "neqo" or server == "neqo":
-                opts = [("cubic", True)]
-            else:
-                opts = [("", None)]
+    scmd, _ = mangle(fmt(scfg.server_cmd), unit.cc, unit.pacing, cf, "")
+    ccmd_d, _ = mangle(fmt(ccfg.client_cmd), unit.cc, unit.pacing, sf, ccfg.disk_flag)
+    ccmd, _ = mangle(fmt(ccfg.client_cmd), unit.cc, unit.pacing, sf, "")
 
-            for cc, pacing in opts:
-                # When neqo is the server, apply the client's interop flags to it.
-                # When neqo is the client, apply the server's interop flags to it.
-                cf = ccfg.interop_flag if server == "neqo" else ""
-                sf = scfg.interop_flag if client == "neqo" else ""
+    if not verify(cfg, tmp, unit.client, scmd, ccmd_d):
+        raise RuntimeError(f"Transfer failed: {unit.client} vs. {unit.server}")
 
-                scmd, ext = mangle(fmt(scfg.server_cmd), cc, pacing, cf, "")
-                ccmd_d, _ = mangle(fmt(ccfg.client_cmd), cc, pacing, sf, ccfg.disk_flag)
-                ccmd, _ = mangle(fmt(ccfg.client_cmd), cc, pacing, sf, "")
-                name = f"{client}-{server}{ext}"
+    if unit.client == "neqo" or unit.server == "neqo":
+        hyperfine(
+            cfg,
+            scmd.replace("/neqo/", "/neqo-baseline/"),
+            ccmd.replace("/neqo/", "/neqo-baseline/"),
+            unit.name,
+            cfg.workspace / "hyperfine-baseline",
+        )
 
-                if not verify(cfg, tmp, client, scmd, ccmd_d):
-                    raise RuntimeError(f"Transfer failed: {client} vs. {server}")
+    hyperfine(cfg, scmd, ccmd, unit.name, cfg.workspace / "hyperfine", md=True)
+    perf(cfg, scmd, ccmd, unit.name)
+    return process(cfg, unit.name, unit.bold)
 
-                if client == "neqo" or server == "neqo":
-                    hyperfine(
-                        cfg,
-                        scmd.replace("/neqo/", "/neqo-baseline/"),
-                        ccmd.replace("/neqo/", "/neqo-baseline/"),
-                        name,
-                        cfg.workspace / "hyperfine-baseline",
-                    )
 
-                hyperfine(cfg, scmd, ccmd, name, cfg.workspace / "hyperfine", md=True)
-                perf(cfg, scmd, ccmd, name)
+def merge(cfg, artifacts):
+    """Assemble the rows and regressions the matrix jobs produced into one table."""
 
-                bold = client == server or (
-                    client == "neqo" and server == "neqo" and cc == "cubic" and pacing
-                )
-                if row := process(cfg, name, bold):
-                    steps.append(row)
-    return steps
+    def gather(name, key=None):
+        files = artifacts.glob(f"*/{name}")
+        return "".join(sorted((f.read_text(encoding="utf-8") for f in files), key=key))
+
+    header = (
+        f"Transfer of {cfg.size} bytes over loopback, min. {cfg.runs} runs. "
+        "All unit-less numbers are in milliseconds.\n\n"
+        "| Client vs. server | Mean±σ | Min–Max | Median±MAD | MiB/s±σ | ΔMedian |\n"
+        "|:---|---:|---:|---:|---:|---:|\n"
+    )
+    # Sort rows as if unbolded, so the emphasized ones stay next to their own kind.
+    rows = gather("steps.md", key=lambda r: re.sub(r"^\| \*\*", "| ", r))
+    (cfg.workspace / "comparison.md").write_text(header + rows, encoding="utf-8")
+    (cfg.workspace / "results.txt").write_text(gather("results.txt"), encoding="utf-8")
 
 
 def main():
-    """Parse arguments, run all comparisons, and write the results tables."""
+    """Parse arguments, then list the units, run one of them, or merge their results."""
     p = argparse.ArgumentParser(description="Compare QUIC implementations")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=4433)
@@ -486,14 +516,30 @@ def main():
     p.add_argument("--runs", type=int, default=100)
     p.add_argument("--workspace", type=Path, default=Path.cwd())
     p.add_argument("--perf-opt", default="record -F2999 --call-graph fp -g")
-    p.add_argument("--server-set", default="bench/server", help="cset name for the server CPU")
-    p.add_argument("--client-set", default="bench/client", help="cset name for the client CPU")
+    p.add_argument("--server-cpu", type=int, default=0, help="CPU to pin the server to")
+    p.add_argument("--client-cpu", type=int, default=1, help="CPU to pin the client to")
+    p.add_argument("--list-units", action="store_true", help="Print the unit names as JSON")
+    p.add_argument("--unit", help="Name of the unit to run, one of --list-units")
+    p.add_argument("--merge", type=Path, help="Directory holding the per-unit artifacts")
     a = p.parse_args()
+
+    if a.list_units:
+        print(json.dumps([u.name for u in units()]))
+        return 0
+
     cfg = Cfg(
         host=a.host, port=a.port, size=a.size, runs=a.runs,
         workspace=a.workspace, perf_opt=a.perf_opt,
-        server_set=a.server_set, client_set=a.client_set,
+        server_cpu=a.server_cpu, client_cpu=a.client_cpu,
     )
+
+    if a.merge:
+        merge(cfg, a.merge)
+        return 0
+
+    unit = next((u for u in units() if u.name == a.unit), None)
+    if unit is None:
+        p.error(f"--unit must name a unit, not {a.unit!r}; see --list-units")
 
     for d in ("binaries", "hyperfine", "hyperfine-baseline"):
         (cfg.workspace / d).mkdir(exist_ok=True)
@@ -501,23 +547,14 @@ def main():
 
     tmp = setup(cfg)
     try:
-        steps = run(cfg, tmp)
+        row = run_unit(cfg, tmp, unit)
     finally:
         kill_servers()
         kill_port(cfg.port)
         shutil.rmtree(tmp, ignore_errors=True)
 
-    (cfg.workspace / "steps.md").write_text("".join(steps), encoding="utf-8")
-    header = (
-        f"Transfer of {cfg.size} bytes over loopback, min. {cfg.runs} runs. "
-        "All unit-less numbers are in milliseconds.\n\n"
-        "| Client vs. server | Mean±σ | Min–Max | Median±MAD | MiB/s±σ | ΔMedian |\n"
-        "|:---|---:|---:|---:|---:|---:|\n"
-    )
-    sorted_steps = sorted(steps, key=lambda r: re.sub(r"^\| \*\*", "| ", r))
-    (cfg.workspace / "comparison.md").write_text(
-        header + "".join(sorted_steps), encoding="utf-8"
-    )
+    (cfg.workspace / "steps.md").write_text(row or "", encoding="utf-8")
+    return 0
 
 
 if __name__ == "__main__":

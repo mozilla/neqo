@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use neqo_common::{log::init as init_log, qinfo};
+use neqo_common::log::init as init_log;
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
@@ -85,7 +85,8 @@ fn gbit_bandwidth(ecn: bool) {
     .run();
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
-    qinfo!(
+    println!(
+        // Not `qinfo!`: `--features bench` drops that level, and this is the result.
         "{name} achieved {a} Mb/s bandwidth (link rate {t})",
         a = achieved_bandwidth / MBIT as f64,
         t = LINK_BANDWIDTH / MBIT

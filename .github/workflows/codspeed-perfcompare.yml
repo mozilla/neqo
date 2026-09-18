@@ -1,0 +1,174 @@
+name: CodSpeed perfcompare
+on:
+  push:
+    branches: ["main"]
+  pull_request: # Required for CodSpeed's PR comment and status check.
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  RUSTUP_TOOLCHAIN: stable
+  TRANSFER_SIZE: 33554432 # 32 MiB
+  MTU: 1500
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build-neqo:
+    name: Build neqo
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+
+      - name: Build neqo
+        run: |
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+          mkdir -p binaries
+          cp target/release/neqo-client target/release/neqo-server binaries/
+
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: binaries
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: neqo-binaries
+          path: binaries
+          retention-days: 1
+
+  build-others:
+    name: Build ${{ matrix.impl }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        impl: [quiche, s2n]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions # Cone mode also gets the Cargo.toml rust-cache needs.
+      - uses: $/.github/actions/quic-build
+        with:
+          impl: ${{ matrix.impl }}
+          artifact-name: ${{ matrix.impl }}-binaries
+
+  perfcompare:
+    name: ${{ matrix.combo.client }}-${{ matrix.combo.server }}
+    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
+    needs: [build-neqo, build-others]
+    strategy:
+      fail-fast: false
+      matrix:
+        combo:
+          - { client: neqo, server: neqo }
+          - { client: neqo, server: quiche }
+          - { client: quiche, server: neqo }
+          - { client: neqo, server: s2n }
+          - { client: s2n, server: neqo }
+    steps:
+      # CodSpeed needs the Git metadata to identify the repository and commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download neqo
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: neqo-binaries
+          path: binaries
+
+      # Combos never pair two different non-neqo impls, so at most one of these applies.
+      - name: Download external impl binaries
+        if: matrix.combo.client != 'neqo' || matrix.combo.server != 'neqo'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ (matrix.combo.client != 'neqo' && matrix.combo.client || matrix.combo.server) }}-binaries
+          path: binaries
+
+      - run: chmod +x binaries/*
+
+      - name: Setup test environment
+        uses: $/.github/actions/testdata-setup
+        with:
+          sizes: ${{ env.TRANSFER_SIZE }}
+          mtu: ${{ env.MTU }} # Same packetization as the other client/server benchmarks.
+
+      # Separate ports would only matter if combos ran concurrently on this runner; they
+      # run sequentially in the matrix, so the command generator's default port is fine.
+      - name: Generate commands
+        id: commands
+        uses: $/.github/actions/perfcompare-commands
+        with:
+          client: ${{ matrix.combo.client }}
+          server: ${{ matrix.combo.server }}
+          size: ${{ env.TRANSFER_SIZE }}
+          neqo-path: binaries
+
+      - name: Set environment
+        run: |
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/binaries/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/binaries/test-fixture/db"
+          } >> "$GITHUB_ENV"
+
+      - name: Start server
+        env:
+          SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
+        run: |
+          # shellcheck disable=SC2086
+          $SERVER_CMD &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          sleep 1
+
+      - name: Verify transfer
+        env:
+          CLIENT_CMD_SAVE: ${{ steps.commands.outputs.client-cmd-save }}
+        run: |
+          eval "$CLIENT_CMD_SAVE"
+          SIZE=$(stat -c%s "$TRANSFER_SIZE")
+          if [ "$SIZE" -lt "$TRANSFER_SIZE" ]; then
+            echo "Transfer failed: expected $TRANSFER_SIZE bytes, got $SIZE"
+            exit 1
+          fi
+          rm -f "$TRANSFER_SIZE"
+
+      - name: Create benchmark config
+        env:
+          BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
+          CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
+        run: |
+          {
+            echo "benchmarks:"
+            echo "  - name: \"$BENCH_NAME\""
+            echo "    exec: $CLIENT_CMD"
+            echo "    options:"
+            echo "      min-rounds: 500"
+          } > "$GITHUB_WORKSPACE/codspeed.yml"
+
+      - name: Run benchmark
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: walltime
+          working-directory: ${{ github.workspace }}
+          config: ${{ github.workspace }}/codspeed.yml
+          token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
+
+      - name: Stop server
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true

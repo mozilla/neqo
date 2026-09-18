@@ -9,6 +9,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
+  MTU: 1500
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -36,7 +37,7 @@ jobs:
 
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
-    runs-on: ${{ matrix.bench.runner }}
+    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
     # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
     # environment: codspeed
     needs: bench-matrix
@@ -50,6 +51,15 @@ jobs:
         with:
           persist-credentials: false
 
+      # The runner image ships a toolchain with a different profile, and reconciling
+      # against it hits an EXDEV rename bug in rustup, so install into a job-local home.
+      - name: Use a fresh Rust toolchain home
+        run: |
+          {
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+          } >> "$GITHUB_ENV"
+
       - uses: $/.github/actions/install-build-deps
         with:
           version: stable
@@ -61,6 +71,9 @@ jobs:
           CRATE: ${{ matrix.bench.crate }}
           MODE: ${{ matrix.bench.mode }}
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
+
+      - name: Set the loopback MTU # Same packetization as the other benchmark workflows.
+        run: sudo ip link set dev lo mtu "$MTU"
 
       - name: Run bench & upload results
         uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
