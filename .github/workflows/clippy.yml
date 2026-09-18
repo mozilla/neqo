@@ -52,7 +52,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy

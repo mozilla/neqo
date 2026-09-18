@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
           clean: false
 
-      - uses: ./neqo/.github/actions/build-neqo
+      - uses: $/.github/actions/build-neqo
         with:
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
@@ -52,12 +52,7 @@ jobs:
     name: Build google/quiche
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: ./.github/actions/quic-build
+      - uses: $/.github/actions/quic-build
         with:
           impl: google
           artifact-name: build-google
@@ -71,7 +66,7 @@ jobs:
           sparse-checkout: .github/actions
           persist-credentials: false
 
-      - uses: ./.github/actions/quic-build
+      - uses: $/.github/actions/quic-build
         with:
           impl: quiche
           artifact-name: build-quiche
@@ -85,7 +80,7 @@ jobs:
           sparse-checkout: .github/actions
           persist-credentials: false
 
-      - uses: ./.github/actions/quic-build
+      - uses: $/.github/actions/quic-build
         with:
           impl: s2n
           artifact-name: build-s2n
@@ -169,7 +164,7 @@ jobs:
       # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
       - name: Prepare machine
         id: cpu-tuning
-        uses: ./neqo/.github/actions/cpu-tuning
+        uses: $/.github/actions/cpu-tuning
         with:
           mtu: ${{ env.MTU }}
 
@@ -210,7 +205,7 @@ jobs:
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
         if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
+        uses: $/.github/actions/cpu-tuning
         with:
           mode: restore
 
@@ -274,7 +269,7 @@ jobs:
           compression-level: 9
 
       - name: Export PR comment data
-        uses: ./neqo/.github/actions/pr-comment-data-export
+        uses: $/.github/actions/pr-comment-data-export
         with:
           name: ${{ github.workflow }}
           contents: results.md

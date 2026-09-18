@@ -32,7 +32,7 @@ jobs:
         with:
           persist-credentials: false
       - id: matrix
-        uses: ./.github/actions/bench-matrix
+        uses: $/.github/actions/bench-matrix
 
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
@@ -50,7 +50,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-codspeed

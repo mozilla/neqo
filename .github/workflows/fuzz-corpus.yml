@@ -37,7 +37,7 @@ jobs:
         with:
           persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: nightly
 
