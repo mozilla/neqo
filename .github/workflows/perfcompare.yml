@@ -10,7 +10,9 @@ env:
   RUSTUP_TOOLCHAIN: stable
   # See bench.yml for the event choices; `cycles:u` has to stay first.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
-  MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
+  MTU: 1500
+  SIZE: 33554432 # Both the measuring jobs and the table header need these.
+  RUNS: 100
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
   # `--call-graph fp` needs frame pointers, which x86_64 Rust omits by default. build-neqo appends
@@ -41,85 +43,68 @@ jobs:
           path: neqo
           submodules: "recursive"
           persist-credentials: false
-          clean: false
 
       - uses: $/.github/actions/build-neqo
         with:
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
 
-  build-google:
-    name: Build google/quiche
+  build-others:
+    name: Build ${{ matrix.impl }}
     runs-on: ubuntu-24.04
-    steps:
-      - uses: $/.github/actions/quic-build
-        with:
-          impl: google
-          artifact-name: build-google
-
-  build-quiche:
-    name: Build cloudflare/quiche
-    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        impl: [google, quiche, s2n]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: .github/actions
+          sparse-checkout: .github/actions # Cone mode also gets the Cargo.toml rust-cache needs.
           persist-credentials: false
 
       - uses: $/.github/actions/quic-build
         with:
-          impl: quiche
-          artifact-name: build-quiche
-
-  build-s2n:
-    name: Build s2n-quic
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: .github/actions
-          persist-credentials: false
-
-      - uses: $/.github/actions/quic-build
-        with:
-          impl: s2n
-          artifact-name: build-s2n
+          impl: ${{ matrix.impl }}
+          artifact-name: build-${{ matrix.impl }} # perfcompare.py's commands start with this.
 
   build-samply:
     uses: $/.github/workflows/build-samply.yml
 
+  units:
+    name: Determine comparison units
+    runs-on: ubuntu-24.04
+    outputs:
+      units: ${{ steps.units.outputs.units }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - id: units
+        shell: bash
+        run: echo "units=$(python3 .github/scripts/perfcompare.py --list-units)" >> "$GITHUB_OUTPUT"
+
   perfcompare:
-    name: Performance comparison
-    runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
-    needs: [build-neqo, build-google, build-quiche, build-s2n, build-samply]
+    name: ${{ matrix.unit }}
+    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
+    needs: [units, build-neqo, build-others, build-samply]
+    strategy:
+      fail-fast: false
+      matrix:
+        unit: ${{ fromJson(needs.units.outputs.units) }}
     defaults:
       run:
         shell: bash
 
     steps:
-      - name: Check free disk space
-        run: |
-          df -h /
-          AVAIL=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
-          if [ "$AVAIL" -lt 25 ]; then
-            echo "::error::Only ${AVAIL}G free on $(hostname); need 25G. Runner needs cleanup."
-            exit 1
-          fi
-
       - name: Checkout mozilla/neqo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: mozilla/neqo
           path: neqo
           persist-credentials: false
-          clean: false
       - run: |
           cd neqo
           git fetch --no-tags --depth=1 origin "$BASE_REF"
-
-      - name: Set PATH and environment
-        run: |
-          echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
 
       - name: Install Rust
         uses: $/.github/actions/install-build-deps
@@ -131,28 +116,18 @@ jobs:
 
       - uses: $/.github/actions/install-samply
 
+      - name: Install SciPy # perfcompare.py's Mann-Whitney test needs it.
+        run: |
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends python3-scipy
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: build-neqo
-          path: build-neqo
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: build-google
-          path: build-google
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: build-quiche
-          path: build-quiche
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: build-s2n
-          path: build-s2n
+          pattern: build-* # Each unpacks into a directory named after it.
+          path: .
 
       - name: Set up build artifacts
         run: |
-          # Clean stale binaries dir from previous workflow runs.
-          # perfcompare.py recreates and populates binaries/ during the run.
-          rm -rf binaries
           chmod +x build-neqo/neqo/* build-neqo/neqo-baseline/* \
             build-google/* build-quiche/* build-s2n/*
           {
@@ -160,11 +135,9 @@ jobs:
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/build-neqo/test-fixture/db"
           } >> "$GITHUB_ENV"
 
-      # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
-      # See https://github.com/microsoft/msquic/issues/4618#issuecomment-2422611592
       - name: Prepare machine
-        id: cpu-tuning
-        uses: $/.github/actions/cpu-tuning
+        id: machine
+        uses: $/.github/actions/bench-machine
         with:
           mtu: ${{ env.MTU }}
 
@@ -173,47 +146,77 @@ jobs:
       - name: Compare QUIC implementations
         env:
           WORKSPACE: ${{ github.workspace }}
-          SERVER_SET: ${{ steps.cpu-tuning.outputs.server-set }}
-          CLIENT_SET: ${{ steps.cpu-tuning.outputs.client-set }}
+          SERVER_CPU: ${{ steps.machine.outputs.server-cpu }}
+          CLIENT_CPU: ${{ steps.machine.outputs.client-cpu }}
+          UNIT: ${{ matrix.unit }}
         run: |
           python3 neqo/.github/scripts/perfcompare.py \
             --host 127.0.0.1 \
             --port 4433 \
-            --size 33554432 \
-            --runs 100 \
+            --size "$SIZE" \
+            --runs "$RUNS" \
             --workspace "$WORKSPACE" \
             --perf-opt "$PERF_OPT" \
-            --server-set "$SERVER_SET" \
-            --client-set "$CLIENT_SET"
-          # perfcompare.py runs under sudo nice, so output files are root-owned; fix for post-processing
+            --server-cpu "$SERVER_CPU" \
+            --client-cpu "$CLIENT_CPU" \
+            --unit "$UNIT"
+          # Take back what root `perf` wrote.
           sudo chown -R "$(id -u)" ./*.perf hyperfine hyperfine-baseline 2>/dev/null || true
 
-      # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
         timeout-minutes: 30
-        run: |
-          for f in *.perf; do
-            # Convert for profiler.firefox.com
-            samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
-            # Generate flamegraphs from the cycles event (perf.data has multiple events)
-            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
-            # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
-            perf report -i "$f" --stdio --no-children -g none \
-              -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
-          done
-
-      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
-      - name: Restore machine
-        if: always()
-        uses: $/.github/actions/cpu-tuning
+        uses: $/.github/actions/process-perf
         with:
-          mode: restore
+          reports: "true"
+
+      - name: Upload unit results
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: perfcompare-${{ matrix.unit }}
+          path: |
+            steps.md
+            results.txt
+            *.samply.json.gz
+            *.svg
+            *.report.txt
+            hyperfine
+            hyperfine-baseline
+          retention-days: 1
+          compression-level: 9
+
+  results:
+    name: Assemble comparison
+    if: ${{ !cancelled() }}
+    needs: perfcompare
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout mozilla/neqo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mozilla/neqo
+          path: neqo
+          persist-credentials: false
+      - run: |
+          cd neqo
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: perfcompare-*
+          path: units
+
+      - name: Merge unit results
+        run: |
+          python3 neqo/.github/scripts/perfcompare.py --merge units --size "$SIZE" --runs "$RUNS"
 
       - name: Format results as Markdown
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: "On-prem"
         run: |
           SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
           echo "$SHA" > baseline-sha.txt
@@ -240,7 +243,6 @@ jobs:
             echo "</details>"
           } >> results.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
-          echo "$TESTBED" > testbed.txt
           cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
@@ -249,7 +251,7 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
-            *.samply.json.gz
+            units/*/*.samply.json.gz
           compression-level: 9
 
       - name: Export performance data
@@ -258,14 +260,13 @@ jobs:
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-perf
           path: |
-            *.svg
+            units/*/*.svg
+            units/*/*.report.txt
+            units/*/hyperfine
+            units/*/hyperfine-baseline
             *.txt
             *.md
             event.json
-            results.*
-            results-baseline.*
-            hyperfine
-            hyperfine-baseline
           compression-level: 9
 
       - name: Export PR comment data
@@ -285,16 +286,3 @@ jobs:
           else
             echo "No performance regression detected."
           fi
-
-      - name: Remove benchmark artifacts
-        if: always()
-        run: |
-          # Kill any server processes that survived the run (e.g. after workflow cancellation).
-          # Tags are _tag() values from IMPLS in perfcompare.py: basename of server binary, truncated to 15 chars.
-          for tag in neqo-server quic_server quiche-server s2n-quic-qns; do
-            sudo pkill -9 "$tag" 2>/dev/null || true
-          done
-          sudo fuser -k 4433/udp 4433/tcp || true
-          rm -- * || true
-          rm -r -- binaries build-neqo build-google build-quiche build-s2n \
-            comment-data hyperfine hyperfine-baseline || true

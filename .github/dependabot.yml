@@ -4,7 +4,7 @@
 version: 2
 updates:
   # We don't really use Dependabot for Rust dependencies, since we are tracking Gecko
-  - package-ecosystem: "cargo"
+  - package-ecosystem: "cargo" # zizmor: ignore[dependabot-cooldown] Updates are disabled below.
     directory: "/"
     schedule:
       interval: "weekly"

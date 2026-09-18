@@ -3,7 +3,7 @@ description: Determine the list of benchmarks from cargo metadata
 
 outputs:
   benches:
-    description: JSON array of benchmarks for CodSpeed, with runner
+    description: JSON array of benchmarks for CodSpeed
     value: ${{ steps.benches.outputs.benches }}
   all:
     description: JSON array of all unique crate/bench pairs (for profiling)
@@ -43,16 +43,10 @@ runs:
             )
           ]')
 
-        # All modes run on the CodSpeed macro runner: shared GitHub-hosted runners can
-        # land on different underlying CPU models/system libraries between runs, which
-        # CodSpeed flags as "different runtime environments" for simulation (simulated
-        # cache behavior) and memory (allocator/glibc version) modes, not just walltime.
-        BENCHES=$(echo "$ALL_BENCHES" | jq -c '[.[] | . + {runner: "codspeed-macro-x86-ryzen-9950x-ubuntu-24-04"}]')
-
         # All unique crate/bench pairs (for profiling)
         ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '[.[] | {crate, bench}] | unique')
 
         {
-          echo "benches=$BENCHES"
+          echo "benches=$ALL_BENCHES"
           echo "all=$ALL_UNIQUE"
         } >> "$GITHUB_OUTPUT"
