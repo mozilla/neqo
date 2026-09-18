@@ -14,6 +14,8 @@ updates:
     # <https://docs.github.com/en/code-security/dependabot/working-with-dependabot/dependabot-options-reference#ignore-->
     ignore:
       - dependency-name: "*"
+    cooldown:
+      default-days: 7
   - package-ecosystem: "github-actions"
     directories:
       - "/.github/actions/*"

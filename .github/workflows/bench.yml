@@ -45,7 +45,7 @@ jobs:
           submodules: "recursive"
           persist-credentials: false
 
-      - uses: ./neqo/.github/actions/build-neqo
+      - uses: $/.github/actions/build-neqo
         with:
           artifact-name: bench-build
           benches: "true"
@@ -113,7 +113,7 @@ jobs:
       # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
       - name: Prepare machine
         id: cpu-tuning
-        uses: ./neqo/.github/actions/cpu-tuning
+        uses: $/.github/actions/cpu-tuning
         with:
           mtu: ${{ env.MTU }}
 
@@ -227,7 +227,7 @@ jobs:
       # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
       - name: Restore machine
         if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
+        uses: $/.github/actions/cpu-tuning
         with:
           mode: restore
 
@@ -293,7 +293,7 @@ jobs:
           compression-level: 9
 
       - name: Export PR comment data
-        uses: ./neqo/.github/actions/pr-comment-data-export
+        uses: $/.github/actions/pr-comment-data-export
         with:
           name: ${{ github.workflow }}
           contents: results.md

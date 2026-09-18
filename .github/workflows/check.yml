@@ -88,7 +88,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: ${{ matrix.rust-toolchain == 'stable' && 'llvm-tools' || '' }} ${{ matrix.rust-toolchain == 'nightly' && startsWith(matrix.os, 'ubuntu') && !endsWith(matrix.os, 'arm') && 'rust-src ' || '' }}
@@ -207,7 +207,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-hack
@@ -227,7 +227,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-android
+      - uses: $/.github/actions/check-android
         with:
           target: ${{ matrix.target }}
 
@@ -247,7 +247,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends gcc-multilib g++-multilib
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           target: i686-unknown-linux-gnu
       - name: Compile
@@ -267,7 +267,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: $/.github/actions/check-vm
         with:
           platform: ${{ matrix.os }}
           codecov-token: ${{ secrets.CODECOV_TOKEN }} # zizmor: ignore[secrets-outside-env]
