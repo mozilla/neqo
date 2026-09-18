@@ -103,11 +103,18 @@ jobs:
 
       - run: chmod +x binaries/*
 
+      # Pin client and server to separate CPUs, as the other perf workflows do. Unpinned, the
+      # two can share a core or straddle the 9950X's CCDs, which dominates a walltime median.
+      - name: Prepare machine
+        id: machine
+        uses: $/.github/actions/bench-machine
+        with:
+          mtu: ${{ env.MTU }} # Same packetization as the other client/server benchmarks.
+
       - name: Setup test environment
         uses: $/.github/actions/testdata-setup
         with:
           sizes: ${{ env.TRANSFER_SIZE }}
-          mtu: ${{ env.MTU }} # Same packetization as the other client/server benchmarks.
 
       # Separate ports would only matter if combos ran concurrently on this runner; they
       # run sequentially in the matrix, so the command generator's default port is fine.
@@ -130,9 +137,10 @@ jobs:
       - name: Start server
         env:
           SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
+          SERVER_CPU: ${{ steps.machine.outputs.server-cpu }}
         run: |
           # shellcheck disable=SC2086
-          $SERVER_CMD &
+          taskset -c "$SERVER_CPU" $SERVER_CMD &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
           sleep 1
 
@@ -152,11 +160,13 @@ jobs:
         env:
           BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
           CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
+          CLIENT_CPU: ${{ steps.machine.outputs.client-cpu }}
         run: |
           {
             echo "benchmarks:"
             echo "  - name: \"$BENCH_NAME\""
-            echo "    exec: $CLIENT_CMD"
+            # `exec` is tokenized, not run through a shell, so the prefix is just more argv.
+            echo "    exec: taskset -c $CLIENT_CPU $CLIENT_CMD"
             echo "    options:"
             echo "      min-rounds: 500"
           } > "$GITHUB_WORKSPACE/codspeed.yml"

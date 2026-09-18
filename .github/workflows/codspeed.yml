@@ -9,7 +9,6 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
-  MTU: 1500
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -73,6 +72,8 @@ jobs:
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
       - name: Set the loopback MTU # Same packetization as the other benchmark workflows.
+        env:
+          MTU: 1500 # Step-scoped: `neqo-bin` benches append `/mtu-$MTU` to their names.
         run: sudo ip link set dev lo mtu "$MTU"
 
       - name: Run bench & upload results
