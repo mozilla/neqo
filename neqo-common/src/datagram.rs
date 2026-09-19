@@ -24,22 +24,6 @@ pub struct Datagram<D = Vec<u8>> {
     d: D,
 }
 
-impl TryFrom<Batch> for Datagram {
-    type Error = ();
-
-    fn try_from(d: Batch) -> Result<Self, Self::Error> {
-        if d.num_datagrams() != 1 {
-            return Err(());
-        }
-        Ok(Self {
-            src: d.src,
-            dst: d.dst,
-            tos: d.tos,
-            d: d.d,
-        })
-    }
-}
-
 impl<D> Datagram<D> {
     #[must_use]
     pub const fn source(&self) -> SocketAddr {
@@ -151,20 +135,32 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
     }
 }
 
+/// Metadata for a [`Batch`] occupying the first `len` bytes of its buffer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BatchMeta {
+    pub src: SocketAddr,
+    pub dst: SocketAddr,
+    pub tos: Tos,
+    pub datagram_size: NonZeroUsize,
+    pub len: usize,
+}
+
 /// A batch of [`Datagram`]s with the same metadata, e.g., destination.
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-#[derive(Clone, PartialEq, Eq)]
-pub struct Batch {
+///
+/// Borrows the caller's buffer, so the send path is not generic over it.
+#[derive(PartialEq, Eq)]
+pub struct Batch<'a> {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
     datagram_size: NonZeroUsize,
-    d: Vec<u8>,
+    d: &'a mut [u8],
 }
 
-impl Debug for Batch {
+impl Debug for Batch<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(
             f,
@@ -173,39 +169,46 @@ impl Debug for Batch {
             self.src,
             self.dst,
             self.datagram_size,
-            HexWithLen::new(&self.d)
+            HexWithLen::new(&*self.d)
         )
     }
 }
 
-impl From<Datagram<Vec<u8>>> for Batch {
-    fn from(d: Datagram<Vec<u8>>) -> Self {
-        Self {
-            src: d.src,
-            dst: d.dst,
-            tos: d.tos,
-            datagram_size: NonZeroUsize::new(d.d.len())
-                .expect("Datagram is guaranteed to be non-empty"),
-            d: d.d,
-        }
-    }
-}
-
-impl Batch {
+impl<'a> Batch<'a> {
+    /// # Panics
+    /// When `d` is empty.
     #[must_use]
     pub const fn new(
         src: SocketAddr,
         dst: SocketAddr,
         tos: Tos,
         datagram_size: NonZeroUsize,
-        d: Vec<u8>,
+        d: &'a mut [u8],
     ) -> Self {
+        assert!(!d.is_empty(), "Batch data cannot be empty");
         Self {
             src,
             dst,
             tos,
             datagram_size,
             d,
+        }
+    }
+
+    /// Rebuild a batch from its [`BatchMeta`] and the buffer it was written into.
+    ///
+    /// # Panics
+    /// When `meta` does not describe a prefix of `d`.
+    #[must_use]
+    pub fn from_meta(meta: &BatchMeta, d: &'a mut [u8]) -> Self {
+        assert!(meta.datagram_size.get() <= meta.len);
+        assert!(meta.len <= d.len());
+        Self {
+            src: meta.src,
+            dst: meta.dst,
+            tos: meta.tos,
+            datagram_size: meta.datagram_size,
+            d: &mut d[..meta.len],
         }
     }
 
@@ -233,9 +236,21 @@ impl Batch {
         self.datagram_size
     }
 
+    /// Metadata, copied out so the buffer's borrow can end.
     #[must_use]
-    pub fn data(&self) -> &[u8] {
-        &self.d
+    pub const fn meta(&self) -> BatchMeta {
+        BatchMeta {
+            src: self.src,
+            dst: self.dst,
+            tos: self.tos,
+            datagram_size: self.datagram_size,
+            len: self.d.len(),
+        }
+    }
+
+    #[must_use]
+    pub const fn data(&self) -> &[u8] {
+        self.d
     }
 
     #[must_use]
@@ -253,14 +268,13 @@ impl Batch {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
+        let datagram_size = self.datagram_size.get();
+        let src = self.src;
+        let dst = self.dst;
+        let tos = self.tos;
         self.d
-            .chunks_mut(self.datagram_size.get())
-            .map(|d| Datagram {
-                src: self.src,
-                dst: self.dst,
-                tos: self.tos,
-                d,
-            })
+            .chunks_mut(datagram_size)
+            .map(move |d| Datagram { src, dst, tos, d })
     }
 }
 
@@ -309,38 +323,55 @@ mod tests {
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
 
-        // 10 bytes, segment size 4 -> 3 datagrams (4+4+2)
-        let batch =
-            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 10]);
-        assert_eq!(batch.num_datagrams(), 3);
-
-        // 8 bytes, segment size 4 -> 2 datagrams (4+4)
-        let batch =
-            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), vec![0u8; 8]);
-        assert_eq!(batch.num_datagrams(), 2);
-
-        // 5 bytes, segment size 5 -> 1 datagram
-        let batch =
-            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 5]);
-        assert_eq!(batch.num_datagrams(), 1);
-
-        // 6 bytes, segment size 5 -> 2 datagrams (5+1)
-        let batch =
-            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(5).unwrap(), vec![0u8; 6]);
-        assert_eq!(batch.num_datagrams(), 2);
+        for (len, segment_size, datagrams) in [
+            (10, 4, 3), // 4+4+2
+            (8, 4, 2),  // 4+4
+            (5, 5, 1),
+            (6, 5, 2), // 5+1
+        ] {
+            let mut buf = vec![0u8; len];
+            let batch = datagram::Batch::new(
+                src,
+                dst,
+                tos,
+                NonZeroUsize::new(segment_size).unwrap(),
+                &mut buf,
+            );
+            assert_eq!(
+                batch.num_datagrams(),
+                datagrams,
+                "{len} bytes / {segment_size}"
+            );
+        }
     }
 
     #[test]
     fn batch_tos() {
+        let mut buf = vec![0u8; 10];
         let mut batch = datagram::Batch::new(
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234),
             SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678),
             Tos::default(),
             NonZeroUsize::new(4).unwrap(),
-            vec![0u8; 10],
+            &mut buf,
         );
         batch.set_tos(Ecn::Ce.into());
         assert_eq!(batch.tos(), Ecn::Ce.into());
+    }
+
+    #[test]
+    fn batch_from_meta_uses_length() {
+        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+        let meta = datagram::BatchMeta {
+            src: addr,
+            dst: addr,
+            tos: Tos::default(),
+            datagram_size: NonZeroUsize::new(4).unwrap(),
+            len: 5,
+        };
+        let mut buf = [0; 8];
+        let batch = datagram::Batch::from_meta(&meta, &mut buf);
+        assert_eq!(batch.data().len(), 5);
     }
 
     #[test]
@@ -348,13 +379,8 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let batch = datagram::Batch::new(
-            src,
-            dst,
-            tos,
-            NonZeroUsize::new(4).unwrap(),
-            vec![1, 2, 3, 4, 5, 6, 7, 8, 9],
-        );
+        let mut buf = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let batch = datagram::Batch::new(src, dst, tos, NonZeroUsize::new(4).unwrap(), &mut buf);
         let datagrams: Vec<_> = batch.iter().collect();
         assert_eq!(datagrams.len(), 3);
         assert_eq!(datagrams[0].d, &[1, 2, 3, 4]);
@@ -373,13 +399,9 @@ mod tests {
         let src = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
         let dst = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5678);
         let tos = Tos::default();
-        let mut batch = datagram::Batch::new(
-            src,
-            dst,
-            tos,
-            NonZeroUsize::new(3).unwrap(),
-            vec![10, 20, 30, 40, 50, 60, 70],
-        );
+        let mut buf = vec![10, 20, 30, 40, 50, 60, 70];
+        let mut batch =
+            datagram::Batch::new(src, dst, tos, NonZeroUsize::new(3).unwrap(), &mut buf);
         for datagram in batch.iter_mut() {
             assert_eq!(datagram.source(), src);
             assert_eq!(datagram.destination(), dst);
@@ -408,24 +430,16 @@ mod tests {
     }
 
     #[test]
-    fn batch_data_and_try_from() {
-        let d = Datagram::new(DEFAULT_ADDR, DEFAULT_ADDR, Tos::default(), vec![1, 2, 3]);
-        let batch = datagram::Batch::from(d);
-        assert_eq!(batch.data(), &[1, 2, 3]);
-        let d2: Datagram = batch.try_into().unwrap();
-        assert_eq!(d2.as_ref(), &[1, 2, 3]);
-    }
-
-    #[test]
-    fn batch_try_from_multiple_fails() {
+    fn batch_debug() {
+        let mut buf = vec![1, 2, 3, 4];
         let batch = datagram::Batch::new(
             DEFAULT_ADDR,
             DEFAULT_ADDR,
             Tos::default(),
             NonZeroUsize::new(2).unwrap(),
-            vec![1, 2, 3, 4],
+            &mut buf,
         );
+        assert_eq!(batch.data(), &[1, 2, 3, 4]);
         assert!(format!("{batch:?}").starts_with("datagram::Batch"));
-        assert!(Datagram::try_from(batch).is_err());
     }
 }

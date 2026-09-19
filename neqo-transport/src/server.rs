@@ -30,7 +30,7 @@ use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
-    ConnectionParameters, OutputBatch, Res, Version,
+    BatchMeta, ConnectionParameters, OutputBatch, Res, Version,
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
@@ -230,7 +230,8 @@ impl Server {
         initial: InitialDetails,
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
-    ) -> Output {
+        send_buffer: &mut Vec<u8>,
+    ) -> Option<BatchMeta> {
         qdebug!("[{self}] Handle initial");
         #[cfg(feature = "build-fuzzing-corpus")]
         Self::write_addr_valid_corpus(dgram.source(), &initial.token);
@@ -239,10 +240,12 @@ impl Server {
             .borrow()
             .validate(&initial.token, dgram.source(), now);
         match res {
-            AddressValidationResult::Invalid => Output::None,
-            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
+            AddressValidationResult::Invalid => None,
+            AddressValidationResult::Pass => {
+                self.accept_connection(initial, dgram, None, now, send_buffer)
+            }
             AddressValidationResult::ValidRetry(orig_dcid) => {
-                self.accept_connection(initial, dgram, Some(orig_dcid), now)
+                self.accept_connection(initial, dgram, Some(orig_dcid), now, send_buffer)
             }
             AddressValidationResult::Validate => {
                 qinfo!("[{self}] Send retry for {:?}", initial.dst_cid);
@@ -255,7 +258,7 @@ impl Server {
                         "[{self}] DCID too short ({} bytes), dropping packet",
                         initial.dst_cid.len()
                     );
-                    return Output::None;
+                    return None;
                 }
 
                 let res = self.address_validation.borrow().generate_retry_token(
@@ -265,43 +268,43 @@ impl Server {
                 );
                 let Ok(token) = res else {
                     qerror!("[{self}] unable to generate token, dropping packet");
-                    return Output::None;
+                    return None;
                 };
-                if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
-                    let packet = packet::Builder::retry(
-                        initial.version,
-                        &initial.src_cid,
-                        &new_dcid,
-                        &token,
-                        &initial.dst_cid,
-                    );
-                    packet.map_or_else(
-                        |_| {
-                            qerror!("[{self}] unable to encode retry, dropping packet");
-                            Output::None
-                        },
-                        |p| {
-                            qdebug!(
-                                "[{self}] type={:?} path:{} {}->{} {:?} len {}",
-                                packet::Type::Retry,
-                                initial.dst_cid,
-                                dgram.destination(),
-                                dgram.source(),
-                                Tos::default(),
-                                p.len(),
-                            );
-                            Output::Datagram(Datagram::new(
-                                dgram.destination(),
-                                dgram.source(),
-                                Tos::default(),
-                                p,
-                            ))
-                        },
-                    )
-                } else {
+                let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() else {
                     qerror!("[{self}] no connection ID for retry, dropping packet");
-                    Output::None
-                }
+                    return None;
+                };
+                let res = packet::Builder::retry(
+                    initial.version,
+                    &initial.src_cid,
+                    &new_dcid,
+                    &token,
+                    &initial.dst_cid,
+                );
+                let Ok(p) = res else {
+                    qerror!("[{self}] unable to encode retry, dropping packet");
+                    return None;
+                };
+                qdebug!(
+                    "[{self}] type={:?} path:{} {}->{} {:?} len {}",
+                    packet::Type::Retry,
+                    initial.dst_cid,
+                    dgram.destination(),
+                    dgram.source(),
+                    Tos::default(),
+                    p.len(),
+                );
+                // Same offset-0 invariant as VN.
+                debug_assert!(send_buffer.is_empty());
+                send_buffer.extend_from_slice(&p);
+                let datagram_size = NonZeroUsize::new(p.len())?;
+                Some(BatchMeta {
+                    src: dgram.destination(),
+                    dst: dgram.source(),
+                    tos: Tos::default(),
+                    datagram_size,
+                    len: p.len(),
+                })
             }
         }
     }
@@ -356,7 +359,8 @@ impl Server {
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) -> Output {
+        send_buffer: &mut Vec<u8>,
+    ) -> Option<BatchMeta> {
         qinfo!(
             "[{self}] Accept connection {:?}",
             orig_dcid.as_ref().unwrap_or(&initial.dst_cid)
@@ -376,9 +380,13 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid, now);
-                let out = c.process(Some(dgram), now);
+                // Straight into the caller's buffer, so the first flight is not
+                // built into a throwaway one and copied.
+                let meta = c
+                    .process_multiple(Some(dgram), now, send_buffer, NonZeroUsize::MIN)
+                    .meta();
                 self.connections.push(Rc::new(RefCell::new(c)));
-                out
+                meta
             }
             Err(e) => {
                 qwarn!("[{self}] Unable to create connection");
@@ -393,46 +401,58 @@ impl Server {
                         now,
                     );
                 }
-                Output::None
+                None
             }
         }
     }
 
+    /// Defer `dgrams` to a later call, so output can be returned now.
+    fn save_for_later<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
+        &mut self,
+        dgrams: I,
+        now: Instant,
+    ) {
+        self.saved_datagrams
+            .extend(dgrams.into_iter().map(|d| SavedDatagram {
+                d: d.to_owned(),
+                t: now,
+            }));
+    }
+
     /// Process new input datagrams on the connection.
     pub fn process_multiple_input<
+        'b,
         A: AsRef<[u8]> + AsMut<[u8]>,
         I: IntoIterator<Item = Datagram<A>>,
     >(
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+        send_buffer: &'b mut Vec<u8>,
+    ) -> OutputBatch<'b> {
+        send_buffer.clear();
+
         // Process input datagrams from previous call.
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
-            if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
-                self.saved_datagrams
-                    .extend(dgrams.into_iter().map(|d| SavedDatagram {
-                        d: d.to_owned(),
-                        t: now,
-                    }));
-                return OutputBatch::DatagramBatch(b);
+            // Metadata only, so the borrow ends here.
+            if let Some(meta) = self.process_input(std::iter::once(d), t, &mut *send_buffer) {
+                self.save_for_later(dgrams, now);
+                return OutputBatch::rebuild(Some(&meta), send_buffer);
             }
         }
 
         // Process input datagrams from this call.
-        if let o @ OutputBatch::DatagramBatch(_) = self.process_input(dgrams, now) {
-            return o;
-        }
-
-        OutputBatch::None
+        let meta = self.process_input(dgrams, now, &mut *send_buffer);
+        OutputBatch::rebuild(meta.as_ref(), send_buffer)
     }
 
-    // Process a new input datagram on the connection.
+    /// Process a new input datagram, writing any response into `send_buffer`.
     fn process_input<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+        send_buffer: &mut Vec<u8>,
+    ) -> Option<BatchMeta> {
         let mut dgrams = dgrams.into_iter();
         while let Some(mut dgram) = dgrams.next() {
             qtrace!("Process datagram: {}", Hex::new(&dgram[..]));
@@ -465,13 +485,12 @@ impl Server {
                 continue;
             }
 
+            // An `Initial` always has a version; treat a missing one as unsupported.
             if packet.packet_type() == packet::Type::OtherVersion
                 || (packet.packet_type() == packet::Type::Initial
-                    && !self
-                        .conn_params
-                        .get_versions()
-                        .all()
-                        .contains(&packet.version().expect("packet has version")))
+                    && packet
+                        .version()
+                        .is_none_or(|v| !self.conn_params.get_versions().all().contains(&v)))
             {
                 if len < MIN_INITIAL_PACKET_SIZE {
                     qdebug!("[{self}] Unsupported version: too short");
@@ -479,19 +498,22 @@ impl Server {
                 }
 
                 qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-                let vn = packet::Builder::version_negotiation(
+                // `rebuild` starts at offset 0.
+                debug_assert!(send_buffer.is_empty());
+                let vn_len = packet::Builder::version_negotiation(
                     &packet.scid()[..],
                     &packet.dcid()[..],
                     packet.wire_version(),
                     self.conn_params.get_versions().all(),
+                    &mut *send_buffer,
                 );
                 qdebug!(
-                    "[{self}] type={:?} path:{} {destination}->{source} {:?} len {}",
+                    "[{self}] type={:?} path:{} {destination}->{source} {:?} len {vn_len}",
                     packet::Type::VersionNegotiation,
                     packet.dcid(),
                     Tos::default(),
-                    vn.len(),
                 );
+                let datagram_size = NonZeroUsize::new(vn_len)?;
 
                 crate::qlog::server_version_information_failed(
                     &mut self.create_qlog_trace(packet.dcid(), now),
@@ -500,14 +522,15 @@ impl Server {
                     now,
                 );
 
-                self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
-                    d: d.to_owned(),
-                    t: now,
-                }));
+                self.save_for_later(dgrams, now);
 
-                return OutputBatch::DatagramBatch(
-                    Datagram::new(destination, source, Tos::default(), vn).into(),
-                );
+                return Some(BatchMeta {
+                    src: destination,
+                    dst: source,
+                    tos: Tos::default(),
+                    datagram_size,
+                    len: vn_len,
+                });
             }
 
             match packet.packet_type() {
@@ -519,12 +542,9 @@ impl Server {
                     // Copy values from `packet` because they are currently still borrowing from
                     // `dgram`.
                     let initial = InitialDetails::new(&packet);
-                    if let o @ Output::Datagram(_) = self.handle_initial(initial, dgram, now) {
-                        self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
-                            d: d.to_owned(),
-                            t: now,
-                        }));
-                        return o.into();
+                    if let Some(meta) = self.handle_initial(initial, dgram, now, send_buffer) {
+                        self.save_for_later(dgrams, now);
+                        return Some(meta);
                     }
                 }
                 packet::Type::ZeroRtt => {
@@ -540,30 +560,38 @@ impl Server {
             }
         }
 
-        OutputBatch::None
+        None
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch {
+    fn process_next_output<'b>(
+        &mut self,
+        now: Instant,
+        send_buffer: &'b mut Vec<u8>,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<'b> {
         assert!(
             self.saved_datagrams.is_empty(),
             "Always process all inbound datagrams first."
         );
         let mut callback = None;
 
+        // Reused across connections; no output leaves the buffer empty.
         for connection in &mut self.connections {
-            match connection
-                .borrow_mut()
-                .process_multiple_output(now, max_datagrams)
-            {
-                OutputBatch::None => {}
-                d @ OutputBatch::DatagramBatch(_) => return d,
-                OutputBatch::Callback(next) => match callback {
-                    Some(previous) => callback = Some(min(previous, next)),
-                    None => callback = Some(next),
-                },
-            }
+            let batch = connection.borrow_mut().process_multiple_output(
+                now,
+                &mut *send_buffer,
+                max_datagrams,
+            );
+            // Metadata only, so the borrow ends here.
+            let Some(meta) = batch.meta() else {
+                if let OutputBatch::Callback(next) = batch {
+                    callback = Some(callback.map_or(next, |previous| min(previous, next)));
+                }
+                continue;
+            };
+            return OutputBatch::rebuild(Some(&meta), send_buffer);
         }
 
         callback.map_or(OutputBatch::None, OutputBatch::Callback)
@@ -577,31 +605,37 @@ impl Server {
 
     /// Wrapper around [`Server::process_multiple`] that processes a single output
     /// datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
         dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
-            .try_into()
-            .expect("max_datagrams is 1")
+        Output::owned(|b, max| self.process_multiple(dgrams, now, b, max))
     }
 
-    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
+    pub fn process_multiple<
+        'b,
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
         dgrams: I,
         now: Instant,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        if let o @ OutputBatch::DatagramBatch(_) = self.process_multiple_input(dgrams, now) {
+    ) -> OutputBatch<'b> {
+        // Metadata only, so the borrow ends here.
+        let written = self
+            .process_multiple_input(dgrams, now, &mut *send_buffer)
+            .meta();
+        if written.is_some() {
             // Return immediately. Do any maintenance on next call.
-            return o;
+            return OutputBatch::rebuild(written.as_ref(), send_buffer);
         }
 
         // Process output datagrams.
-        let maybe_callback = match self.process_next_output(now, max_datagrams) {
+        let maybe_callback = match self.process_next_output(now, send_buffer, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
             o @ (OutputBatch::Callback(_) | OutputBatch::None) => o,

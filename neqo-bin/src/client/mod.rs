@@ -36,7 +36,7 @@ use http::Uri as Url;
 use neqo_common::{Datagram, Role, qdebug, qerror, qinfo, qlog::Qlog};
 use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
-use neqo_udp::RecvBuf;
+use neqo_udp::{RecvBuf, SendBuf};
 use nss::{
     Cipher, ResumptionToken,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
@@ -381,8 +381,12 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
-    fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
-    -> OutputBatch;
+    fn process_multiple_output<'b>(
+        &mut self,
+        now: Instant,
+        send_buf: &'b mut Vec<u8>,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<'b>;
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -403,6 +407,7 @@ struct Runner<'a, H: Handler> {
     timeout: Option<Pin<Box<Sleep>>>,
     args: &'a Args,
     recv_buf: RecvBuf,
+    send_buf: SendBuf,
 }
 
 impl<'a, H: Handler> Runner<'a, H> {
@@ -419,6 +424,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             args,
             timeout: None,
             recv_buf: RecvBuf::default(),
+            send_buf: SendBuf::default(),
         }
     }
 
@@ -473,7 +479,10 @@ impl<'a, H: Handler> Runner<'a, H> {
                 .inspect_err(|_| qerror!("Socket return GSO size of 0"))
                 .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
 
-            match self.client.process_multiple_output(now(), max_datagrams) {
+            match self
+                .client
+                .process_multiple_output(now(), self.send_buf.as_mut(), max_datagrams)
+            {
                 OutputBatch::DatagramBatch(dgram) => loop {
                     // Optimistically attempt sending datagram. In case the OS
                     // buffer is full, wait till socket is writable then try
