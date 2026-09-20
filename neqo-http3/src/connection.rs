@@ -1199,6 +1199,14 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Connect-udp has no API of its own to set an outgoing-datagram high
+    /// water mark (unlike `WebTransport`'s `outgoingHighWaterMark`), so every
+    /// connect-udp session gets this baked in. Matches the depth the legacy
+    /// connection-wide datagram queue used to enforce for everyone before
+    /// per-session queues replaced it, so connect-udp keeps the backpressure
+    /// signal PR #3859 added.
+    const CONNECT_UDP_DATAGRAM_HIGH_WATER_MARK: usize = 10;
+
     pub fn extended_connect_create_session<T>(
         &mut self,
         conn: &mut Connection,
@@ -1211,6 +1219,12 @@ impl Http3Connection {
         T: RequestTarget,
     {
         let id = self.create_bidi_transport_stream(conn)?;
+        if connect_type == ExtendedConnectType::ConnectUdp {
+            conn.set_datagram_high_water_mark(
+                id,
+                std::num::NonZeroUsize::new(Self::CONNECT_UDP_DATAGRAM_HIGH_WATER_MARK),
+            );
+        }
 
         let extended_conn = Rc::new(RefCell::new(extended_connect::session::Session::new(
             id,

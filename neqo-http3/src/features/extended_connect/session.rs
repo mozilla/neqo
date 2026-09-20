@@ -425,7 +425,7 @@ impl Session {
     /// Returns an error if:
     /// - The session is not in Active state (`Error::Unavailable`).
     /// - `send_group_id` is neither `SendGroupId::new(0)` (ungrouped) nor a group already
-    ///   registered for this session's streams (`Error::InvalidInput`).
+    ///   registered for this session (`Error::InvalidInput`).
     /// - HTTP DATAGRAM Capsule sending fails (the QUIC-datagram path itself cannot fail here:
     ///   MTU/size limits are applied later, at packet-build time, same as queued stream data).
     ///
