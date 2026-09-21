@@ -146,7 +146,7 @@ impl<'a> Decoder<'a> {
         if first < 0x80 {
             let v = u64::from(u16::from_be_bytes(
                 *self.buf.get(self.offset..)?.first_chunk()?,
-            )) & ((1 << 14) - 1);
+            )) & 0x3fff;
             self.offset += 2;
             return Some(v);
         }
