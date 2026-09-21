@@ -120,8 +120,8 @@ neqo/
 - **machete.yml**: Checks for unused dependencies
 - **bench.yml**: Criterion benchmark reports on CodSpeed macro runners
 - **perfcompare.yml**: Client/server comparison reports on CodSpeed macro runners
-- **codspeed.yml**: Criterion benchmarks uploaded to CodSpeed
-- **codspeed-perfcompare.yml**: Client/server benchmarks uploaded to CodSpeed
+- **codspeed.yml**: Criterion benchmarks uploaded to CodSpeed; also calls codspeed-perfcompare.yml
+- **codspeed-perfcompare.yml**: Client/server benchmarks uploaded to CodSpeed. Only called by codspeed.yml, so that a commit produces one CodSpeed run; CodSpeed groups results by GitHub Actions run.
 - **sanitize.yml**: Runs tests with address/memory sanitizers
 - **semver.yml**: Checks for semver compliance
 - **firefox.yml**: Integration test with Firefox

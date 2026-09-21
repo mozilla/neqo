@@ -1,9 +1,12 @@
 name: CodSpeed perfcompare
+# Called by codspeed.yml, never triggered on its own: CodSpeed groups results by GitHub Actions
+# run, and a called workflow runs inside the caller's run. Triggering this one directly would
+# produce a second, partial CodSpeed run for the same commit.
 on:
-  push:
-    branches: ["main"]
-  pull_request: # Required for CodSpeed's PR comment and status check.
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      CODSPEED_TOKEN:
+        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -11,10 +14,6 @@ env:
   RUSTUP_TOOLCHAIN: stable
   TRANSFER_SIZE: 33554432 # 32 MiB
   MTU: 1500
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
-  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -103,8 +102,8 @@ jobs:
 
       - run: chmod +x binaries/*
 
-      # Pin client and server to separate CPUs, as the other perf workflows do. Unpinned, the
-      # two can share a core or straddle the 9950X's CCDs, which dominates a walltime median.
+      # Pin client and server to separate CPUs: sharing a core or straddling the 9950X's CCDs
+      # dominates the walltime median.
       - name: Prepare machine
         id: machine
         uses: $/.github/actions/bench-machine
@@ -116,8 +115,7 @@ jobs:
         with:
           sizes: ${{ env.TRANSFER_SIZE }}
 
-      # Separate ports would only matter if combos ran concurrently on this runner; they
-      # run sequentially in the matrix, so the command generator's default port is fine.
+      # The combos run sequentially on this runner, so the default port needs no override.
       - name: Generate commands
         id: commands
         uses: $/.github/actions/perfcompare-commands

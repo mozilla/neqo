@@ -82,3 +82,11 @@ jobs:
           mode: ${{ matrix.bench.mode }}
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
+
+  # Called from here, rather than triggered on its own, so that all of a commit's results land
+  # in a single CodSpeed run: CodSpeed groups them by GitHub Actions run.
+  perfcompare:
+    name: Client/server
+    uses: $/.github/workflows/codspeed-perfcompare.yml
+    secrets:
+      CODSPEED_TOKEN: ${{ secrets.CODSPEED_TOKEN }}
