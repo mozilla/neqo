@@ -130,9 +130,9 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "cfg_aliases"
-version = "0.2.1"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
+checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "ciborium"
@@ -223,9 +223,9 @@ checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
 
 [[package]]
 name = "codspeed"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea0fb765e7d2f2f24c2eb54537b7f1e172644ba6079f3a219ca86f5a2df99eff"
+checksum = "7083f253260bcb4aaa3b4aa4c52973703dabc1a85c2f193997e2689aafa8a919"
 dependencies = [
  "anyhow",
  "cc",
@@ -241,9 +241,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76f14cb47b12df99d3eda06a2c439efc7b99d1dfa46a7fafffb9d499a03ecbfb"
+checksum = "d9f24251445188c69d50f10179d795424bd71b533b7e3f84fc03f26893b01af0"
 dependencies = [
  "clap",
  "codspeed",
@@ -256,9 +256,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat-walltime"
-version = "5.0.0"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac4363344ab6712963c06a97f8a6e2250d2669f500f523e9431d2535bd53c060"
+checksum = "5c38205d56e2cb4fe04b708de7f9653a3f1b89edbe3a20b28f21e9e525e9e061"
 dependencies = [
  "anes",
  "cast",
@@ -356,6 +356,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d336a2a514f6ccccaa3e09b02d41d35330c07ddf03a62165fcec10bb561c7806"
 dependencies = [
  "darling_core",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_more"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "093242cf7570c207c83073cf82f79706fe7b8317e98620a47d5be7c3d8497678"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bda628edc44c4bb645fbe0f758797143e4e07926f7ebf4e9bdfbd3d2ce621df3"
+dependencies = [
+ "proc-macro2",
  "quote",
  "syn",
 ]
@@ -507,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -515,7 +535,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.29.1",
+ "test-fixture 0.31.1",
 ]
 
 [[package]]
@@ -686,6 +706,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
+name = "mach2"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -720,7 +749,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -740,34 +769,38 @@ dependencies = [
  "qlog",
  "quinn-udp",
  "rustc-hash",
+ "serde_json",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.29.1",
+ "test-fixture 0.31.1",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
  "env_logger",
  "hex",
+ "libc",
  "log",
+ "mach2",
  "qlog",
+ "serde",
  "sha1",
  "static_assertions",
  "strum",
- "test-fixture 0.29.1",
+ "test-fixture 0.31.1",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -781,14 +814,15 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "sfv",
+ "static_assertions",
  "strum",
- "test-fixture 0.29.1",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -796,13 +830,13 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.29.1",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -815,16 +849,19 @@ dependencies = [
  "nss-rs",
  "qlog",
  "rustc-hash",
+ "serde",
+ "serde_json",
+ "serde_with",
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.29.1",
+ "test-fixture 0.31.1",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -858,15 +895,14 @@ dependencies = [
 
 [[package]]
 name = "nss-rs"
-version = "0.13.4"
-source = "git+https://github.com/mozilla/nss-rs#da11b438d142cdcb71a2b152a9c5d13efe59d8b6"
+version = "0.16.1"
+source = "git+https://github.com/mozilla/nss-rs#ba8a3f6acffc7e25749054969ccbbb3ca615df7f"
 dependencies = [
  "bindgen",
+ "derive_more",
  "enum-map",
  "log",
- "once_cell",
- "pkcs11-bindings",
- "semver",
+ "pkg-config",
  "serde",
  "serde_derive",
  "strum",
@@ -910,13 +946,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
 
 [[package]]
-name = "pkcs11-bindings"
-version = "0.1.7"
+name = "pkg-config"
+version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77f2b11de4fec7f1e085891d4a4bf16a8b1beb49978837a80d4e9e705b99295c"
-dependencies = [
- "bindgen",
-]
+checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "proc-macro2"
@@ -941,9 +974,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.6.1"
+version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76150b617afc75e6e21ac5f39bc196e80b65415ae48d62dbef8e2519d040ce42"
+checksum = "3ca72c3f2792761ab5fa848490694cbc728c7f659669ed4320c4c79c12150966"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1042,12 +1075,6 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
-
-[[package]]
-name = "semver"
-version = "1.0.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58bc9567378fc7690d6b2addae4e60ac2eeea07becb2c64b9f218b53865cba2a"
 
 [[package]]
 name = "serde"
@@ -1161,9 +1188,9 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "smallvec"
-version = "1.15.1"
+version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+checksum = "8ed6a63f02c8539c91a8685a86f4099661ba3da017932f6ebbea6de3f0fa7c90"
 dependencies = [
  "serde",
 ]
@@ -1236,7 +1263,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs#da11b438d142cdcb71a2b152a9c5d13efe59d8b6"
+source = "git+https://github.com/mozilla/nss-rs#ba8a3f6acffc7e25749054969ccbbb3ca615df7f"
 dependencies = [
  "log",
  "nss-rs",
@@ -1244,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.29.1"
+version = "0.31.1"
 dependencies = [
  "log",
  "neqo-common",
@@ -1252,6 +1279,7 @@ dependencies = [
  "neqo-transport",
  "nss-rs",
  "qlog",
+ "serde_json",
  "test-fixture 0.1.0",
 ]
 

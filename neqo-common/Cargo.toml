@@ -1,7 +1,6 @@
 [package]
 name = "neqo-common"
 authors.workspace = true
-homepage.workspace = true
 repository.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -22,10 +21,15 @@ env_logger = { version = "0.10", default-features = false }
 hex = { workspace = true, optional = true }
 log = { workspace = true }
 qlog = { workspace = true }
+serde = { workspace = true }
 sha1 = { version = "0.10", default-features = false, optional = true }
 static_assertions = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
+
+[target."cfg(target_os = \"macos\")".dependencies]
+libc = { workspace = true }
+mach2 = { version = "0.4.1", default-features = false } # 0.4.1 adds `thread_policy`.
 
 [target."cfg(windows)".dependencies]
 windows = { workspace = true, features = ["Win32_Media"] }
@@ -35,7 +39,7 @@ criterion = { version = "5", package = "codspeed-criterion-compat", default-feat
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["test-fixture/bench", "log/release_max_level_info"]
+bench = ["test-fixture/bench", "log/release_max_level_warn"]
 build-fuzzing-corpus = ["hex/alloc", "sha1"]
 ci = []
 test-fixture = []

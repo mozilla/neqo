@@ -13,13 +13,13 @@ use crate::{CloseType, Error, Http3StreamType, ReceiveOutput, RecvStream, Res, S
 
 #[derive(Debug)]
 pub struct DecoderRecvStream {
-    stream_id: StreamId,
     decoder: Rc<RefCell<qpack::Decoder>>,
 }
 
 impl DecoderRecvStream {
-    pub const fn new(stream_id: StreamId, decoder: Rc<RefCell<qpack::Decoder>>) -> Self {
-        Self { stream_id, decoder }
+    pub fn new(stream_id: StreamId, decoder: Rc<RefCell<qpack::Decoder>>) -> Res<Self> {
+        decoder.borrow_mut().add_recv_stream(stream_id)?;
+        Ok(Self { decoder })
     }
 }
 
@@ -36,9 +36,7 @@ impl RecvStream for DecoderRecvStream {
 
     fn receive(&mut self, conn: &mut Connection, _now: Instant) -> Res<(ReceiveOutput, bool)> {
         Ok((
-            ReceiveOutput::UnblockedStreams(
-                self.decoder.borrow_mut().receive(conn, self.stream_id)?,
-            ),
+            ReceiveOutput::UnblockedStreams(self.decoder.borrow_mut().receive(conn)?),
             false,
         ))
     }

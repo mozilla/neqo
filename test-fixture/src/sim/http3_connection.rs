@@ -18,13 +18,15 @@ use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
 };
-use neqo_transport::{ConnectionParameters, Output, StreamId};
+use neqo_transport::{ConnectionParameters, Output, RandomConnectionIdGenerator, StreamId};
 use nss::AuthenticationStatus;
 
 use crate::{
-    boxed, http3_client_with_params, http3_server_with_params, now,
+    boxed, http3_client_with_cid_gen, http3_server_with_cid_gen, now,
     sim::{self, GoalStatus, Rng},
 };
+
+const CID_LEN: usize = 8;
 
 /// A goal for the connection.
 /// Goals can be accomplished in any order.
@@ -92,7 +94,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: Endpoint::Client(http3_client_with_params(params)),
+            c: Endpoint::Client(http3_client_with_cid_gen(
+                RandomConnectionIdGenerator::new(CID_LEN),
+                params,
+            )),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
@@ -107,7 +112,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: Endpoint::Server(http3_server_with_params(params)),
+            c: Endpoint::Server(http3_server_with_cid_gen(
+                RandomConnectionIdGenerator::new(CID_LEN),
+                params,
+            )),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
@@ -213,7 +221,10 @@ impl sim::Node for Node {
 
     fn print_summary(&self, test_name: &str) {
         match &self.c {
-            Endpoint::Client(c) => qinfo!("{test_name}: {:?}", c.transport_stats()),
+            Endpoint::Client(c) => qinfo!(
+                "{test_name}: {}",
+                serde_json::to_string(&c.transport_stats()).unwrap()
+            ),
             Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
         }
     }
@@ -444,15 +455,25 @@ mod tests {
         },
     };
 
-    #[test]
-    fn requests() {
+    fn run_requests(num_requests: usize, body_size: usize) {
         let nodes = boxed![
-            Node::default_client(boxed![Requests::new(20, 1_000)]),
+            Node::default_client(boxed![Requests::new(num_requests, body_size)]),
             TailDrop::dsl_uplink(),
-            Node::default_server(boxed![Responses::new(20, 1_000)]),
+            Node::default_server(boxed![Responses::new(num_requests, body_size)]),
             TailDrop::dsl_uplink(),
         ];
-        let sim = Simulator::new("", nodes);
-        sim.setup().run();
+        Simulator::new("", nodes).setup().run();
+    }
+
+    #[test]
+    fn requests() {
+        run_requests(20, 1_000);
+    }
+
+    // Body exceeds neqo_http3's read-buffer size, forcing multiple `Data` events per request.
+    #[test]
+    fn requests_with_body_larger_than_read_buffer() {
+        const READ_BUFFER_SIZE: usize = 32 * 1024;
+        run_requests(2, READ_BUFFER_SIZE + 8 * 1024);
     }
 }

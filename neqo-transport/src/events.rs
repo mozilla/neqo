@@ -6,13 +6,13 @@
 
 // Collecting a list of events relevant to whoever is using the Connection.
 
-use std::{cell::RefCell, collections::VecDeque, net::SocketAddr, num::NonZeroU64, rc::Rc};
+use std::{net::SocketAddr, num::NonZeroU64};
 
-use neqo_common::event::Provider as EventProvider;
+use neqo_common::event::{Provider as EventProvider, Queue as EventQueue};
 use nss::ResumptionToken;
 
 use crate::{
-    AppError, Stats,
+    AppError,
     connection::State,
     quic_datagrams::DatagramTracking,
     scone::Bitrate,
@@ -22,7 +22,6 @@ use crate::{
 #[derive(Debug, PartialOrd, Ord, PartialEq, Eq)]
 pub enum OutgoingDatagramOutcome {
     DroppedTooBig,
-    DroppedQueueFull,
     Lost,
     Acked,
 }
@@ -78,7 +77,8 @@ pub enum ConnectionEvent {
         id: u64,
         outcome: OutgoingDatagramOutcome,
     },
-    IncomingDatagramDropped,
+    /// The outgoing QUIC datagram queue has space again after having been full.
+    OutgoingDatagramSpaceAvailable,
     /// An update was received to SCONE throughput advice.
     /// The value is the approximate rate in bits per second; None = unknown.
     SconeUpdated(Option<NonZeroU64>),
@@ -91,122 +91,124 @@ pub enum ConnectionEvent {
 
 #[derive(Debug, Default, Clone)]
 pub struct ConnectionEvents {
-    events: Rc<RefCell<VecDeque<ConnectionEvent>>>,
+    events: EventQueue<ConnectionEvent>,
 }
 
 impl ConnectionEvents {
     pub fn authentication_needed(&self) {
-        self.insert(ConnectionEvent::AuthenticationNeeded);
+        self.events.push(ConnectionEvent::AuthenticationNeeded);
     }
 
     pub fn ech_fallback_authentication_needed(&self, public_name: String) {
-        self.insert(ConnectionEvent::EchFallbackAuthenticationNeeded { public_name });
+        self.events
+            .push_unique(ConnectionEvent::EchFallbackAuthenticationNeeded { public_name });
     }
 
     pub fn new_stream(&self, stream_id: StreamId) {
-        self.insert(ConnectionEvent::NewStream { stream_id });
+        self.events.push(ConnectionEvent::NewStream { stream_id });
     }
 
     pub fn recv_stream_readable(&self, stream_id: StreamId) {
-        self.insert(ConnectionEvent::RecvStreamReadable { stream_id });
+        self.events
+            .push_unique(ConnectionEvent::RecvStreamReadable { stream_id });
     }
 
     pub fn recv_stream_reset(&self, stream_id: StreamId, app_error: AppError) {
         // If reset, no longer readable.
-        self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
+        self.events.remove_matching(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
 
-        self.insert(ConnectionEvent::RecvStreamReset {
-            stream_id,
-            app_error,
-        });
+        // A duplicate is any reset for the stream, even with a different error.
+        self.events.push_unique_by(
+            ConnectionEvent::RecvStreamReset {
+                stream_id,
+                app_error,
+            },
+            |evt| {
+                matches!(evt, ConnectionEvent::RecvStreamReset { stream_id: x, .. }
+                    if *x == stream_id)
+            },
+        );
     }
 
     pub fn send_stream_writable(&self, stream_id: StreamId) {
-        self.insert(ConnectionEvent::SendStreamWritable { stream_id });
+        self.events
+            .push_unique(ConnectionEvent::SendStreamWritable { stream_id });
     }
 
     pub fn send_stream_stop_sending(&self, stream_id: StreamId, app_error: AppError) {
         // If stopped, no longer writable.
-        self.remove(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
+        self.events.remove_matching(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
 
-        self.insert(ConnectionEvent::SendStreamStopSending {
-            stream_id,
-            app_error,
-        });
+        // A duplicate is any stop for the stream, even with a different error.
+        self.events.push_unique_by(
+            ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error,
+            },
+            |evt| {
+                matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+                    if *x == stream_id)
+            },
+        );
     }
 
     pub fn send_stream_complete(&self, stream_id: StreamId) {
-        self.remove(|evt| {
+        self.events.remove_matching(|evt| {
             matches!(evt,
                 ConnectionEvent::SendStreamWritable { stream_id: x } |
-                ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
+                ConnectionEvent::SendStreamStopSending { stream_id: x, .. } |
+                ConnectionEvent::SendStreamComplete { stream_id: x }
                 if *x == stream_id)
         });
 
-        self.insert(ConnectionEvent::SendStreamComplete { stream_id });
+        self.events
+            .push(ConnectionEvent::SendStreamComplete { stream_id });
     }
 
     pub fn send_stream_creatable(&self, stream_type: StreamType) {
-        self.insert(ConnectionEvent::SendStreamCreatable { stream_type });
+        self.events
+            .push_unique(ConnectionEvent::SendStreamCreatable { stream_type });
     }
 
     pub fn connection_state_change(&self, state: State) {
         // If closing, existing events no longer relevant.
         match state {
-            State::Closing { .. } | State::Closed(_) => self.events.borrow_mut().clear(),
+            State::Closing { .. } | State::Closed(_) => self.events.clear(),
             _ => (),
         }
-        self.insert(ConnectionEvent::StateChange(state));
+        self.events.push_unique(ConnectionEvent::StateChange(state));
     }
 
     pub fn client_resumption_token(&self, token: ResumptionToken) {
-        self.insert(ConnectionEvent::ResumptionToken(token));
+        self.events.push(ConnectionEvent::ResumptionToken(token));
     }
 
     pub fn client_0rtt_rejected(&self) {
         // If 0rtt rejected, must start over and existing events are no longer
         // relevant.
-        self.events.borrow_mut().clear();
-        self.insert(ConnectionEvent::ZeroRttRejected);
+        self.events.clear();
+        self.events.push(ConnectionEvent::ZeroRttRejected);
     }
 
     pub fn recv_stream_complete(&self, stream_id: StreamId) {
         // If stopped, no longer readable.
-        self.remove(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
+        self.events.remove_matching(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
     }
 
     pub fn scone_updated(&self, scone: Bitrate) {
-        self.remove(|evt| matches!(evt, ConnectionEvent::SconeUpdated(_)));
-        self.insert(ConnectionEvent::SconeUpdated(Option::from(scone)));
-    }
-
-    // The number of datagrams in the events queue is limited to max_queued_datagrams.
-    // This function ensure this and deletes the oldest datagrams (head-drop) if needed.
-    fn check_datagram_queued(&self, max_queued_datagrams: usize, stats: &mut Stats) {
-        let mut queue = self.events.borrow_mut();
-        let count = queue
-            .iter()
-            .filter(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
-            .count();
-        if count < max_queued_datagrams {
-            // Below the limit. No action needed.
-            return;
-        }
-        let first = queue
-            .iter_mut()
-            .find(|evt| matches!(evt, ConnectionEvent::Datagram(_)))
-            .expect("Checked above");
-        // Remove the oldest (head-drop), replacing it with an
-        // IncomingDatagramDropped placeholder.
-        *first = ConnectionEvent::IncomingDatagramDropped;
-        stats.incoming_datagram_dropped += 1;
-    }
-
-    pub fn add_datagram(&self, max_queued_datagrams: usize, data: &[u8], stats: &mut Stats) {
-        self.check_datagram_queued(max_queued_datagrams, stats);
         self.events
-            .borrow_mut()
-            .push_back(ConnectionEvent::Datagram(data.to_vec()));
+            .remove_matching(|evt| matches!(evt, ConnectionEvent::SconeUpdated(_)));
+        self.events
+            .push_unique(ConnectionEvent::SconeUpdated(Option::from(scone)));
+    }
+
+    pub fn add_datagram(&self, data: &[u8]) {
+        self.events.push(ConnectionEvent::Datagram(data.to_vec()));
+    }
+
+    pub fn datagram_space_available(&self) {
+        self.events
+            .push_unique(ConnectionEvent::OutgoingDatagramSpaceAvailable);
     }
 
     pub fn datagram_outcome(
@@ -216,41 +218,13 @@ impl ConnectionEvents {
     ) {
         if let DatagramTracking::Id(id) = dgram_tracker {
             self.events
-                .borrow_mut()
-                .push_back(ConnectionEvent::OutgoingDatagramOutcome { id: *id, outcome });
+                .push(ConnectionEvent::OutgoingDatagramOutcome { id: *id, outcome });
         }
     }
 
     pub fn path_migrated(&self, local: SocketAddr, remote: SocketAddr) {
-        self.insert(ConnectionEvent::PathMigrated { local, remote });
-    }
-
-    fn insert(&self, event: ConnectionEvent) {
-        let mut q = self.events.borrow_mut();
-
-        // Special-case two enums that are not strictly PartialEq equal but that
-        // we wish to avoid inserting duplicates.
-        let already_present = match &event {
-            ConnectionEvent::SendStreamStopSending { stream_id, .. } => q.iter().any(|evt| {
-                matches!(evt, ConnectionEvent::SendStreamStopSending { stream_id: x, .. }
-		                    if *x == *stream_id)
-            }),
-            ConnectionEvent::RecvStreamReset { stream_id, .. } => q.iter().any(|evt| {
-                matches!(evt, ConnectionEvent::RecvStreamReset { stream_id: x, .. }
-		                    if *x == *stream_id)
-            }),
-            _ => q.contains(&event),
-        };
-        if !already_present {
-            q.push_back(event);
-        }
-    }
-
-    fn remove<F>(&self, f: F)
-    where
-        F: Fn(&ConnectionEvent) -> bool,
-    {
-        self.events.borrow_mut().retain(|evt| !f(evt));
+        self.events
+            .push(ConnectionEvent::PathMigrated { local, remote });
     }
 }
 
@@ -258,11 +232,11 @@ impl EventProvider for ConnectionEvents {
     type Event = ConnectionEvent;
 
     fn has_events(&self) -> bool {
-        !self.events.borrow().is_empty()
+        !self.events.is_empty()
     }
 
     fn next_event(&mut self) -> Option<Self::Event> {
-        self.events.borrow_mut().pop_front()
+        self.events.next_event()
     }
 }
 
@@ -271,7 +245,7 @@ impl EventProvider for ConnectionEvents {
 mod tests {
     use neqo_common::event::Provider as _;
 
-    use crate::{CloseReason, ConnectionEvent, ConnectionEvents, Error, State, Stats, StreamId};
+    use crate::{CloseReason, ConnectionEvent, ConnectionEvents, Error, State, StreamId};
 
     #[test]
     fn event_culling() {
@@ -283,10 +257,6 @@ mod tests {
         evts.client_0rtt_rejected();
         assert_eq!(evts.events().count(), 1);
         assert_eq!(evts.events().count(), 0);
-
-        evts.new_stream(4.into());
-        evts.new_stream(4.into());
-        assert_eq!(evts.events().count(), 1);
 
         evts.recv_stream_readable(6.into());
         evts.recv_stream_reset(6.into(), 66);
@@ -333,71 +303,5 @@ mod tests {
         evts.send_stream_stop_sending(10.into(), 55);
         evts.connection_state_change(State::Closed(CloseReason::Transport(Error::StreamState)));
         assert_eq!(evts.events().count(), 1);
-    }
-
-    #[test]
-    fn datagram_queue_drops_oldest() {
-        const MAX_QUEUED: usize = 2;
-
-        // Fill the queue to capacity, verify that and that there are no drops yet.
-        let e = ConnectionEvents::default();
-        let mut stats = Stats::default();
-        e.add_datagram(MAX_QUEUED, &[1], &mut stats);
-        e.add_datagram(MAX_QUEUED, &[2], &mut stats);
-        assert_eq!(stats.incoming_datagram_dropped, 0);
-        assert_eq!(e.events.borrow().len(), MAX_QUEUED);
-
-        // Add one more datagram - this should drop the oldest ("1").
-        e.add_datagram(MAX_QUEUED, &[3], &mut stats);
-        assert_eq!(stats.incoming_datagram_dropped, 1);
-
-        // Should have one `IncomingDatagramDropped` event + `MAX_QUEUED` datagrams.
-        assert_eq!(
-            e.events.borrow().iter().collect::<Vec<_>>(),
-            [
-                &ConnectionEvent::IncomingDatagramDropped,
-                &ConnectionEvent::Datagram(vec![2]),
-                &ConnectionEvent::Datagram(vec![3]),
-            ]
-        );
-    }
-
-    /// Previously `check_datagram_queued` had a bug that caused it to
-    /// potentially drop an unrelated event.
-    ///
-    /// See <https://github.com/mozilla/neqo/pull/3105> for details.
-    #[test]
-    fn datagram_queue_drops_datagram_not_unrelated_event() {
-        const MAX_QUEUED: usize = 2;
-
-        let e = ConnectionEvents::default();
-        let mut stats = Stats::default();
-
-        // Add unrelated event.
-        e.new_stream(4.into());
-
-        // Fill the queue with datagrams to capacity.
-        e.add_datagram(MAX_QUEUED, &[1], &mut stats);
-        e.add_datagram(MAX_QUEUED, &[2], &mut stats);
-        assert_eq!(stats.incoming_datagram_dropped, 0);
-        assert_eq!(e.events.borrow().len(), 1 + MAX_QUEUED);
-
-        // Add one more datagram - this should drop the oldest ("1"), not the
-        // unrelated event.
-        e.add_datagram(MAX_QUEUED, &[3], &mut stats);
-        assert_eq!(stats.incoming_datagram_dropped, 1);
-
-        // Should have one `IncomingDatagramDropped` event + `MAX_QUEUED` datagrams.
-        assert_eq!(
-            e.events.borrow().iter().collect::<Vec<_>>(),
-            [
-                &ConnectionEvent::NewStream {
-                    stream_id: StreamId::new(4)
-                },
-                &ConnectionEvent::IncomingDatagramDropped,
-                &ConnectionEvent::Datagram(vec![2]),
-                &ConnectionEvent::Datagram(vec![3]),
-            ]
-        );
     }
 }

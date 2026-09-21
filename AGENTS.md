@@ -16,7 +16,7 @@ In addition to the instructions in this file, also follow the detailed instructi
 ## Building and Testing
 
 ### Prerequisites
-- NSS library version as specified in the `min_version.txt` file of the [`nss`](https://github.com/mozilla/nss-rs) crate
+- NSS library version as specified in the `[package.metadata.nss]` table of the [`nss`](https://github.com/mozilla/nss-rs) crate's `Cargo.toml`
 - System NSS will be used if available and new enough; otherwise, build will fetch and compile NSS automatically
 
 ### Essential Commands (Always Use --locked)
@@ -101,7 +101,7 @@ neqo/
 ├── mtu/                # MTU detection (tests require GitHub Actions)
 └── .github/            # CI workflows and actions
     ├── workflows/      # CI pipeline definitions
-    └── actions/        # Reusable GitHub Actions (rust, nss, etc.)
+    └── actions/        # Reusable GitHub Actions (install-build-deps, build-neqo, etc.)
 ```
 
 ### Key Files
@@ -118,7 +118,10 @@ neqo/
 - **rustfmt.yml** (Format): cargo fmt check with nightly
 - **deny.yml**: cargo deny for advisories, bans, licenses, sources
 - **machete.yml**: Checks for unused dependencies
-- **bench.yml**: Performance benchmarks (runs on dedicated hardware)
+- **bench.yml**: Criterion benchmark reports on CodSpeed macro runners
+- **perfcompare.yml**: Client/server comparison reports on CodSpeed macro runners
+- **codspeed.yml**: Criterion benchmarks uploaded to CodSpeed
+- **codspeed-perfcompare.yml**: Client/server benchmarks uploaded to CodSpeed
 - **sanitize.yml**: Runs tests with address/memory sanitizers
 - **semver.yml**: Checks for semver compliance
 - **firefox.yml**: Integration test with Firefox

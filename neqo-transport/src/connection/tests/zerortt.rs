@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider as _, qdebug, to_usize};
+use neqo_common::{event::Provider as _, qdebug};
 use nss::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -15,7 +15,7 @@ use super::{
     default_server, exchange_ticket, new_server, resumed_server,
 };
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamType, Version,
+    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamDataLimit, StreamType, Version,
     events::ConnectionEvent,
 };
 
@@ -215,13 +215,14 @@ fn zero_rtt_send_reject() {
 fn zero_rtt_update_flow_control() {
     const LOW: u64 = 3;
     const HIGH: u64 = 10;
-    const MESSAGE: &[u8] = &[0; to_usize(HIGH)];
+    #[expect(clippy::cast_possible_truncation, reason = "small value will fit")]
+    const MESSAGE: &[u8] = &[0; HIGH as usize];
 
     let mut client = default_client();
     let mut server = new_server(
         ConnectionParameters::default()
-            .max_stream_data(StreamType::UniDi, true, LOW)
-            .max_stream_data(StreamType::BiDi, true, LOW),
+            .max_stream_data(StreamDataLimit::UniDi, LOW)
+            .max_stream_data(StreamDataLimit::BiDiRemote, LOW),
     );
     connect(&mut client, &mut server);
 
@@ -232,8 +233,8 @@ fn zero_rtt_update_flow_control() {
         .expect("should set token");
     let mut server = new_server(
         ConnectionParameters::default()
-            .max_stream_data(StreamType::UniDi, true, HIGH)
-            .max_stream_data(StreamType::BiDi, true, HIGH)
+            .max_stream_data(StreamDataLimit::UniDi, HIGH)
+            .max_stream_data(StreamDataLimit::BiDiRemote, HIGH)
             .versions(client.version, Version::all()),
     );
 

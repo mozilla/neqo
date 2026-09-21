@@ -194,11 +194,16 @@ impl HeaderTable {
             .add_ref();
     }
 
-    /// Look for a header pair.
-    /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
-    /// and `value_matches` (if the header value matches as well not only header name)
-    pub fn lookup(&mut self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
-        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
+    /// Look for a header pair in the static table only.
+    ///
+    /// Unlike [`Self::lookup`], this does not consult the dynamic table, so it borrows
+    /// nothing and can never return a dynamic entry (which would need a reference to be
+    /// held against eviction). The encoder uses this when it must not create a new
+    /// dynamic-table reference for the stream.
+    ///
+    /// The function returns `LookupResult`: `index`, `static_table` (always `true` here)
+    /// and `value_matches` (if the header value matches as well, not only the header name).
+    pub fn static_lookup(name: &[u8], value: &[u8]) -> Option<LookupResult> {
         let mut name_match = None;
         for iter in HEADER_STATIC_TABLE {
             if iter.name() == name {
@@ -217,8 +222,23 @@ impl HeaderTable {
                 });
             }
         }
+        name_match
+    }
 
-        for iter in &mut self.dynamic {
+    /// Look for a header pair in the static and dynamic tables.
+    /// The function returns `LookupResult`: `index`, `static_table` (if it is a static table entry)
+    /// and `value_matches` (if the header value matches as well not only header name)
+    pub fn lookup(&self, name: &[u8], value: &[u8], can_block: bool) -> Option<LookupResult> {
+        qtrace!("[{self}] lookup name:{name:?} value {value:?} can_block={can_block}");
+        // A static value match wins outright; otherwise a static name-only match is kept
+        // as a fallback that a dynamic name-only match must not displace.
+        let static_match = Self::static_lookup(name, value);
+        if static_match.as_ref().is_some_and(|r| r.value_matches) {
+            return static_match;
+        }
+
+        let mut name_match = static_match;
+        for iter in &self.dynamic {
             if !can_block && iter.index() >= self.acked_inserts_cnt {
                 continue;
             }

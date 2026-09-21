@@ -266,7 +266,9 @@ impl LiteralReader {
     /// The Gecko limit is in `network.http.max_response_header_size` and defaults to
     /// 393216 bytes (384 KB), see `modules/libpref/init/StaticPrefList.yaml`. We use
     /// the same limit.
-    pub(crate) const MAX_LEN: usize = 384 * 1024;
+    ///
+    /// Also reused by `neqo-http3` (`hframe::MAX_HEADER_BYTES`).
+    pub const MAX_LEN: usize = 384 * 1024;
 
     /// Creates `LiteralReader` with the first byte. This constructor is always used
     /// when a literal has a prefix.

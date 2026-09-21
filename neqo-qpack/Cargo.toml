@@ -1,7 +1,6 @@
 [package]
 name = "neqo-qpack"
 authors.workspace = true
-homepage.workspace = true
 repository.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -31,7 +30,7 @@ test-fixture = { path = "../test-fixture" }
 ignored = ["log"]
 
 [features]
-bench = ["neqo-common/bench", "neqo-transport/bench", "log/release_max_level_info"]
+bench = ["neqo-common/bench", "neqo-transport/bench", "log/release_max_level_warn"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-transport/build-fuzzing-corpus",

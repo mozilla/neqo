@@ -55,13 +55,13 @@ pub fn init(level_filter: Option<log::LevelFilter>) {
 
 /// Log an error message using the neqo logging framework.
 ///
-/// Automatically initializes logging in test/bench builds before logging.
+/// Automatically initializes logging in test builds before logging.
 /// Equivalent to `log::error!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qerror {
     ($($arg:tt)*) => ( {
-        #[cfg(any(test, feature = "bench"))]
+        #[cfg(test)]
         ::neqo_common::log::init(None);
         ::log::error!($($arg)*);
     } );
@@ -69,13 +69,13 @@ macro_rules! qerror {
 
 /// Log a warning message using the neqo logging framework.
 ///
-/// Automatically initializes logging in test/bench builds before logging.
+/// Automatically initializes logging in test builds before logging.
 /// Equivalent to `log::warn!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qwarn {
     ($($arg:tt)*) => ( {
-        #[cfg(any(test, feature = "bench"))]
+        #[cfg(test)]
         ::neqo_common::log::init(None);
         ::log::warn!($($arg)*);
     } );
@@ -83,13 +83,13 @@ macro_rules! qwarn {
 
 /// Log an informational message using the neqo logging framework.
 ///
-/// Automatically initializes logging in test/bench builds before logging.
+/// Automatically initializes logging in test builds before logging.
 /// Equivalent to `log::info!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qinfo {
     ($($arg:tt)*) => ( {
-        #[cfg(any(test, feature = "bench"))]
+        #[cfg(test)]
         ::neqo_common::log::init(None);
         ::log::info!($($arg)*);
     } );
@@ -97,13 +97,13 @@ macro_rules! qinfo {
 
 /// Log a debug message using the neqo logging framework.
 ///
-/// Automatically initializes logging in test/bench builds before logging.
+/// Automatically initializes logging in test builds before logging.
 /// Equivalent to `log::debug!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qdebug {
     ($($arg:tt)*) => ( {
-        #[cfg(any(test, feature = "bench"))]
+        #[cfg(test)]
         ::neqo_common::log::init(None);
         ::log::debug!($($arg)*);
     } );
@@ -111,13 +111,13 @@ macro_rules! qdebug {
 
 /// Log a trace message using the neqo logging framework.
 ///
-/// Automatically initializes logging in test/bench builds before logging.
+/// Automatically initializes logging in test builds before logging.
 /// Equivalent to `log::trace!` but with automatic initialization.
 #[macro_export]
 #[clippy::format_args]
 macro_rules! qtrace {
     ($($arg:tt)*) => ( {
-        #[cfg(any(test, feature = "bench"))]
+        #[cfg(test)]
         ::neqo_common::log::init(None);
         ::log::trace!($($arg)*);
     } );

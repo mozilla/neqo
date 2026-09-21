@@ -49,6 +49,7 @@ mod null;
 mod pmtud;
 mod priority;
 mod recovery;
+mod reset_stream_at;
 mod resumption;
 mod stream;
 mod vn;
@@ -239,6 +240,8 @@ where
         input = output.and_then(&mut modifier);
         qtrace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
+        #[allow(clippy::allow_attributes, // TODO: Switch to expect once MSRV>=1.99.
+                clippy::mut_mut, reason = "Correct here.")]
         mem::swap(&mut a, &mut b);
     }
     if let Some(d) = input {
@@ -311,6 +314,16 @@ fn assert_error(c: &Connection, expected: &CloseReason) {
             assert_eq!(*error, *expected, "{c} error mismatch");
         }
         _ => panic!("bad state {:?}", c.state()),
+    }
+}
+
+/// Pump datagrams between two peers until neither has anything more to send.
+fn exchange(a: &mut Connection, b: &mut Connection) {
+    let mut d = a.process_output(now()).dgram();
+    while let Some(dgram) = d {
+        let r = b.process(Some(dgram), now()).dgram();
+        mem::swap(a, b);
+        d = r;
     }
 }
 

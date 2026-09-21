@@ -20,6 +20,7 @@ use crate::{
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
+        stats::SessionStats,
     },
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
@@ -39,6 +40,7 @@ pub struct Session {
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
+    stats: SessionStats,
 }
 
 impl Display for Session {
@@ -59,6 +61,7 @@ impl Session {
             pending_streams: HashSet::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
+            stats: SessionStats::default(),
         }
     }
     /// Register a send group with a caller-provided ID for this session.
@@ -238,6 +241,10 @@ impl Protocol for Session {
 
     fn protocol(&self) -> Option<&str> {
         self.negotiated_protocol.as_deref()
+    }
+
+    fn stats(&self) -> Option<&SessionStats> {
+        Some(&self.stats)
     }
 
     fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {

@@ -28,6 +28,7 @@ mod write_corpus {
 mod fuzzing {
     use crate::{
         Decoder, Error, Res,
+        decoder::map_error,
         reader::{ReadByte, Reader},
     };
 
@@ -63,14 +64,6 @@ mod fuzzing {
     impl<'a> BufferReader<'a> {
         const fn new(buf: &'a [u8]) -> Self {
             Self { buf, offset: 0 }
-        }
-    }
-
-    fn map_error(err: Error) -> Error {
-        if err == Error::ClosedCriticalStream {
-            Error::ClosedCriticalStream
-        } else {
-            Error::EncoderStream
         }
     }
 

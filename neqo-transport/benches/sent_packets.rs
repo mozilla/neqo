@@ -53,7 +53,7 @@ fn collect_packets(iter: impl IntoIterator<Item = sent::Packet>) -> sent::Packet
 /// while the acknowledgment rate will ensure that most of the
 /// outstanding packets remain in flight.
 fn take_ranges(c: &mut Criterion) {
-    let now = Instant::now();
+    let now = test_fixture::now();
     c.bench_function("sent::Packets::take_ranges", |b| {
         b.iter_batched_ref(
             || collect_packets((0..PACKETS).map(|i| make_packet(i, now))),
@@ -68,7 +68,7 @@ fn take_ranges(c: &mut Criterion) {
 /// packet numbers.  This is the only insertion pattern that occurs in practice
 /// (the sender assigns packet numbers and they always increase).
 fn track(c: &mut Criterion) {
-    let now = Instant::now();
+    let now = test_fixture::now();
     c.bench_function("sent::Packets::track", |b| {
         b.iter_batched(
             sent::Packets::default,
@@ -86,14 +86,14 @@ fn track(c: &mut Criterion) {
 /// Measure bulk expiry of the oldest in-flight packets (loss-detection
 /// housekeeping): first half expired, second half not.
 fn remove_expired(c: &mut Criterion) {
-    let now = Instant::now();
     let cd = Duration::from_millis(300);
+    // First half lost at `old` (expired by `now`); second half lost at `now` (not yet).
+    let old = test_fixture::now();
+    let now = old + cd * 2;
 
     c.bench_function("sent::Packets::remove_expired half-expired", |b| {
         b.iter_batched_ref(
             || {
-                // First half lost at `now - 2*cd` (expired); second half lost at `now` (not yet).
-                let old = now - cd * 2;
                 collect_packets(
                     (0..PACKETS / 2)
                         .map(|i| make_lost_packet(i, old))
@@ -106,5 +106,9 @@ fn remove_expired(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, take_ranges, track, remove_expired);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = take_ranges, track, remove_expired
+}
 criterion_main!(benches);

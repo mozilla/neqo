@@ -20,15 +20,16 @@ use std::{
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
+    expect_usize,
     hex::{Hex, HexSnipMiddle, HexWithLen},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
-    qtrace, qwarn, to_u64, to_usize,
+    qtrace, qwarn, to_u64,
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
     PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
-    agent::{CertificateCompressor, CertificateInfo},
+    cert::{CertificateCompressor, CertificateInfo},
 };
 use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
@@ -45,7 +46,7 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
-    packet::{self},
+    packet,
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
@@ -63,7 +64,7 @@ use crate::{
         TransportParameterId::{
             self, AckDelayExponent, ActiveConnectionIdLimit, DisableMigration, GreaseQuicBit,
             InitialSourceConnectionId, MaxAckDelay, MaxDatagramFrameSize, MaxUdpPayloadSize,
-            MinAckDelay, OriginalDestinationConnectionId, RetrySourceConnectionId,
+            MinAckDelay, OriginalDestinationConnectionId, ResetStreamAt, RetrySourceConnectionId,
             StatelessResetToken,
         },
         TransportParameters, TransportParametersHandler,
@@ -444,7 +445,6 @@ impl Connection {
         let quic_datagrams = QuicDatagrams::new(
             conn_params.get_datagram_size(),
             conn_params.get_outgoing_datagram_queue(),
-            conn_params.get_incoming_datagram_queue(),
             events.clone(),
         );
 
@@ -804,8 +804,8 @@ impl Connection {
         let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
-        let tp =
-            TransportParameters::decode(&mut dec_tp).map_err(|_| Error::InvalidResumptionToken)?;
+        let tp = TransportParameters::decode(Role::Client, &mut dec_tp)
+            .map_err(|_| Error::InvalidResumptionToken)?;
 
         let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
         qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
@@ -974,11 +974,9 @@ impl Connection {
         let mut v = self.stats.borrow().clone();
         v.version = self.version;
         if let Some(p) = self.paths.primary() {
-            let p = p.borrow();
-            v.rtt = p.rtt().estimate();
-            v.rttvar = p.rtt().rttvar();
-            v.min_rtt = p.rtt().minimum();
+            p.borrow().update_stats(&mut v);
         }
+        self.streams.update_stats(&mut v);
         v
     }
 
@@ -1094,6 +1092,27 @@ impl Connection {
                 .timeout(&path, now, self.crypto.has_handshake_keys());
             self.handle_lost_packets(&lost);
             qlog::packets_lost(&mut self.qlog, &lost, now);
+        }
+
+        // Declare the connection broken if too many consecutive PTOs have gone
+        // unacknowledged, i.e. the path is a black hole. This closes the connection
+        // sooner than, and with a distinct reason from, the idle timeout.
+        //
+        // We only do this once connected, i.e. after the handshake completes. A
+        // black hole during the handshake is the job of happy eyeballs, which races
+        // multiple connection attempts and does not need us to give up on any single
+        // one early. Requiring `connected()` also guarantees we have an RTT sample,
+        // so the PTO backoff we are counting is based on a real estimate.
+        if let Some(max_pto) = self.conn_params.get_max_pto()
+            && self.state.connected()
+            && self.loss_recovery.pto_count() >= max_pto.get()
+        {
+            qinfo!("[{self}] {max_pto} consecutive PTOs, declaring connection broken");
+            self.set_state(
+                State::Closed(CloseReason::Transport(Error::TooManyPtos)),
+                now,
+            );
+            return;
         }
 
         if self.release_resumption_token_timer.is_some() {
@@ -1325,14 +1344,24 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
-        if !packet.is_valid_retry(
-            self.original_destination_cid
-                .as_ref()
-                .ok_or(Error::InvalidRetry)?,
-        ) {
+        let odcid = self
+            .original_destination_cid
+            .as_ref()
+            .ok_or(Error::InvalidRetry)?;
+        if !packet.is_valid_retry(odcid) {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Retry with bad integrity tag");
+            return Ok(());
+        }
+        // RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet that
+        // carries a Source Connection ID identical to the Destination Connection ID
+        // of its Initial. The Retry integrity key is public, so this comparison is
+        // one of the few checks that constrains an off-path injected Retry.
+        if packet.scid() == *odcid {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry with SCID matching our Initial DCID");
             return Ok(());
         }
         // At this point, we should only have the connection ID that we generated.
@@ -1535,6 +1564,17 @@ impl Connection {
         }
 
         match (packet.packet_type(), &self.state, &self.role) {
+            // RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an
+            // Initial to 0, and a client that receives an Initial with a non-zero Token
+            // Length MUST discard the packet or close with PROTOCOL_VIOLATION. Discarding
+            // is preferred here: the token length sits in the unprotected header, so an
+            // off-path injection must not be able to tear down the connection.
+            (packet::Type::Initial, _, Role::Client) if !packet.token().is_empty() => {
+                self.stats
+                    .borrow_mut()
+                    .pkt_dropped("Client received an Initial with a token");
+                return Ok(PreprocessResult::Next);
+            }
             (packet::Type::Initial, State::Init, Role::Server) => {
                 let version = packet.version().ok_or(Error::ProtocolViolation)?;
                 if !packet.is_valid_initial()
@@ -1670,14 +1710,12 @@ impl Connection {
     }
 
     /// After a Initial, Handshake, `ZeroRtt`, or Short packet is successfully processed.
-    #[expect(clippy::too_many_arguments, reason = "Yes, but they're needed.")]
     fn postprocess_packet(
         &mut self,
         path: &PathRef,
         tos: Tos,
         remote: SocketAddr,
         packet: &packet::Decrypted,
-        packet_number: packet::Number,
         migrate: bool,
         now: Instant,
     ) {
@@ -1688,7 +1726,7 @@ impl Connection {
             last_ecn_mark != ecn_mark && stats.ecn_rx_transition[last_ecn_mark][ecn_mark].is_none()
         }) {
             stats.ecn_rx_transition[last_ecn_mark][ecn_mark] =
-                Some((packet.packet_type(), packet_number));
+                Some((packet.packet_type(), packet.pn()));
         }
 
         stats.ecn_last_mark = Some(ecn_mark);
@@ -1712,13 +1750,12 @@ impl Connection {
             };
             self.set_state(new_state, now);
             if self.role == Role::Server && self.state == State::Handshaking {
-                self.zero_rtt_state =
-                    if self.crypto.enable_0rtt(self.version, self.role) == Ok(true) {
-                        qdebug!("[{self}] Accepted 0-RTT");
-                        ZeroRttState::AcceptedServer
-                    } else {
-                        ZeroRttState::Rejected
-                    };
+                self.zero_rtt_state = if self.crypto.enable_0rtt(self.version) == Ok(true) {
+                    qdebug!("[{self}] Accepted 0-RTT");
+                    ZeroRttState::AcceptedServer
+                } else {
+                    ZeroRttState::Rejected
+                };
             }
         }
 
@@ -1771,6 +1808,7 @@ impl Connection {
         let tos = d.tos();
         let remote = d.source();
         let mut slc = d.as_mut();
+        self.stats.borrow_mut().bytes_rx += slc.len();
         let mut dcid = None;
         let pto = path.borrow().rtt().pto(self.confirmed());
 
@@ -1830,7 +1868,7 @@ impl Connection {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
-                                        path, tos, remote, &payload, pn, migrate, now,
+                                        path, tos, remote, &payload, migrate, now,
                                     );
                                 }
                                 Err(e) => {
@@ -1857,8 +1895,10 @@ impl Connection {
                             self.save_datagram(epoch, d, remaining, now);
                             return Ok(());
                         }
-                        Error::KeysExhausted => {
-                            // Exhausting read keys is fatal.
+                        // Exhausting read keys is fatal. So is a packet that
+                        // authenticated but broke the protocol (e.g. reserved
+                        // bits set), which closes the connection.
+                        Error::KeysExhausted | Error::ProtocolViolation => {
                             return Err(e.error);
                         }
                         Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
@@ -2311,8 +2351,8 @@ impl Connection {
         let pn = tx.next_pn();
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
-        let pn_len =
-            size_of::<packet::Number>() - to_usize(u64::from(unacked_range.leading_zeros() / 8));
+        // The conversion is safe because the maximum value is 8.
+        let pn_len = size_of::<packet::Number>() - expect_usize(unacked_range.leading_zeros() / 8);
         assert!(
             pn_len > 0,
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
@@ -2480,9 +2520,9 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        coalesced: bool, // Whether this packet is coalesced behind another one.
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
+        let coalesced = builder.is_coalesced();
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2787,7 +2827,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, header_start != 0, now);
+                    self.write_frames(path, space, &profile, &mut builder, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -2953,7 +2993,7 @@ impl Connection {
         qdebug!("[{self}] client_start");
         debug_assert_eq!(self.role, Role::Client);
         if let Some(path) = self.paths.primary() {
-            qlog::client_connection_started(&mut self.qlog, &path, now);
+            qlog::connection_started(&mut self.qlog, &path, now);
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
@@ -2976,7 +3016,7 @@ impl Connection {
 
         self.handshake(now, self.version, PacketNumberSpace::Initial, None)?;
         self.set_state(State::WaitInitial, now);
-        self.zero_rtt_state = if self.crypto.enable_0rtt(self.version, self.role)? {
+        self.zero_rtt_state = if self.crypto.enable_0rtt(self.version)? {
             qdebug!("[{self}] Enabled 0-RTT");
             ZeroRttState::Sending
         } else {
@@ -3055,7 +3095,8 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            let max_udp_payload = to_usize(remote.get_integer(MaxUdpPayloadSize));
+            // We cap this transport parameter to usize::MAX on decode, so this is safe.
+            let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
             path.borrow_mut()
                 .pmtud_mut()
                 .set_peer_max_udp_payload(max_udp_payload);
@@ -3271,7 +3312,7 @@ impl Connection {
             if self.crypto.tls().has_secret(Epoch::Handshake) {
                 self.compatible_upgrade(packet_version)?;
             }
-            if self.crypto.install_keys(self.role)? {
+            if self.crypto.install_keys()? {
                 self.saved_datagrams.make_available(Epoch::Handshake);
             }
         }
@@ -3406,8 +3447,18 @@ impl Connection {
                     stateless_reset_token,
                 ))?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
-                if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
-                    qinfo!("[{self}] received too many connection IDs");
+                let too_many = if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
+                    Some("received too many active connection IDs")
+                } else if self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE {
+                    // `MAX_RETIRE_QUEUE` is the actual allowed maximum.  A single call to
+                    // `retire_cids` above can add at most `ACTIVE_LIMIT` entries, so the
+                    // queue can only ever temporarily exceed the bound by that.
+                    Some("too many connection IDs pending retirement")
+                } else {
+                    None
+                };
+                if let Some(msg) = too_many {
+                    qinfo!("[{self}] {msg}");
                     return Err(Error::ConnectionIdLimitExceeded);
                 }
             }
@@ -3497,8 +3548,7 @@ impl Connection {
             }
             Frame::Datagram { data, .. } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams
-                    .handle_datagram(data, &mut self.stats.borrow_mut())?;
+                self.quic_datagrams.handle_datagram(data)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }
@@ -3511,23 +3561,24 @@ impl Connection {
     /// to retransmit the frame as needed.
     fn handle_lost_packets(&mut self, lost_packets: &[sent::Packet]) {
         for lost in lost_packets {
+            let space = lost.space();
             for token in lost.tokens() {
                 qdebug!("[{self}] Lost: {token:?}");
                 match token {
-                    recovery::Token::Ack(ack_token) => {
+                    recovery::Token::Ack(_) => {
                         // If we lost an ACK frame during the handshake, send another one.
-                        if ack_token.space() != PacketNumberSpace::ApplicationData {
-                            self.acks.immediate_ack(ack_token.space(), lost.time_sent());
+                        if space != PacketNumberSpace::ApplicationData {
+                            self.acks.immediate_ack(space, lost.time_sent());
                         }
                     }
-                    recovery::Token::Crypto(ct) => self.crypto.lost(ct),
+                    recovery::Token::Crypto(ct) => self.crypto.lost(space, ct),
                     recovery::Token::HandshakeDone => self.state_signaling.handshake_done(),
                     recovery::Token::NewToken(seqno) => self.new_token.lost(*seqno),
                     recovery::Token::NewConnectionId(ncid) => self.cid_manager.lost(ncid),
                     recovery::Token::RetireConnectionId(seqno) => {
                         self.paths.lost_retire_cid(*seqno);
                     }
-                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(rate),
+                    recovery::Token::AckFrequency(rate) => self.paths.lost_ack_frequency(*rate),
                     recovery::Token::KeepAlive => self.idle_timeout.lost_keep_alive(),
                     recovery::Token::Stream(stream_token) => self.streams.lost(stream_token),
                     recovery::Token::Datagram(dgram_tracker) => {
@@ -3589,18 +3640,20 @@ impl Connection {
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
         qlog::packets_acked(&mut self.qlog, space, &acked_packets, now);
+        let mut bytes_acked = 0;
         for acked in acked_packets {
+            bytes_acked += acked.len();
             for token in acked.tokens() {
                 match token {
                     recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
-                    recovery::Token::Ack(at) => self.acks.acked(at),
-                    recovery::Token::Crypto(ct) => self.crypto.acked(ct),
+                    recovery::Token::Ack(at) => self.acks.acked(space, at),
+                    recovery::Token::Crypto(ct) => self.crypto.acked(space, ct),
                     recovery::Token::NewToken(seqno) => self.new_token.acked(*seqno),
                     recovery::Token::NewConnectionId(entry) => self.cid_manager.acked(entry),
                     recovery::Token::RetireConnectionId(seqno) => {
                         self.paths.acked_retire_cid(*seqno);
                     }
-                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(rate),
+                    recovery::Token::AckFrequency(rate) => self.paths.acked_ack_frequency(*rate),
                     recovery::Token::KeepAlive => self.idle_timeout.ack_keep_alive(),
                     recovery::Token::Datagram(dgram_tracker) => self
                         .events
@@ -3613,10 +3666,12 @@ impl Connection {
         }
         self.handle_lost_packets(&lost_packets);
         qlog::packets_lost(&mut self.qlog, &lost_packets, now);
-        let stats = &mut self.stats.borrow_mut().frame_rx;
-        stats.ack += 1;
+        let mut stats = self.stats.borrow_mut();
+        stats.bytes_acked += bytes_acked;
+        stats.frame_rx.ack += 1;
         if let Some(largest_acknowledged) = largest_acknowledged {
-            stats.largest_acknowledged = max(stats.largest_acknowledged, largest_acknowledged);
+            stats.frame_rx.largest_acknowledged =
+                max(stats.frame_rx.largest_acknowledged, largest_acknowledged);
         }
         Ok(())
     }
@@ -3661,7 +3716,7 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_valid(now);
             // Generate a qlog event that the server connection started.
-            qlog::server_connection_started(&mut self.qlog, &path, now);
+            qlog::connection_started(&mut self.qlog, &path, now);
             qlog::recovery_parameters_set(
                 &mut self.qlog,
                 path.borrow().plpmtu(),
@@ -3905,7 +3960,27 @@ impl Connection {
         Ok(())
     }
 
+    /// Commit to reliably delivering all stream data buffered so far: if the stream is later
+    /// reset via [`Self::stream_reset_send`], that prefix is still delivered using
+    /// `RESET_STREAM_AT`. Call this after writing the data to be protected.
+    /// # Errors
+    /// When the stream ID is invalid, the peer did not enable reliable reset
+    /// ([`Error::NotAvailable`]), or the stream has already been reset ([`Error::StreamState`]).
+    pub fn stream_commit(&mut self, stream_id: StreamId) -> Res<()> {
+        // Get the stream first: it cannot exist without remote transport parameters, so
+        // `remote()` below won't panic.
+        let stream = self.streams.get_send_stream_mut(stream_id)?;
+        if !self.tps.borrow().remote().get_empty(ResetStreamAt) {
+            return Err(Error::NotAvailable);
+        }
+        stream.commit()
+    }
+
     /// Abandon transmission of in-flight and future stream data.
+    ///
+    /// If a reliable prefix was committed via [`Self::stream_commit`] and the peer advertised
+    /// support for reliable reset, the committed prefix is delivered using `RESET_STREAM_AT`;
+    /// otherwise a plain `RESET_STREAM` is sent.
     /// # Errors
     /// When the stream ID is invalid.
     pub fn stream_reset_send(&mut self, stream_id: StreamId, err: AppError) -> Res<()> {
@@ -3962,6 +4037,16 @@ impl Connection {
         self.quic_datagrams.remote_datagram_size()
     }
 
+    /// Whether the peer advertised support for reliable stream reset (`RESET_STREAM_AT`).
+    /// Returns `false` until peer transport parameters are available.
+    #[must_use]
+    pub fn peer_supports_reliable_stream_reset(&self) -> bool {
+        let tps = self.tps.borrow();
+        tps.remote_handshake()
+            .or_else(|| tps.remote_0rtt())
+            .is_some_and(|tp| tp.get_empty(ResetStreamAt))
+    }
+
     /// Returns the current max size of a datagram that can fit into a packet.
     /// The value will change over time depending on the encoded size of the
     /// packet number, ack frames, etc.
@@ -4009,6 +4094,12 @@ impl Connection {
 
     /// Queue a datagram for sending.
     ///
+    /// The QUIC datagram is always queued. Returns `Ok(true)` if space remains
+    /// afterwards, or `Ok(false)` if the outgoing QUIC datagram queue is now
+    /// full. On `Ok(false)` the application should stop sending and wait for an
+    /// [`OutgoingDatagramSpaceAvailable`] event before sending again; nothing
+    /// already queued is dropped.
+    ///
     /// # Errors
     ///
     /// The function returns `TooMuchData` if the supply buffer is bigger than
@@ -4019,9 +4110,10 @@ impl Connection {
     /// to check the estimated max datagram size and to use smaller datagrams.
     /// `max_datagram_size` is just a current estimate and will change over
     /// time depending on the encoded size of the packet number, ack frames, etc.
-    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<()> {
-        self.quic_datagrams
-            .add_datagram(buf, id.into(), &mut self.stats.borrow_mut())
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
+    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<bool> {
+        self.quic_datagrams.add_datagram(buf, id.into())
     }
 
     /// Return the PLMTU of the primary path.

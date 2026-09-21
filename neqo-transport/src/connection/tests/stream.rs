@@ -14,7 +14,7 @@ use super::{
     default_server, maybe_authenticate, new_client, new_server, send_something, send_with_extra,
 };
 use crate::{
-    CloseReason, Connection, ConnectionParameters, Error, StreamId, StreamType,
+    CloseReason, Connection, ConnectionParameters, Error, StreamDataLimit, StreamId, StreamType,
     connection::params::INITIAL_LOCAL_MAX_STREAM_DATA,
     events::ConnectionEvent,
     frame::FrameType,
@@ -583,7 +583,7 @@ fn wrong_directional_stream_frames() {
         // The trailing 0s are PADDING for the frames that don't need them.
         let dgram = send_with_extra(
             &mut server,
-            Writer(vec![frame_type.into(), stream_id, 0, 0]),
+            Writer(vec![frame_type.into(), stream_id, 0, 0, 0]),
             now(),
         );
         client.process_input(dgram, now());
@@ -593,6 +593,7 @@ fn wrong_directional_stream_frames() {
     // Frames a sender may not receive, on a client-initiated send-only stream.
     for frame_type in [
         FrameType::ResetStream,
+        FrameType::ResetStreamAt,
         FrameType::Stream,
         FrameType::StreamDataBlocked,
     ] {
@@ -1043,8 +1044,8 @@ fn change_flow_control(stream_type: StreamType, new_fc: u64) {
 
     let mut client = new_client(
         ConnectionParameters::default()
-            .max_stream_data(StreamType::BiDi, true, RECV_BUFFER_START)
-            .max_stream_data(StreamType::UniDi, true, RECV_BUFFER_START),
+            .max_stream_data(StreamDataLimit::BiDiRemote, RECV_BUFFER_START)
+            .max_stream_data(StreamDataLimit::UniDi, RECV_BUFFER_START),
     );
     let mut server = default_server();
     connect(&mut client, &mut server);

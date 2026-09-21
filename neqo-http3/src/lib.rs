@@ -149,8 +149,6 @@ pub mod frames;
 mod frames;
 mod headers_checks;
 mod priority;
-mod push_controller;
-mod push_id;
 mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
@@ -181,7 +179,6 @@ pub use neqo_transport::{
     streams::{SendGroupId, SendOrder},
 };
 pub use priority::Priority;
-pub use push_id::PushId;
 pub use server::Http3Server;
 pub use server_events::{Http3OrWebTransportStream, Http3ServerEvent};
 #[cfg(fuzzing)]
@@ -245,6 +242,8 @@ pub enum Error {
     AlreadyInitialized,
     #[error("Fatal error")]
     Fatal,
+    #[error("Flow control limit reached")]
+    FlowControlLimit,
     #[error("HTTP GOAWAY received")]
     HttpGoaway,
     #[error("Internal error")]
@@ -261,18 +260,12 @@ pub enum Error {
     InvalidState,
     #[error("Invalid stream ID")]
     InvalidStreamId,
-    #[error("No more data")]
-    NoMoreData,
     #[error("Not enough data")]
     NotEnoughData,
     #[error("Stream limit reached")]
     StreamLimit,
     #[error("Transport error: {0}")]
-    Transport(
-        #[from]
-        #[source]
-        TransportError,
-    ),
+    Transport(#[source] TransportError),
     #[error("Transport stream does not exist")]
     TransportStreamDoesNotExist,
     #[error("Operation unavailable")]
@@ -333,58 +326,6 @@ impl Error {
         matches!(self, Self::HttpGeneralProtocolStream | Self::InvalidHeader)
     }
 
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_send_errors(err: &Self) -> Self {
-        match err {
-            Self::Transport(TransportError::InvalidStreamId | TransportError::FinalSize) => {
-                Self::TransportStreamDoesNotExist
-            }
-            Self::Transport(TransportError::InvalidInput) => Self::InvalidInput,
-            _ => {
-                debug_assert!(false, "Unexpected error");
-                Self::TransportStreamDoesNotExist
-            }
-        }
-    }
-
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_create_errors(err: &TransportError) -> Self {
-        match err {
-            TransportError::ConnectionState => Self::Unavailable,
-            TransportError::StreamLimit => Self::StreamLimit,
-            _ => {
-                debug_assert!(false, "Unexpected error");
-                Self::TransportStreamDoesNotExist
-            }
-        }
-    }
-
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_recv_errors(err: &Self) -> Self {
-        match err {
-            Self::Transport(TransportError::NoMoreData) => {
-                debug_assert!(
-                    false,
-                    "Do not call stream_recv if FIN has been previously read"
-                );
-            }
-            Self::Transport(TransportError::InvalidStreamId) => {}
-            _ => {
-                debug_assert!(false, "Unexpected error");
-            }
-        }
-        Self::TransportStreamDoesNotExist
-    }
-
     /// # Errors
     ///
     /// Any error is mapped to the indicated type.
@@ -410,6 +351,20 @@ impl From<QpackError> for Error {
     }
 }
 
+impl From<TransportError> for Error {
+    fn from(err: TransportError) -> Self {
+        match err {
+            TransportError::InvalidStreamId | TransportError::FinalSize => {
+                Self::TransportStreamDoesNotExist
+            }
+            TransportError::InvalidInput => Self::InvalidInput,
+            TransportError::ConnectionState => Self::Unavailable,
+            TransportError::StreamLimit => Self::StreamLimit,
+            other => Self::Transport(other),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Http3StreamType {
     Control,
@@ -417,7 +372,6 @@ pub enum Http3StreamType {
     Encoder,
     NewStream,
     Http,
-    Push,
     ExtendedConnect,
     WebTransport(StreamId),
     Unknown,
@@ -559,6 +513,10 @@ impl Http3StreamInfo {
         }
     }
 
+    pub(crate) const fn stream_type(&self) -> Http3StreamType {
+        self.stream_type
+    }
+
     #[must_use]
     pub fn is_http(&self) -> bool {
         self.stream_type == Http3StreamType::Http
@@ -589,6 +547,19 @@ trait SendStream: Stream {
     fn has_data_to_send(&self) -> bool;
     fn stream_writable(&self);
     fn done(&self) -> bool;
+
+    /// Commit to reliably delivering the data buffered so far, so that it is still delivered
+    /// (via `RESET_STREAM_AT`) even if the stream is later reset. Implementations of this are
+    /// expected to send all data they have buffered so the commitment covers everything written so
+    /// far. The default implementation fails immediately.
+    ///
+    /// # Errors
+    /// Transport errors (e.g. the peer did not enable reliable reset),
+    /// or [`Error::FlowControlLimit`] if the buffered data could not be fully flushed.
+    /// The latter should be rare as most cases of buffering should include a couple of bytes.
+    fn commit(&mut self, _conn: &mut Connection, _now: Instant) -> Res<()> {
+        Err(Error::Unavailable)
+    }
 
     /// # Errors
     ///
@@ -627,7 +598,8 @@ trait SendStream: Stream {
         Err(Error::InvalidStreamId)
     }
 
-    /// This function is only implemented by `WebTransportSendStream`.
+    /// This function is only implemented by
+    /// [`WebTransportSendStream`](crate::features::extended_connect::webtransport_streams::WebTransportSendStream).
     fn stats(&mut self, _conn: &mut Connection) -> Res<send_stream::Stats> {
         Err(Error::Unavailable)
     }
@@ -745,35 +717,17 @@ mod tests {
 
     #[test]
     fn error_mapping() {
-        use Error::{
-            InvalidInput, StreamLimit, Transport, TransportStreamDoesNotExist, Unavailable,
-        };
         use neqo_transport::Error as Te;
 
-        assert!(matches!(
-            Error::map_stream_send_errors(&Transport(Te::InvalidStreamId)),
-            TransportStreamDoesNotExist
-        ));
-        assert!(matches!(
-            Error::map_stream_send_errors(&Transport(Te::FinalSize)),
-            TransportStreamDoesNotExist
-        ));
-        assert!(matches!(
-            Error::map_stream_send_errors(&Transport(Te::InvalidInput)),
-            InvalidInput
-        ));
-        assert!(matches!(
-            Error::map_stream_create_errors(&Te::ConnectionState),
-            Unavailable
-        ));
-        assert!(matches!(
-            Error::map_stream_create_errors(&Te::StreamLimit),
-            StreamLimit
-        ));
-        // Note: map_stream_recv_errors with NoMoreData has debug_assert, skip in debug builds.
-        assert!(matches!(
-            Error::map_stream_recv_errors(&Transport(Te::InvalidStreamId)),
-            TransportStreamDoesNotExist
-        ));
+        for (input, expected) in [
+            (Te::InvalidStreamId, Error::TransportStreamDoesNotExist),
+            (Te::FinalSize, Error::TransportStreamDoesNotExist),
+            (Te::InvalidInput, Error::InvalidInput),
+            (Te::ConnectionState, Error::Unavailable),
+            (Te::StreamLimit, Error::StreamLimit),
+            (Te::NotConnected, Error::Transport(Te::NotConnected)),
+        ] {
+            assert_eq!(Error::from(input), expected);
+        }
     }
 }

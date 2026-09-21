@@ -9,13 +9,13 @@
     reason = "Inherent in codspeed criterion_group! macro."
 )]
 
-use std::{hint::black_box, time::Instant};
+use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use neqo_common::{Decoder, Encoder};
 use neqo_transport::{
     CryptoDxState, CryptoStates, RandomConnectionIdGenerator,
-    frame::{Frame, FrameEncoder, FrameType},
+    frame::{Frame, FrameEncoder as _, FrameType},
     packet::{Builder, Public},
 };
 use test_fixture::fixture_init;
@@ -79,12 +79,12 @@ fn bench_encode(c: &mut Criterion, name: &str, build: fn(&mut CryptoDxState) -> 
     });
 }
 
-fn bench_decode(c: &mut Criterion, name: &str, pkt: Vec<u8>) {
+fn bench_decode(c: &mut Criterion, name: &str, pkt: &[u8]) {
     let cid_decoder = RandomConnectionIdGenerator::new(DCID.len());
-    let now = Instant::now();
+    let now = test_fixture::now();
     c.bench_function(name, |b| {
         b.iter_batched(
-            || (pkt.clone(), CryptoStates::test_default()),
+            || (pkt.to_vec(), CryptoStates::test_default()),
             |(mut buf, mut crypto): (Vec<u8>, CryptoStates)| {
                 let (public, _) = Public::decode(&mut buf, &cid_decoder).expect("decode");
                 let decrypted = public.decrypt(&mut crypto, now).expect("decrypt");
@@ -109,7 +109,7 @@ fn packet_encode_stream(c: &mut Criterion) {
 
 fn packet_decode_stream(c: &mut Criterion) {
     let pkt = build_stream_packet(&mut CryptoDxState::test_default_write());
-    bench_decode(c, "packet::Public decrypt+decode STREAM packet", pkt);
+    bench_decode(c, "packet::Public decrypt+decode STREAM packet", &pkt);
 }
 
 fn packet_encode_ack(c: &mut Criterion) {
@@ -122,7 +122,7 @@ fn packet_encode_ack(c: &mut Criterion) {
 
 fn packet_decode_ack(c: &mut Criterion) {
     let pkt = build_ack_packet(&mut CryptoDxState::test_default_write());
-    bench_decode(c, "packet::Public decrypt+decode ACK packet", pkt);
+    bench_decode(c, "packet::Public decrypt+decode ACK packet", &pkt);
 }
 
 fn benchmark(c: &mut Criterion) {

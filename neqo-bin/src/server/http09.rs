@@ -26,6 +26,7 @@ use super::Args;
 use crate::{
     STREAM_IO_BUFFER_SIZE,
     send_data::{SendData, SendResult},
+    server::StatsReporter,
 };
 
 #[derive(Default)]
@@ -40,6 +41,7 @@ pub struct HttpServer {
     read_state: HashMap<StreamId, Vec<u8>>,
     is_qns_test: bool,
     read_buffer: Vec<u8>,
+    stats: StatsReporter,
 }
 
 impl HttpServer {
@@ -66,6 +68,7 @@ impl HttpServer {
             read_state: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
+            stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
         })
     }
 
@@ -230,6 +233,12 @@ impl super::HttpServer for HttpServer {
                             .send_ticket(now, b"hi!")
                             .unwrap();
                     }
+                    // Exactly one of these occurs; `Closed` is dropped before it is seen.
+                    ConnectionEvent::StateChange(
+                        State::Closing { .. } | State::Draining { .. },
+                    ) => {
+                        self.stats.report(&acr.connection());
+                    }
                     ConnectionEvent::StateChange(_)
                     | ConnectionEvent::SendStreamCreatable { .. }
                     | ConnectionEvent::SendStreamComplete { .. }
@@ -253,7 +262,34 @@ impl Display for HttpServer {
 
 #[cfg(test)]
 mod tests {
-    use super::HttpServer;
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_transport::RandomConnectionIdGenerator;
+    use test_fixture::{ProcessServer, anti_replay, fixture_init};
+
+    use super::{Args, HttpServer};
+    use crate::server::test_support::{StatsServer, reported_on_close};
+
+    fn make_server(args: &Args) -> HttpServer {
+        fixture_init();
+        HttpServer::new(
+            args,
+            anti_replay(),
+            Rc::new(RefCell::new(RandomConnectionIdGenerator::new(10))),
+        )
+        .expect("build server")
+    }
+
+    impl StatsServer for HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer {
+            &mut self.server
+        }
+    }
+
+    #[test]
+    fn reports_stats_once_on_close() {
+        assert_eq!(reported_on_close(make_server), 1);
+    }
 
     // Issue 1 (FIN-only frame after buffered partial data) is exercised by
     // the QNS zerortt interop test end-to-end; unit testing it would require

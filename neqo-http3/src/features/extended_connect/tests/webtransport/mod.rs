@@ -142,6 +142,7 @@ impl WtTest {
         connect_with(&mut client, &mut server);
         Self { client, server }
     }
+
     fn negotiate_wt_session(
         &mut self,
         accept: &SessionAcceptAction,
@@ -381,6 +382,10 @@ impl WtTest {
         self.exchange_packets();
     }
 
+    fn commit_stream_client(&mut self, wt_stream_id: StreamId) {
+        self.client.stream_commit(wt_stream_id, now()).unwrap();
+    }
+
     fn receive_reset_client(&mut self, expected_stream_id: StreamId) {
         let wt_reset_event = |e| {
             matches!(
@@ -614,7 +619,7 @@ impl WtTest {
         self.client.webtransport_max_datagram_size(stream_id)
     }
 
-    fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<(), Error> {
+    fn send_datagram(&mut self, stream_id: StreamId, buf: &[u8]) -> Result<bool, Error> {
         self.client
             .webtransport_send_datagram(stream_id, buf, None, now())
     }
@@ -651,25 +656,5 @@ impl WtTest {
             )
         };
         assert!(self.server.events().any(wt_datagram_event));
-    }
-
-    fn check_no_datagram_received_client(&mut self) {
-        let wt_datagram_event = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::WebTransport(WebTransportEvent::Datagram { .. })
-            )
-        };
-        assert!(!self.client.events().any(wt_datagram_event));
-    }
-
-    fn check_no_datagram_received_server(&self) {
-        let wt_datagram_event = |e| {
-            matches!(
-                e,
-                Http3ServerEvent::WebTransport(ServerEvent::Datagram { .. })
-            )
-        };
-        assert!(!self.server.events().any(wt_datagram_event));
     }
 }

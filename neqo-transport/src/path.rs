@@ -397,6 +397,12 @@ impl Paths {
         });
     }
 
+    /// The number of connection IDs that have been retired locally but whose
+    /// `RETIRE_CONNECTION_ID` frames have not yet been ACK'ed.
+    pub(crate) const fn retire_queue_len(&self) -> usize {
+        self.to_retire.len()
+    }
+
     /// Write out any `RETIRE_CONNECTION_ID` frames that are outstanding.
     pub fn write_frames<B: Buffer>(
         &mut self,
@@ -430,13 +436,13 @@ impl Paths {
         self.to_retire.retain(|&seqno| seqno != acked);
     }
 
-    pub fn lost_ack_frequency(&self, lost: &AckRate) {
+    pub fn lost_ack_frequency(&self, lost: AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().lost_ack_frequency(lost);
         }
     }
 
-    pub fn acked_ack_frequency(&self, acked: &AckRate) {
+    pub fn acked_ack_frequency(&self, acked: AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().acked_ack_frequency(acked);
         }
@@ -908,7 +914,7 @@ impl Path {
         self.rtt.write_frames(builder, tokens, stats);
     }
 
-    pub const fn lost_ack_frequency(&mut self, lost: &AckRate) {
+    pub const fn lost_ack_frequency(&mut self, lost: AckRate) {
         self.rtt.frame_lost(lost);
     }
 
@@ -924,7 +930,7 @@ impl Path {
         self.ecn_info.start(stats);
     }
 
-    pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
+    pub const fn acked_ack_frequency(&mut self, acked: AckRate) {
         self.rtt.frame_acked(acked);
     }
 
@@ -985,6 +991,15 @@ impl Path {
     /// Read-only access to the owned sender.
     pub const fn sender(&self) -> &PacketSender {
         &self.sender
+    }
+
+    /// Take a snapshot of this path's RTT and congestion-control stats into `stats`.
+    pub fn update_stats(&self, stats: &mut Stats) {
+        stats.rtt = self.rtt.estimate();
+        stats.rttvar = self.rtt.rttvar();
+        stats.min_rtt = self.rtt.minimum();
+        stats.cc.cwnd = self.sender.cwnd();
+        stats.cc.bytes_in_flight = self.sender.bytes_in_flight();
     }
 
     /// Pass on RTT configuration: the maximum acknowledgment delay of the peer,

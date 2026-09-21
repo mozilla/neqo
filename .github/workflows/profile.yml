@@ -10,9 +10,17 @@ env:
   RUST_BACKTRACE: 1
   RUSTUP_TOOLCHAIN: stable
   TRANSFER_SIZE: 33554432 # 32 MiB
-  PERF_OPT: record -F2999 --call-graph fp -e cycles:u,cycles:k,kmem:rss_stat,sched:sched_switch -m 2048
+  MTU: 1500 # Same packetization as the benchmark workflows.
+  # Not the bench.yml set: GitHub-hosted runners have `cycles` but not `instructions`.
+  PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
+  # Profiling build settings; see also bench.yml and perfcompare.yml. `RUSTFLAGS` is needed here
+  # because this workflow builds neqo inline rather than via the build-neqo action.
+  CARGO_PROFILE_RELEASE_DEBUG: true
   CARGO_PROFILE_RELEASE_LTO: true
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+  CFLAGS: -fno-omit-frame-pointer
+  CXXFLAGS: -fno-omit-frame-pointer
+  RUSTFLAGS: -C force-frame-pointers=yes
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -27,116 +35,64 @@ defaults:
 
 jobs:
   bench-matrix:
-    name: Determine bench matrix
+    name: Determine bench matrix and refs
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.matrix.outputs.all }}
+      # Only build the baseline (PR base branch) on pull requests
+      refs: ${{ steps.refs.outputs.refs }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - id: matrix
-        uses: ./.github/actions/bench-matrix
-
-  bench-profile:
-    name: Profile ${{ matrix.bench.bench }}
-    runs-on: ubuntu-24.04
-    needs: bench-matrix
-    if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
-    steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          version: stable
-          tools: samply
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
-        with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build benchmark
+        uses: $/.github/actions/bench-matrix
+      - id: refs
         env:
-          CRATE: ${{ matrix.bench.crate }}
-          BENCH: ${{ matrix.bench.bench }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          cargo bench --locked --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt
-          mkdir -p binaries
-          BENCH_BIN=$(grep Executable bench-build.txt | cut -d'(' -f2 | cut -d')' -f1)
-          cp "$BENCH_BIN" "binaries/$BENCH"
-
-      - name: Enable perf
-        run: sudo sysctl -w kernel.perf_event_paranoid=-1
-
-      - name: Run benchmark with perf
-        env:
-          BENCH: ${{ matrix.bench.bench }}
-        run: |
-          # shellcheck disable=SC2086
-          perf $PERF_OPT -o "$BENCH.perf" -- "binaries/$BENCH" --bench --noplot || true
-
-      - name: Process with samply
-        env:
-          BENCH: ${{ matrix.bench.bench }}
-        run: |
-          if [ -f "$BENCH.perf" ]; then
-            samply import "$BENCH.perf" -o "$BENCH.samply.json.gz" --save-only --presymbolicate || true
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "refs=[{\"name\":\"pr\",\"sha\":\"$HEAD_SHA\"},{\"name\":\"base\",\"sha\":\"$BASE_SHA\"}]" >> "$GITHUB_OUTPUT"
+          else
+            echo 'refs=[{"name":"pr","sha":""}]' >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload profile
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}
-          path: |
-            *.samply.json.gz
-            binaries
-          retention-days: 90
-          if-no-files-found: ignore
-
-  perfcompare-profile:
-    name: Profile ${{ matrix.client }}-${{ matrix.server }}
+  build-others:
+    name: Build ${{ matrix.impl }}
     runs-on: ubuntu-24.04
     strategy:
-      fail-fast: false
       matrix:
-        include:
-          - { client: neqo, server: neqo }
-          - { client: neqo, server: msquic }
-          - { client: msquic, server: neqo }
-          - { client: neqo, server: quiche }
-          - { client: quiche, server: neqo }
-
+        impl: [quiche, s2n]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          sparse-checkout: .github/actions # Cone mode also gets the Cargo.toml rust-cache needs.
+      - uses: $/.github/actions/quic-build
+        with:
+          impl: ${{ matrix.impl }}
+          artifact-name: ${{ matrix.impl }}-binaries
 
-      - uses: mozilla/actions/rust@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
+  build-samply:
+    uses: $/.github/workflows/build-samply.yml
+
+  build-neqo:
+    name: Build neqo (${{ matrix.ref.name }})
+    runs-on: ubuntu-24.04
+    needs: bench-matrix
+    strategy:
+      matrix:
+        ref: ${{ fromJson(needs.bench-matrix.outputs.refs) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ matrix.ref.sha }}
+
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
-          tools: samply
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: nss-version
-        uses: ./.github/actions/minimum-version
-        with:
-          directory: .
-      - uses: mozilla/actions/nss@c7f9db3409fff64a55f16ac0cacbc4cdd05ae435 # v1.1.19
-        with:
-          minimum-version: ${{ steps.nss-version.outputs.minimum }}
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build neqo
         run: |
@@ -144,88 +100,277 @@ jobs:
           mkdir -p binaries
           cp target/release/neqo-client target/release/neqo-server binaries/
 
-      - name: Build msquic
-        if: matrix.client == 'msquic' || matrix.server == 'msquic'
-        uses: ./.github/actions/quic-build
+      - uses: $/.github/actions/bundle-nss
         with:
-          impl: msquic
-          token: ${{ secrets.GITHUB_TOKEN }}
+          path: binaries
 
-      - name: Build cloudflare/quiche
-        if: matrix.client == 'quiche' || matrix.server == 'quiche'
-        uses: ./.github/actions/quic-build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          impl: quiche
-          token: ${{ secrets.GITHUB_TOKEN }}
+          name: neqo-binaries-${{ matrix.ref.name }}
+          path: binaries
+          retention-days: 1
+
+  build-bench:
+    name: Build ${{ matrix.bench.bench }} (${{ matrix.ref.name }})
+    runs-on: ubuntu-24.04
+    needs: bench-matrix
+    if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+        ref: ${{ fromJson(needs.bench-matrix.outputs.refs) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ matrix.ref.sha }}
+
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+
+      - name: Build benchmark
+        env:
+          CRATE: ${{ matrix.bench.crate }}
+          BENCH: ${{ matrix.bench.bench }}
+          REF: ${{ matrix.ref.name }}
+        run: |
+          mkdir -p binaries
+          if cargo bench --locked --package "$CRATE" --features bench --bench "$BENCH" --no-run 2>&1 | tee bench-build.txt; then
+            BENCH_BIN=$(grep Executable bench-build.txt | cut -d'(' -f2 | cut -d')' -f1)
+            cp "$BENCH_BIN" "binaries/$BENCH"
+          elif [ "$REF" = "base" ]; then
+            # The bench may not exist on the base ref if it's new in this PR.
+            echo "::warning::Bench $BENCH not found on base ref; skipping."
+          else
+            exit 1
+          fi
+
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: binaries
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: binaries-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-${{ matrix.ref.name }}
+          path: binaries
+          retention-days: 1
+
+  bench-profile:
+    name: Profile ${{ matrix.bench.bench }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    needs: [bench-matrix, build-bench, build-samply]
+    # `build-bench`'s result is deliberately unchecked, so one bench failing to build still
+    # profiles the others.
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.build-samply.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+    steps:
+      # No checkout: this job only consumes artifacts.
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
+          rust-cache: "false" # Nothing is compiled here.
+
+      - uses: $/.github/actions/install-samply
+
+      - name: Download benchmark (pr)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-pr
+          path: binaries-pr
+
+      - name: Download benchmark (base)
+        if: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: true # A base-side failure must not cost us the PR profile.
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: binaries-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}-base
+          path: binaries-base
+
+      - uses: $/.github/actions/enable-perf
+
+      - name: Set the loopback MTU
+        run: sudo ip link set dev lo mtu "$MTU"
+
+      # Both refs, back-to-back on one runner, each against its own bundled NSS.
+      - name: Record perf
+        env:
+          BENCH: ${{ matrix.bench.bench }}
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          fail=
+          for NAME in base pr; do
+            BIN="binaries-$NAME/$BENCH"
+            # Absent when the bench is new in this PR.
+            [ -f "$BIN" ] || continue
+            chmod +x "$BIN"
+            # shellcheck disable=SC2086
+            sudo env LD_LIBRARY_PATH="$WORKSPACE/binaries-$NAME/lib" \
+              TEST_FIXTURE_DB="$WORKSPACE/binaries-$NAME/test-fixture/db" \
+              CRITERION_HOME="/tmp/criterion-$NAME" \
+              perf $PERF_OPT -o "$BENCH-$NAME.perf" -- "$BIN" --bench --noplot || true
+            [ -f "$BENCH-$NAME.perf" ] || { echo "::error::perf produced no data for $BENCH ($NAME)"; fail=1; }
+          done
+          [ -z "$fail" ]
+
+      - name: Process perf data
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        uses: $/.github/actions/process-perf
+
+      - name: Upload profile (pr)
+        if: ${{ !cancelled() }}
+        uses: $/.github/actions/upload-profile
+        with:
+          name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}
+          ref: pr
+
+      - name: Upload profile (base)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: $/.github/actions/upload-profile
+        with:
+          name: bench-${{ matrix.bench.crate }}-${{ matrix.bench.bench }}
+          ref: base
+
+  perfcompare-profile:
+    name: Profile ${{ matrix.combo.client }}-${{ matrix.combo.server }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    needs: [bench-matrix, build-others, build-neqo, build-samply]
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.build-neqo.result == 'success' && needs.build-samply.result == 'success' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        combo:
+          - { client: neqo, server: neqo }
+          - { client: neqo, server: quiche }
+          - { client: quiche, server: neqo }
+          - { client: neqo, server: s2n }
+          - { client: s2n, server: neqo }
+
+    steps:
+      # No checkout: this job only consumes artifacts.
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
+          rust-cache: "false" # Nothing is compiled here.
+
+      - uses: $/.github/actions/install-samply
+
+      - name: Download neqo (pr)
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: neqo-binaries-pr
+          path: binaries-pr
+
+      - name: Download neqo (base)
+        if: github.event_name == 'pull_request'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: neqo-binaries-base
+          path: binaries-base
+
+      - name: Download external impl binaries
+        if: matrix.combo.client != 'neqo' || matrix.combo.server != 'neqo'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }} # No checkout, so gh cannot infer it.
+          RUN_ID: ${{ github.run_id }}
+          CLIENT: ${{ matrix.combo.client }}
+          SERVER: ${{ matrix.combo.server }}
+        run: |
+          for impl in "$CLIENT" "$SERVER"; do
+            [ "$impl" = "neqo" ] && continue
+            gh run download "$RUN_ID" --name "$impl-binaries" --dir binaries
+          done
+
+      - name: Fix binary permissions
+        run: |
+          for d in binaries binaries-pr binaries-base; do
+            if [ -d "$d" ]; then chmod +x "$d"/*; fi
+          done
 
       - name: Calculate perf size
         run: echo "PERF_SIZE=$((TRANSFER_SIZE * 20))" >> "$GITHUB_ENV"
 
       - name: Setup test environment
-        uses: ./.github/actions/testdata-setup
+        uses: $/.github/actions/testdata-setup
         with:
           sizes: ${{ env.PERF_SIZE }}
+          mtu: ${{ env.MTU }}
 
-      - name: Generate commands
-        id: commands
-        uses: ./.github/actions/perfcompare-commands
+      # Separate ports, so a server outliving its recording cannot block the next bind.
+      - name: Generate commands (pr)
+        id: commands-pr
+        uses: $/.github/actions/perfcompare-commands
         with:
-          client: ${{ matrix.client }}
-          server: ${{ matrix.server }}
+          client: ${{ matrix.combo.client }}
+          server: ${{ matrix.combo.server }}
           size: ${{ env.PERF_SIZE }}
+          neqo-path: binaries-pr
+          port: "4433"
 
-      - name: Set command environment
-        env:
-          BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
-          SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
-          CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
-        run: |
-          {
-            echo "BENCH_NAME=$BENCH_NAME"
-            echo "SERVER_CMD=$SERVER_CMD"
-            echo "CLIENT_CMD=$CLIENT_CMD"
-          } >> "$GITHUB_ENV"
+      - uses: $/.github/actions/enable-perf
 
-      - name: Enable perf
-        run: sudo sysctl -w kernel.perf_event_paranoid=-1
-
-      - name: Record server perf
-        run: |
-          # shellcheck disable=SC2086
-          perf $PERF_OPT -o "$BENCH_NAME.server.perf" -- $SERVER_CMD &
-          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
-          sleep 1
-
-      - name: Record client perf
-        working-directory: /tmp
-        run: |
-          # shellcheck disable=SC2086
-          perf $PERF_OPT -o "$BENCH_NAME.client.perf" -- $CLIENT_CMD || true
-
-      - name: Stop server
-        if: always()
-        run: kill "$SERVER_PID" 2>/dev/null || true
-
-      - name: Collect and process perf data
-        run: |
-          mkdir -p profiles
-          for role in server client; do
-            f="$BENCH_NAME.$role.perf"
-            [ -f "$f" ] || f="/tmp/$f"
-            [ -f "$f" ] || continue
-            echo "Processing $f..."
-            samply import "$f" -o "profiles/$BENCH_NAME.$role.samply.json.gz" --save-only --presymbolicate || true
-          done
-
-      - name: Upload profiles
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Record perf (pr)
+        uses: $/.github/actions/record-perf
         with:
-          name: perfcompare-${{ matrix.client }}-${{ matrix.server }}
-          path: |
-            profiles/*.samply.json.gz
-            binaries
-          retention-days: 90
-          if-no-files-found: ignore
+          name: ${{ steps.commands-pr.outputs.bench-name }}-pr
+          server-cmd: ${{ steps.commands-pr.outputs.server-cmd }}
+          client-cmd: ${{ steps.commands-pr.outputs.client-cmd }}
+          lib-path: ${{ github.workspace }}/binaries-pr/lib
+          db-path: ${{ github.workspace }}/binaries-pr/test-fixture/db
+          perf-opt: ${{ env.PERF_OPT }}
+
+      - name: Generate commands (base)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        id: commands-base
+        uses: $/.github/actions/perfcompare-commands
+        with:
+          client: ${{ matrix.combo.client }}
+          server: ${{ matrix.combo.server }}
+          size: ${{ env.PERF_SIZE }}
+          neqo-path: binaries-base
+          port: "4434"
+
+      - name: Record perf (base)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        continue-on-error: true
+        uses: $/.github/actions/record-perf
+        with:
+          name: ${{ steps.commands-base.outputs.bench-name }}-base
+          server-cmd: ${{ steps.commands-base.outputs.server-cmd }}
+          client-cmd: ${{ steps.commands-base.outputs.client-cmd }}
+          lib-path: ${{ github.workspace }}/binaries-base/lib
+          db-path: ${{ github.workspace }}/binaries-base/test-fixture/db
+          perf-opt: ${{ env.PERF_OPT }}
+
+      - name: Process perf data
+        if: ${{ !cancelled() }}
+        timeout-minutes: 60
+        uses: $/.github/actions/process-perf
+
+      - name: Upload profiles (pr)
+        if: ${{ !cancelled() }}
+        uses: $/.github/actions/upload-profile
+        with:
+          name: perfcompare-${{ matrix.combo.client }}-${{ matrix.combo.server }}
+          ref: pr
+
+      - name: Upload profiles (base)
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+        uses: $/.github/actions/upload-profile
+        with:
+          name: perfcompare-${{ matrix.combo.client }}-${{ matrix.combo.server }}
+          ref: base
 
   pr-comment:
     name: PR Comment
@@ -233,31 +378,44 @@ jobs:
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          persist-credentials: false
-
+      # No checkout: the API paths are absolute.
       - name: Generate comment
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          ARTIFACTS=$(gh api "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" \
-            --jq '.artifacts | map(select(.name | test("^bench-|^perfcompare-"))) | sort_by(.name) | .[] | "- [\(.name)](\(.archive_download_url | sub("api.github.com/repos"; "github.com") | sub("/zip"; "")))"')
+          gh api --paginate --slurp "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" |
+            jq '[.[].artifacts[]]' > artifacts.json
+          section() {
+            jq -r --arg prefix "$1" --arg title "$2" '
+              [.[] | select(.name | startswith($prefix))]
+              | group_by(.name | sub("-(pr|base)$"; ""))
+              | select(length > 0)
+              | "<details><summary>\($title) (\(length))</summary>\n",
+                (.[]
+                 | . as $g
+                 | ($g[0].name | sub("-(pr|base)$"; "") | sub("^(bench|perfcompare)-"; "")) as $name
+                 | ["pr", "base"]
+                   | map(. as $ref
+                         | ($g[] | select(.name | endswith("-" + $ref)))
+                         | "[\($ref)](https://github.com/\(env.REPOSITORY)/actions/runs/\(env.RUN_ID)/artifacts/\(.id))")
+                   | "- \($name): \(join(" · "))"),
+                "\n</details>\n"
+            ' artifacts.json
+          }
           {
-            echo "### Performance Profiles"
+            echo "### Performance profiles for [profiler.firefox.com](https://profiler.firefox.com/)"
             echo
-            if [ -n "$ARTIFACTS" ]; then
-              echo "Performance profiles for [profiler.firefox.com](https://profiler.firefox.com/):"
-              echo
-              echo "$ARTIFACTS"
+            if jq -e 'any(.[]; .name | endswith("-pr"))' artifacts.json > /dev/null; then
+              section bench- "Benchmarks"
+              section perfcompare- "Comparisons"
             else
               echo "No performance profiles were generated."
             fi
           } > results.md
 
-      - uses: ./.github/actions/pr-comment-data-export
+      - uses: $/.github/actions/pr-comment-data-export
         with:
           name: ${{ github.workflow }}
           contents: results.md

@@ -19,7 +19,7 @@ use neqo_transport::{
     recovery,
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stream_id::StreamId,
-    streams::{SendGroupId, SendOrder},
+    streams::SendGroupId,
 };
 
 const MAX_STREAM_DATA: u64 = 1 << 20; // 1 MiB credit
@@ -126,7 +126,7 @@ fn make_grouped_streams(n_streams: usize, n_groups: usize) -> SendStreams {
     let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));
     let conn_events = ConnectionEvents::default();
     let mut ss = SendStreams::default();
-    for i in 0..n_streams as u64 {
+    for i in 0..to_u64(n_streams) {
         let id = StreamId::from(i * 4);
         let mut s = SendStream::new(
             id,
@@ -137,7 +137,7 @@ fn make_grouped_streams(n_streams: usize, n_groups: usize) -> SendStreams {
         s.send(DATA).expect("send failed");
         ss.insert(id, s);
         ss.set_fairness(id, true).expect("set_fairness failed");
-        let group_id = SendGroupId::new((i as usize % n_groups) as u64 + 1);
+        let group_id = SendGroupId::new(i % to_u64(n_groups) + 1);
         ss.set_sendgroup(id, Some(group_id))
             .expect("set_sendgroup failed");
     }
@@ -149,7 +149,7 @@ fn make_sendordered_streams(n_streams: usize) -> SendStreams {
     let conn_fc = Rc::new(RefCell::new(SenderFlowControl::new((), u64::MAX)));
     let conn_events = ConnectionEvents::default();
     let mut ss = SendStreams::default();
-    for i in 0..n_streams as u64 {
+    for i in 0..to_u64(n_streams) {
         let id = StreamId::from(i * 4);
         let mut s = SendStream::new(
             id,
@@ -159,7 +159,7 @@ fn make_sendordered_streams(n_streams: usize) -> SendStreams {
         );
         s.send(DATA).expect("send failed");
         ss.insert(id, s);
-        ss.set_sendorder(id, Some(i as SendOrder))
+        ss.set_sendorder(id, Some(i.cast_signed()))
             .expect("set_sendorder failed");
     }
     ss
@@ -179,7 +179,7 @@ fn write_frames_3_groups_9_streams(c: &mut Criterion) {
     );
 }
 
-/// 5 fair streams with sendOrder, no explicit sendGroup — exercises per_group
+/// 5 fair streams with sendOrder, no explicit sendGroup — exercises `per_group`
 /// path (not the fast path).
 fn write_frames_5_sendordered(c: &mut Criterion) {
     c.bench_function("SendStreams::write_frames 5-sendordered no-group", |b| {
@@ -199,7 +199,7 @@ fn write_frames_3_groups_9_sendordered(c: &mut Criterion) {
                 let mut ss = make_grouped_streams(9, 3);
                 for i in 0..9u64 {
                     let id = StreamId::from(i * 4);
-                    ss.set_sendorder(id, Some(i as SendOrder))
+                    ss.set_sendorder(id, Some(i.cast_signed()))
                         .expect("set_sendorder failed");
                 }
                 ss
@@ -210,15 +210,16 @@ fn write_frames_3_groups_9_sendordered(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    write_frames_1_stream,
-    write_frames_5_streams,
-    write_frames_20_streams,
-    write_frames_5_fair_all_active,
-    write_frames_20_fair_all_active,
-    write_frames_3_groups_9_streams,
-    write_frames_5_sendordered,
-    write_frames_3_groups_9_sendordered,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = write_frames_1_stream,
+        write_frames_5_streams,
+        write_frames_20_streams,
+        write_frames_5_fair_all_active,
+        write_frames_20_fair_all_active,
+        write_frames_3_groups_9_streams,
+        write_frames_5_sendordered,
+        write_frames_3_groups_9_sendordered
+}
 criterion_main!(benches);

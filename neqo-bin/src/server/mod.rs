@@ -17,7 +17,7 @@ use std::{
     fmt::Display,
     fs,
     future::poll_fn,
-    io::{self},
+    io,
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,
@@ -35,7 +35,9 @@ use futures::{
 };
 use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::Http3Server;
-use neqo_transport::{OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress};
+use neqo_transport::{
+    Connection, OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress,
+};
 use neqo_udp::{DatagramIter, RecvBuf};
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey,
@@ -45,7 +47,7 @@ use nss::{
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now, send_data::SendData};
+use crate::{SharedArgs, now, report_stats, send_data::SendData};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -211,6 +213,26 @@ impl Args {
     }
 }
 
+/// Reports the stats of closed connections.
+pub(super) struct StatsReporter {
+    enabled: bool,
+    /// Where to append to, or `None` to log.
+    path: Option<PathBuf>,
+}
+
+impl StatsReporter {
+    pub(super) const fn new(enabled: bool, path: Option<PathBuf>) -> Self {
+        Self { enabled, path }
+    }
+
+    /// Reports `conn`'s stats. Callers report each connection once.
+    pub(super) fn report(&self, conn: &RefCell<Connection>) {
+        if self.enabled {
+            report_stats(&conn.borrow().stats(), self.path.as_deref());
+        }
+    }
+}
+
 /// Abstracts the common configuration methods shared by [`neqo_transport::server::Server`]
 /// and [`Http3Server`], enabling [`configure_server`] to work with both.
 pub(super) trait ServerConfig {
@@ -324,17 +346,13 @@ pub struct Runner<S> {
     now: Box<dyn Fn() -> Instant>,
     server: S,
     timeout: Option<Pin<Box<Sleep>>>,
-    sockets: Vec<(SocketAddr, crate::udp::Socket)>,
+    sockets: Vec<crate::udp::Socket>,
     recv_buf: RecvBuf,
 }
 
 impl<S: HttpServer + Unpin> Runner<S> {
     #[must_use]
-    pub fn new(
-        server: S,
-        now: Box<dyn Fn() -> Instant>,
-        sockets: Vec<(SocketAddr, crate::udp::Socket)>,
-    ) -> Self {
+    pub fn new(server: S, now: Box<dyn Fn() -> Instant>, sockets: Vec<crate::udp::Socket>) -> Self {
         Self {
             now,
             server,
@@ -348,20 +366,20 @@ impl<S: HttpServer + Unpin> Runner<S> {
     pub fn local_addresses(&self) -> Vec<SocketAddr> {
         self.sockets
             .iter()
-            .map(|(_, s)| s.local_addr().unwrap())
+            .map(crate::udp::Socket::local_addr)
             .collect()
     }
 
     /// Tries to find a socket, but then just falls back to sending from the first.
     fn find_socket(
-        sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        sockets: &mut [crate::udp::Socket],
         addr: SocketAddr,
     ) -> &mut crate::udp::Socket {
-        let ((_host, first_socket), rest) = sockets.split_first_mut().unwrap();
-        rest.iter_mut()
-            .map(|(_host, socket)| socket)
-            .find(|socket| socket.local_addr().is_ok_and(|a| a == addr))
-            .unwrap_or(first_socket)
+        let index = sockets
+            .iter()
+            .position(|socket| socket.local_addr() == addr)
+            .unwrap_or_default();
+        &mut sockets[index]
     }
 
     // Free function (i.e. not taking `&mut self: ServerRunner`) to be callable by
@@ -370,7 +388,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
     async fn process_inner(
         server: &mut S,
         timeout: &mut Option<Pin<Box<Sleep>>>,
-        sockets: &mut [(SocketAddr, crate::udp::Socket)],
+        sockets: &mut [crate::udp::Socket],
         now: &dyn Fn() -> Instant,
         mut input_dgrams: Option<DatagramIter<'_>>,
     ) -> Result<(), io::Error> {
@@ -384,7 +402,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
         // used with a single socket only.
         let smallest_max_gso_segments = sockets
             .iter()
-            .map(|(_, socket)| socket.max_gso_segments())
+            .map(crate::udp::Socket::max_gso_segments)
             .min()
             .expect("At least one socket must be present")
             .try_into()
@@ -399,6 +417,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             ) {
                 OutputBatch::DatagramBatch(dgram) => {
                     let socket = Self::find_socket(sockets, dgram.source());
+                    let mut retry_on_reset = true;
                     loop {
                         // Optimistically attempt sending datagram. In case the
                         // OS buffer is full, wait till socket is writable then
@@ -419,6 +438,15 @@ impl<S: HttpServer + Unpin> Runner<S> {
                                 // Drop the packets and let QUIC handle retransmission.
                                 break;
                             }
+                            Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
+                                // See `read_and_process`. This call consumes the pending error,
+                                // so retry once, then let QUIC handle retransmission.
+                                qdebug!("Ignoring {e} on send, a peer probably closed its socket");
+                                if !retry_on_reset {
+                                    break;
+                                }
+                                retry_on_reset = false;
+                            }
                             e @ Err(_) => return e,
                         }
                     }
@@ -436,9 +464,20 @@ impl<S: HttpServer + Unpin> Runner<S> {
 
     async fn read_and_process(&mut self, sockets_index: usize) -> Result<(), io::Error> {
         loop {
-            let (host, socket) = &mut self.sockets[sockets_index];
-            let Some(input_dgrams) = socket.recv(*host, &mut self.recv_buf)? else {
-                break;
+            let socket = &mut self.sockets[sockets_index];
+            let input_dgrams = match socket.recv(&mut self.recv_buf) {
+                Ok(Some(input_dgrams)) => input_dgrams,
+                Ok(None) => break,
+                Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
+                    // Windows reports an earlier send's ICMP "port unreachable" as
+                    // `WSAECONNRESET` here. This socket serves all connections, so keep going,
+                    // like quinn does.
+                    //
+                    // <https://github.com/quinn-rs/quinn/blob/35fe3379205ed2ace0e6a858f60f3a8a2ff6510e/quinn/src/endpoint.rs#L925-L929>
+                    qdebug!("Ignoring {e} on receive, a peer probably closed its socket");
+                    continue;
+                }
+                Err(e) => return Err(e),
             };
 
             Self::process_inner(
@@ -470,7 +509,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
         let sockets_ready = select_all(
             self.sockets
                 .iter()
-                .map(|(_host, socket)| Box::pin(socket.readable())),
+                .map(|socket| Box::pin(socket.readable())),
         )
         .map(|(res, inx, _)| match res {
             Ok(()) => Ok(Ready::Socket(inx)),
@@ -548,16 +587,13 @@ pub fn run(
         qerror!("No valid hosts defined");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
-    let sockets: Vec<(SocketAddr, crate::udp::Socket)> = hosts
+    let sockets: Vec<crate::udp::Socket> = hosts
         .into_iter()
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
-            qinfo!(
-                "Server waiting for connection on: {:?}",
-                socket.local_addr()
-            );
+            qinfo!("Server waiting for connection on: {}", socket.local_addr());
 
-            Ok((host, socket))
+            Ok(socket)
         })
         .collect::<Result<_, io::Error>>()?;
 
@@ -584,9 +620,139 @@ pub fn run(
     }
 }
 
+/// Test helpers shared by `http09::tests` and `http3::tests`.
+#[cfg(test)]
+pub(super) mod test_support {
+    use std::fs;
+
+    use test_fixture::{ProcessServer, default_client, handshake_with_server, now};
+
+    use super::Args;
+    use crate::temp_dir::TempDir;
+
+    /// The inner server [`reported_on_close`] drives.
+    pub(super) trait StatsServer: super::HttpServer {
+        fn transport(&mut self) -> &mut dyn ProcessServer;
+    }
+
+    /// Connect to `make`'s server and close, returning the records it wrote.
+    pub(super) fn reported_on_close<S: StatsServer>(make: impl FnOnce(&Args) -> S) -> usize {
+        let dir = TempDir::new();
+        let file = dir.path().join("stats.json");
+
+        let mut args = Args::default();
+        args.shared.alpn = test_fixture::DEFAULT_ALPN[0].to_string();
+        args.shared.stats_file = Some(file.clone());
+        let mut server = make(&args);
+
+        let mut client = default_client();
+        handshake_with_server(&mut client, server.transport());
+        server.process_events(now());
+        assert!(!file.exists(), "must only report on close");
+
+        client.close(now(), 0, "bye");
+        let out = client.process_output(now());
+        _ = server.transport().process(out.dgram(), now());
+
+        server.process_events(now()); // Twice: a repeat would append a line.
+        server.process_events(now());
+        fs::read_to_string(&file).map_or(0, |s| s.lines().count())
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::response_for_path;
+    use std::fmt;
+
+    use neqo_common::{Tos, datagram};
+    use test_fixture::{default_client, fixture_init};
+    use tokio::time::timeout;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct MockServer {
+        batches: Vec<datagram::Batch>,
+        destinations: Vec<SocketAddr>,
+    }
+
+    impl Display for MockServer {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "MockServer")
+        }
+    }
+
+    impl HttpServer for MockServer {
+        fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+            &mut self,
+            dgrams: D,
+            _now: Instant,
+            _max_datagrams: NonZeroUsize,
+        ) -> OutputBatch {
+            for d in dgrams {
+                self.destinations.push(d.destination());
+            }
+            self.batches
+                .pop()
+                .map_or(OutputBatch::None, OutputBatch::DatagramBatch)
+        }
+
+        fn process_events(&mut self, _now: Instant) {}
+
+        fn has_events(&self) -> bool {
+            false
+        }
+    }
+
+    /// Expect a peer closing its socket not to stop the server serving everyone else.
+    ///
+    /// Only Windows surfaces the resulting ICMP error, as `WSAECONNRESET`. Elsewhere this
+    /// still covers the send and receive loops.
+    #[tokio::test]
+    async fn ignore_connection_reset() -> Result<(), io::Error> {
+        let socket = crate::udp::Socket::bind("127.0.0.1:0")?;
+        let local_addr = socket.local_addr();
+
+        let closed = std::net::UdpSocket::bind("127.0.0.1:0")?;
+        let closed_addr = closed.local_addr()?;
+        drop(closed);
+
+        let mut runner = Runner::new(MockServer::default(), Box::new(now), vec![socket]);
+
+        // Draw an ICMP "port unreachable" from the closed port.
+        for _ in 0..10 {
+            runner.server.batches.push(
+                Datagram::new(local_addr, closed_addr, Tos::default(), b"hello".to_vec()).into(),
+            );
+            runner.process().await?;
+        }
+
+        // Whatever that did to the socket, this datagram from a live peer has to arrive.
+        std::net::UdpSocket::bind("127.0.0.1:0")?.send_to(b"ping", local_addr)?;
+        timeout(Duration::from_secs(10), async {
+            while runner.server.destinations.is_empty() {
+                if let Ready::Socket(i) = runner.ready().await? {
+                    runner.read_and_process(i).await?;
+                }
+            }
+            Ok::<_, io::Error>(())
+        })
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "server stopped serving"))??;
+
+        assert!(runner.server.destinations.iter().all(|d| *d == local_addr));
+
+        Ok(())
+    }
+
+    #[test]
+    fn reports_nothing_without_the_stats_flag() {
+        fixture_init();
+        let dir = crate::temp_dir::TempDir::new();
+        let file = dir.path().join("stats.json");
+        StatsReporter::new(false, Some(file.clone())).report(&RefCell::new(default_client()));
+        assert!(!file.exists());
+    }
 
     #[test]
     fn response_for_path_qns_not_found() {

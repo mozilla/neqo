@@ -5,11 +5,15 @@
 // except according to those terms.
 
 use neqo_common::to_u64;
-use neqo_transport::StreamType;
+use neqo_transport::{ConnectionParameters, StreamType};
+use test_fixture::now;
 
 use crate::{
-    Error,
-    features::extended_connect::{CloseReason, tests::webtransport::WtTest},
+    Error, Http3Parameters,
+    features::extended_connect::{
+        CloseReason,
+        tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
+    },
     webtransport::ClientSession as _,
 };
 
@@ -175,6 +179,87 @@ fn wt_client_stream_uni_reset() {
     drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
     wt.reset_stream_client(wt_stream);
     wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+#[test]
+fn wt_client_stream_uni_reset_is_reliable() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
+
+    // No explicit commit: the H3 layer auto-commits the session-id prefix when it is sent, so
+    // resetting the stream is delivered as RESET_STREAM_AT.
+    let before = wt.client.transport_stats().frame_tx.reset_stream_at;
+    wt.reset_stream_client(wt_stream);
+    assert_eq!(
+        wt.client.transport_stats().frame_tx.reset_stream_at,
+        before + 1
+    );
+    wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+#[test]
+fn wt_client_stream_uni_commit_reset() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
+
+    // Commit the buffered data, then reset: this is delivered as RESET_STREAM_AT.
+    wt.commit_stream_client(wt_stream);
+    let before = wt.client.transport_stats().frame_tx.reset_stream_at;
+    wt.reset_stream_client(wt_stream);
+    assert_eq!(
+        wt.client.transport_stats().frame_tx.reset_stream_at,
+        before + 1
+    );
+    wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+}
+
+/// When a WebTransport stream's preface cannot be flushed to the transport (here because the
+/// connection send credit is exhausted), sends are blocked and committing is safe. The preface is
+/// sent atomically, so the transport never holds — and so can never commit — a partial preface.
+#[test]
+fn wt_client_stream_commit_blocked_preface_is_safe() {
+    let mut wt = WtTest::new_with_params(
+        wt_default_parameters(),
+        Http3Parameters::default()
+            .webtransport(true)
+            .connection_parameters(
+                ConnectionParameters::default()
+                    .datagram_size(DATAGRAM_SIZE)
+                    .max_data(2000),
+            ),
+    );
+    let wt_session = wt.create_wt_session();
+
+    // Soak up the connection's send credit on one stream (its preface flushes while credit is
+    // still available).
+    let filler = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    let buf = [0; 1024];
+    while wt.client.send_data(filler, &buf, now()).unwrap() > 0 {}
+
+    // A fresh stream can no longer flush its preface.
+    let blocked = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+
+    // Sending and committing is blocked at this point.
+    assert_eq!(wt.client.send_data(blocked, &[0; 10], now()).unwrap(), 0);
+    assert_eq!(
+        wt.client.stream_commit(blocked, now()),
+        Err(Error::FlowControlLimit)
+    );
+
+    wt.exchange_packets();
+
+    assert_eq!(wt.client.send_data(blocked, &[0; 10], now()).unwrap(), 10);
+    assert_eq!(wt.client.stream_commit(blocked, now()), Ok(()));
 }
 
 #[test]

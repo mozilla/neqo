@@ -6,7 +6,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use neqo_common::qwarn;
+use neqo_common::qdebug;
 use nss::Error as CryptoError;
 use thiserror::Error;
 
@@ -65,7 +65,7 @@ pub use self::{
         Connection, Output, OutputBatch, State, ZeroRttState,
         params::{
             ConnectionParameters, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
-            MAX_LOCAL_MAX_STREAM_DATA,
+            MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,
         },
     },
     events::{ConnectionEvent, ConnectionEvents},
@@ -188,6 +188,11 @@ pub enum Error {
     Peer(TransportError),
     #[error("stateless reset")]
     StatelessReset,
+    /// Too many consecutive PTOs went unacknowledged, so the path is assumed to be
+    /// a black hole. A distinct variant so the application can tell this apart, but
+    /// reported on the wire as `NO_VIABLE_PATH` (there is no dedicated code).
+    #[error("too many PTOs without acknowledgement; connection assumed broken")]
+    TooManyPtos,
     #[error("too much data")]
     TooMuchData,
     #[error("unexpected message")]
@@ -220,7 +225,7 @@ impl Error {
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::Application => ERROR_APPLICATION_CLOSE,
-            Self::NoAvailablePath => 16,
+            Self::NoAvailablePath | Self::TooManyPtos => 16,
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
             // As we have a special error code for ECH fallbacks, we lose the alert.
@@ -235,7 +240,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qwarn!("Crypto operation failed {err:?}");
+        qdebug!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::Crypto(err),
@@ -301,6 +306,7 @@ mod tests {
             (Error::EchRetry(vec![]), 0x179),
             (Error::VersionNegotiation, 0x53f8),
             (Error::Internal, 1),
+            (Error::TooManyPtos, 16),
         ] {
             assert_eq!(err.code(), code);
         }

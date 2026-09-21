@@ -14,6 +14,9 @@ inputs:
   bindgen-args:
     description: "bindgen arguments for generating BSD bindings. Non-empty enables binding generation."
     default: ""
+  nss-version-check:
+    description: "Whether to check the system NSS version against the minimum required by nss-rs."
+    default: "true"
 
 runs:
   using: composite
@@ -25,7 +28,17 @@ runs:
         PLATFORM: ${{ inputs.platform }}
         WORKSPACE: ${{ inputs.working-directory == '.' && '--workspace' || '' }}
         BINDGEN_ARGS: ${{ inputs.bindgen-args }}
+        NSS_VERSION_CHECK: ${{ inputs.nss-version-check }}
       run: |
+        # Minimum NSS version required by nss-rs, so that we can detect a too-old system NSS below.
+        if [ "$NSS_VERSION_CHECK" = "true" ]; then
+          NSS_MIN_VERSION=$(cargo metadata --locked --format-version=1 -q \
+            | jq -r '.packages[] | select(.name=="nss-rs") | .metadata.nss["min-version"]')
+          case "$NSS_MIN_VERSION" in
+            *[!0-9.]*|"") echo "Could not determine minimum NSS version"; exit 1 ;;
+          esac
+        fi
+
         cat <<EOF > prepare.sh
           # This executes as root
           set -ex
@@ -55,6 +68,16 @@ runs:
           set -ex
           cd "$WD"
           pwd
+          NSS_MIN_VERSION='$NSS_MIN_VERSION'
+          if [ -n "\$NSS_MIN_VERSION" ]; then
+            if ! pkg-config --exists nss; then
+              echo "::warning::No nss.pc on $PLATFORM, cannot check the NSS version"
+            elif ! pkg-config --atleast-version="\$NSS_MIN_VERSION" nss; then
+              echo "Skipping $PLATFORM: system NSS \$(pkg-config --modversion nss) is older than the required \$NSS_MIN_VERSION" > nss-skipped.txt
+              echo "::warning::\$(cat nss-skipped.txt)"
+              exit 0
+            fi
+          fi
           case "$PLATFORM" in
             openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
                         export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
@@ -123,7 +146,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@a6de9343ef5747433d9c25784c90e84998b9d69a # v1.4.6
+      uses: vmactions/freebsd-vm@4469451fe39bee80be4066836c5170362e9349f3 # v1.5.7
       with:
         usesh: true
         disable-cache: true
@@ -133,7 +156,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@fcf799d7ce9c305ad89eabef1fb2fa5c1c42d0ee # v1.4.3
+      uses: vmactions/openbsd-vm@86cdc08415d9d0865267e686561e276c52d62530 # v1.4.7
       with:
         usesh: true
         disable-cache: true
@@ -143,7 +166,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@99816dccf75edf233ed6cd00a159e3a5b85ea373 # v1.4.0
+      uses: vmactions/netbsd-vm@20ee93a005c9fc78743e6e05269f4cb023b87413 # v1.5.0
       with:
         usesh: true
         disable-cache: true
@@ -153,7 +176,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@d30dd6c228c8661ade859e36ead7660b9a62efcc # v1.3.7
+      uses: vmactions/solaris-vm@a11f407d3720a3717673d4194f19ee63b284977e # v1.4.0
       with:
         release: "11.4-gcc"
         usesh: true
@@ -163,6 +186,14 @@ runs:
         prepare: ${{ steps.prep.outputs.prepare }}
         run: ${{ steps.prep.outputs.run }}
 
+    - shell: bash
+      env:
+        WORKING_DIR: ${{ inputs.working-directory }}
+      run: |
+        if [ -f "$WORKING_DIR/nss-skipped.txt" ]; then
+          echo "### $(cat "$WORKING_DIR/nss-skipped.txt")" >> "$GITHUB_STEP_SUMMARY"
+        fi
+
     - id: check-coverage
       shell: bash
       env:
@@ -170,7 +201,7 @@ runs:
       run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
 
     - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         files: codecov.json
         working-directory: ${{ inputs.working-directory }}

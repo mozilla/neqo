@@ -105,15 +105,7 @@ pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler,
     );
 }
 
-pub fn server_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    connection_started(qlog, path, now);
-}
-
-pub fn client_connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
-    connection_started(qlog, path, now);
-}
-
-fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
+pub fn connection_started(qlog: &mut Qlog, path: &PathRef, now: Instant) {
     qlog.add_event_at(
         || {
             let p = path.deref().borrow();
@@ -623,10 +615,18 @@ impl From<Frame<'_>> for QuicFrame {
                     payload_length: None,
                 }
             }
+            // Note that qlog doesn't currently support `RESET_STREAM_AT`,
+            // so map it into `RESET_STREAM` for now.
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
                 final_size,
+            }
+            | Frame::ResetStreamAt {
+                stream_id,
+                application_error_code,
+                final_size,
+                ..
             } => Self::ResetStream {
                 stream_id: stream_id.as_u64(),
                 error_code: application_error_code,
@@ -736,13 +736,13 @@ impl From<Frame<'_>> for QuicFrame {
                 trigger_frame_type: Some(frame_type),
             },
             Frame::HandshakeDone => Self::HandshakeDone,
+            Frame::Datagram { data, .. } => Self::Datagram {
+                length: to_u64(data.len()),
+                raw: None,
+            },
             Frame::AckFrequency { .. } => Self::Unknown {
                 frame_type_value: None,
                 raw_frame_type: frame.get_type().into(),
-                raw: None,
-            },
-            Frame::Datagram { data, .. } => Self::Datagram {
-                length: to_u64(data.len()),
                 raw: None,
             },
         }

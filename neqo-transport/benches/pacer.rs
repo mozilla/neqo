@@ -9,10 +9,7 @@
     reason = "Inherent in codspeed criterion_group! macro."
 )]
 
-use std::{
-    hint::black_box,
-    time::{Duration, Instant},
-};
+use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use neqo_transport::Pacer;
@@ -20,31 +17,33 @@ use neqo_transport::Pacer;
 const RTT: Duration = Duration::from_millis(50);
 const MTU: usize = 1_350;
 const CWND: usize = MTU * 100;
+const CALLS: usize = 1_000;
 
-/// PRIMARY: `spend()` when pacing is enabled and each call is credit-limited.
-/// This is the dominant case during a paced bulk transfer: the pacer has just
-/// enough credit for each packet and the call does the full division.
-///
-/// For pacing to actually limit, the inter-packet interval
-/// `RTT * MTU / (CWND * 2)` must exceed GRANULARITY (1 ms).
-/// With RTT=50ms, MTU=1350: CWND must be ≤ 33 750 bytes.
-/// CWND_LIMITED=MTU*10=13 500 gives a 2.5ms inter-packet interval.
+// These loops need `black_box` to survive the optimizer: `&p` keeps the pacer's
+// loads and stores, and opaque arguments keep `spend()`'s arithmetic.
+
+/// PRIMARY: `spend()` in the steady state of a paced bulk transfer, where the
+/// sender waits out the pacing interval and `self.c` returns to zero each call.
 fn pacer_spend_pacing_limited(c: &mut Criterion) {
     const CWND_LIMITED: usize = MTU * 10;
+    // One packet of credit per call: `RTT * MTU / (CWND_LIMITED * SPEEDUP)`.
+    const INTERVAL: Duration = RTT.checked_div(20).expect("divisor is not zero");
+    let now = test_fixture::now();
     c.bench_function("Pacer::spend pacing-limited", |b| {
         b.iter_batched(
             || {
-                let now = Instant::now();
-                // Pacer starts with one packet of credit; after the first
-                // spend() call it reaches zero credit and subsequent calls
-                // exercise the pacing-limited path (full division + wait
-                // interval computation).
-                Pacer::new(true, now, MTU, MTU)
+                let mut p = Pacer::new(true, now, MTU, MTU);
+                // Drain the initial burst to reach the steady state.
+                p.spend(now, RTT, CWND_LIMITED, MTU);
+                assert_eq!(p.next(RTT, CWND_LIMITED), now + INTERVAL);
+                p
             },
             |mut p| {
-                let now = Instant::now();
-                for _ in 0..1_000 {
-                    black_box(p.spend(now, RTT, CWND_LIMITED, MTU));
+                let (rtt, cwnd, count) = black_box((RTT, CWND_LIMITED, MTU));
+                let mut t = now;
+                for _ in 0..CALLS {
+                    t += INTERVAL;
+                    p.spend(t, rtt, cwnd, count);
                 }
                 black_box(p)
             },
@@ -56,18 +55,16 @@ fn pacer_spend_pacing_limited(c: &mut Criterion) {
 /// `next()` fast path: credit is available, function returns `self.t`
 /// without computing a division.
 fn pacer_next_fast_path(c: &mut Criterion) {
+    let now = test_fixture::now();
     c.bench_function("Pacer::next fast-path", |b| {
         b.iter_batched(
-            || {
-                let now = Instant::now();
-                // Full credit: next() will return immediately.
-                Pacer::new(true, now, CWND, MTU)
-            },
+            // Full credit: next() will return immediately.
+            || Pacer::new(true, now, CWND, MTU),
             |p| {
-                for _ in 0..1_000 {
+                for _ in 0..CALLS {
                     black_box(p.next(RTT, CWND));
+                    black_box(&p);
                 }
-                black_box(p)
             },
             BatchSize::SmallInput,
         );
@@ -75,30 +72,26 @@ fn pacer_next_fast_path(c: &mut Criterion) {
 }
 
 /// `spend()` when pacing is disabled: the function must still update
-/// `self.t` but should return `false` immediately without any arithmetic.
+/// `self.t` but should return immediately without any arithmetic.
 fn pacer_spend_disabled(c: &mut Criterion) {
+    let now = test_fixture::now();
     c.bench_function("Pacer::spend disabled", |b| {
         b.iter_batched(
-            || {
-                let now = Instant::now();
-                Pacer::new(false, now, CWND, MTU)
-            },
+            || Pacer::new(false, now, CWND, MTU),
             |mut p| {
-                let now = Instant::now();
-                for _ in 0..1_000 {
-                    black_box(p.spend(now, RTT, CWND, MTU));
+                for _ in 0..CALLS {
+                    p.spend(now, RTT, CWND, MTU);
+                    black_box(&p);
                 }
-                black_box(p)
             },
             BatchSize::SmallInput,
         );
     });
 }
 
-criterion_group!(
-    benches,
-    pacer_spend_pacing_limited,
-    pacer_next_fast_path,
-    pacer_spend_disabled,
-);
+criterion_group! {
+    name = benches;
+    config = { neqo_common::log::init(None); Criterion::default() };
+    targets = pacer_spend_pacing_limited, pacer_next_fast_path, pacer_spend_disabled
+}
 criterion_main!(benches);

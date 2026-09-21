@@ -1,0 +1,46 @@
+name: Process perf data
+description: >
+  Convert every matching perf.data file into a profiler.firefox.com profile, optionally also
+  into a flamegraph and a per-symbol IPC report. A sample-less baseline recording only warns,
+  so the base ref cannot fail the PR's profile.
+
+inputs:
+  path:
+    description: Glob matching the perf.data files to process
+    default: "*.perf"
+  reports:
+    description: Also write a flamegraph and a per-symbol IPC report beside each profile
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        PERF_FILES: ${{ inputs.path }}
+        REPORTS: ${{ inputs.reports }}
+      run: |
+        fail=
+        # shellcheck disable=SC2086
+        for f in $PERF_FILES; do
+          [ -e "$f" ] || continue
+          sudo chown "$(id -u)" "$f" # perf runs under sudo, so it writes these as root.
+          if [ -z "$(perf script -i "$f" | head -n1)" ]; then
+            case "$f" in
+              *-base.*|*-baseline/*) echo "::warning::perf recorded no samples for $f" ;;
+              *) echo "::error::perf recorded no samples for $f"; fail=1 ;;
+            esac
+            continue
+          fi
+          echo "Processing $f..."
+          # Convert for profiler.firefox.com
+          samply import "$f" -o "${f%.perf}.samply.json.gz" --save-only --presymbolicate ||
+            { echo "::error::samply import failed for $f"; fail=1; }
+          [ "$REPORTS" == "true" ] || continue
+          # Generate flamegraphs from the cycles event (perf.data has multiple events)
+          perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
+          # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
+          perf report -i "$f" --stdio --no-children -g none \
+            -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
+        done
+        [ -z "$fail" ]

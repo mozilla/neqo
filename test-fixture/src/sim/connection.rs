@@ -14,8 +14,8 @@ use std::{
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_transport::{
-    Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator, Output, State,
-    StreamId, StreamType,
+    Connection, ConnectionEvent, ConnectionParameters, EmptyConnectionIdGenerator,
+    Error as TransportError, Output, State, StreamId, StreamType,
 };
 use nss::AuthenticationStatus;
 
@@ -27,7 +27,6 @@ use crate::{
 /// A goal for the connection.
 /// Goals can be accomplished in any order.
 pub trait Goal: Debug {
-    fn init(&mut self, _c: &mut Connection, _now: Instant) {}
     /// Perform some processing.
     fn process(&mut self, _c: &mut Connection, _now: Instant) -> GoalStatus {
         GoalStatus::Waiting
@@ -54,7 +53,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: crate::new_client::<EmptyConnectionIdGenerator>(params.randomize_first_pn(false)),
+            // Simulated peer address never resolves, interface MTU is pointless.
+            c: crate::new_client::<EmptyConnectionIdGenerator>(
+                params.randomize_first_pn(false).pmtud_iface_mtu(false),
+            ),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
@@ -71,7 +73,7 @@ impl Node {
         Self {
             c: crate::new_server::<EmptyConnectionIdGenerator, &str>(
                 crate::DEFAULT_ALPN,
-                params.randomize_first_pn(false),
+                params.randomize_first_pn(false).pmtud_iface_mtu(false),
             ),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
@@ -106,11 +108,8 @@ impl Node {
 
     /// On the first call to this method, the setup goals will turn into the active goals.
     /// On the second call, they will be swapped back and the main goals will run.
-    fn setup_goals(&mut self, now: Instant) {
+    fn setup_goals(&mut self) {
         std::mem::swap(&mut self.goals, &mut self.setup_goals);
-        for g in &mut self.goals {
-            g.init(&mut self.c, now);
-        }
     }
 
     /// Process all goals using the given closure and return whether any were active.
@@ -135,8 +134,8 @@ impl Node {
 }
 
 impl sim::Node for Node {
-    fn init(&mut self, _rng: Rng, now: Instant) {
-        self.setup_goals(now);
+    fn init(&mut self, _rng: Rng, _now: Instant) {
+        self.setup_goals();
     }
 
     fn process(&mut self, mut d: Option<Datagram>, now: Instant) -> Output {
@@ -165,10 +164,10 @@ impl sim::Node for Node {
         }
     }
 
-    fn prepare(&mut self, now: Instant) {
+    fn prepare(&mut self, _now: Instant) {
         assert!(self.done(), "ConnectionNode::prepare: setup not complete");
-        self.setup_goals(now);
-        assert!(!self.done(), "ConnectionNode::prepare: setup not complete");
+        self.setup_goals();
+        assert!(!self.done(), "ConnectionNode::prepare: no goals to run");
     }
 
     fn done(&self) -> bool {
@@ -176,7 +175,10 @@ impl sim::Node for Node {
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!("{test_name}: {:?}", self.c.stats());
+        qinfo!(
+            "{test_name}: {}",
+            serde_json::to_string(&self.c.stats()).unwrap()
+        );
     }
 }
 
@@ -231,17 +233,27 @@ impl SendData {
         }
     }
 
-    fn make_stream(&mut self, c: &mut Connection) {
-        if self.stream_id.is_none()
-            && let Ok(stream_id) = c.stream_create(StreamType::UniDi)
-        {
-            qdebug!("[{c}] made stream {stream_id} for sending");
-            self.stream_id = Some(stream_id);
+    fn make_stream(&mut self, c: &mut Connection) -> Option<StreamId> {
+        if self.stream_id.is_none() {
+            match c.stream_create(StreamType::UniDi) {
+                Ok(stream_id) => {
+                    qdebug!("[{c}] made stream {stream_id} for sending");
+                    self.stream_id = Some(stream_id);
+                }
+                Err(e) => assert!(
+                    matches!(e, TransportError::StreamLimit),
+                    "unexpected error creating stream: {e}"
+                ),
+            }
         }
+        self.stream_id
     }
 
-    fn send(&mut self, c: &mut Connection, stream_id: StreamId) -> GoalStatus {
+    fn send(&mut self, c: &mut Connection) -> GoalStatus {
         const DATA: &[u8] = &[0; 4096];
+        let Some(stream_id) = self.make_stream(c) else {
+            return GoalStatus::Waiting;
+        };
         let mut status = GoalStatus::Waiting;
         loop {
             let end = min(self.remaining, DATA.len());
@@ -261,13 +273,8 @@ impl SendData {
 }
 
 impl Goal for SendData {
-    fn init(&mut self, c: &mut Connection, _now: Instant) {
-        self.make_stream(c);
-    }
-
     fn process(&mut self, c: &mut Connection, _now: Instant) -> GoalStatus {
-        self.stream_id
-            .map_or(GoalStatus::Waiting, |stream_id| self.send(c, stream_id))
+        self.send(c)
     }
 
     fn handle_event(
@@ -279,15 +286,12 @@ impl Goal for SendData {
         match e {
             ConnectionEvent::SendStreamCreatable {
                 stream_type: StreamType::UniDi,
-            } => {
-                self.make_stream(c);
-                GoalStatus::Active
-            }
+            } => self.send(c),
 
             ConnectionEvent::SendStreamWritable { stream_id }
                 if Some(*stream_id) == self.stream_id =>
             {
-                self.send(c, *stream_id)
+                self.send(c)
             }
 
             // If we sent data in 0-RTT, then we didn't track how much we should
@@ -302,20 +306,23 @@ impl Goal for SendData {
 #[derive(Debug, Clone)]
 pub struct ReceiveData {
     remaining: usize,
+    buf: [u8; 4096],
 }
 
 impl ReceiveData {
     #[must_use]
     pub const fn new(amount: usize) -> Self {
-        Self { remaining: amount }
+        Self {
+            remaining: amount,
+            buf: [0; 4096],
+        }
     }
 
     fn recv(&mut self, c: &mut Connection, stream_id: StreamId) -> GoalStatus {
-        let mut buf = vec![0; 4096];
         let mut status = GoalStatus::Waiting;
         loop {
-            let end = min(self.remaining, buf.len());
-            let (recvd, _) = c.stream_recv(stream_id, &mut buf[..end]).unwrap();
+            let end = min(self.remaining, self.buf.len());
+            let (recvd, _) = c.stream_recv(stream_id, &mut self.buf[..end]).unwrap();
             qtrace!("received {recvd} remaining {}", self.remaining);
             if recvd == 0 {
                 return status;

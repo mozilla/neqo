@@ -168,6 +168,20 @@ impl Http3ServerHandler {
         self.base_handler.stream_reset_send(conn, stream_id, error)
     }
 
+    /// Commit to reliably delivering the stream data buffered so far.
+    ///
+    /// # Errors
+    /// When the transport rejects the commitment (see
+    /// [`neqo_transport::Connection::stream_commit`]).
+    pub fn stream_commit(
+        &mut self,
+        stream_id: StreamId,
+        conn: &mut Connection,
+        now: Instant,
+    ) -> Res<()> {
+        self.base_handler.stream_commit(conn, stream_id, now)
+    }
+
     pub(crate) fn validate_extended_connect_session(&self, session_id: StreamId) -> Res<()> {
         self.base_handler
             .validate_extended_connect_session(session_id)
@@ -270,6 +284,9 @@ impl Http3ServerHandler {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => self.base_handler.handle_datagram(dgram),
+                ConnectionEvent::OutgoingDatagramSpaceAvailable => {
+                    self.events.datagram_space_available();
+                }
                 ConnectionEvent::AuthenticationNeeded
                 | ConnectionEvent::EchFallbackAuthenticationNeeded { .. }
                 | ConnectionEvent::ZeroRttRejected
@@ -277,7 +294,6 @@ impl Http3ServerHandler {
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::SendStreamCreatable { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
-                | ConnectionEvent::IncomingDatagramDropped
                 | ConnectionEvent::SconeUpdated(_)
                 | ConnectionEvent::PathMigrated { .. } => {}
             }
@@ -295,7 +311,6 @@ impl Http3ServerHandler {
             .base_handler
             .handle_stream_readable(conn, stream_id, now)?
         {
-            ReceiveOutput::NewStream(NewStreamType::Push(_)) => Err(Error::HttpStreamCreation),
             ReceiveOutput::NewStream(NewStreamType::Http(first_frame_type)) => {
                 self.base_handler.add_streams(
                     stream_id,
@@ -315,8 +330,7 @@ impl Http3ServerHandler {
                         },
                         Rc::clone(self.base_handler.qpack_decoder()),
                         Box::new(self.events.clone()),
-                        None,
-                        PriorityHandler::new(false, Priority::default()),
+                        PriorityHandler::new(Priority::default()),
                     )),
                 );
                 let res = self
@@ -341,22 +355,13 @@ impl Http3ServerHandler {
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
-                        HFrame::MaxPushId { .. } => {
-                            // TODO implement push
-                            Ok(())
-                        }
-                        HFrame::Goaway { .. } | HFrame::CancelPush { .. } => {
+                        HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
+                        // Server push is not supported. A server that does not push ignores
+                        // MAX_PUSH_ID (RFC 9114, Section 7.2.7); any other push frame is
+                        // unexpected.
+                        HFrame::MaxPushId => Ok(()),
+                        HFrame::CancelPush | HFrame::PriorityUpdatePush => {
                             Err(Error::HttpFrameUnexpected)
-                        }
-                        HFrame::PriorityUpdatePush {
-                            element_id,
-                            priority,
-                        } => {
-                            // TODO: check if the element_id references a promised push stream or
-                            // is greater than the maximum Push ID.
-                            self.events
-                                .priority_update(StreamId::from(element_id), priority);
-                            Ok(())
                         }
                         HFrame::PriorityUpdateRequest {
                             element_id,
@@ -376,7 +381,7 @@ impl Http3ServerHandler {
                             Ok(())
                         }
                         _ => unreachable!(
-                            "we should only put MaxPushId, Goaway and PriorityUpdates into control_frames"
+                            "only Goaway, PriorityUpdateRequest and server-push frames are put into control_frames"
                         ),
                     }?;
                 }
