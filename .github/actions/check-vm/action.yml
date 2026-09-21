@@ -146,7 +146,7 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@8b0f1a8fc0ea0def307835c258940ca358fe6480 # v1.5.6
+      uses: vmactions/freebsd-vm@4469451fe39bee80be4066836c5170362e9349f3 # v1.5.7
       with:
         usesh: true
         disable-cache: true
@@ -201,7 +201,7 @@ runs:
       run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
 
     - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         files: codecov.json
         working-directory: ${{ inputs.working-directory }}
