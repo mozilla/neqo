@@ -133,14 +133,33 @@ impl<'a> Decoder<'a> {
 
     /// Decodes a QUIC varint.
     pub fn decode_varint(&mut self) -> Option<u64> {
-        let b1 = self.decode_n(1)?;
-        match b1 >> 6 {
-            0 => Some(b1),
-            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
-            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
-            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
-            _ => unreachable!(),
+        let first = *self.buf.get(self.offset)?;
+        // The two most significant bits of the first byte encode the length: 1, 2, 4 or 8 bytes.
+        // Read the value with a single fixed-width big-endian load and mask those bits off,
+        // rather than assembling it from a variable-length copy into a scratch buffer. Comparing
+        // the first byte against the length boundaries, rather than matching on `first >> 6`,
+        // keeps the common one-byte case a single predictable branch instead of an indirect jump.
+        if first < 0x40 {
+            self.offset += 1;
+            return Some(u64::from(first));
         }
+        if first < 0x80 {
+            let v = u64::from(u16::from_be_bytes(
+                *self.buf.get(self.offset..)?.first_chunk()?,
+            )) & ((1 << 14) - 1);
+            self.offset += 2;
+            return Some(v);
+        }
+        if first < 0xc0 {
+            let v = u64::from(u32::from_be_bytes(
+                *self.buf.get(self.offset..)?.first_chunk()?,
+            )) & ((1 << 30) - 1);
+            self.offset += 4;
+            return Some(v);
+        }
+        let v = u64::from_be_bytes(*self.buf.get(self.offset..)?.first_chunk()?) & MAX_VARINT;
+        self.offset += 8;
+        Some(v)
     }
 
     /// Decodes the rest of the buffer.  Infallible.
