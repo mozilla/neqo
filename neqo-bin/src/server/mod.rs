@@ -662,24 +662,17 @@ pub(super) mod test_support {
 
 #[cfg(test)]
 mod tests {
-    use std::fmt;
-
     use neqo_common::{Tos, datagram};
     use test_fixture::{default_client, fixture_init};
     use tokio::time::timeout;
 
     use super::*;
 
-    #[derive(Default)]
+    #[derive(Default, displaydoc::Display)]
+    #[displaydoc("MockServer")]
     struct MockServer {
         batches: Vec<datagram::Batch>,
         destinations: Vec<SocketAddr>,
-    }
-
-    impl Display for MockServer {
-        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(f, "MockServer")
-        }
     }
 
     impl HttpServer for MockServer {

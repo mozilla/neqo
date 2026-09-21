@@ -150,7 +150,10 @@ struct MaybeLostPacket {
     time_sent: Instant,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, displaydoc::Display)]
+#[displaydoc(
+    "State [phase: {phase:?}, cwnd: {congestion_window}, ssthresh: {ssthresh:?}, recovery_start: {recovery_start:?}]"
+)]
 struct State {
     phase: Phase,
     congestion_window: usize,
@@ -159,16 +162,6 @@ struct State {
     /// Packet number of the first packet that was sent after a congestion event. When this one is
     /// acked we will exit [`Phase::Recovery`] and enter [`Phase::CongestionAvoidance`].
     recovery_start: Option<packet::Number>,
-}
-
-impl Display for State {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "State [phase: {:?}, cwnd: {}, ssthresh: {:?}, recovery_start: {:?}]",
-            self.phase, self.congestion_window, self.ssthresh, self.recovery_start
-        )
-    }
 }
 
 impl State {
@@ -183,7 +176,8 @@ impl State {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("{slow_start}/{congestion_control} CongCtrl [bif: {bytes_in_flight}, {current}]")]
 pub struct ClassicCongestionController<S, T> {
     slow_start: S,
     congestion_control: T,
@@ -216,16 +210,6 @@ pub struct ClassicCongestionController<S, T> {
     stored: Option<State>,
     /// Whether to recover from spurious congestion events by restoring prior state.
     spurious_recovery: bool,
-}
-
-impl<S: Display, T: Display> Display for ClassicCongestionController<S, T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}/{} CongCtrl [bif: {}, {}]",
-            self.slow_start, self.congestion_control, self.bytes_in_flight, self.current
-        )
-    }
 }
 
 impl<S, T> ClassicCongestionController<S, T> {

@@ -6,13 +6,7 @@
 
 #[cfg(test)]
 use std::num::NonZeroUsize;
-use std::{
-    cell::RefCell,
-    fmt::{self, Debug, Display, Formatter},
-    mem,
-    rc::Rc,
-    time::Instant,
-};
+use std::{cell::RefCell, fmt::Debug, mem, rc::Rc, time::Instant};
 
 use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
@@ -24,7 +18,6 @@ use neqo_transport::{
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
-use strum::Display;
 
 use crate::{
     CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
@@ -61,7 +54,7 @@ pub struct RequestDescription<'b, T: RequestTarget> {
 }
 
 /// Possible actions on an HTTP Extended CONNECT session request.
-#[derive(Display)]
+#[derive(strum::Display)]
 pub enum SessionAcceptAction {
     Accept,
     /// Accept the session and include additional headers in the 200 response.
@@ -288,7 +281,8 @@ impl Http3State {
 /// [`Http3ServerHandler`]: crate::connection_server::Http3ServerHandler
 /// [`ConnectionEvent::RecvStreamReadable`]: neqo_transport::ConnectionEvent::RecvStreamReadable
 /// [`ConnectionEvent::NewStream`]: neqo_transport::ConnectionEvent::NewStream
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("Http3 connection")]
 pub struct Http3Connection {
     role: Role,
     state: Http3State,
@@ -303,12 +297,6 @@ pub struct Http3Connection {
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
     send_group_generator: SendGroupGenerator,
-}
-
-impl Display for Http3Connection {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 connection")
-    }
 }
 
 impl Http3Connection {

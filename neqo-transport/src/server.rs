@@ -10,7 +10,6 @@ use std::{
     cell::RefCell,
     cmp::min,
     collections::VecDeque,
-    fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -101,6 +100,8 @@ impl EchConfig {
     }
 }
 
+#[derive(displaydoc::Display)]
+#[displaydoc("Server")]
 pub struct Server {
     /// The names of certificates.
     certs: Vec<String>,
@@ -676,9 +677,3 @@ impl PartialEq for ConnectionRef {
 }
 
 impl Eq for ConnectionRef {}
-
-impl Display for Server {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Server")
-    }
-}
