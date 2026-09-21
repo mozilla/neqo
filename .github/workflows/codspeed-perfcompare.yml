@@ -6,7 +6,10 @@ on:
   workflow_call:
     secrets:
       CODSPEED_TOKEN:
-        required: true
+        # Not required: pull requests from forks have no secrets, and CodSpeed accepts
+        # tokenless uploads for public repositories. A required secret that the caller
+        # maps to an empty value fails the call.
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
