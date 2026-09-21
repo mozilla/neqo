@@ -39,7 +39,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
+        uses: mozilla/actions/toolchains@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -152,7 +152,7 @@ jobs:
           path: lcov.info
           retention-days: 1
 
-      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: codecov.json
           fail_ci_if_error: false
@@ -188,13 +188,13 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@4f515786a131dedc8913cf64640f35a144ea4d0f # v2.0.9
+      - uses: mozilla/actions/crap@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
         with:
           lcov-path: lcov.info
           threshold: "30"
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: github/codeql-action/upload-sarif@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+      - uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: crap.sarif
           category: cargo-crap
