@@ -29,8 +29,7 @@ bench = [
         "neqo-common/bench",
         "neqo-http3/bench",
         "neqo-transport/bench",
-        "nss/bench",
-        "log/release_max_level_info",
+        "log/release_max_level_warn",
 ]
 disable-random = []
 

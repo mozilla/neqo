@@ -1,0 +1,41 @@
+# Populate the main-branch quic-build caches that no workflow running on main would otherwise
+# create. Pull requests can restore from main, so this makes their first build a cache hit.
+name: QUIC build cache
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+# quic-build hashes these into its cache key, so they have to match perfcompare.yml exactly.
+env:
+  CARGO_PROFILE_RELEASE_DEBUG: true
+  CARGO_PROFILE_RELEASE_LTO: true
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
+  CFLAGS: -fno-omit-frame-pointer
+  CXXFLAGS: -fno-omit-frame-pointer
+  RUSTFLAGS: -C force-frame-pointers=yes
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false # A cancelled build never reaches quic-build's cache save.
+
+permissions:
+  contents: read
+
+jobs:
+  build-others:
+    name: Build ${{ matrix.impl }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        # Only perfcompare.yml builds google, and it never runs on main. profile.yml already
+        # warms quiche and s2n with the same build flags.
+        impl: [google]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions # Cone mode also gets the Cargo.toml rust-cache needs.
+      - uses: $/.github/actions/quic-build
+        with:
+          impl: ${{ matrix.impl }}

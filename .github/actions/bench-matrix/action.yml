@@ -3,7 +3,7 @@ description: Determine the list of benchmarks from cargo metadata
 
 outputs:
   benches:
-    description: JSON array of benchmarks for CodSpeed (non-walltime, with runner)
+    description: JSON array of benchmarks for CodSpeed
     value: ${{ steps.benches.outputs.benches }}
   all:
     description: JSON array of all unique crate/bench pairs (for profiling)
@@ -43,13 +43,10 @@ runs:
             )
           ]')
 
-        # CodSpeed benchmarks (non-walltime, with runner)
-        NON_WALLTIME=$(echo "$ALL_BENCHES" | jq -c '[.[] | select(.mode != "walltime") | . + {runner: "ubuntu-24.04"}]')
-
         # All unique crate/bench pairs (for profiling)
         ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '[.[] | {crate, bench}] | unique')
 
         {
-          echo "benches=$NON_WALLTIME"
+          echo "benches=$ALL_BENCHES"
           echo "all=$ALL_UNIQUE"
         } >> "$GITHUB_OUTPUT"

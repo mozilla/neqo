@@ -53,7 +53,10 @@ impl Node {
         goals: I1,
     ) -> Self {
         Self {
-            c: crate::new_client::<EmptyConnectionIdGenerator>(params.randomize_first_pn(false)),
+            // Simulated peer address never resolves, interface MTU is pointless.
+            c: crate::new_client::<EmptyConnectionIdGenerator>(
+                params.randomize_first_pn(false).pmtud_iface_mtu(false),
+            ),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
         }
@@ -70,7 +73,7 @@ impl Node {
         Self {
             c: crate::new_server::<EmptyConnectionIdGenerator, &str>(
                 crate::DEFAULT_ALPN,
-                params.randomize_first_pn(false),
+                params.randomize_first_pn(false).pmtud_iface_mtu(false),
             ),
             setup_goals: setup.into_iter().collect(),
             goals: goals.into_iter().collect(),
