@@ -6,7 +6,6 @@
 
 use std::{
     cell::{RefCell, RefMut},
-    fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     path::PathBuf,
     rc::Rc,
@@ -39,6 +38,8 @@ type HandlerRef = Rc<RefCell<Http3ServerHandler>>;
 /// A tuning knob, kept in sync with `neqo_bin::STREAM_IO_BUFFER_SIZE`.
 const MAX_EVENT_DATA_SIZE: usize = 32 * 1024;
 
+#[derive(displaydoc::Display)]
+#[displaydoc("Http3 server")]
 pub struct Http3Server {
     server: Server,
     http3_parameters: Http3Parameters,
@@ -46,12 +47,6 @@ pub struct Http3Server {
     events: Http3ServerEvents,
     /// Reused across events, so only each event's exactly-sized copy is allocated.
     read_buf: Vec<u8>,
-}
-
-impl Display for Http3Server {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 server ")
-    }
 }
 
 impl Http3Server {
@@ -432,11 +427,7 @@ fn prepare_data(
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{
-        collections::HashMap,
-        ops::{Deref, DerefMut},
-        time::Duration,
-    };
+    use std::{collections::HashMap, time::Duration};
 
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
@@ -710,7 +701,10 @@ mod tests {
         drop(connect_and_receive_settings());
     }
 
+    #[derive(derive_more::Deref, derive_more::DerefMut)]
     struct PeerConnection {
+        #[deref]
+        #[deref_mut]
         conn: Connection,
         control_stream_id: StreamId,
     }
@@ -720,19 +714,6 @@ mod tests {
         fn control_send(&mut self, data: &[u8]) {
             let res = self.conn.stream_send(self.control_stream_id, data);
             assert_eq!(res, Ok(data.len()));
-        }
-    }
-
-    impl Deref for PeerConnection {
-        type Target = Connection;
-        fn deref(&self) -> &Self::Target {
-            &self.conn
-        }
-    }
-
-    impl DerefMut for PeerConnection {
-        fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut self.conn
         }
     }
 

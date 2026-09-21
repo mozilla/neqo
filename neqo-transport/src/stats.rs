@@ -6,13 +6,7 @@
 
 // Tracking of some useful statistics.
 
-use std::{
-    cell::RefCell,
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-    time::Duration,
-};
+use std::{cell::RefCell, fmt::Debug, rc::Rc, time::Duration};
 
 use enum_map::EnumMap;
 use neqo_common::{Dscp, Ecn, qdebug};
@@ -249,7 +243,7 @@ pub(crate) fn serialize_counts<S: Serializer, K: Debug, V: Serialize + Default +
 }
 
 /// ECN counts by QUIC [`packet::Type`].
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut)]
 pub struct EcnCount(EnumMap<packet::Type, ecn::Count>);
 
 impl Serialize for EcnCount {
@@ -258,56 +252,17 @@ impl Serialize for EcnCount {
     }
 }
 
-impl Deref for EcnCount {
-    type Target = EnumMap<packet::Type, ecn::Count>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for EcnCount {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 /// Packet types and numbers of the first ECN mark transition between two marks.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut)]
 pub struct EcnTransitions(EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>);
 
-impl Deref for EcnTransitions {
-    type Target = EnumMap<Ecn, EnumMap<Ecn, Option<(packet::Type, packet::Number)>>>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for EcnTransitions {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
 /// Received packet counts by DSCP value.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, derive_more::Deref, derive_more::DerefMut)]
 pub struct DscpCount(EnumMap<Dscp, usize>);
 
 impl Serialize for DscpCount {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serialize_counts(self.0, serializer)
-    }
-}
-
-impl Deref for DscpCount {
-    type Target = EnumMap<Dscp, usize>;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for DscpCount {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -457,16 +412,10 @@ impl Stats {
     }
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, derive_more::Deref)]
 pub struct StatsCell {
+    #[deref(forward)]
     stats: Rc<RefCell<Stats>>,
-}
-
-impl Deref for StatsCell {
-    type Target = RefCell<Stats>;
-    fn deref(&self) -> &Self::Target {
-        &self.stats
-    }
 }
 
 #[cfg(test)]

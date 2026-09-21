@@ -15,6 +15,7 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
+derive_more = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
 neqo-http3 = { path = "../neqo-http3", default-features = false, features = ["draft-29"] }
@@ -23,6 +24,7 @@ nss = { workspace = true }
 nss-test-fixture = { workspace = true }
 qlog = { workspace = true }
 serde_json = { workspace = true }
+strum = { workspace = true }
 
 [features]
 bench = [

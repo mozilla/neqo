@@ -4,14 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Display, Formatter},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice, str,
-    time::Instant,
-};
+use std::{cell::RefCell, num::NonZeroUsize, rc::Rc, slice, str, time::Instant};
 
 use neqo_common::{Datagram, event::Provider as _, qdebug, qwarn};
 use neqo_http3::Error;
@@ -35,6 +28,8 @@ struct HttpStreamState {
     data_to_send: Option<SendData>,
 }
 
+#[derive(displaydoc::Display)]
+#[displaydoc("Http 0.9 server")]
 pub struct HttpServer {
     server: Server,
     write_state: HashMap<StreamId, HttpStreamState>,
@@ -251,12 +246,6 @@ impl super::HttpServer for HttpServer {
 
     fn has_events(&self) -> bool {
         self.server.has_active_connections()
-    }
-}
-
-impl Display for HttpServer {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http 0.9 server ")
     }
 }
 

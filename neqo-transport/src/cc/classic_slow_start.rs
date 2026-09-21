@@ -4,10 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display},
-    time::Instant,
-};
+use std::time::Instant;
 
 use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -18,14 +15,9 @@ use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::Congesti
 /// > congestion window.
 ///
 /// <https://datatracker.ietf.org/doc/html/rfc9002#section-7.3.1-2>
-#[derive(Debug, Default)]
+#[derive(Debug, Default, displaydoc::Display)]
+#[displaydoc("ClassicSlowStart")]
 pub struct ClassicSlowStart {}
-
-impl Display for ClassicSlowStart {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "ClassicSlowStart")
-    }
-}
 
 impl SlowStart for ClassicSlowStart {
     fn on_packets_acked(
