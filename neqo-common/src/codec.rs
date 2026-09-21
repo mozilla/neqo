@@ -134,11 +134,9 @@ impl<'a> Decoder<'a> {
     /// Decodes a QUIC varint.
     pub fn decode_varint(&mut self) -> Option<u64> {
         let first = *self.buf.get(self.offset)?;
-        // The two most significant bits of the first byte encode the length: 1, 2, 4 or 8 bytes.
-        // Read the value with a single fixed-width big-endian load and mask those bits off,
-        // rather than assembling it from a variable-length copy into a scratch buffer. Comparing
-        // the first byte against the length boundaries, rather than matching on `first >> 6`,
-        // keeps the common one-byte case a single predictable branch instead of an indirect jump.
+        // The first byte's two most significant bits encode the length: 1, 2, 4 or 8 bytes.
+        // Range checks on that byte keep the common one-byte case a predictable branch, and
+        // each arm is a single fixed-width load with those bits masked off.
         if first < 0x40 {
             self.offset += 1;
             return Some(u64::from(first));
