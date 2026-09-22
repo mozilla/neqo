@@ -444,14 +444,15 @@ impl Http3Client {
         )?;
         let tok = dec.decode_remainder();
         qtrace!("[{self}]   Transport token {}", Hex::new(tok));
-        self.conn.enable_resumption(now, tok)?;
-        if self.conn.state().closed() {
-            let state = self.conn.state().clone();
-            let res = self
-                .base_handler
-                .handle_state_change(&mut self.conn, &state);
-            debug_assert_eq!(Ok(true), res);
-            return Err(Error::Fatal);
+        if let Err(e) = self.conn.enable_resumption(now, tok) {
+            if self.conn.state().closed() {
+                let state = self.conn.state().clone();
+                let handled = self
+                    .base_handler
+                    .handle_state_change(&mut self.conn, &state);
+                debug_assert_eq!(Ok(true), handled);
+            }
+            return Err(e.into());
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler

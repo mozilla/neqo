@@ -35,7 +35,7 @@ use smallvec::SmallVec;
 use strum::IntoEnumIterator as _;
 
 use crate::{
-    AppError, CloseReason, Error, Res, StreamId,
+    AppError, CloseReason, Error, Res, ResumptionTokenError, StreamId,
     addr_valid::{AddressValidation, NewTokenState},
     cc::Phase,
     cid::{
@@ -791,36 +791,35 @@ impl Connection {
 
         let version = Version::try_from(
             dec.decode_uint::<version::Wire>()
-                .ok_or(Error::InvalidResumptionToken)?,
+                .ok_or(ResumptionTokenError::Version)?,
         )?;
         qtrace!("[{self}]   version {version:?}");
         if !self.conn_params.get_versions().all().contains(&version) {
             return Err(Error::DisabledVersion);
         }
 
-        let rtt = Duration::from_millis(dec.decode_varint().ok_or(Error::InvalidResumptionToken)?);
+        let rtt = Duration::from_millis(dec.decode_varint().ok_or(ResumptionTokenError::Rtt)?);
         qtrace!("[{self}]   RTT {rtt:?}");
 
-        let tp_slice = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
+        let tp_slice = dec
+            .decode_vvec()
+            .ok_or(ResumptionTokenError::TransportParametersLength)?;
         qtrace!("[{self}]   transport parameters {}", Hex::new(tp_slice));
         let mut dec_tp = Decoder::from(tp_slice);
         let tp = TransportParameters::decode(Role::Client, &mut dec_tp)
-            .map_err(|_| Error::InvalidResumptionToken)?;
+            .map_err(|_| ResumptionTokenError::TransportParameters)?;
 
-        let init_token = dec.decode_vvec().ok_or(Error::InvalidResumptionToken)?;
+        let init_token = dec
+            .decode_vvec()
+            .ok_or(ResumptionTokenError::InitialToken)?;
         qtrace!("[{self}]   Initial token {}", Hex::new(init_token));
 
         let tok = dec.decode_remainder();
         qtrace!("[{self}]   TLS token {}", Hex::new(tok));
 
+        // Nothing is sent or mutated yet, so a refused token leaves the connection reusable.
         match self.crypto.tls_mut() {
-            Agent::Client(c) => {
-                let res = c.enable_resumption(tok);
-                if let Err(e) = res {
-                    self.absorb_error::<Error>(now, Err(Error::from(e)));
-                    return Ok(());
-                }
-            }
+            Agent::Client(c) => c.enable_resumption(tok)?,
             Agent::Server(_) => return Err(Error::WrongRole),
         }
 
@@ -841,8 +840,7 @@ impl Connection {
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
         let res = self.client_start(now);
-        self.absorb_error(now, res);
-        Ok(())
+        self.capture_error(None, now, FrameType::Padding, res)
     }
 
     pub(crate) fn set_validation(&mut self, validation: &Rc<RefCell<AddressValidation>>) {
