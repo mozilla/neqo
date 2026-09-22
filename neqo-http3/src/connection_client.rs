@@ -3933,6 +3933,27 @@ mod tests {
         assert_eq!(client.state(), Http3State::ZeroRtt);
     }
 
+    /// A transport connection that closed before the HTTP/3 layer saw the state change
+    /// refuses the token, and the HTTP/3 state catches up.
+    #[test]
+    fn resumption_token_after_transport_close() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+
+        let mut client = default_http3_client();
+        client.conn.close(now(), 0, "");
+        assert_eq!(client.state(), Http3State::Initializing);
+
+        assert_eq!(
+            client.enable_resumption(now(), &token).unwrap_err(),
+            Error::Unavailable
+        );
+        assert_eq!(
+            client.state(),
+            Http3State::Closing(CloseReason::Application(0))
+        );
+    }
+
     #[test]
     fn zero_rtt_send_reject() {
         let (mut client, mut server) = connect();
