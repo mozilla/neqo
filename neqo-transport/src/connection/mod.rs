@@ -765,7 +765,7 @@ impl Connection {
     }
 
     /// Enable resumption, using a token previously provided.
-    /// This can only be called once and only on the client.
+    /// This can only succeed once, and only on the client.
     /// After calling the function, it should be possible to attempt 0-RTT
     /// if the token supports that.
     ///
@@ -774,6 +774,7 @@ impl Connection {
     ///
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
+    /// A rejected token leaves the connection in [`State::Init`], so another can be tried.
     pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, now: Instant, token: A) -> Res<()> {
         if self.state != State::Init {
             qerror!("[{self}] set token in state {:?}", self.state);
@@ -817,7 +818,7 @@ impl Connection {
         let tok = dec.decode_remainder();
         qtrace!("[{self}]   TLS token {}", Hex::new(tok));
 
-        // Nothing is sent or mutated yet, so a refused token leaves the connection reusable.
+        // Nothing is sent yet, so a refused token leaves the connection reusable.
         match self.crypto.tls_mut() {
             Agent::Client(c) => c.enable_resumption(tok)?,
             Agent::Server(_) => return Err(Error::WrongRole),
