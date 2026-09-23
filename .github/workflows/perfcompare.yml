@@ -41,7 +41,6 @@ jobs:
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: "recursive"
           persist-credentials: false
 
       - uses: $/.github/actions/build-neqo
@@ -116,11 +115,6 @@ jobs:
 
       - uses: $/.github/actions/install-samply
 
-      - name: Install SciPy # perfcompare.py's Mann-Whitney test needs it.
-        run: |
-          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-          sudo apt-get install -y --no-install-recommends python3-scipy
-
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: build-* # Each unpacks into a directory named after it.
@@ -174,8 +168,6 @@ jobs:
         with:
           name: perfcompare-${{ matrix.unit }}
           path: |
-            steps.md
-            results.txt
             *.samply.json.gz
             *.svg
             *.report.txt
@@ -208,6 +200,11 @@ jobs:
         with:
           pattern: perfcompare-*
           path: units
+
+      - name: Install SciPy # perfcompare.py's Mann-Whitney test needs it.
+        run: |
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends python3-scipy
 
       - name: Merge unit results
         run: |

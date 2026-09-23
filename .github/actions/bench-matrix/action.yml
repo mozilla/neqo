@@ -1,12 +1,20 @@
 name: Determine bench matrix
 description: Determine the list of benchmarks from cargo metadata
 
+inputs:
+  batch-size:
+    description: Most benchmarks per CodSpeed batch
+    default: "5"
+
 outputs:
   benches:
-    description: JSON array of benchmarks for CodSpeed
+    description: JSON array of benchmarks for CodSpeed, each with the `batch` it runs in
     value: ${{ steps.benches.outputs.benches }}
+  batches:
+    description: JSON array of same-mode batches of benchmarks for CodSpeed
+    value: ${{ steps.benches.outputs.batches }}
   all:
-    description: JSON array of all unique crate/bench pairs (for profiling)
+    description: JSON array of all unique crate/bench targets and their CPU mode
     value: ${{ steps.benches.outputs.all }}
 
 runs:
@@ -14,6 +22,8 @@ runs:
   steps:
     - id: benches
       shell: bash
+      env:
+        BATCH_SIZE: ${{ inputs.batch-size }}
       run: |
         ALL_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -c '
           [.packages[] |
@@ -43,10 +53,23 @@ runs:
             )
           ]')
 
-        # All unique crate/bench pairs (for profiling)
-        ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '[.[] | {crate, bench}] | unique')
+        # The memory entries repeat the CPU-mode ones.
+        ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '
+          [.[] | select(.mode != "memory") | {crate, bench, mode}] | unique')
+
+        # One mode per batch, as the CodSpeed action takes one; deal benches into the fewest batches.
+        BATCHES=$(echo "$ALL_BENCHES" | jq -c --argjson n "$BATCH_SIZE" '
+          group_by(.mode) | map(
+            . as $g | ((length + $n - 1) / $n | floor) as $k | [range($k)] | map(. as $i | {
+              id: "\($g[0].mode)-\($i)",
+              mode: $g[0].mode,
+              benches: [$g | to_entries[] | select(.key % $k == $i) | .value]
+            })) | add // []')
+
+        BENCHES=$(echo "$BATCHES" | jq -c 'map(.id as $id | .benches[] | . + {batch: $id})')
 
         {
-          echo "benches=$ALL_BENCHES"
+          echo "benches=$BENCHES"
+          echo "batches=$BATCHES"
           echo "all=$ALL_UNIQUE"
         } >> "$GITHUB_OUTPUT"

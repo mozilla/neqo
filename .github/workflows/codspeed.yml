@@ -27,6 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       benches: ${{ steps.matrix.outputs.benches }}
+      batches: ${{ steps.matrix.outputs.batches }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -34,17 +35,55 @@ jobs:
       - id: matrix
         uses: $/.github/actions/bench-matrix
 
-  benchmarks:
-    name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
-    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
-    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
-    # environment: codspeed
+  build-bench:
+    name: Build ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
+    runs-on: ubuntu-24.04
     needs: bench-matrix
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
       fail-fast: false
       matrix:
         bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+          tools: cargo-codspeed
+
+      - name: Build bench
+        env:
+          BENCH: ${{ matrix.bench.bench }}
+          CRATE: ${{ matrix.bench.crate }}
+          MODE: ${{ matrix.bench.mode }}
+        run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
+
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codspeed-build-${{ matrix.bench.batch }}-${{ matrix.bench.bench }}
+          path: | # `cargo codspeed run` looks under the target directory.
+            target/codspeed
+            dist
+          retention-days: 1
+
+  benchmarks:
+    name: Run ${{ join(matrix.batch.benches.*.bench, ', ') }} (${{ matrix.batch.mode }})
+    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
+    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
+    # environment: codspeed
+    needs: [bench-matrix, build-bench]
+    if: ${{ !cancelled() && needs.bench-matrix.outputs.batches != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        batch: ${{ fromJson(needs.bench-matrix.outputs.batches) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -63,13 +102,21 @@ jobs:
         with:
           version: stable
           tools: cargo-codspeed
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
 
-      - name: Build bench
-        env:
-          BENCH: ${{ matrix.bench.bench }}
-          CRATE: ${{ matrix.bench.crate }}
-          MODE: ${{ matrix.bench.mode }}
-        run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: codspeed-build-${{ matrix.batch.id }}-* # `cargo codspeed run` runs all of them.
+          merge-multiple: true
+          path: .
+
+      - name: Set up bench binaries
+        run: |
+          find target/codspeed -type f -exec chmod +x {} + # Artifacts drop the executable bit.
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
+          } >> "$GITHUB_ENV"
 
       - name: Set the loopback MTU # Same packetization as the other benchmark workflows.
         env:
@@ -79,7 +126,7 @@ jobs:
       - name: Run bench & upload results
         uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
         with:
-          mode: ${{ matrix.bench.mode }}
+          mode: ${{ matrix.batch.mode }}
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
 

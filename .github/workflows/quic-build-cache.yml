@@ -28,9 +28,8 @@ jobs:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        # Only perfcompare.yml builds google, and it never runs on main. profile.yml already
-        # warms quiche and s2n with the same build flags.
-        impl: [google]
+        # perfcompare.yml builds these, but only runs on pull requests.
+        impl: [google, quiche, s2n]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
