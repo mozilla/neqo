@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider as _, to_u64};
+use neqo_common::{Encoder, event::Provider as _, to_u64};
 use static_assertions::const_assert;
 
 use super::{
@@ -19,7 +19,7 @@ use crate::{
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
     packet,
-    quic_datagrams::QuicDatagram,
+    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagram},
     send_stream::{RetransmissionPriority, TransmissionPriority},
 };
 
@@ -436,6 +436,64 @@ fn dgram_unsupported() {
     // including an empty one, is a connection error (RFC 9221, Section 3).
     let out = server
         .test_write_frames(InsertEmptyDatagram, now())
+        .dgram()
+        .unwrap();
+    client.process_input(out, now());
+
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+/// A peer limit well below the path MTU, so that it, not the MTU, is what
+/// bounds the datagram.
+const FRAME_LIMIT: usize = 500;
+const DATA_AT_FRAME_LIMIT: &[u8] = &[0; FRAME_LIMIT];
+const_assert!(FRAME_LIMIT < DATAGRAM_LEN_MTU);
+
+/// RFC 9221, Section 3: `max_datagram_frame_size` is "the maximum size of a
+/// DATAGRAM frame (including the frame type, length, and payload)".  A
+/// payload of `max_datagram_size()` bytes must therefore still fit the peer's
+/// limit once the frame type and the length prefix are added.  In an
+/// otherwise empty packet `write_frames` picks `DATAGRAM` with a length
+/// field, so that is the frame size the sender has to stay under.
+#[test]
+fn max_datagram_size_leaves_room_for_the_frame_header() {
+    let mut client =
+        new_client(ConnectionParameters::default().datagram_size(QuicDatagram::MAX_SIZE));
+    let mut server = new_server(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
+    connect_force_idle(&mut client, &mut server);
+
+    let max = client.max_datagram_size().unwrap();
+    let payload_len = usize::try_from(max).unwrap();
+    assert_eq!(client.send_datagram(vec![0; payload_len], None), Ok(true));
+    assert!(client.process_output(now()).dgram().is_some());
+    assert_eq!(client.stats().frame_tx.datagram, 1);
+
+    let frame_len = DATAGRAM_FRAME_TYPE_VARINT_LEN + Encoder::varint_len(max) + payload_len;
+    assert!(
+        frame_len <= FRAME_LIMIT,
+        "max_datagram_size() = {max} yields a {frame_len}-byte DATAGRAM frame, \
+         over the peer's max_datagram_frame_size of {FRAME_LIMIT}"
+    );
+}
+
+/// The receiving side of the same rule (RFC 9221, Section 3): "An endpoint
+/// that receives a DATAGRAM frame that is larger than the value it sent in
+/// its max_datagram_frame_size transport parameter MUST terminate the
+/// connection with an error of type PROTOCOL_VIOLATION."  The injected frame
+/// has a payload of exactly the limit, so with its type byte it is one over.
+#[test]
+fn datagram_frame_over_local_limit_is_a_protocol_violation() {
+    let mut client = new_client(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let out = server
+        .test_write_frames(
+            InsertDatagram {
+                data: DATA_AT_FRAME_LIMIT,
+            },
+            now(),
+        )
         .dgram()
         .unwrap();
     client.process_input(out, now());
