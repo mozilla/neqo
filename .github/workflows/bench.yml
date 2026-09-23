@@ -365,6 +365,11 @@ jobs:
         env:
           EVENT_PATH: ${{ github.event_path }}
         run: |
+          cp "$EVENT_PATH" event.json
+          if [ ! -s results.txt ]; then
+            : > results.md # An empty comment deletes the previous one.
+            exit 0
+          fi
           SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
           echo "$SHA" > baseline-sha.txt
           python3 neqo/.github/scripts/format-bench-results.py results.txt stats
@@ -395,7 +400,6 @@ jobs:
           } > results.md
           rm -f all-bench-results.md significant-results.md perf-stat.md profiles.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
-          cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
         id: export_samply
