@@ -34,12 +34,50 @@ jobs:
       - id: matrix
         uses: $/.github/actions/bench-matrix
 
+  build-bench:
+    name: Build ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
+    runs-on: ubuntu-24.04
+    needs: bench-matrix
+    if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJson(needs.bench-matrix.outputs.benches) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+          tools: cargo-codspeed
+
+      - name: Build bench
+        env:
+          BENCH: ${{ matrix.bench.bench }}
+          CRATE: ${{ matrix.bench.crate }}
+          MODE: ${{ matrix.bench.mode }}
+        run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
+
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codspeed-build-${{ matrix.bench.bench }}-${{ matrix.bench.mode }}
+          path: | # `cargo codspeed run` looks under the target directory.
+            target/codspeed
+            dist
+          retention-days: 1
+
   benchmarks:
     name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
     runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
     # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
     # environment: codspeed
-    needs: bench-matrix
+    needs: [bench-matrix, build-bench]
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
       fail-fast: false
@@ -63,13 +101,20 @@ jobs:
         with:
           version: stable
           tools: cargo-codspeed
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
 
-      - name: Build bench
-        env:
-          BENCH: ${{ matrix.bench.bench }}
-          CRATE: ${{ matrix.bench.crate }}
-          MODE: ${{ matrix.bench.mode }}
-        run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codspeed-build-${{ matrix.bench.bench }}-${{ matrix.bench.mode }}
+          path: .
+
+      - name: Set up bench binaries
+        run: |
+          find target/codspeed -type f -exec chmod +x {} + # Artifacts drop the executable bit.
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
+          } >> "$GITHUB_ENV"
 
       - name: Set the loopback MTU # Same packetization as the other benchmark workflows.
         env:

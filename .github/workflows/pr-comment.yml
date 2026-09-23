@@ -11,7 +11,7 @@ on:
     # These must exactly match the `name:` of each producer workflow. Nothing
     # validates this: renaming a producer workflow silently stops its PR
     # comments from posting, with no error anywhere.
-    workflows: ["QNS PR", "cargo bench", "Performance comparison", "Profile"]
+    workflows: ["QNS PR", "cargo bench", "Performance comparison"]
     types:
       - completed # zizmor: ignore[dangerous-triggers]
 

@@ -1,16 +1,21 @@
 name: Build neqo
 description: >
-  Build neqo client/server for both main and PR branches, optionally including
-  walltime benchmark binaries, bundle NSS shared libraries and test fixtures,
-  and upload everything as a single artifact.
+  Build neqo client/server and/or one benchmark for both main and PR branches, bundle
+  NSS shared libraries and test fixtures, and upload everything as a single artifact.
 
 inputs:
   artifact-name:
     description: Name for the uploaded artifact
     required: true
-  benches:
-    description: Also build walltime benchmark binaries
-    default: "false"
+  bench:
+    description: '"<crate> <bench>" of a benchmark to build, e.g. "neqo-transport pacer"'
+    default: ""
+  bins:
+    description: Build the neqo-client and neqo-server binaries
+    default: "true"
+  ref:
+    description: Which ref to build, `pr` or `baseline`; both if unset
+    default: ""
   baseline-ref:
     description: Git ref to build baseline binaries from
     default: "origin/main"
@@ -33,7 +38,9 @@ runs:
     - name: Build neqo
       shell: bash
       env:
-        BENCHES: ${{ inputs.benches }}
+        BENCH: ${{ inputs.bench }}
+        BINS: ${{ inputs.bins }}
+        REF: ${{ inputs.ref }}
         BASELINE_REF: ${{ inputs.baseline-ref }}
         CARGO_PROFILE_RELEASE_LTO: true
         CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
@@ -41,39 +48,30 @@ runs:
         # See https://github.com/flamegraph-rs/flamegraph for why we append to RUSTFLAGS here.
         export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=lld -C link-arg=-Wl,--no-rosegment -C force-frame-pointers=yes $RUSTFLAGS"
         mkdir -p dist/neqo-baseline dist/neqo
+        read -r CRATE BENCH_NAME <<< "$BENCH"
         cd neqo
-        if [[ "$BENCHES" == "true" ]]; then
-          WALLTIME_BENCHES=$(cargo metadata --no-deps --format-version 1 | jq -r '
-            [.packages[] |
-              . as $pkg |
-              .targets[] |
-              select(.kind[] == "bench") |
-              select(has("required-features")) |
-              .name as $bench_name |
-              (($pkg.metadata.bench // []) | map(select(.name == $bench_name)) | .[0]) as $bench_meta |
-              select(($bench_meta.codspeed.mode) == "walltime") |
-              "\($pkg.name) \($bench_name)"
-            ] | .[]')
-          build_walltime_benches() {
-            local dest="$1"
-            [[ -z "$WALLTIME_BENCHES" ]] && return
-            echo "$WALLTIME_BENCHES" | while read -r crate bench; do
-              cargo bench --package "$crate" --bench "$bench" --locked --features bench --no-run 2>&1 | tee -a benches.txt
-              BIN=$(grep Executable benches.txt | tail -n1 | cut -d\( -f2 | cut -d\) -f1)
-              cp "$BIN" "$dest/"
-              : > benches.txt
-            done
-          }
+        # The baseline need not have a bench that is new in this PR.
+        build() {
+          local dest="$1" lenient="$2"
+          if [[ "$BINS" == "true" ]]; then
+            cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+            cp target/release/neqo-client target/release/neqo-server "$dest/"
+          fi
+          [[ -z "$BENCH" ]] && return 0
+          if ! cargo bench --package "$CRATE" --bench "$BENCH_NAME" --locked --features bench --no-run 2>&1 | tee benches.txt; then
+            [[ -n "$lenient" ]] || return 1
+            echo "::warning::Bench $BENCH_NAME does not build on $BASELINE_REF; skipping."
+            return 0
+          fi
+          cp "$(grep Executable benches.txt | tail -n1 | cut -d\( -f2 | cut -d\) -f1)" "$dest/"
+        }
+        if [[ "$REF" != "pr" ]]; then
+          git fetch --no-tags --depth=1 origin "${BASELINE_REF#origin/}"
+          git checkout "$BASELINE_REF"
+          build ../dist/neqo-baseline lenient
+          git checkout -
         fi
-        git fetch --no-tags --depth=1 origin "${BASELINE_REF#origin/}"
-        git checkout "$BASELINE_REF"
-        cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
-        if [[ "$BENCHES" == "true" ]]; then build_walltime_benches ../dist/neqo-baseline; fi
-        cp target/release/neqo-client target/release/neqo-server ../dist/neqo-baseline/
-        git checkout -
-        cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
-        if [[ "$BENCHES" == "true" ]]; then build_walltime_benches ../dist/neqo; fi
-        cp target/release/neqo-client target/release/neqo-server ../dist/neqo/
+        [[ "$REF" == "baseline" ]] || build ../dist/neqo ""
 
     - name: Bundle NSS runtime files
       uses: $/.github/actions/bundle-nss

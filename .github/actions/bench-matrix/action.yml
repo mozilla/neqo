@@ -6,7 +6,7 @@ outputs:
     description: JSON array of benchmarks for CodSpeed
     value: ${{ steps.benches.outputs.benches }}
   all:
-    description: JSON array of all unique crate/bench pairs (for profiling)
+    description: JSON array of all unique crate/bench targets and their CPU mode
     value: ${{ steps.benches.outputs.all }}
 
 runs:
@@ -43,8 +43,9 @@ runs:
             )
           ]')
 
-        # All unique crate/bench pairs (for profiling)
-        ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '[.[] | {crate, bench}] | unique')
+        # The memory entries repeat the CPU-mode ones.
+        ALL_UNIQUE=$(echo "$ALL_BENCHES" | jq -c '
+          [.[] | select(.mode != "memory") | {crate, bench, mode}] | unique')
 
         {
           echo "benches=$ALL_BENCHES"
