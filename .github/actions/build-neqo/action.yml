@@ -58,12 +58,16 @@ runs:
             cp target/release/neqo-client target/release/neqo-server "$dest/"
           fi
           [[ -z "$BENCH" ]] && return 0
-          if ! cargo bench --package "$CRATE" --bench "$BENCH_NAME" --locked --features bench --no-run 2>&1 | tee benches.txt; then
-            [[ -n "$lenient" ]] || return 1
-            echo "::warning::Bench $BENCH_NAME does not build on $BASELINE_REF; skipping."
+          local meta
+          meta=$(cargo metadata --no-deps --format-version 1 --locked)
+          if [[ -n "$lenient" ]] && ! jq -e --arg p "$CRATE" --arg b "$BENCH_NAME" \
+              '.packages[] | select(.name == $p) | .targets[] | select(.name == $b and (.kind | index("bench")))' \
+              <<< "$meta" >/dev/null; then
+            echo "::warning::Bench $BENCH_NAME does not exist on $BASELINE_REF; skipping."
             return 0
           fi
-          cp "$(grep Executable benches.txt | tail -n1 | cut -d\( -f2 | cut -d\) -f1)" "$dest/"
+          cargo bench --package "$CRATE" --bench "$BENCH_NAME" --locked --features bench --no-run 2>&1 | tee benches.txt
+          cp "$(grep Executable benches.txt | tail -n1 | cut -d\( -f2 | cut -d\) -f1)" "$dest/$BENCH_NAME"
         }
         if [[ "$REF" != "pr" ]]; then
           git fetch --no-tags --depth=1 origin "${BASELINE_REF#origin/}"
