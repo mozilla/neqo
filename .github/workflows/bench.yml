@@ -366,7 +366,7 @@ jobs:
           EVENT_PATH: ${{ github.event_path }}
         run: |
           cp "$EVENT_PATH" event.json
-          if [ ! -s results.txt ]; then
+          if [ ! -s results.txt ] && [ ! -s profiles.md ]; then
             : > results.md # An empty comment deletes the previous one.
             exit 0
           fi
@@ -376,19 +376,21 @@ jobs:
           # Build final markdown output
           {
             echo "### Benchmark results"
-            echo
-            if [ -s significant-results.md ]; then
-              echo "Significant performance differences relative to $SHA."
-              cat significant-results.md
-            else
-              echo "No significant performance differences relative to $SHA."
+            if [ -s results.txt ]; then
+              echo
+              if [ -s significant-results.md ]; then
+                echo "Significant performance differences relative to $SHA."
+                cat significant-results.md
+              else
+                echo "No significant performance differences relative to $SHA."
+              fi
+              echo
+              echo "<details><summary>All results</summary>"
+              echo
+              cat all-bench-results.md
+              echo
+              echo "</details>"
             fi
-            echo
-            echo "<details><summary>All results</summary>"
-            echo
-            cat all-bench-results.md
-            echo
-            echo "</details>"
             if [ -s perf-stat.md ]; then
               echo
               cat perf-stat.md

@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, qwarn};
+use neqo_common::{Buffer, Role, qdebug, qtrace};
 
 use crate::{
     AppError, ConnectionEvents, Error, Res,
@@ -245,8 +245,7 @@ impl Streams {
                 self.handle_max_streams(*stream_type, *maximum_streams);
             }
             Frame::DataBlocked { data_limit } => {
-                // Should never happen since we set data limit to max
-                qwarn!("Received DataBlocked with data limit {data_limit}");
+                qdebug!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
