@@ -3,6 +3,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
+    # `edited` so a retargeted PR gets a run: when a stack is reordered, the head push can
+    # conflict with the old base, which makes GitHub skip that `synchronize` run. Other edits
+    # are skipped by the `if:` on each root job below.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 env:
@@ -11,7 +15,9 @@ env:
   RUSTUP_TOOLCHAIN: stable
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  # An `edited` run that isn't a base change skips all its jobs. Give it a group of its own so
+  # that editing a PR's title or description doesn't cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.ref_name }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -25,6 +31,7 @@ jobs:
   bench-matrix:
     name: Determine bench matrix
     runs-on: ubuntu-24.04
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     outputs:
       benches: ${{ steps.matrix.outputs.benches }}
       batches: ${{ steps.matrix.outputs.batches }}
@@ -32,6 +39,34 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Results are filed under the PR head and compared against the PR base, so make sure that
+      # the test merge commit is built from both, rather than a stale one, e.g., one still made
+      # against the old base just after a retarget, which leaves the head SHA unchanged.
+      - name: Check that the merge commit is of the PR head into the PR base
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # `git cat-file` still lists the parents in a shallow clone, unlike `git rev-parse HEAD^2`.
+          mapfile -t parents < <(git cat-file -p HEAD | sed -n 's/^parent //p')
+          if [ "${#parents[@]}" -ne 2 ] || [ "${parents[1]}" != "$HEAD_SHA" ]; then
+            echo "::error::$GITHUB_SHA is not a merge of the PR head $HEAD_SHA. Push to the PR, or close and reopen it, to get a fresh merge commit."
+            exit 1
+          fi
+          # The base branch may have moved on since the event, so also accept a first parent
+          # that descends from the event's base. A merge against the pre-retarget base doesn't.
+          if [ "${parents[0]}" != "$BASE_SHA" ]; then
+            status="$(gh api "repos/$REPO/compare/$BASE_SHA...${parents[0]}" --jq .status || echo error)"
+            if [ "$status" != "ahead" ]; then
+              echo "::error::$GITHUB_SHA merges into ${parents[0]}, which isn't the PR base $BASE_SHA or a descendant of it ($status). Push to the PR, or close and reopen it, to get a fresh merge commit."
+              exit 1
+            fi
+          fi
+
       - id: matrix
         uses: $/.github/actions/bench-matrix
 
@@ -79,7 +114,7 @@ jobs:
     # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
     # environment: codspeed
     needs: [bench-matrix, build-bench]
-    if: ${{ !cancelled() && needs.bench-matrix.outputs.batches != '[]' }}
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.bench-matrix.outputs.batches != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -135,6 +170,7 @@ jobs:
   build-neqo:
     name: Build neqo
     runs-on: ubuntu-24.04
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -163,6 +199,7 @@ jobs:
   build-others:
     name: Build ${{ matrix.impl }}
     runs-on: ubuntu-24.04
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       matrix:
         impl: [quiche, s2n]
@@ -179,7 +216,7 @@ jobs:
   perfcompare:
     name: ${{ matrix.combo.client }}-${{ matrix.combo.server }}
     runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
-    needs: [build-neqo, build-others]
+    needs: [bench-matrix, build-neqo, build-others] # `bench-matrix` checks the merge commit.
     # Job-scoped, so they cannot leak into `benchmarks`, where `MTU` is deliberately step-scoped.
     env:
       TRANSFER_SIZE: 33554432 # 32 MiB

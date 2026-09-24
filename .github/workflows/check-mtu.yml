@@ -8,9 +8,12 @@ on:
       - ".github/workflows/check-mtu.yml"
       - ".github/actions/check-vm/**"
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -29,6 +32,7 @@ env:
 jobs:
   check-netns:
     name: Network namespace tests
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -44,6 +48,7 @@ jobs:
 
   generate-bindings:
     name: Generate ${{ matrix.os }} bindings
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       fail-fast: false
       matrix:
@@ -75,6 +80,7 @@ jobs:
 
   check-android:
     name: Check Android
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -96,6 +102,7 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
@@ -118,7 +125,7 @@ jobs:
   check-bindings:
     name: Check bindings
     needs: [generate-bindings, check-vm]
-    if: always() && !cancelled()
+    if: ${{ always() && !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     permissions:
       pull-requests: write # to create PRs for binding updates
