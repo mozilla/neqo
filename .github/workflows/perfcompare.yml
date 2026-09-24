@@ -2,6 +2,8 @@ name: Performance comparison
 on:
   workflow_call:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 env:
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -21,7 +23,8 @@ env:
   BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -30,6 +33,7 @@ permissions:
 jobs:
   build-neqo:
     name: Build neqo
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -50,6 +54,7 @@ jobs:
 
   build-others:
     name: Build ${{ matrix.impl }}
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -66,10 +71,12 @@ jobs:
           artifact-name: build-${{ matrix.impl }} # perfcompare.py's commands start with this.
 
   build-samply:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: $/.github/workflows/build-samply.yml
 
   units:
     name: Determine comparison units
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       units: ${{ steps.units.outputs.units }}
@@ -178,7 +185,7 @@ jobs:
 
   results:
     name: Assemble comparison
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
     needs: perfcompare
     runs-on: ubuntu-24.04
     defaults:

@@ -1,7 +1,8 @@
 name: Vendor
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
   workflow_dispatch:
     inputs:
@@ -23,7 +24,8 @@ on:
         default: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -40,6 +42,7 @@ env:
 jobs:
   vendor:
     name: Vendor into Gecko
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       fail-fast: true
       matrix:

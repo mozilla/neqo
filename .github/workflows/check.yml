@@ -1,6 +1,8 @@
 name: CI
 on:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
   push:
     branches: ["main"] # Only to populate the Rust cache
@@ -16,7 +18,8 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -29,6 +32,7 @@ defaults:
 jobs:
   toolchains:
     name: Determine toolchains
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -174,7 +178,7 @@ jobs:
   crap:
     name: CRAP analysis
     needs: check
-    if: ${{ !cancelled() && github.event_name != 'push' }}
+    if: ${{ !cancelled() && github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -201,7 +205,7 @@ jobs:
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -218,7 +222,7 @@ jobs:
 
   check-android:
     name: Check Android
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -235,7 +239,7 @@ jobs:
   # not i686-pc-windows-msvc or Windows-specific neqo-udp/mtu paths.
   check-i686:
     name: Check i686-unknown-linux-gnu
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -255,7 +259,7 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: ${{ github.event_name != 'push' }}
+    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov

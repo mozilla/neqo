@@ -4,10 +4,12 @@
 name: QNS PR
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -20,7 +22,7 @@ env:
 jobs:
   docker-image:
     name: Build Docker images for QNS
-    if: github.actor != 'dependabot[bot]'
+    if: ${{ github.actor != 'dependabot[bot]' && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -209,7 +211,7 @@ jobs:
 
   report:
     name: Report results
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
     needs: [docker-image, run-qns, implementations]
     runs-on: ubuntu-24.04
     steps:

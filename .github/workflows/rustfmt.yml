@@ -1,11 +1,14 @@
 name: Format
 on:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -13,4 +16,5 @@ permissions:
 
 jobs:
   format:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: mozilla/actions/.github/workflows/rustfmt.yml@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10

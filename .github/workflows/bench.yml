@@ -2,6 +2,8 @@ name: cargo bench
 on:
   workflow_call:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 env:
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -24,7 +26,8 @@ env:
   BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -33,6 +36,7 @@ permissions:
 jobs:
   targets:
     name: Determine bench targets
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       targets: ${{ steps.matrix.outputs.all }}
@@ -98,13 +102,14 @@ jobs:
           retention-days: 1
 
   build-samply:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: $/.github/workflows/build-samply.yml
 
   bench-variants:
     name: Determine benchmarks
     runs-on: ubuntu-24.04
     needs: build
-    if: ${{ !cancelled() }} # A failed build must not skip the other targets.
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }} # A failed build must not skip the other targets.
     outputs:
       benchmarks: ${{ steps.benchmarks.outputs.benchmarks }}
     defaults:
@@ -299,7 +304,7 @@ jobs:
 
   results:
     name: Assemble benchmark results
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
     needs: bench
     runs-on: ubuntu-24.04
     defaults:
