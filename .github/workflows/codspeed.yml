@@ -40,17 +40,31 @@ jobs:
         with:
           persist-credentials: false
 
-      # Results are filed under the PR head, so make sure that the test merge commit is built
-      # from it, rather than a stale one, e.g., just after a base change resolved a conflict.
-      - name: Check that the merge commit contains the PR head
+      # Results are filed under the PR head and compared against the PR base, so make sure that
+      # the test merge commit is built from both, rather than a stale one, e.g., one still made
+      # against the old base just after a retarget, which leaves the head SHA unchanged.
+      - name: Check that the merge commit is of the PR head into the PR base
         if: ${{ github.event_name == 'pull_request' }}
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
           # `git cat-file` still lists the parents in a shallow clone, unlike `git rev-parse HEAD^2`.
-          if [ "$(git rev-parse HEAD)" != "$HEAD_SHA" ] && ! git cat-file -p HEAD | grep -qx "parent $HEAD_SHA"; then
-            echo "::error::$GITHUB_SHA does not contain the PR head $HEAD_SHA. Re-run this workflow."
+          mapfile -t parents < <(git cat-file -p HEAD | sed -n 's/^parent //p')
+          if [ "${#parents[@]}" -ne 2 ] || [ "${parents[1]}" != "$HEAD_SHA" ]; then
+            echo "::error::$GITHUB_SHA is not a merge of the PR head $HEAD_SHA. Push to the PR, or close and reopen it, to get a fresh merge commit."
             exit 1
+          fi
+          # The base branch may have moved on since the event, so also accept a first parent
+          # that descends from the event's base. A merge against the pre-retarget base doesn't.
+          if [ "${parents[0]}" != "$BASE_SHA" ]; then
+            status="$(gh api "repos/$REPO/compare/$BASE_SHA...${parents[0]}" --jq .status || echo error)"
+            if [ "$status" != "ahead" ]; then
+              echo "::error::$GITHUB_SHA merges into ${parents[0]}, which isn't the PR base $BASE_SHA or a descendant of it ($status). Push to the PR, or close and reopen it, to get a fresh merge commit."
+              exit 1
+            fi
           fi
 
       - id: matrix
