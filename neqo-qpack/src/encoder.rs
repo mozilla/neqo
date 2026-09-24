@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Header, qdebug, qerror, qlog::Qlog, qtrace, to_u64};
+use neqo_common::{Header, qdebug, qerror, qtrace, to_u64};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -20,7 +20,6 @@ use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
-    qlog,
     reader::ReceiverConnWrapper,
     stats::Stats,
     table::{ADDITIONAL_TABLE_ENTRY_SIZE, HeaderTable, LookupResult},
@@ -143,11 +142,11 @@ impl Encoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
-        self.read_instructions(conn, now).map_err(map_error)
+    pub fn receive(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
+        self.read_instructions(conn).map_err(map_error)
     }
 
-    fn read_instructions(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+    fn read_instructions(&mut self, conn: &mut Connection) -> Res<()> {
         qdebug!("[{self}] read a new instruction");
         let Some(stream_id) = self.recv_stream_id else {
             debug_assert!(false, "receive() before add_recv_stream()");
@@ -156,7 +155,7 @@ impl Encoder {
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut(), now)?,
+                Ok(instruction) => self.call_instruction(instruction)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -244,12 +243,7 @@ impl Encoder {
         }
     }
 
-    fn call_instruction(
-        &mut self,
-        instruction: DecoderInstruction,
-        qlog: &mut Qlog,
-        now: Instant,
-    ) -> Res<()> {
+    fn call_instruction(&mut self, instruction: DecoderInstruction) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -259,12 +253,6 @@ impl Encoder {
                 if increment == 0 {
                     return Err(Error::DecoderStream);
                 }
-                qlog::qpack_read_insert_count_increment_instruction(
-                    qlog,
-                    increment,
-                    &increment.to_be_bytes(),
-                    now,
-                );
 
                 self.insert_count_instruction(increment)
             }
@@ -708,12 +696,7 @@ mod tests {
             .unwrap();
         let out = encoder.peer_conn.process_output(now);
         drop(encoder.conn.process(out.dgram(), now));
-        assert!(
-            encoder
-                .encoder
-                .read_instructions(&mut encoder.conn, now)
-                .is_ok()
-        );
+        assert!(encoder.encoder.read_instructions(&mut encoder.conn).is_ok());
     }
 
     const CAP_INSTRUCTION_200: &[u8] = &[0x02, 0x3f, 0xa9, 0x01];
@@ -1064,7 +1047,7 @@ mod tests {
         let out = encoder.peer_conn.process_output(now());
         encoder.conn.process_input(out.dgram().unwrap(), now());
         assert_eq!(
-            encoder.encoder.read_instructions(&mut encoder.conn, now()),
+            encoder.encoder.read_instructions(&mut encoder.conn),
             Err(Error::DecoderStream)
         );
     }
@@ -1084,7 +1067,7 @@ mod tests {
         let out = encoder.peer_conn.process_output(now());
         encoder.conn.process_input(out.dgram().unwrap(), now());
         assert_eq!(
-            encoder.encoder.read_instructions(&mut encoder.conn, now()),
+            encoder.encoder.read_instructions(&mut encoder.conn),
             Err(Error::DecoderStream)
         );
     }

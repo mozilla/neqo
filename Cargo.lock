@@ -866,7 +866,6 @@ dependencies = [
  "log",
  "neqo-common",
  "neqo-transport",
- "qlog",
  "rustc-hash",
  "static_assertions",
  "test-fixture 0.31.1",
