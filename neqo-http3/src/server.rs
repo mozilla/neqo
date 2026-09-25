@@ -180,7 +180,11 @@ impl Http3Server {
         active_conns.extend(
             self.http3_handlers
                 .iter()
-                .filter(|(_, handler)| handler.borrow_mut().should_be_processed())
+                .filter(|(conn, handler)| {
+                    handler
+                        .borrow_mut()
+                        .should_be_processed(&conn.borrow(), now)
+                })
                 .map(|(c, _)| c)
                 .cloned(),
         );

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::num::NonZeroUsize;
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Encoder, event::Provider as _, to_u64};
 use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, streams::SendGroupId};
@@ -80,6 +80,33 @@ fn max_datagram_size_smaller_than_session_prefix() {
 
     assert_eq!(wt_session.max_datagram_size(), Ok(0));
     assert_eq!(wt.max_datagram_size(wt_session.stream_id()), Ok(0));
+}
+
+#[test]
+fn datagram_expires_before_being_sent() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
+
+    // No packets ever need to be built in between: expiry must not wait on
+    // that. Driving the server's own HTTP/3 tick (not exchange_packets,
+    // which uses its own clock) is enough on its own.
+    let later = t0 + Duration::from_millis(10);
+    drop(wt.server.process_output(later));
+
+    assert_eq!(
+        wt_session.datagram_queue_capacity().queued_datagrams,
+        0,
+        "the stale datagram must be gone before it is ever handed to the QUIC layer"
+    );
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
 }
 
 #[test]
@@ -192,6 +219,32 @@ fn outgoing_datagram_space_available_forwarded() {
             .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
         "OutgoingDatagramSpaceAvailable was not forwarded to the HTTP/3 server"
     );
+}
+
+#[test]
+fn server_processes_a_connection_whose_only_pending_work_is_an_expired_datagram() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    // Enqueue without marking the connection as needing processing: the
+    // datagram's own expiry must be enough on its own to get this
+    // connection processed later, with nothing else giving it a reason.
+    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    _ = wt_session
+        .send_datagram_without_marking_needs_processing(DGRAM, Some(1), t0)
+        .unwrap();
+    assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
+
+    let later = t0 + Duration::from_millis(10);
+    drop(wt.server.process_output(later));
+
+    assert_eq!(
+        wt_session.datagram_queue_capacity().queued_datagrams,
+        0,
+        "the datagram's own expiry must get this connection processed"
+    );
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
 }
 
 #[test]

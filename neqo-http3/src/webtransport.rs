@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Display, Formatter},
@@ -13,8 +11,12 @@ use std::{
     rc::Rc,
     time::Instant,
 };
+#[cfg(test)]
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
     send_stream, server::ConnectionRef, streams::SendOrder,
@@ -794,6 +796,33 @@ impl ServerSession {
             )
     }
 
+    /// Test-only: like [`Self::send_datagram`], but does not mark the
+    /// connection as needing processing, so a test can enqueue a datagram
+    /// and later observe whether it expires on its own, without an
+    /// unrelated reason to process the connection masking the check.
+    #[cfg(test)]
+    pub(crate) fn send_datagram_without_marking_needs_processing<I: Into<DatagramTracking>>(
+        &self,
+        buf: &[u8],
+        id: I,
+        now: Instant,
+    ) -> Res<DatagramQueueOutcome> {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_send_datagram(
+                session_id,
+                &mut self.stream_handler.conn.borrow_mut(),
+                buf,
+                id,
+                now,
+                SendGroupId::new(0),
+                0,
+            )
+    }
+
     /// Set the outgoing-datagram queue's high water mark for this session.
     ///
     /// Test-only: not yet exposed to a production caller.
@@ -810,6 +839,57 @@ impl ServerSession {
                 mark,
             )
             .expect("test session must exist");
+    }
+
+    /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
+    /// to the implementation-defined default with `None`.
+    ///
+    /// Test-only; see [`Self::set_datagram_high_water_mark`].
+    #[cfg(test)]
+    pub(crate) fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_set_datagram_max_age(
+                session_id,
+                &mut self.stream_handler.conn.borrow_mut(),
+                max_age,
+                now,
+            )
+            .expect("test session must exist");
+    }
+
+    /// This session's statistics, e.g. `datagrams_expired_outgoing`.
+    ///
+    /// Test-only; see [`Self::set_datagram_high_water_mark`].
+    #[cfg(test)]
+    pub(crate) fn stats(&self) -> extended_connect::stats::SessionStats {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .webtransport_session_stats(session_id)
+            .expect("test session must exist")
+    }
+
+    /// Snapshot of the outgoing-datagram queue's current byte/count state.
+    ///
+    /// Test-only; see [`Self::set_datagram_high_water_mark`].
+    #[cfg(test)]
+    pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_datagram_queue_capacity(
+                session_id,
+                &self.stream_handler.conn.borrow(),
+            )
+            .expect("test session must exist")
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
