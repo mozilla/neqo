@@ -88,7 +88,9 @@ fn datagram_expires_before_being_sent() {
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
@@ -146,22 +148,30 @@ fn datagram_of_exactly_the_peers_limit_is_accepted() {
     assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
 }
 
+/// With a mark of 2 already set, the first datagram `send` queues is `Ok`
+/// and the second crosses the mark.
+fn assert_second_datagram_crosses_a_mark_of_two(
+    mut send: impl FnMut(u64) -> Result<DatagramQueueOutcome, crate::Error>,
+) {
+    assert_eq!(send(1), Ok(DatagramQueueOutcome::Ok));
+    assert_eq!(
+        send(2),
+        Ok(DatagramQueueOutcome::AboveWatermark),
+        "the second datagram crosses the high water mark"
+    );
+}
+
 #[test]
 fn datagram_high_water_mark_signals_backpressure() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
-    let t0 = now();
 
-    wt_session.set_datagram_high_water_mark(Some(NonZeroUsize::new(2).unwrap()));
-    assert_eq!(
-        wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::Ok)
-    );
-    assert_eq!(
-        wt_session.send_datagram(DGRAM, Some(2), t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark),
-        "the second datagram crosses the high water mark"
-    );
+    wt_session
+        .set_datagram_high_water_mark(Some(NonZeroUsize::new(2).unwrap()))
+        .unwrap();
+    assert_second_datagram_crosses_a_mark_of_two(|id| {
+        wt_session.send_datagram(DGRAM, Some(id), now(), SendGroupId::new(0), 0)
+    });
 }
 
 /// Draining a queue that reported `AboveWatermark` must surface the resume
@@ -175,13 +185,8 @@ fn outgoing_datagram_space_available_forwarded() {
     let session_id = wt_session.stream_id();
     let t0 = now();
 
-    let (conn, handler) = wt.client.connection_and_handler();
-    handler
-        .extended_connect_set_datagram_high_water_mark(
-            session_id,
-            conn,
-            Some(NonZeroUsize::new(1).unwrap()),
-        )
+    wt.client
+        .webtransport_set_datagram_high_water_mark(session_id, Some(NonZeroUsize::new(1).unwrap()))
         .unwrap();
     assert_eq!(
         wt.client
@@ -195,7 +200,9 @@ fn outgoing_datagram_space_available_forwarded() {
         "client resume event fired before the queue drained"
     );
 
-    wt_session.set_datagram_high_water_mark(Some(NonZeroUsize::new(1).unwrap()));
+    wt_session
+        .set_datagram_high_water_mark(Some(NonZeroUsize::new(1).unwrap()))
+        .unwrap();
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::AboveWatermark)
@@ -232,7 +239,9 @@ fn server_processes_a_connection_whose_only_pending_work_is_an_expired_datagram(
     // Enqueue without marking the connection as needing processing: the
     // datagram's own expiry must be enough on its own to get this
     // connection processed later, with nothing else giving it a reason.
-    wt_session.set_datagram_max_age(Some(Duration::from_millis(5)), t0);
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
     _ = wt_session
         .send_datagram_without_marking_needs_processing(DGRAM, Some(1), t0)
         .unwrap();
@@ -405,4 +414,70 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
         low_priority_ids[total_evicted..total_evicted + received_low.len()],
         "surviving low-priority datagrams must be exactly the oldest ones eviction spared, in FIFO order"
     );
+}
+
+#[test]
+fn client_set_datagram_high_water_mark_signals_backpressure() {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+
+    wt.client
+        .webtransport_set_datagram_high_water_mark(session_id, Some(NonZeroUsize::new(2).unwrap()))
+        .unwrap();
+    assert_second_datagram_crosses_a_mark_of_two(|id| {
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(id),
+            now(),
+            SendGroupId::new(0),
+            0,
+        )
+    });
+}
+
+/// Raising the mark over a blocked queue resumes the sender with nothing
+/// sent; lowering it below the queue's occupancy does not (no sender was
+/// waiting), it only makes the next send report `AboveWatermark`.
+#[test]
+fn client_changing_the_high_water_mark_resumes_only_a_blocked_queue() {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+    let t0 = now();
+    let mark = |wt: &mut WtTest, n| {
+        wt.client
+            .webtransport_set_datagram_high_water_mark(session_id, NonZeroUsize::new(n))
+            .unwrap();
+    };
+    let send = |wt: &mut WtTest, id| {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), t0, SendGroupId::new(0), 0)
+            .unwrap()
+    };
+    // Read the transport's events directly: building a packet (as every
+    // HTTP/3 `process_*` path would) sends the datagram, which resumes the
+    // sender on its own.
+    let resumed = |wt: &mut WtTest| {
+        wt.client.connection_mut().events().any(|e| {
+            matches!(
+                e,
+                neqo_transport::ConnectionEvent::OutgoingDatagramSpaceAvailable
+            )
+        })
+    };
+
+    mark(&mut wt, 1);
+    assert_eq!(send(&mut wt, 1), DatagramQueueOutcome::AboveWatermark);
+    assert!(!resumed(&mut wt));
+
+    mark(&mut wt, 3);
+    assert!(
+        resumed(&mut wt),
+        "raising the mark must resume a blocked sender"
+    );
+
+    assert_eq!(send(&mut wt, 2), DatagramQueueOutcome::Ok);
+    mark(&mut wt, 1);
+    assert!(!resumed(&mut wt), "no sender was waiting");
+    assert_eq!(send(&mut wt, 3), DatagramQueueOutcome::AboveWatermark);
 }
