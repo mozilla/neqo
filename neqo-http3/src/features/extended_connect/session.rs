@@ -535,7 +535,9 @@ impl Session {
 
     /// Remove and count every datagram still queued when this session
     /// closes: nothing will ever call [`Self::expire_datagrams`] again to
-    /// pick them up.
+    /// pick them up.  Whole-connection close does not come through here;
+    /// the queues go with the `Connection`, and the application learns of
+    /// it from the connection state change instead.
     pub(crate) fn drop_queued_datagrams(&mut self, conn: &mut Connection) {
         let dropped = conn.drop_session_datagrams(self.id);
         self.protocol.record_sent_outgoing_datagrams(dropped.sent);

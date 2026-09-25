@@ -1013,6 +1013,12 @@ impl ServerSession {
             .expect("test session must exist")
     }
 
+    /// Test-only: see `Connection::next_datagram_expiry`.
+    #[cfg(test)]
+    pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.stream_handler.conn.borrow().next_datagram_expiry()
+    }
+
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
     #[must_use]
     pub fn remote_datagram_size(&self) -> u64 {
