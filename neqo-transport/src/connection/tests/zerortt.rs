@@ -132,10 +132,9 @@ fn zero_rtt_before_resumption_token() {
     assert!(client.stream_create(StreamType::BiDi).is_err());
 }
 
-#[test]
-fn zero_rtt_send_reject() {
-    const MESSAGE: &[u8] = &[1, 2, 3];
-
+/// A resuming client and a server whose fresh anti-replay context makes it
+/// reject that client's 0-RTT.
+fn resumed_pair_that_rejects_0rtt() -> (Connection, Connection) {
     let mut client = default_client();
     let mut server = default_server();
     connect(&mut client, &mut server);
@@ -159,6 +158,14 @@ fn zero_rtt_send_reject() {
     server
         .server_enable_0rtt(&ar, AllowZeroRtt {})
         .expect("enable 0-RTT");
+    (client, server)
+}
+
+#[test]
+fn zero_rtt_send_reject() {
+    const MESSAGE: &[u8] = &[1, 2, 3];
+
+    let (mut client, mut server) = resumed_pair_that_rejects_0rtt();
 
     // Write some data on the client.
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
@@ -209,6 +216,51 @@ fn zero_rtt_send_reject() {
     // The server should receive new stream
     server.process_input(client_after_reject.unwrap(), now());
     assert!(server.events().any(recvd_stream_evt));
+}
+
+/// A caller (e.g. the `WebTransport` anticipated-streams API) can raise the incoming
+/// stream limit before the handshake confirms, since that is exactly when the W3C API
+/// supplies it. `Streams::zero_rtt_rejected` must tolerate a limit already raised above
+/// the configured transport parameter rather than asserting it is unchanged.
+#[test]
+fn zero_rtt_reject_after_set_remote_max_streams() {
+    let (mut client, mut server) = resumed_pair_that_rejects_0rtt();
+
+    client.set_remote_max_streams(StreamType::BiDi, 1000);
+    client.set_remote_max_streams(StreamType::UniDi, 1000);
+
+    let client_hs = client.process_output(now());
+    assert!(client_hs.as_dgram_ref().is_some());
+    let client_0rtt = client.process_output(now());
+    assert!(client_0rtt.as_dgram_ref().is_some());
+
+    let server_hs = server.process(client_hs.dgram(), now());
+    let server_hs2 = server.process(client_0rtt.dgram(), now());
+
+    _ = client.process(server_hs.dgram(), now());
+    let dgram = client.process(server_hs2.dgram(), now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+
+    // This is where a debug build previously panicked: `zero_rtt_rejected` asserted
+    // the limit was unchanged from the transport parameter.
+    let client_fin = client.process(dgram, now());
+    let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
+    assert!(client.events().any(recvd_0rtt_reject));
+
+    // The MAX_STREAMS frames went out in the rejected 0-RTT packet; they
+    // must be re-sent in 1-RTT so the server ends up with the raised limit.
+    let mut dgram = client_fin.dgram();
+    while let Some(d) = dgram {
+        dgram = server.process(Some(d), now()).dgram();
+        dgram = dgram.and_then(|d| client.process(Some(d), now()).dgram());
+    }
+    for st in [StreamType::BiDi, StreamType::UniDi] {
+        let opened = std::iter::repeat_with(|| server.stream_create(st))
+            .take_while(Result::is_ok)
+            .take(1001)
+            .count();
+        assert_eq!(opened, 1000, "{st:?}");
+    }
 }
 
 #[test]

@@ -983,6 +983,66 @@ fn max_streams_after_bidi_closed() {
     assert!(client.stream_create(StreamType::BiDi).is_err());
 }
 
+/// Raising the incoming stream limit at runtime is advertised to the peer via
+/// `MAX_STREAMS`, so it can open streams beyond the limit the handshake set.
+#[test]
+fn set_remote_max_streams_lets_peer_open_more_streams() {
+    for st in [StreamType::BiDi, StreamType::UniDi] {
+        let mut client = default_client();
+        let mut server = new_server(ConnectionParameters::default().max_streams(st, 1));
+        connect(&mut client, &mut server);
+
+        assert!(client.stream_create(st).is_ok());
+        assert_eq!(client.stream_create(st).unwrap_err(), Error::StreamLimit);
+
+        server.set_remote_max_streams(st, 3);
+        let dgram = server.process_output(now()).dgram();
+        client.process_input(dgram.expect("MAX_STREAMS is sent right away"), now());
+
+        assert!(client.stream_create(st).is_ok());
+        assert!(client.stream_create(st).is_ok());
+        assert_eq!(client.stream_create(st).unwrap_err(), Error::StreamLimit);
+
+        // Monotonic: a lower value changes nothing and sends nothing.
+        server.set_remote_max_streams(st, 2);
+        assert!(server.process_output(now()).dgram().is_none());
+    }
+}
+
+/// A closed stream still frees a slot after a raise: the next `MAX_STREAMS`
+/// is the streams retired so far plus the raised limit.
+#[test]
+fn set_remote_max_streams_then_retire_frees_another_stream() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 1));
+    connect(&mut client, &mut server);
+
+    server.set_remote_max_streams(StreamType::UniDi, 2);
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+
+    let first = client.stream_create(StreamType::UniDi).unwrap();
+    assert!(client.stream_create(StreamType::UniDi).is_ok());
+    assert_eq!(
+        client.stream_create(StreamType::UniDi).unwrap_err(),
+        Error::StreamLimit
+    );
+
+    client.stream_close_send(first).unwrap();
+    let dgram = client.process_output(now()).dgram();
+    server.process_input(dgram.unwrap(), now());
+    let mut buf = [0; 16];
+    assert_eq!(server.stream_recv(first, &mut buf).unwrap(), (0, true));
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.expect("retiring a stream sends MAX_STREAMS"), now());
+
+    assert!(client.stream_create(StreamType::UniDi).is_ok());
+    assert_eq!(
+        client.stream_create(StreamType::UniDi).unwrap_err(),
+        Error::StreamLimit
+    );
+}
+
 #[test]
 fn no_dupdata_readable_events() {
     let mut client = default_client();
