@@ -118,10 +118,10 @@ impl Protocol for Session {
     fn read_control_stream(
         &mut self,
         conn: &mut Connection,
-        events: &mut Box<dyn ExtendedConnectEvents>,
+        _events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
-    ) -> Res<Option<State>> {
+    ) -> Res<Option<(State, CloseReason)>> {
         let (f, fin) = self
             .frame_reader
             .receive::<WebTransportFrame>(
@@ -131,28 +131,16 @@ impl Protocol for Session {
             .map_err(|_| Error::HttpGeneralProtocolStream)?;
         qtrace!("[{self}] Received frame: {f:?} fin={fin}");
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
-                CloseReason::Clean { error, message },
-                None,
-            );
-            if fin {
-                Ok(Some(State::Done))
-            } else {
-                Ok(Some(State::FinPending))
-            }
+            let state = if fin { State::Done } else { State::FinPending };
+            Ok(Some((state, CloseReason::Clean { error, message })))
         } else if fin {
-            events.session_end(
-                ExtendedConnectType::WebTransport,
-                self.id,
+            Ok(Some((
+                State::Done,
                 CloseReason::Clean {
                     error: 0,
                     message: String::new(),
                 },
-                None,
-            );
-            Ok(Some(State::Done))
+            )))
         } else {
             Ok(None)
         }
@@ -247,8 +235,16 @@ impl Protocol for Session {
         Some(&self.stats)
     }
 
+    fn record_sent_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.datagrams_sent_outgoing += count;
+    }
+
     fn record_expired_outgoing_datagrams(&mut self, count: u64) {
         self.stats.datagrams_expired_outgoing += count;
+    }
+
+    fn record_dropped_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.datagrams_dropped_outgoing += count;
     }
 
     fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {

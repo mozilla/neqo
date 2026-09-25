@@ -59,7 +59,7 @@ impl Protocol for Session {
         events: &mut Box<dyn ExtendedConnectEvents>,
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
-    ) -> Res<Option<State>> {
+    ) -> Res<Option<(State, CloseReason)>> {
         loop {
             let (capsule, fin) = self
                 .frame_reader
@@ -84,16 +84,13 @@ impl Protocol for Session {
             }
 
             if fin {
-                events.session_end(
-                    ExtendedConnectType::ConnectUdp,
-                    self.session_id,
+                return Ok(Some((
+                    State::Done,
                     CloseReason::Clean {
                         error: 0,
                         message: String::new(),
                     },
-                    None,
-                );
-                return Ok(Some(State::Done));
+                )));
             }
 
             if !capsule_is_some {

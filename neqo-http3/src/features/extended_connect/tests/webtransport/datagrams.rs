@@ -7,7 +7,7 @@
 use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Encoder, event::Provider as _, to_u64};
-use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, streams::SendGroupId};
+use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamId, streams::SendGroupId};
 use test_fixture::now;
 
 use crate::{
@@ -129,7 +129,6 @@ fn datagram_larger_than_peers_limit_is_rejected_synchronously() {
     assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 0);
 }
 
-/// The other side of the boundary: a datagram of exactly `max_datagram_size`
 /// is accepted.
 #[test]
 fn datagram_of_exactly_the_peers_limit_is_accepted() {
@@ -146,6 +145,51 @@ fn datagram_of_exactly_the_peers_limit_is_accepted() {
         Ok(DatagramQueueOutcome::Ok)
     );
     assert_eq!(wt_session.datagram_queue_capacity().queued_datagrams, 1);
+}
+
+/// `SessionStats::datagrams_sent_outgoing` must count a datagram sent
+/// without a tracking id.
+#[test]
+fn untracked_datagram_sent_is_counted_in_aggregate_stats() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    assert_eq!(
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, now(), SendGroupId::new(0), 0)
+            .unwrap(),
+        DatagramQueueOutcome::Ok
+    );
+    wt.exchange_packets();
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.datagrams_sent_outgoing, 1);
+    assert_eq!(stats.datagrams_dropped_outgoing, 0);
+}
+
+/// `SessionStats::datagrams_dropped_outgoing` must count a datagram evicted
+/// from the queue to make room under the byte budget, even without a
+/// tracking id.
+#[test]
+fn untracked_datagram_eviction_is_counted_in_aggregate_stats() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+
+    for sent in 0.. {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, None, now(), SendGroupId::new(0), 0)
+            .unwrap();
+        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+            break;
+        }
+        assert!(sent < 1_000_000, "byte budget should have been hit by now");
+    }
+
+    let stats = wt.client.webtransport_session_stats(session_id).unwrap();
+    assert_eq!(stats.datagrams_dropped_outgoing, 1);
 }
 
 /// With a mark of 2 already set, the first datagram `send` queues is `Ok`
@@ -236,12 +280,13 @@ fn server_processes_a_connection_whose_only_pending_work_is_an_expired_datagram(
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    // Enqueue without marking the connection as needing processing: the
-    // datagram's own expiry must be enough on its own to get this
-    // connection processed later, with nothing else giving it a reason.
     wt_session
         .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
         .unwrap();
+    // Flush anything session setup left pending so it can't mask the check
+    // below. From this point on, only the datagram's own expiry may give the
+    // connection a reason to be processed.
+    drop(wt.server.process_output(t0));
     _ = wt_session
         .send_datagram_without_marking_needs_processing(DGRAM, Some(1), t0)
         .unwrap();
@@ -256,6 +301,34 @@ fn server_processes_a_connection_whose_only_pending_work_is_an_expired_datagram(
         "the datagram's own expiry must get this connection processed"
     );
     assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
+}
+
+/// The send counterpart: once the datagram is written into a packet, its
+/// sent count is the connection's only pending work, and must still get it
+/// processed so the count reaches the session's stats.
+#[test]
+fn server_processes_a_connection_whose_only_pending_work_is_a_sent_count() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    drop(wt.server.process_output(t0));
+    _ = wt_session
+        .send_datagram_without_marking_needs_processing(DGRAM, None, t0)
+        .unwrap();
+    let mut t = t0;
+    let out = loop {
+        match wt.server.process_output(t) {
+            neqo_transport::Output::Datagram(d) => break d,
+            neqo_transport::Output::Callback(delay) => t += delay,
+            neqo_transport::Output::None => panic!("the server never sent the datagram"),
+        }
+    };
+    assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
+    drop(out);
+
+    drop(wt.server.process_output(t));
+    assert_eq!(wt_session.stats().datagrams_sent_outgoing, 1);
 }
 
 #[test]
@@ -291,6 +364,113 @@ fn datagram_send_order_controls_priority() {
         received,
         vec![b"high".to_vec(), b"low".to_vec()],
         "the higher send_order datagram must be delivered first"
+    );
+}
+
+#[test]
+fn datagram_send_updates_sent_stat() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    assert_eq!(
+        wt_session.send_datagram(DGRAM, None, t0, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
+
+    wt.exchange_packets();
+
+    assert_eq!(wt_session.stats().datagrams_sent_outgoing, 1);
+}
+
+#[test]
+fn datagram_expiry_is_counted() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    wt_session
+        .set_datagram_max_age(Some(Duration::from_millis(5)), t0)
+        .unwrap();
+    _ = wt_session
+        .send_datagram(DGRAM, Some(9), t0, SendGroupId::new(0), 0)
+        .unwrap();
+
+    drop(wt.server.process_output(t0 + Duration::from_millis(10)));
+
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
+    assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
+}
+
+#[test]
+fn session_close_counts_queued_datagrams_as_dropped() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    _ = wt_session
+        .send_datagram(DGRAM, Some(3), t0, SendGroupId::new(0), 0)
+        .unwrap();
+    let stats = wt_session.close_session(0, "bye", t0).unwrap();
+    drop(wt.server.process_output(t0));
+
+    assert_eq!(
+        stats.datagrams_dropped_outgoing, 1,
+        "the stats close_session returns must already count the drop"
+    );
+}
+
+#[test]
+fn datagram_expires_on_the_implementation_defined_default_max_age() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let t0 = now();
+
+    // No set_datagram_max_age call: outgoingMaxAge is left at its default.
+    _ = wt_session
+        .send_datagram(DGRAM, Some(13), t0, SendGroupId::new(0), 0)
+        .unwrap();
+
+    // Comfortably past the default, so this expires on the very first
+    // drain rather than getting sent.
+    drop(wt.server.process_output(t0 + Duration::from_secs(1)));
+
+    assert_eq!(wt_session.stats().datagrams_expired_outgoing, 1);
+    assert_eq!(wt_session.stats().datagrams_sent_outgoing, 0);
+}
+
+#[test]
+fn client_set_datagram_max_age_expires_queued_datagrams() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let t0 = now();
+
+    assert_eq!(
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(7),
+            t0,
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+
+    let t1 = t0 + Duration::from_millis(200);
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, Some(Duration::from_millis(100)), t1)
+        .unwrap();
+
+    assert_eq!(
+        wt.client
+            .webtransport_session_stats(session_id)
+            .unwrap()
+            .datagrams_expired_outgoing,
+        1,
+        "shortening max_age past an already-queued datagram must expire it immediately"
     );
 }
 
@@ -480,4 +660,96 @@ fn client_changing_the_high_water_mark_resumes_only_a_blocked_queue() {
     mark(&mut wt, 1);
     assert!(!resumed(&mut wt), "no sender was waiting");
     assert_eq!(send(&mut wt, 3), DatagramQueueOutcome::AboveWatermark);
+}
+
+/// Fill `session_id`'s queue with `send_order` 10 datagrams until the byte
+/// budget evicts one; returns how many were accepted.
+fn fill_to_the_byte_budget(wt: &mut WtTest, session_id: StreamId) -> u64 {
+    for id in 0.. {
+        let outcome = wt
+            .client
+            .webtransport_send_datagram(session_id, DGRAM, Some(id), now(), SendGroupId::new(0), 10)
+            .unwrap();
+        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+            return id + 1;
+        }
+        assert!(id < 1_000_000, "byte budget should have been hit by now");
+    }
+    unreachable!()
+}
+
+/// A datagram refused at enqueue for being the lowest priority in a full
+/// queue is counted as dropped.
+#[test]
+fn rejected_datagram_is_counted_as_dropped() {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+
+    fill_to_the_byte_budget(&mut wt, session_id);
+    let before = wt.client.webtransport_session_stats(session_id).unwrap();
+
+    assert_eq!(
+        wt.client.webtransport_send_datagram(
+            session_id,
+            DGRAM,
+            Some(u64::MAX),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Rejected)
+    );
+    assert_eq!(
+        wt.client
+            .webtransport_session_stats(session_id)
+            .unwrap()
+            .datagrams_dropped_outgoing,
+        before.datagrams_dropped_outgoing + 1
+    );
+}
+
+/// Every accepted datagram ends up sent, expired or dropped exactly once,
+/// which is what a caller reconciling its own credit relies on.
+#[test]
+fn every_accepted_datagram_is_counted_exactly_once() {
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+    let t0 = now();
+    let send = |wt: &mut WtTest, t| {
+        wt.client
+            .webtransport_send_datagram(session_id, DGRAM, None, t, SendGroupId::new(0), 0)
+            .unwrap()
+    };
+
+    assert_eq!(send(&mut wt, t0), DatagramQueueOutcome::Ok);
+    wt.exchange_packets();
+
+    assert_eq!(send(&mut wt, t0), DatagramQueueOutcome::Ok);
+    wt.client
+        .webtransport_set_datagram_max_age(
+            session_id,
+            Some(Duration::from_millis(1)),
+            t0 + Duration::from_millis(10),
+        )
+        .unwrap();
+    wt.client
+        .webtransport_set_datagram_max_age(session_id, None, t0)
+        .unwrap();
+
+    let queued = fill_to_the_byte_budget(&mut wt, session_id);
+    let accepted = 2 + queued;
+
+    let stats = wt
+        .client
+        .webtransport_close_session(session_id, 0, "", now())
+        .unwrap();
+    assert!(stats.datagrams_sent_outgoing >= 1);
+    assert_eq!(stats.datagrams_expired_outgoing, 1);
+    assert!(stats.datagrams_dropped_outgoing > 1);
+    assert_eq!(
+        stats.datagrams_sent_outgoing
+            + stats.datagrams_expired_outgoing
+            + stats.datagrams_dropped_outgoing,
+        accepted
+    );
 }

@@ -570,6 +570,13 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
+        // Drop what is still queued first, so the snapshot below counts it:
+        // the teardown would do this anyway, but only after the caller has
+        // been handed its "final" stats. Doing it twice is harmless - the
+        // second call finds no queue left.
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .drop_queued_datagrams(conn);
         // Snapshot the stats before tearing the session down, so the caller sees
         // the final values. This also rejects non-WebTransport sessions.
         //

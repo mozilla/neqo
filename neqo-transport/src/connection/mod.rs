@@ -43,7 +43,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
-    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome, DroppedDatagrams},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
@@ -4204,10 +4204,12 @@ impl Connection {
         self.quic_datagrams.take_session_expired_count(session)
     }
 
-    /// Whether any session has an expiry count waiting to be picked up by
-    /// [`Self::expire_session_datagrams`]. `process_timer` sheds stale
-    /// datagrams on its own schedule, so a caller that sweeps only when given
-    /// a reason to needs this to learn that there is now something to count.
+    /// Whether any session has an expiry or sent count waiting to be picked
+    /// up by [`Self::expire_session_datagrams`] or
+    /// [`Self::take_session_sent_datagrams`]. `process_timer` sheds stale
+    /// datagrams and `process_output` builds packets on their own schedule,
+    /// so a caller that sweeps only when given a reason to needs this to
+    /// learn that there is now something to count.
     ///
     /// A queue's counts clear only when drained or when
     /// [`Self::drop_session_datagrams`] removes the queue. A caller that
@@ -4217,6 +4219,23 @@ impl Connection {
     #[must_use]
     pub fn has_pending_datagram_counts(&self) -> bool {
         self.quic_datagrams.has_pending_counts()
+    }
+
+    /// Remove `session`'s queue, e.g. because the session is closing. Returns
+    /// how many datagrams were still queued, and the sent and expiry counts
+    /// not yet taken.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> DroppedDatagrams {
+        self.quic_datagrams.drop_session_datagrams(session)
+    }
+
+    /// The number of `session`'s datagrams written into a QUIC packet since
+    /// the last call.  Not a delivery signal: the packet can still be lost,
+    /// and a DATAGRAM frame is never retransmitted.  Tracked datagrams also
+    /// get a [`ConnectionEvent::OutgoingDatagramOutcome`] for that.
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramOutcome`]: crate::ConnectionEvent::OutgoingDatagramOutcome
+    pub fn take_session_sent_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_sent_count(session)
     }
 
     /// The instant at which the oldest datagram queued on any session
@@ -4231,12 +4250,6 @@ impl Connection {
     #[must_use]
     pub fn next_datagram_expiry(&self) -> Option<Instant> {
         self.quic_datagrams.next_datagram_expiry(self.min_rtt())
-    }
-
-    /// Remove every datagram queued on `session`'s behalf, e.g. because the
-    /// session is closing. Returns how many were removed.
-    pub fn drop_session_datagrams(&mut self, session: StreamId) -> usize {
-        self.quic_datagrams.drop_session_datagrams(session)
     }
 
     /// Return the PLMTU of the primary path.
