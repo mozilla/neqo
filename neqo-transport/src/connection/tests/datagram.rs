@@ -1037,6 +1037,45 @@ fn take_session_expired_datagrams_drains_without_sweeping() {
 }
 
 #[test]
+fn enqueue_datagram_rejects_more_than_the_peers_limit() {
+    let mut client = new_client(ConnectionParameters::default().datagram_size(0));
+    let mut server =
+        new_server(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
+    connect_force_idle(&mut client, &mut server);
+    let session = StreamId::new(0);
+    let limit = usize::try_from(DATAGRAM_LEN_SMALLER_THAN_MTU).unwrap();
+
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            vec![0; limit + 1],
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Err(Error::TooMuchData)
+    );
+    assert_eq!(
+        client.enqueue_datagram(
+            session,
+            vec![0; limit],
+            Some(2),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    // The client advertised no datagram support, so nothing fits.
+    assert_eq!(
+        server.enqueue_datagram(session, vec![0], Some(3), now(), SendGroupId::new(0), 0),
+        Err(Error::TooMuchData)
+    );
+    assert_eq!(server.datagram_queue_capacity(session).queued_datagrams, 0);
+}
+
+#[test]
 fn expiring_a_blocked_queue_via_the_session_sweep_signals_space_available() {
     // The connection-wide timer sweep is covered by
     // `expiring_a_blocked_session_queue_signals_space_available`; the
@@ -1049,7 +1088,7 @@ fn expiring_a_blocked_queue_via_the_session_sweep_signals_space_available() {
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        DatagramQueueOutcome::AboveWatermark
+        Ok(DatagramQueueOutcome::AboveWatermark)
     );
 
     assert_eq!(
@@ -1095,7 +1134,7 @@ fn datagram_queue_expiry_drives_next_delay() {
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     let outcome =
         client.enqueue_datagram(session, vec![1, 2, 3], Some(1), now, SendGroupId::new(0), 0);
-    assert_eq!(outcome, DatagramQueueOutcome::Ok);
+    assert_eq!(outcome, Ok(DatagramQueueOutcome::Ok));
 
     assert_eq!(
         client.next_delay(now, false),
@@ -1197,13 +1236,13 @@ fn enqueue_expires_stale_datagrams_before_charging_the_new_one() {
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        DatagramQueueOutcome::AboveWatermark
+        Ok(DatagramQueueOutcome::AboveWatermark)
     );
 
     let later = now + Duration::from_millis(10);
     assert_eq!(
         client.enqueue_datagram(session, vec![2], Some(2), later, SendGroupId::new(0), 0),
-        DatagramQueueOutcome::AboveWatermark,
+        Ok(DatagramQueueOutcome::AboveWatermark),
         "the new datagram alone fills a mark of 1"
     );
     assert_eq!(
@@ -1252,7 +1291,7 @@ fn expiring_a_blocked_session_queue_signals_space_available() {
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        DatagramQueueOutcome::AboveWatermark
+        Ok(DatagramQueueOutcome::AboveWatermark)
     );
 
     client.process_timer(now + Duration::from_millis(10));
@@ -1275,7 +1314,7 @@ fn shrinking_max_age_signals_space_available() {
     client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        DatagramQueueOutcome::AboveWatermark
+        Ok(DatagramQueueOutcome::AboveWatermark)
     );
 
     client.set_datagram_max_age(
@@ -1301,7 +1340,7 @@ fn resume_signal_fires_once_a_blocked_queue_drains_below_watermark() {
     client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        DatagramQueueOutcome::AboveWatermark
+        Ok(DatagramQueueOutcome::AboveWatermark)
     );
     assert!(
         !client

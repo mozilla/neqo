@@ -317,6 +317,11 @@ impl QuicDatagrams {
     /// [`DatagramQueue::enqueue`]. Expires anything already past its
     /// max-age first, so a stale entry cannot hold the watermark or the byte
     /// budget against the new one; `min_rtt` supplies the default max-age.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TooMuchData` if `data` is bigger than the allowed remote
+    /// datagram size.
     #[expect(
         clippy::too_many_arguments,
         reason = "Connection::enqueue_datagram's parameters plus the RTT the default max-age derives from"
@@ -330,10 +335,18 @@ impl QuicDatagrams {
         send_group_id: SendGroupId,
         send_order: SendOrder,
         min_rtt: Duration,
-    ) -> DatagramQueueOutcome {
+    ) -> Res<DatagramQueueOutcome> {
+        if to_u64(data.len()) > self.remote_datagram_size {
+            qdebug!(
+                "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
+                data.len(),
+                self.remote_datagram_size
+            );
+            return Err(Error::TooMuchData);
+        }
         let queue = self.queues.entry(session).or_default();
         Self::expire_queue(queue, &self.conn_events, now, default_max_age(min_rtt));
-        queue.enqueue(data, id, now, send_group_id, send_order)
+        Ok(queue.enqueue(data, id, now, send_group_id, send_order))
     }
 
     /// See [`DatagramQueue::set_high_water_mark`].

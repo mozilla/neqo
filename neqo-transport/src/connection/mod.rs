@@ -4145,20 +4145,22 @@ impl Connection {
     /// (in practice, an Extended CONNECT session's control-stream `StreamId`).
     /// `send_group_id` of `SendGroupId::new(0)` means ungrouped.
     ///
-    /// This never fails: the *path* MTU is applied later, at packet-build
-    /// time, exactly like queued stream data.
+    /// The *path* MTU is applied later, at packet-build time, exactly like
+    /// queued stream data.
     ///
-    /// The peer's limit is not, though: the caller must not enqueue anything
-    /// longer than [`Self::remote_datagram_size`], or anything at all while
-    /// that is `0` (the peer sent no `max_datagram_frame_size` and so does
-    /// not support DATAGRAM frames at all). Neither is checked here or at
-    /// packet-build time, and sending either violates the peer's transport
-    /// parameters. "Longer than" compares the payload, as
-    /// [`Self::max_datagram_size`] always has; RFC 9221 defines the limit
-    /// for the whole frame, type and length included, so a payload of exactly
-    /// the limit is 1 to 5 bytes over. That reading predates this queue and
-    /// is tracked separately, since fixing it means changing
-    /// `max_datagram_size` too.
+    /// # Errors
+    ///
+    /// Returns `TooMuchData` if `data` is longer than
+    /// [`Self::remote_datagram_size`], which includes any non-empty datagram
+    /// while that is `0` (the peer sent no `max_datagram_frame_size` and so
+    /// does not support DATAGRAM frames at all). "Longer than" compares the
+    /// payload, as [`Self::max_datagram_size`] always has; RFC 9221 defines
+    /// the limit for the whole frame, type and length included, so a payload
+    /// of exactly the limit is over by the frame type plus any length. In
+    /// practice that is 1 to 3 bytes: a datagram that fits a real path MTU is
+    /// under 16384 bytes, so its length takes at most 2. That reading
+    /// predates this queue and is tracked separately, since fixing it means
+    /// changing `max_datagram_size` too.
     pub fn enqueue_datagram(
         &mut self,
         session: StreamId,
@@ -4167,7 +4169,7 @@ impl Connection {
         now: Instant,
         send_group_id: SendGroupId,
         send_order: SendOrder,
-    ) -> DatagramQueueOutcome {
+    ) -> Res<DatagramQueueOutcome> {
         let min_rtt = self.min_rtt();
         self.quic_datagrams.enqueue_datagram(
             session,
