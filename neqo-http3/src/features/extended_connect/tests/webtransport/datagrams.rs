@@ -83,6 +83,41 @@ fn max_datagram_size_smaller_than_session_prefix() {
 }
 
 #[test]
+fn datagram_larger_than_peers_limit_is_rejected_synchronously() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    let max = wt_session
+        .max_datagram_size()
+        .expect("datagrams are enabled by default");
+    let oversized = vec![0; usize::try_from(max).unwrap() + 1];
+
+    assert_eq!(
+        wt_session.send_datagram(&oversized, Some(1), now(), SendGroupId::new(0), 0),
+        Err(crate::Error::Transport(neqo_transport::Error::TooMuchData)),
+        "an oversized datagram must fail before ever reaching the queue"
+    );
+}
+
+/// The other side of the boundary: a datagram of exactly `max_datagram_size`
+/// is accepted.
+#[test]
+fn datagram_of_exactly_the_peers_limit_is_accepted() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    let max = wt_session
+        .max_datagram_size()
+        .expect("datagrams are enabled by default");
+    let largest = vec![0; usize::try_from(max).unwrap()];
+
+    assert_eq!(
+        wt_session.send_datagram(&largest, Some(1), now(), SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+}
+
+#[test]
 fn datagram_high_water_mark_signals_backpressure() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();

@@ -940,3 +940,27 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
         "resume event not emitted after the window reopened"
     );
 }
+
+/// connect-udp datagrams carry a context ID after the quarter stream ID, and
+/// both count against the peer's datagram limit.
+#[test]
+fn datagram_over_the_peers_limit_including_context_id_is_rejected() {
+    fixture_init();
+    let (mut client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
+    let prefix = neqo_common::Encoder::varint_len(session_id.as_u64() / 4)
+        + neqo_common::Encoder::varint_len(0);
+    // The proxy's advertised `datagram_size`; see
+    // `initiate_new_session_with_client_params`.
+    let limit = 1500;
+
+    assert!(
+        client
+            .connect_udp_send_datagram(session_id, &vec![0; limit - prefix], None, now())
+            .is_ok()
+    );
+    assert_eq!(
+        client.connect_udp_send_datagram(session_id, &vec![0; limit - prefix + 1], None, now()),
+        Err(Error::Transport(neqo_transport::Error::TooMuchData))
+    );
+}

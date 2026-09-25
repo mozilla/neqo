@@ -424,8 +424,10 @@ impl Session {
     /// - The session is not in Active state (`Error::Unavailable`).
     /// - `send_group_id` is neither `SendGroupId::new(0)` (ungrouped) nor a group already
     ///   registered for this session (`Error::InvalidInput`).
-    /// - HTTP DATAGRAM Capsule sending fails (the QUIC-datagram path itself cannot fail here:
-    ///   MTU/size limits are applied later, at packet-build time, same as queued stream data).
+    /// - The encoded datagram (including the session-id/protocol prefix) is longer than the peer's
+    ///   datagram limit (`Error::Transport(neqo_transport::Error::TooMuchData)`). This compares the
+    ///   payload, not the whole DATAGRAM frame; see `Connection::enqueue_datagram`.
+    /// - HTTP DATAGRAM Capsule sending fails.
     ///
     /// On success, returns the queue's backpressure signal (see
     /// [`DatagramQueueOutcome`]) so the caller can throttle further writes.
@@ -492,7 +494,7 @@ impl Session {
             now,
             send_group_id,
             send_order,
-        );
+        )?;
         qtrace!("[{self}] enqueued datagram: {outcome:?}");
         Ok(outcome)
     }
