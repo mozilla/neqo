@@ -985,4 +985,8 @@ fn connect_udp_session_rejected_by_webtransport_datagram_setters() {
         ),
         Err(Error::InvalidStreamId)
     );
+    assert_eq!(
+        client.webtransport_datagram_queue_capacity(session_id),
+        Err(Error::InvalidStreamId)
+    );
 }

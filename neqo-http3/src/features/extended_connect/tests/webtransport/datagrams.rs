@@ -194,6 +194,62 @@ fn untracked_datagram_eviction_is_counted_in_aggregate_stats() {
     assert_eq!(stats.datagrams_dropped_outgoing, 1);
 }
 
+/// [`Http3Client::webtransport_datagram_queue_capacity`] reports this
+/// session's own queue, and no other session's.
+#[test]
+fn datagram_queue_capacity_is_per_session() {
+    const BURST: u8 = 20;
+
+    let mut wt = WtTest::new();
+    let session_id = wt.create_wt_session().stream_id();
+    let other_session_id = wt.create_wt_session().stream_id();
+
+    let before = wt
+        .client
+        .webtransport_datagram_queue_capacity(session_id)
+        .unwrap();
+    assert_eq!(before.queued_datagrams, 0);
+    assert_eq!(before.remaining_bytes, before.max_queued_bytes);
+
+    for i in 0..BURST {
+        _ = wt
+            .client
+            .webtransport_send_datagram(
+                session_id,
+                &[0, i],
+                Some(u64::from(i)),
+                now(),
+                SendGroupId::new(0),
+                0,
+            )
+            .unwrap();
+    }
+
+    let after = wt
+        .client
+        .webtransport_datagram_queue_capacity(session_id)
+        .unwrap();
+    assert_eq!(after.queued_datagrams, usize::from(BURST));
+    assert!(
+        after.remaining_bytes < before.remaining_bytes,
+        "enqueuing datagrams must consume some of the byte budget"
+    );
+    assert_eq!(after.max_queued_bytes, before.max_queued_bytes);
+
+    assert_eq!(
+        wt.client
+            .webtransport_datagram_queue_capacity(other_session_id)
+            .unwrap(),
+        before,
+        "another session's queue must be untouched by this session's burst"
+    );
+    assert_eq!(
+        wt.client
+            .webtransport_datagram_queue_capacity(StreamId::new(1_000_000)),
+        Err(crate::Error::InvalidStreamId)
+    );
+}
+
 /// With a mark of 2 already set, the first datagram `send` queues is `Ok`
 /// and the second crosses the mark.
 fn assert_second_datagram_crosses_a_mark_of_two(
