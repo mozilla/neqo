@@ -4,14 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    cell::RefCell,
-    fmt::{self, Display},
-    num::NonZeroUsize,
-    rc::Rc,
-    slice,
-    time::Instant,
-};
+use std::{cell::RefCell, num::NonZeroUsize, rc::Rc, slice, time::Instant};
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
 use neqo_http3::{
@@ -28,6 +21,8 @@ use crate::{
     server::StatsReporter,
 };
 
+#[derive(displaydoc::Display)]
+#[displaydoc("{server}")]
 pub struct HttpServer {
     server: Http3Server,
     /// Progress writing to each stream.
@@ -112,12 +107,6 @@ impl HttpServer {
             is_qns_test: args.shared.qns_test.is_some(),
             stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
         }
-    }
-}
-
-impl Display for HttpServer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.server.fmt(f)
     }
 }
 

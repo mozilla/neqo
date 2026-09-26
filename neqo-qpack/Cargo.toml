@@ -15,6 +15,7 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
+displaydoc = { workspace = true }
 log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-transport = { path = "./../neqo-transport", default-features = false }

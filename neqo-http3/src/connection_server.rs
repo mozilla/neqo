@@ -4,11 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    rc::Rc,
-    time::Instant,
-};
+use std::{rc::Rc, time::Instant};
 
 use neqo_common::{Header, MessageType, Role, event::Provider as _, qdebug, qinfo, qtrace};
 use neqo_transport::{AppError, Connection, ConnectionEvent, StreamId};
@@ -23,17 +19,12 @@ use crate::{
     server_connection_events::{Http3ServerConnEvent, Http3ServerConnEvents},
 };
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("Http3 server connection")]
 pub struct Http3ServerHandler {
     base_handler: Http3Connection,
     events: Http3ServerConnEvents,
     needs_processing: bool,
-}
-
-impl Display for Http3ServerHandler {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "Http3 server connection")
-    }
 }
 
 impl Http3ServerHandler {

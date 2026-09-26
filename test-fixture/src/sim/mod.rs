@@ -21,7 +21,6 @@ use std::{
     cmp::min,
     fmt::Debug,
     fs::{File, create_dir_all},
-    ops::{Deref, DerefMut},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
@@ -111,8 +110,10 @@ enum NodeState {
     Idle,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::Deref, derive_more::DerefMut)]
 struct NodeHolder {
+    #[deref(forward)]
+    #[deref_mut(forward)]
     node: Box<dyn Node>,
     state: NodeState,
 }
@@ -124,19 +125,6 @@ impl NodeHolder {
             Waiting(t) => t <= now,
             Idle => false,
         }
-    }
-}
-
-impl Deref for NodeHolder {
-    type Target = dyn Node;
-    fn deref(&self) -> &Self::Target {
-        self.node.as_ref()
-    }
-}
-
-impl DerefMut for NodeHolder {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.node.as_mut()
     }
 }
 

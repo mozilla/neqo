@@ -18,6 +18,8 @@ autobenches = false
 workspace = true
 
 [dependencies]
+derive_more = { workspace = true }
+displaydoc = { workspace = true }
 enumset = { workspace = true }
 http = { workspace = true }
 log = { workspace = true }
