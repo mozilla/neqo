@@ -8,6 +8,7 @@
 
 use neqo_common::qdebug;
 use nss::Error as CryptoError;
+use strum::Display;
 use thiserror::Error;
 
 mod ackrate;
@@ -93,6 +94,17 @@ const ERROR_APPLICATION_CLOSE: TransportError = 12;
 const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError = 13;
 const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 
+/// The resumption token field that would not decode; see [`Error::InvalidResumptionToken`].
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Ord, Eq, Display)]
+#[strum(serialize_all = "snake_case")]
+pub enum ResumptionTokenError {
+    Version,
+    Rtt,
+    TransportParametersLength,
+    TransportParameters,
+    InitialToken,
+}
+
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
 pub enum Error {
     #[error("no error")]
@@ -153,8 +165,8 @@ pub enum Error {
     InvalidMigration,
     #[error("an invalid packet was dropped (internal use only)")]
     InvalidPacket,
-    #[error("invalid resumption token")]
-    InvalidResumptionToken,
+    #[error("invalid resumption token: bad {0}")]
+    InvalidResumptionToken(ResumptionTokenError),
     #[error("invalid retry packet dropped (internal use only)")]
     InvalidRetry,
     #[error("invalid stream ID")]
@@ -251,6 +263,12 @@ impl From<CryptoError> for Error {
 impl From<std::num::TryFromIntError> for Error {
     fn from(_: std::num::TryFromIntError) -> Self {
         Self::IntegerOverflow
+    }
+}
+
+impl From<ResumptionTokenError> for Error {
+    fn from(err: ResumptionTokenError) -> Self {
+        Self::InvalidResumptionToken(err)
     }
 }
 

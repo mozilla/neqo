@@ -444,14 +444,15 @@ impl Http3Client {
         )?;
         let tok = dec.decode_remainder();
         qtrace!("[{self}]   Transport token {}", Hex::new(tok));
-        self.conn.enable_resumption(now, tok)?;
-        if self.conn.state().closed() {
-            let state = self.conn.state().clone();
-            let res = self
-                .base_handler
-                .handle_state_change(&mut self.conn, &state);
-            debug_assert_eq!(Ok(true), res);
-            return Err(Error::Fatal);
+        if let Err(e) = self.conn.enable_resumption(now, tok) {
+            if self.conn.state().closed() {
+                let state = self.conn.state().clone();
+                let handled = self
+                    .base_handler
+                    .handle_state_change(&mut self.conn, &state);
+                debug_assert_eq!(Ok(true), handled);
+            }
+            return Err(e.into());
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler
@@ -1161,8 +1162,9 @@ mod tests {
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
+        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamId,
+        StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -3897,6 +3899,58 @@ mod tests {
                     Priority::default()
                 )
                 .is_err()
+        );
+    }
+
+    /// A token the TLS stack refuses is reported, and the client can still retry.
+    #[test]
+    fn resumption_token_refused_by_tls() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+
+        // The TLS token trails the H3 settings and the version, RTT, TPs and Initial token.
+        let mut dec = Decoder::from(token.as_ref());
+        dec.decode_vvec().unwrap();
+        dec.decode_uint::<u32>().unwrap();
+        dec.decode_varint().unwrap();
+        dec.decode_vvec().unwrap();
+        dec.decode_vvec().unwrap();
+        let mut refused = token.as_ref()[..dec.offset()].to_vec();
+        refused.extend_from_slice(&[0; 8]);
+
+        let mut client = default_http3_client();
+        let err = client.enable_resumption(now(), &refused).unwrap_err();
+        assert!(
+            matches!(err, Error::Transport(TransportError::Crypto(_))),
+            "unexpected error {err:?}"
+        );
+
+        // The client is untouched, so the good token still enables 0-RTT.
+        assert_eq!(client.state(), Http3State::Initializing);
+        client
+            .enable_resumption(now(), &token)
+            .expect("Set resumption token");
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+    }
+
+    /// A transport connection that closed before the HTTP/3 layer saw the state change
+    /// refuses the token, and the HTTP/3 state catches up.
+    #[test]
+    fn resumption_token_after_transport_close() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+
+        let mut client = default_http3_client();
+        client.conn.close(now(), 0, "");
+        assert_eq!(client.state(), Http3State::Initializing);
+
+        assert_eq!(
+            client.enable_resumption(now(), &token).unwrap_err(),
+            Error::Unavailable
+        );
+        assert_eq!(
+            client.state(),
+            Http3State::Closing(CloseReason::Application(0))
         );
     }
 
