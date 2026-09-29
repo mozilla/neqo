@@ -673,8 +673,7 @@ pub(super) mod test_support {
 mod tests {
     use std::fmt;
 
-    use neqo_common::Tos;
-    use neqo_transport::BatchMeta;
+    use neqo_common::{Tos, datagram::BatchMeta};
     use test_fixture::{default_client, fixture_init};
     use tokio::time::timeout;
 
@@ -682,8 +681,8 @@ mod tests {
 
     #[derive(Default)]
     struct MockServer {
-        /// A batch borrows its bytes, so queue what is needed to build one.
-        batches: Vec<(BatchMeta, Vec<u8>)>,
+        /// A batch borrows its bytes, so queue owned datagrams instead.
+        batches: Vec<Datagram>,
         destinations: Vec<SocketAddr>,
     }
 
@@ -708,9 +707,12 @@ mod tests {
             }
             self.batches
                 .pop()
-                .map_or(OutputBatch::None, |(meta, data)| {
-                    send_buf.extend_from_slice(&data);
-                    OutputBatch::rebuild(Some(&meta), send_buf)
+                .and_then(|d| {
+                    send_buf.extend_from_slice(&d);
+                    BatchMeta::single(d.source(), d.destination(), d.tos(), d.len())
+                })
+                .map_or(OutputBatch::None, |meta| {
+                    OutputBatch::rebuild(&meta, send_buf)
                 })
         }
 
@@ -738,17 +740,11 @@ mod tests {
 
         // Draw an ICMP "port unreachable" from the closed port.
         for _ in 0..10 {
-            let data = b"hello".to_vec();
-            let size = NonZeroUsize::new(data.len()).unwrap();
-            runner.server.batches.push((
-                BatchMeta {
-                    src: local_addr,
-                    dst: closed_addr,
-                    tos: Tos::default(),
-                    datagram_size: size,
-                    len: data.len(),
-                },
-                data,
+            runner.server.batches.push(Datagram::new(
+                local_addr,
+                closed_addr,
+                Tos::default(),
+                b"hello".to_vec(),
             ));
             runner.process().await?;
         }

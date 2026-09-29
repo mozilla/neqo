@@ -7,6 +7,7 @@
 use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
+    num::NonZeroUsize,
     rc::Rc,
 };
 
@@ -198,8 +199,6 @@ fn vpn_migration_triggers_pmtud() {
 /// sized for the probe, not the PLPMTU.
 #[test]
 fn send_buffer_holds_pmtud_probe() {
-    use std::num::NonZeroUsize;
-
     fixture_init();
     let mut client = new_client(
         ConnectionParameters::default()

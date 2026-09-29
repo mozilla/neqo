@@ -145,6 +145,20 @@ pub struct BatchMeta {
     pub len: usize,
 }
 
+impl BatchMeta {
+    /// Metadata for a single datagram of `len` bytes, or `None` if it is empty.
+    #[must_use]
+    pub fn single(src: SocketAddr, dst: SocketAddr, tos: Tos, len: usize) -> Option<Self> {
+        Some(Self {
+            src,
+            dst,
+            tos,
+            datagram_size: NonZeroUsize::new(len)?,
+            len,
+        })
+    }
+}
+
 /// A batch of [`Datagram`]s with the same metadata, e.g., destination.
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
@@ -203,13 +217,7 @@ impl<'a> Batch<'a> {
     pub fn from_meta(meta: &BatchMeta, d: &'a mut [u8]) -> Self {
         assert!(meta.datagram_size.get() <= meta.len);
         assert_eq!(meta.len, d.len());
-        Self {
-            src: meta.src,
-            dst: meta.dst,
-            tos: meta.tos,
-            datagram_size: meta.datagram_size,
-            d,
-        }
+        Self::new(meta.src, meta.dst, meta.tos, meta.datagram_size, d)
     }
 
     #[must_use]
@@ -268,12 +276,14 @@ impl<'a> Batch<'a> {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
-        let datagram_size = self.datagram_size.get();
-        let src = self.src;
-        let dst = self.dst;
-        let tos = self.tos;
-        self.d
-            .chunks_mut(datagram_size)
+        let &mut Self {
+            src,
+            dst,
+            tos,
+            datagram_size,
+            ref mut d,
+        } = self;
+        d.chunks_mut(datagram_size.get())
             .map(move |d| Datagram { src, dst, tos, d })
     }
 }
