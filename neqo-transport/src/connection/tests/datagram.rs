@@ -1141,7 +1141,7 @@ fn datagram_is_too_big_only_for_an_empty_full_mtu_packet() {
     // congestion window leaves. The datagram would fit a full packet, so it
     // must stay queued rather than be dropped.
     let mut builder = packet::Builder::short(
-        Encoder::new_borrowed_vec(&mut buf),
+        Encoder::new(&mut buf),
         false,
         None::<&[u8]>,
         60,

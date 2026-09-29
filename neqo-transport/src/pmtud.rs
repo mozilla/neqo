@@ -32,7 +32,8 @@ const MTU_SIZES_V6: &[usize] = &[
     1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
 const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
-const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
+/// PMTUD search-table length.
+pub const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
 const MAX_PROBES: usize = 3;
