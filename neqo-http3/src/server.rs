@@ -135,7 +135,7 @@ impl Http3Server {
     }
 
     /// Process input and produce output in `send_buffer`.
-    /// `send_buffer` is cleared before writing; reuse it across calls.
+    /// `send_buffer` is cleared first; reuse it across calls.
     pub fn process_multiple<
         'b,
         A: AsRef<[u8]> + AsMut<[u8]>,
@@ -148,14 +148,13 @@ impl Http3Server {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch<'b> {
         qtrace!("[{self}] Process");
-        // Metadata only, so the borrow ends here.
         let written = self
             .server
             .process_multiple_input(dgrams, now, &mut *send_buffer)
             .meta();
         self.process_http3(now);
         if let Some(meta) = written {
-            let batch = OutputBatch::rebuild(Some(&meta), send_buffer);
+            let batch = OutputBatch::rebuild(&meta, send_buffer);
             qtrace!("[{self}] Send packet: {batch:?}");
             return batch;
         }

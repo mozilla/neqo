@@ -10,6 +10,7 @@ use std::{
     convert::identity,
     mem,
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -806,8 +807,6 @@ fn server_receives_new_token() {
 /// One buffer shared across connections must yield only the later one's bytes.
 #[test]
 fn shared_send_buffer_across_connections() {
-    use std::num::NonZeroUsize;
-
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -852,8 +851,6 @@ fn shared_send_buffer_across_connections() {
 /// `max_datagrams` bounds the batch, independent of send buffer capacity.
 #[test]
 fn max_datagrams_bounds_batch() {
-    use std::num::NonZeroUsize;
-
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);

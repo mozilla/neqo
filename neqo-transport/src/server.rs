@@ -19,8 +19,8 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Role, Tos, event::Provider as _, hex::Hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
-    qwarn,
+    Datagram, Role, Tos, datagram::BatchMeta, event::Provider as _, hex::Hex, qdebug, qerror,
+    qinfo, qlog::Qlog, qtrace, qwarn,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -30,7 +30,7 @@ use rustc_hash::FxHashSet as HashSet;
 
 pub use crate::addr_valid::ValidateAddress;
 use crate::{
-    BatchMeta, ConnectionParameters, OutputBatch, Res, Version,
+    ConnectionParameters, OutputBatch, Res, Version,
     addr_valid::{AddressValidation, AddressValidationResult},
     cid::{ConnectionId, ConnectionIdGenerator, ConnectionIdRef},
     connection::{Connection, Output, State},
@@ -294,17 +294,8 @@ impl Server {
                     Tos::default(),
                     p.len(),
                 );
-                // Same offset-0 invariant as VN.
-                debug_assert!(send_buffer.is_empty());
                 send_buffer.extend_from_slice(&p);
-                let datagram_size = NonZeroUsize::new(p.len())?;
-                Some(BatchMeta {
-                    src: dgram.destination(),
-                    dst: dgram.source(),
-                    tos: Tos::default(),
-                    datagram_size,
-                    len: p.len(),
-                })
+                BatchMeta::single(dgram.destination(), dgram.source(), Tos::default(), p.len())
             }
         }
     }
@@ -434,16 +425,17 @@ impl Server {
 
         // Process input datagrams from previous call.
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
-            // Metadata only, so the borrow ends here.
             if let Some(meta) = self.process_input(std::iter::once(d), t, &mut *send_buffer) {
                 self.save_for_later(dgrams, now);
-                return OutputBatch::rebuild(Some(&meta), send_buffer);
+                return OutputBatch::rebuild(&meta, send_buffer);
             }
         }
 
         // Process input datagrams from this call.
-        let meta = self.process_input(dgrams, now, &mut *send_buffer);
-        OutputBatch::rebuild(meta.as_ref(), send_buffer)
+        self.process_input(dgrams, now, &mut *send_buffer)
+            .map_or(OutputBatch::None, |meta| {
+                OutputBatch::rebuild(&meta, send_buffer)
+            })
     }
 
     /// Process a new input datagram, writing any response into `send_buffer`.
@@ -498,8 +490,6 @@ impl Server {
                 }
 
                 qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-                // `rebuild` starts at offset 0.
-                debug_assert!(send_buffer.is_empty());
                 let vn_len = packet::Builder::version_negotiation(
                     &packet.scid()[..],
                     &packet.dcid()[..],
@@ -513,7 +503,7 @@ impl Server {
                     packet.dcid(),
                     Tos::default(),
                 );
-                let datagram_size = NonZeroUsize::new(vn_len)?;
+                let meta = BatchMeta::single(destination, source, Tos::default(), vn_len)?;
 
                 crate::qlog::server_version_information_failed(
                     &mut self.create_qlog_trace(packet.dcid(), now),
@@ -524,13 +514,7 @@ impl Server {
 
                 self.save_for_later(dgrams, now);
 
-                return Some(BatchMeta {
-                    src: destination,
-                    dst: source,
-                    tos: Tos::default(),
-                    datagram_size,
-                    len: vn_len,
-                });
+                return Some(meta);
             }
 
             match packet.packet_type() {
@@ -579,19 +563,21 @@ impl Server {
 
         // Reused across connections; no output leaves the buffer empty.
         for connection in &mut self.connections {
-            let batch = connection.borrow_mut().process_multiple_output(
+            match connection.borrow_mut().process_multiple_output(
                 now,
                 &mut *send_buffer,
                 max_datagrams,
-            );
-            // Metadata only, so the borrow ends here.
-            let Some(meta) = batch.meta() else {
-                if let OutputBatch::Callback(next) = batch {
-                    callback = Some(callback.map_or(next, |previous| min(previous, next)));
+            ) {
+                OutputBatch::None => {}
+                OutputBatch::DatagramBatch(b) => {
+                    let meta = b.meta();
+                    return OutputBatch::rebuild(&meta, send_buffer);
                 }
-                continue;
-            };
-            return OutputBatch::rebuild(Some(&meta), send_buffer);
+                OutputBatch::Callback(next) => match callback {
+                    Some(previous) => callback = Some(min(previous, next)),
+                    None => callback = Some(next),
+                },
+            }
         }
 
         callback.map_or(OutputBatch::None, OutputBatch::Callback)
@@ -625,13 +611,12 @@ impl Server {
         send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch<'b> {
-        // Metadata only, so the borrow ends here.
         let written = self
             .process_multiple_input(dgrams, now, &mut *send_buffer)
             .meta();
         if let Some(meta) = written {
             // Return immediately. Do any maintenance on next call.
-            return OutputBatch::rebuild(Some(&meta), send_buffer);
+            return OutputBatch::rebuild(&meta, send_buffer);
         }
 
         // Process output datagrams.

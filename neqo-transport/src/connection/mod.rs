@@ -153,17 +153,12 @@ impl<'a> OutputBatch<'a> {
         }
     }
 
-    /// Rebuild a batch over `buffer` from [`Self::meta`], or [`Self::None`].
-    ///
-    /// `buffer` must start with the batch `meta` describes.
+    /// Rebuild a batch over `buffer` from [`Self::meta`].
     ///
     /// # Panics
-    /// When `buffer` is not exactly `meta.len` long.
+    /// When `buffer` is not exactly the batch `meta` describes.
     #[must_use]
-    pub fn rebuild(meta: Option<&BatchMeta>, buffer: &'a mut Vec<u8>) -> Self {
-        let Some(meta) = meta else {
-            return Self::None;
-        };
+    pub fn rebuild(meta: &BatchMeta, buffer: &'a mut Vec<u8>) -> Self {
         Self::DatagramBatch(datagram::Batch::from_meta(meta, buffer.as_mut_slice()))
     }
 }
@@ -183,7 +178,6 @@ impl Output {
         let mut send_buffer = Vec::new();
         match f(&mut send_buffer, NonZeroUsize::MIN).single() {
             Ok(meta) => {
-                send_buffer.truncate(meta.len);
                 // Only borrowed, so this moves.
                 Self::Datagram(Datagram::new(meta.src, meta.dst, meta.tos, send_buffer))
             }
@@ -1280,7 +1274,7 @@ impl Connection {
     /// Returns datagrams to send, and how long to wait before calling again
     /// even if no incoming packets.
     ///
-    /// `send_buffer` is cleared first; pass the same one each call, to grow it once.
+    /// `send_buffer` is cleared first; reuse it across calls.
     #[must_use = "OutputBatch of the process_multiple_output function must be handled"]
     pub fn process_multiple_output<'b>(
         &mut self,
@@ -2712,7 +2706,7 @@ impl Connection {
             (p.tos(), p.plpmtu(), p.pmtud().address_family_max_mtu())
         };
 
-        let mut datagram_size = None;
+        let mut max_datagram_size = None;
         let mut num_datagrams = 0;
 
         loop {
@@ -2728,36 +2722,37 @@ impl Connection {
                 break;
             }
 
-            let send_buffer_len_before = send_buffer.position();
+            let send_buffer_len_before = send_buffer.len();
 
             // Check if we can fit another PMTUD sized datagram into the batch.
-            if datagram_size.is_some_and(|ds| {
+            if max_datagram_size.is_some_and(|datagram_size| {
                 // GSO requires that all datagrams in a batch are of equal size.
                 // The last datagram can be smaller. The datagrams already in
-                // the batch are each `ds` large. The next datagram
+                // the batch are each `datagram_size` large. The next datagram
                 // can be up to `mtu` large. Break in case the next could be
                 // larger than the ones already in the batch.
-                ds < mtu
+                datagram_size < mtu
                 // GSO allows total datagram batch size up to the address family
                 // max MTU. If the next datagram could exceed that limit, break.
                 //
                 // See for example Linux kernel:
                 // https://github.com/torvalds/linux/blob/fb4d33ab452ea254e2c319bac5703d1b56d895bf/include/linux/netdevice.h#L2402
-                || address_family_max_mtu - send_buffer.position() < mtu
+                || address_family_max_mtu - send_buffer.len() < mtu
             }) {
                 break;
             }
 
-            let res = self.output_dgram_on_path(
-                path,
-                now,
-                closing_frame.take(),
-                Encoder::new(&mut *send_buffer),
-                packet_tos,
-            );
-            // Discard any bytes already written, so a reused buffer stays clean.
-            let res = res.inspect_err(|_| send_buffer.clear())?;
-            match res {
+            match self
+                .output_dgram_on_path(
+                    path,
+                    now,
+                    closing_frame.take(),
+                    Encoder::new(&mut *send_buffer),
+                    packet_tos,
+                )
+                // Discard any bytes already written, so a reused buffer stays clean.
+                .inspect_err(|_| send_buffer.clear())?
+            {
                 SendOption::Yes => {
                     debug_assert_eq!(
                         mtu,
@@ -2765,13 +2760,14 @@ impl Connection {
                         "MTU does not change within batch"
                     );
                     num_datagrams += 1;
-                    let this_size = send_buffer.position() - send_buffer_len_before;
-                    let ds = *datagram_size.get_or_insert(this_size);
-                    debug_assert!(this_size <= ds);
-                    if this_size < ds {
-                        // GSO requires that all packets in a batch are of equal
-                        // size. Only the last packet can be smaller. This
-                        // packet was smaller. Make sure it was the last by
+                    let datagram_size = send_buffer.len() - send_buffer_len_before;
+                    let max_datagram_size = *max_datagram_size.get_or_insert(datagram_size);
+
+                    // GSO requires that all datagrams in a batch are of equal
+                    // size. Only the last datagram can be smaller.
+                    debug_assert!(datagram_size <= max_datagram_size);
+                    if datagram_size < max_datagram_size {
+                        // This packet was smaller. Make sure it is the last by
                         // breaking the loop.
                         break;
                     }
@@ -2788,7 +2784,7 @@ impl Connection {
 
         debug_assert!(!send_buffer.is_empty());
         // Checked before borrowing `send_buffer`, so this path can still clear it.
-        let Some(datagram_size) = datagram_size else {
+        let Some(max_datagram_size) = max_datagram_size else {
             send_buffer.clear();
             return Err(Error::Internal);
         };
@@ -2796,7 +2792,7 @@ impl Connection {
             send_buffer.as_mut_slice(),
             packet_tos,
             num_datagrams,
-            datagram_size,
+            max_datagram_size,
             &mut self.stats.borrow_mut(),
         );
 

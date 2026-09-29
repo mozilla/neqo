@@ -6,7 +6,6 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-pub use neqo_common::datagram::{Batch, BatchMeta};
 use neqo_common::qdebug;
 use nss::Error as CryptoError;
 use thiserror::Error;
