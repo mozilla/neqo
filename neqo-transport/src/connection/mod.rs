@@ -2701,13 +2701,11 @@ impl Connection {
     ) -> Res<SendOptionBatch<'b>> {
         // GSO segmentation and `Batch::num_datagrams` count from offset 0.
         debug_assert!(send_buffer.is_empty());
-        let (packet_tos, mtu, address_family_max_mtu) = {
-            let p = path.borrow();
-            (p.tos(), p.plpmtu(), p.pmtud().address_family_max_mtu())
-        };
-
+        let packet_tos = path.borrow().tos();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
+        let mtu = path.borrow().plpmtu();
+        let address_family_max_mtu = path.borrow().pmtud().address_family_max_mtu();
 
         loop {
             if max_datagrams.get() <= num_datagrams {
@@ -2747,7 +2745,7 @@ impl Connection {
                     path,
                     now,
                     closing_frame.take(),
-                    Encoder::new(&mut *send_buffer),
+                    Encoder::new_borrowed_vec(&mut *send_buffer),
                     packet_tos,
                 )
                 // Discard any bytes already written, so a reused buffer stays clean.
@@ -4125,7 +4123,7 @@ impl Connection {
         let path = self.paths.primary().ok_or(Error::NotAvailable)?;
         let mtu = path.borrow().plpmtu();
         let mut buffer = Vec::new();
-        let encoder = Encoder::new(&mut buffer);
+        let encoder = Encoder::new_borrowed_vec(&mut buffer);
 
         let (_, builder, _) = Self::build_packet_header(
             &path.borrow(),

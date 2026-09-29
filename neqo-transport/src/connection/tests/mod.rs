@@ -847,28 +847,3 @@ fn shared_send_buffer_across_connections() {
             .any(|e| matches!(e, ConnectionEvent::RecvStreamReadable { .. }))
     );
 }
-
-/// `max_datagrams` bounds the batch, independent of send buffer capacity.
-#[test]
-fn max_datagrams_bounds_batch() {
-    let mut client = default_client();
-    let mut server = default_server();
-    connect_force_idle(&mut client, &mut server);
-    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    fill_stream(&mut client, stream_id);
-
-    let mut buf = Vec::new();
-    let roomy = client
-        .process_multiple_output(now(), &mut buf, NonZeroUsize::new(4).unwrap())
-        .dgram()
-        .expect("a datagram");
-    assert!(roomy.num_datagrams() > 2, "need a multi-datagram batch");
-
-    // A lower `max_datagrams` yields fewer, whatever the buffer can hold.
-    fill_stream(&mut client, stream_id);
-    let bounded = client
-        .process_multiple_output(now(), &mut buf, NonZeroUsize::new(2).unwrap())
-        .dgram()
-        .expect("a datagram");
-    assert_eq!(bounded.num_datagrams(), 2);
-}

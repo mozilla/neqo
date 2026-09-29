@@ -230,8 +230,7 @@ impl Server {
         initial: InitialDetails,
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
-        send_buffer: &mut Vec<u8>,
-    ) -> Option<BatchMeta> {
+    ) -> Output {
         qdebug!("[{self}] Handle initial");
         #[cfg(feature = "build-fuzzing-corpus")]
         Self::write_addr_valid_corpus(dgram.source(), &initial.token);
@@ -240,12 +239,10 @@ impl Server {
             .borrow()
             .validate(&initial.token, dgram.source(), now);
         match res {
-            AddressValidationResult::Invalid => None,
-            AddressValidationResult::Pass => {
-                self.accept_connection(initial, dgram, None, now, send_buffer)
-            }
+            AddressValidationResult::Invalid => Output::None,
+            AddressValidationResult::Pass => self.accept_connection(initial, dgram, None, now),
             AddressValidationResult::ValidRetry(orig_dcid) => {
-                self.accept_connection(initial, dgram, Some(orig_dcid), now, send_buffer)
+                self.accept_connection(initial, dgram, Some(orig_dcid), now)
             }
             AddressValidationResult::Validate => {
                 qinfo!("[{self}] Send retry for {:?}", initial.dst_cid);
@@ -258,7 +255,7 @@ impl Server {
                         "[{self}] DCID too short ({} bytes), dropping packet",
                         initial.dst_cid.len()
                     );
-                    return None;
+                    return Output::None;
                 }
 
                 let res = self.address_validation.borrow().generate_retry_token(
@@ -268,34 +265,43 @@ impl Server {
                 );
                 let Ok(token) = res else {
                     qerror!("[{self}] unable to generate token, dropping packet");
-                    return None;
+                    return Output::None;
                 };
-                let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() else {
+                if let Some(new_dcid) = self.cid_generator.borrow_mut().generate_cid() {
+                    let packet = packet::Builder::retry(
+                        initial.version,
+                        &initial.src_cid,
+                        &new_dcid,
+                        &token,
+                        &initial.dst_cid,
+                    );
+                    packet.map_or_else(
+                        |_| {
+                            qerror!("[{self}] unable to encode retry, dropping packet");
+                            Output::None
+                        },
+                        |p| {
+                            qdebug!(
+                                "[{self}] type={:?} path:{} {}->{} {:?} len {}",
+                                packet::Type::Retry,
+                                initial.dst_cid,
+                                dgram.destination(),
+                                dgram.source(),
+                                Tos::default(),
+                                p.len(),
+                            );
+                            Output::Datagram(Datagram::new(
+                                dgram.destination(),
+                                dgram.source(),
+                                Tos::default(),
+                                p,
+                            ))
+                        },
+                    )
+                } else {
                     qerror!("[{self}] no connection ID for retry, dropping packet");
-                    return None;
-                };
-                let res = packet::Builder::retry(
-                    initial.version,
-                    &initial.src_cid,
-                    &new_dcid,
-                    &token,
-                    &initial.dst_cid,
-                );
-                let Ok(p) = res else {
-                    qerror!("[{self}] unable to encode retry, dropping packet");
-                    return None;
-                };
-                qdebug!(
-                    "[{self}] type={:?} path:{} {}->{} {:?} len {}",
-                    packet::Type::Retry,
-                    initial.dst_cid,
-                    dgram.destination(),
-                    dgram.source(),
-                    Tos::default(),
-                    p.len(),
-                );
-                send_buffer.extend_from_slice(&p);
-                BatchMeta::single(dgram.destination(), dgram.source(), Tos::default(), p.len())
+                    Output::None
+                }
             }
         }
     }
@@ -350,8 +356,7 @@ impl Server {
         dgram: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-        send_buffer: &mut Vec<u8>,
-    ) -> Option<BatchMeta> {
+    ) -> Output {
         qinfo!(
             "[{self}] Accept connection {:?}",
             orig_dcid.as_ref().unwrap_or(&initial.dst_cid)
@@ -371,13 +376,9 @@ impl Server {
         match sconn {
             Ok(mut c) => {
                 self.setup_connection(&mut c, initial, orig_dcid, now);
-                // Straight into the caller's buffer, so the first flight is not
-                // built into a throwaway one and copied.
-                let meta = c
-                    .process_multiple(Some(dgram), now, send_buffer, NonZeroUsize::MIN)
-                    .meta();
+                let out = c.process(Some(dgram), now);
                 self.connections.push(Rc::new(RefCell::new(c)));
-                meta
+                out
             }
             Err(e) => {
                 qwarn!("[{self}] Unable to create connection");
@@ -392,22 +393,9 @@ impl Server {
                         now,
                     );
                 }
-                None
+                Output::None
             }
         }
-    }
-
-    /// Defer `dgrams` to a later call, so output can be returned now.
-    fn save_for_later<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
-        &mut self,
-        dgrams: I,
-        now: Instant,
-    ) {
-        self.saved_datagrams
-            .extend(dgrams.into_iter().map(|d| SavedDatagram {
-                d: d.to_owned(),
-                t: now,
-            }));
     }
 
     /// Process new input datagrams on the connection.
@@ -426,19 +414,24 @@ impl Server {
         // Process input datagrams from previous call.
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
             if let Some(meta) = self.process_input(std::iter::once(d), t, &mut *send_buffer) {
-                self.save_for_later(dgrams, now);
+                self.saved_datagrams
+                    .extend(dgrams.into_iter().map(|d| SavedDatagram {
+                        d: d.to_owned(),
+                        t: now,
+                    }));
                 return OutputBatch::rebuild(&meta, send_buffer);
             }
         }
 
         // Process input datagrams from this call.
-        self.process_input(dgrams, now, &mut *send_buffer)
-            .map_or(OutputBatch::None, |meta| {
-                OutputBatch::rebuild(&meta, send_buffer)
-            })
+        if let Some(meta) = self.process_input(dgrams, now, &mut *send_buffer) {
+            return OutputBatch::rebuild(&meta, send_buffer);
+        }
+
+        OutputBatch::None
     }
 
-    /// Process a new input datagram, writing any response into `send_buffer`.
+    // Process a new input datagram on the connection.
     fn process_input<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
         dgrams: I,
@@ -490,20 +483,19 @@ impl Server {
                 }
 
                 qdebug!("[{self}] Unsupported version: {:x}", packet.wire_version());
-                let vn_len = packet::Builder::version_negotiation(
+                let vn = packet::Builder::version_negotiation(
                     &packet.scid()[..],
                     &packet.dcid()[..],
                     packet.wire_version(),
                     self.conn_params.get_versions().all(),
-                    &mut *send_buffer,
                 );
                 qdebug!(
-                    "[{self}] type={:?} path:{} {destination}->{source} {:?} len {vn_len}",
+                    "[{self}] type={:?} path:{} {destination}->{source} {:?} len {}",
                     packet::Type::VersionNegotiation,
                     packet.dcid(),
                     Tos::default(),
+                    vn.len(),
                 );
-                let meta = BatchMeta::single(destination, source, Tos::default(), vn_len)?;
 
                 crate::qlog::server_version_information_failed(
                     &mut self.create_qlog_trace(packet.dcid(), now),
@@ -512,9 +504,15 @@ impl Server {
                     now,
                 );
 
-                self.save_for_later(dgrams, now);
+                self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
+                    d: d.to_owned(),
+                    t: now,
+                }));
 
-                return Some(meta);
+                return BatchMeta::write(
+                    &Datagram::new(destination, source, Tos::default(), vn),
+                    send_buffer,
+                );
             }
 
             match packet.packet_type() {
@@ -526,9 +524,12 @@ impl Server {
                     // Copy values from `packet` because they are currently still borrowing from
                     // `dgram`.
                     let initial = InitialDetails::new(&packet);
-                    if let Some(meta) = self.handle_initial(initial, dgram, now, send_buffer) {
-                        self.save_for_later(dgrams, now);
-                        return Some(meta);
+                    if let Output::Datagram(d) = self.handle_initial(initial, dgram, now) {
+                        self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
+                            d: d.to_owned(),
+                            t: now,
+                        }));
+                        return BatchMeta::write(&d, send_buffer);
                     }
                 }
                 packet::Type::ZeroRtt => {

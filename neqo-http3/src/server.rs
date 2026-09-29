@@ -153,27 +153,31 @@ impl Http3Server {
             .process_multiple_input(dgrams, now, &mut *send_buffer)
             .meta();
         self.process_http3(now);
+        // Try again if input processing did not already produce a datagram.
         if let Some(meta) = written {
-            let batch = OutputBatch::rebuild(&meta, send_buffer);
-            qtrace!("[{self}] Send packet: {batch:?}");
-            return batch;
+            let d = OutputBatch::rebuild(&meta, send_buffer);
+            qtrace!("[{self}] Send packet: {d:?}");
+            d
+        } else {
+            let out = self.server.process_multiple(
+                Option::<Datagram>::None,
+                now,
+                send_buffer,
+                max_datagrams,
+            );
+            if !matches!(out, OutputBatch::DatagramBatch(_)) {
+                self.http3_handlers.retain(|c, _| {
+                    if let State::Closed(error) = c.borrow().state().clone() {
+                        self.events
+                            .connection_state_change(c.clone(), Http3State::Closed(error));
+                        false
+                    } else {
+                        true
+                    }
+                });
+            }
+            out
         }
-        // Input produced no datagram, so try again after `process_http3`.
-        let out = self
-            .server
-            .process_multiple(None::<Datagram>, now, send_buffer, max_datagrams);
-        if !matches!(out, OutputBatch::DatagramBatch(_)) {
-            self.http3_handlers.retain(|c, _| {
-                if let State::Closed(error) = c.borrow().state().clone() {
-                    self.events
-                        .connection_state_change(c.clone(), Http3State::Closed(error));
-                    false
-                } else {
-                    true
-                }
-            });
-        }
-        out
     }
 
     /// Process HTTP3 layer.

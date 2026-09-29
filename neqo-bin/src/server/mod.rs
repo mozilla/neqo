@@ -707,10 +707,7 @@ mod tests {
             }
             self.batches
                 .pop()
-                .and_then(|d| {
-                    send_buf.extend_from_slice(&d);
-                    BatchMeta::single(d.source(), d.destination(), d.tos(), d.len())
-                })
+                .and_then(|d| BatchMeta::write(&d, send_buf))
                 .map_or(OutputBatch::None, |meta| {
                     OutputBatch::rebuild(&meta, send_buf)
                 })

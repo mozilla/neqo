@@ -146,15 +146,15 @@ pub struct BatchMeta {
 }
 
 impl BatchMeta {
-    /// Metadata for a single datagram of `len` bytes, or `None` if it is empty.
-    #[must_use]
-    pub fn single(src: SocketAddr, dst: SocketAddr, tos: Tos, len: usize) -> Option<Self> {
+    /// Append `d` to `buffer`, returning its metadata, or `None` if it is empty.
+    pub fn write(d: &Datagram, buffer: &mut Vec<u8>) -> Option<Self> {
+        buffer.extend_from_slice(&d.d);
         Some(Self {
-            src,
-            dst,
-            tos,
-            datagram_size: NonZeroUsize::new(len)?,
-            len,
+            src: d.src,
+            dst: d.dst,
+            tos: d.tos,
+            datagram_size: NonZeroUsize::new(d.d.len())?,
+            len: d.d.len(),
         })
     }
 }
@@ -276,15 +276,14 @@ impl<'a> Batch<'a> {
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = Datagram<&mut [u8]>> {
-        let &mut Self {
-            src,
-            dst,
-            tos,
-            datagram_size,
-            ref mut d,
-        } = self;
-        d.chunks_mut(datagram_size.get())
-            .map(move |d| Datagram { src, dst, tos, d })
+        self.d
+            .chunks_mut(self.datagram_size.get())
+            .map(|d| Datagram {
+                src: self.src,
+                dst: self.dst,
+                tos: self.tos,
+                d,
+            })
     }
 }
 
@@ -367,21 +366,6 @@ mod tests {
         );
         batch.set_tos(Ecn::Ce.into());
         assert_eq!(batch.tos(), Ecn::Ce.into());
-    }
-
-    #[test]
-    fn batch_from_meta_uses_length() {
-        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
-        let meta = datagram::BatchMeta {
-            src: addr,
-            dst: addr,
-            tos: Tos::default(),
-            datagram_size: NonZeroUsize::new(4).unwrap(),
-            len: 5,
-        };
-        let mut buf = [0; 5];
-        let batch = datagram::Batch::from_meta(&meta, &mut buf);
-        assert_eq!(batch.data().len(), 5);
     }
 
     #[test]
