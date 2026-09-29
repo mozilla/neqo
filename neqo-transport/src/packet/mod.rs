@@ -181,16 +181,21 @@ impl Builder<Vec<u8>> {
         let mut complete: Vec<u8> = encoder.into();
         Ok(complete.split_off(start))
     }
+}
 
-    /// Make a Version Negotiation packet.
-    #[must_use]
+impl<B: Buffer> Builder<B> {
+    /// Write a Version Negotiation packet into `send_buffer`, returning its length.
+    ///
+    /// # Panics
+    /// When `send_buffer` has fixed capacity that cannot hold the packet.
     pub fn version_negotiation(
         dcid: &[u8],
         scid: &[u8],
         client_version: u32,
         versions: &[Version],
-    ) -> Vec<u8> {
-        let mut encoder = Encoder::default();
+        send_buffer: B,
+    ) -> usize {
+        let mut encoder = Encoder::new(send_buffer);
         let mut grease = random::<4>();
         // This will not include the "QUIC bit" sometimes.  Intentionally.
         encoder.encode_byte(BIT_LONG | (grease[3] & 0x7f));
@@ -210,12 +215,9 @@ impl Builder<Vec<u8>> {
         // by making the last byte differ from the client initial.
         grease[3] = (client_version.wrapping_add(0x10) & 0xf0) as u8 | 0x0a;
         encoder.encode(&grease[..4]);
-
-        Vec::from(encoder)
+        encoder.len()
     }
-}
 
-impl<B: Buffer> Builder<B> {
     /// Start building a short header packet.
     ///
     /// This doesn't fail if there isn't enough space; instead it returns a builder that
@@ -1768,11 +1770,22 @@ mod tests {
         0x01, 0xff, 0x00, 0x00, 0x1d, 0x0a, 0x0a, 0x0a, 0x0a,
     ];
 
+    fn build_sample_vn() -> Vec<u8> {
+        fixture_init();
+        let mut vn = Vec::new();
+        Builder::version_negotiation(
+            SERVER_CID,
+            CLIENT_CID,
+            0x0a0a_0a0a,
+            &Version::all(),
+            &mut vn,
+        );
+        vn
+    }
+
     #[test]
     fn build_vn() {
-        fixture_init();
-        let mut vn =
-            Builder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a_0a0a, &Version::all());
+        let mut vn = build_sample_vn();
         // Erase randomness from greasing...
         assert_eq!(vn.len(), SAMPLE_VN.len());
         vn[0] &= 0x80;
@@ -1784,8 +1797,7 @@ mod tests {
 
     #[test]
     fn vn_do_not_repeat_client_grease() {
-        fixture_init();
-        let vn = Builder::version_negotiation(SERVER_CID, CLIENT_CID, 0x0a0a_0a0a, &Version::all());
+        let vn = build_sample_vn();
         assert_ne!(&vn[SAMPLE_VN.len() - 4..], &[0x0a, 0x0a, 0x0a, 0x0a]);
     }
 

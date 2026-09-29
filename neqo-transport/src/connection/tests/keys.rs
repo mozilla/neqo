@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::num::NonZeroUsize;
+
 use neqo_common::{Datagram, qdebug};
 use test_fixture::{
     assertions::{is_handshake, is_initial},
@@ -466,4 +468,25 @@ fn initial_handshake_pto_padding() {
         }
     }
     assert!(found_coalesced);
+}
+
+/// An error after frames are written must leave the send buffer empty.
+#[test]
+fn exhausted_write_keys_leave_send_buffer_empty() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    overwrite_invocations(0);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert!(client.stream_send(stream_id, b"explode!").is_ok());
+
+    let mut send_buffer = Vec::new();
+    let out = client.process_multiple_output(now(), &mut send_buffer, NonZeroUsize::MIN);
+    assert!(out.dgram().is_none());
+    assert!(send_buffer.is_empty());
+    assert!(matches!(
+        client.state(),
+        State::Closed(CloseReason::Transport(Error::KeysExhausted))
+    ));
 }
