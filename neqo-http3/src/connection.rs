@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(test)]
+use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -17,7 +19,8 @@ use neqo_common::{
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -655,6 +658,10 @@ impl Http3Connection {
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_with_pending_data.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.
+            // No extended-CONNECT session can be among these, so there is no
+            // per-session datagram queue on the `Connection` to drop: neither
+            // feature is negotiated in 0-RTT (`set_0rtt_settings` never enables
+            // them), and creating a session fails with `Unavailable` until one is.
             self.send_streams.clear();
             self.recv_streams.clear();
             Ok(())
@@ -1619,7 +1626,10 @@ impl Http3Connection {
         Ok(())
     }
 
-    /// Returns `Ok(false)` when the outgoing QUIC datagram queue is full.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors send_datagram's own params plus session_id/conn"
+    )]
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1627,10 +1637,44 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<bool> {
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now)
+            .send_datagram(conn, buf, id, now, send_group_id, send_order)
+    }
+
+    /// Test-only: not yet exposed to a production caller.
+    #[cfg(test)]
+    pub(crate) fn extended_connect_set_datagram_high_water_mark(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        mark: Option<NonZeroUsize>,
+    ) -> Res<()> {
+        self.validate_extended_connect_session(session_id)?
+            .borrow()
+            .set_datagram_high_water_mark(conn, mark);
+        Ok(())
+    }
+
+    /// Expire stale outgoing datagrams on every active extended-CONNECT
+    /// session's queue and count them per session. Called once per
+    /// `process_http3` tick. The transport counts expiries on the queue
+    /// itself, whether its own timer sweep or this one sheds them, so this
+    /// sweep picks up the right number regardless of whether it runs before
+    /// or after `Connection::process_output` within a tick.
+    ///
+    /// Returns the total number of datagrams expired, for the caller to fold
+    /// into a stats counter.
+    pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> u64 {
+        self.recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().is_active())
+            .map(|s| s.borrow_mut().expire_datagrams(conn, now))
+            .sum()
     }
 
     /// Frames whose handling is specific to the client and server (`Goaway`,
