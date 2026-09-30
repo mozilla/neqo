@@ -231,14 +231,7 @@ fn datagram_send_order_controls_priority() {
 }
 
 /// A burst exceeding the byte budget, with a mix of send-order priorities,
-/// must evict low-priority datagrams to make room for high-priority ones -
-/// verified through the real `Http3Client` API and a live connection, not
-/// just on a bare `DatagramQueue` in isolation. `DatagramQueueOutcome::Overflowed`
-/// reports only how many were evicted, not which ones, so identity is
-/// checked the same way the receiving peer would: by which content (each
-/// datagram's payload is its own id, as 8 little-endian bytes) actually
-/// arrives - checked against whatever has been delivered so far, since a
-/// full drain of a backlog this size isn't practical in one exchange.
+/// must evict low-priority datagrams to make room for high-priority ones.
 #[test]
 fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connection() {
     const HIGH_PRIORITY_COUNT: usize = 5;
