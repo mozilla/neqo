@@ -48,6 +48,7 @@ impl LocalStreamState {
 pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
+    max_entries: u64,
     instruction_reader: DecoderInstructionReader,
     local_stream: LocalStreamState,
     max_blocked_streams: u16,
@@ -72,6 +73,7 @@ impl Encoder {
         Self {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
+            max_entries: 0,
             instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
@@ -109,6 +111,8 @@ impl Encoder {
         if cap > (1 << 30) - 1 {
             return Err(Error::EncoderStream);
         }
+
+        self.max_entries = cap / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE);
 
         if cap == self.table.capacity() {
             return Ok(());
@@ -431,11 +435,8 @@ impl Encoder {
         // by the main loop.
         let mut encoder_blocked = self.send_encoder_updates(conn).is_err();
 
-        let mut encoded_h = HeaderEncoder::new(
-            self.table.base(),
-            self.use_huffman,
-            self.table.capacity() / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE),
-        );
+        let mut encoded_h =
+            HeaderEncoder::new(self.table.base(), self.use_huffman, self.max_entries);
 
         // Avoid the dynamic table unless we have space to track.
         let stream_was_blocking = self.is_stream_blocker(stream_id);
@@ -1706,6 +1707,26 @@ mod tests {
         // change capacity to 2000.
         assert!(encoder.encoder.set_max_capacity(2000).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_1500);
+        assert_eq!(encoder.encoder.table.capacity(), 1500);
+
+        // MaxEntries comes from the decoder's advertised capacity (2000), not the
+        // locally clamped table capacity (1500). Advance past the smaller modulus
+        // to make the encoded Required Insert Count distinguish the two values.
+        for i in 0..100 {
+            let value = i.to_string();
+            encoder
+                .encoder
+                .table
+                .insert(b"x", value.as_bytes())
+                .unwrap();
+            encoder.encoder.table.increment_acked(1).unwrap();
+        }
+        let block = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("x", "99")],
+            STREAM_1,
+        );
+        assert_eq!(block.as_ref(), &[0x65, 0x00, 0x80]);
     }
 
     #[test]
