@@ -198,7 +198,9 @@ jobs:
           threshold: "30"
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+      - # merge_group's ref is often gone by upload time: github/codeql-action#1572
+        if: ${{ github.event_name != 'merge_group' }}
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
         with:
           sarif_file: crap.sarif
           category: cargo-crap
