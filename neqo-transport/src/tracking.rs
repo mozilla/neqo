@@ -16,7 +16,7 @@ use std::{
 use enum_map::{Enum, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use log::{Level, log_enabled};
-use neqo_common::{Buffer, Ecn, Encoder, MAX_VARINT, qdebug, qtrace, qwarn};
+use neqo_common::{Buffer, Ecn, Encoder, MAX_VARINT, qdebug, qtrace, qwarn, to_u64};
 use nss::Epoch;
 use strum::{Display, EnumIter};
 
@@ -388,27 +388,12 @@ impl RecvdPackets {
     }
 
     /// Length of the worst possible ACK frame, assuming only one range and ECN counts.
-    pub const USEFUL_ACK_LEN: usize = 1 + 8 + 8 + 1 + 8 + 3 * 8;
+    ///
+    /// The ACK Range Count uses the width of the maximum tracked range count.
+    pub const USEFUL_ACK_LEN: usize =
+        1 + 8 + 8 + Encoder::varint_len(to_u64(MAX_TRACKED_RANGES - 1)) + 8 + 3 * 8;
     /// Reserve enough room for another useful frame.
     const ACK_FRAME_RESERVE: usize = packet::Builder::MINIMUM_FRAME_SIZE;
-
-    /// Replace the varint currently occupying `old_len` bytes at `off` with `value`.
-    /// Bytes after the field are preserved, including when the varint changes width.
-    fn rewrite_varint<B: Buffer>(enc: &mut Encoder<B>, off: usize, old_len: usize, value: u64) {
-        let new_len = Encoder::varint_len(value);
-        debug_assert!(off + old_len <= enc.len());
-        if new_len == old_len {
-            let mut encoded = Encoder::with_capacity(new_len);
-            encoded.encode_varint(value);
-            enc.as_mut()[off..off + new_len].copy_from_slice(encoded.as_ref());
-            return;
-        }
-
-        let tail = enc.as_ref()[off + old_len..].to_vec();
-        enc.truncate(off);
-        enc.encode_varint(value);
-        enc.encode(tail);
-    }
 
     /// Generate an ACK frame for this packet number space.
     ///
@@ -459,13 +444,16 @@ impl RecvdPackets {
             Encoder::varint_len(ect0) + Encoder::varint_len(ect1) + Encoder::varint_len(ce)
         });
         // Leave room for another useful frame. Ranges are encoded one at a time
-        // against this limit; the ACK Range Count varint is patched afterwards.
+        // against this limit. ACK Range Count is reserved at the width of the most
+        // ranges this frame could carry, so the final count is rewritten in place,
+        // possibly as a longer-than-minimal varint, and never shifts the ranges.
         let limit = builder.limit().saturating_sub(Self::ACK_FRAME_RESERVE);
-        let count_placeholder = Encoder::varint_len(0);
+        let max_extra = to_u64(pending.clone().count());
+        let count_len = Encoder::varint_len(max_extra);
         let base_len = Encoder::varint_len(u64::from(frame_type))
             + Encoder::varint_len(first.largest)
             + Encoder::varint_len(ack_delay)
-            + count_placeholder
+            + count_len
             + Encoder::varint_len(first.len() - 1)
             + ecn_len;
         if builder.len() + base_len > limit {
@@ -480,7 +468,7 @@ impl RecvdPackets {
             b.encode_varint(first.largest);
             b.encode_varint(ack_delay);
             let count_off = b.len();
-            b.encode_varint(0u64);
+            b.encode_varint(max_extra);
             b.encode_varint(first.len() - 1);
 
             acked.push(first.clone());
@@ -492,23 +480,17 @@ impl RecvdPackets {
                 // (difference 1) are illegal.
                 b.encode_varint(last - range.largest - 2);
                 b.encode_varint(range.len() - 1);
-                let next_extra = extra + 1;
-                // The count is still the one-byte placeholder. A wider count shifts
-                // every byte written after it, so include that growth in the check.
-                let count_growth = Encoder::varint_len(next_extra) - count_placeholder;
-                if b.len() + count_growth + ecn_len > limit {
+                if b.len() + ecn_len > limit {
                     // This range overruns. Drop it and keep the previous count.
                     b.truncate(before);
                     break;
                 }
-                extra = next_extra;
+                extra += 1;
                 last = range.smallest;
                 acked.push(range.clone());
             }
 
-            if extra > 0 {
-                Self::rewrite_varint(b, count_off, count_placeholder, extra);
-            }
+            b.rewrite_varint(count_off, count_len, extra);
             if let Some((ect0, ect1, ce)) = ecn {
                 b.encode_varint(ect0);
                 b.encode_varint(ect1);
@@ -1082,48 +1064,21 @@ mod tests {
 
     #[test]
     fn no_room_for_extra_range() {
-        let mut stats = Stats::default();
-        let mut tracker = AckTracker::default();
-        tracker
-            .get_mut(PacketNumberSpace::Initial)
-            .unwrap()
-            .set_received(now(), 0, true, &mut stats)
-            .unwrap();
-        tracker
-            .get_mut(PacketNumberSpace::Initial)
-            .unwrap()
-            .set_received(now(), 2, true, &mut stats)
-            .unwrap();
+        let mut tracker = tracker_with_initial_ranges(2);
         assert!(
             tracker
                 .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
                 .is_some()
         );
 
-        let mut builder =
-            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut builder = ack_builder(packet::LIMIT);
         // Enough for the first range plus a reserved frame, but not the next range.
         builder.set_limit(ack_frame_len(1) + packet::Builder::MINIMUM_FRAME_SIZE);
 
-        let mut stats = FrameStats::default();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut recovery::Tokens::new(),
-            &mut stats,
-        );
-        assert_eq!(stats.ack, 1);
-
-        let mut dec = builder.as_decoder();
-        dec.skip(1); // Skip the short header.
-        let frame = Frame::decode(&mut dec).unwrap();
-        if let Frame::Ack { ack_ranges, .. } = frame {
-            assert_eq!(ack_ranges.len(), 0);
-        } else {
-            panic!("not an ACK!");
-        }
+        let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
+        assert_ack_token_range_count(&tokens, 1);
+        // Largest of the two received ranges (packet numbers 0 and 2).
+        assert_initial_ack_ranges(&builder, 1, 1);
     }
 
     fn tracker_with_initial_ranges(range_count: usize) -> AckTracker {
@@ -1141,17 +1096,22 @@ mod tests {
     /// Encoded size of an ACK for [`tracker_with_initial_ranges`]: one-packet ranges at
     /// `pn = i * 2`, no ECN, zero ACK delay, and a 1-byte short header with no DCID.
     fn ack_frame_len(range_count: usize) -> usize {
+        ack_frame_len_with_pending(range_count, range_count)
+    }
+
+    /// As [`ack_frame_len`], for a frame that keeps the newest `kept` of `pending` ranges.
+    /// ACK Range Count is reserved at the width `pending` ranges would need.
+    fn ack_frame_len_with_pending(kept: usize, pending: usize) -> usize {
         const STRIDE: u64 = 2;
-        let largest = to_u64(range_count - 1) * STRIDE;
-        let extra = range_count - 1;
+        let largest = to_u64(pending - 1) * STRIDE;
         let mut len = 1
             + Encoder::varint_len(u64::from(FrameType::Ack))
             + Encoder::varint_len(largest)
             + Encoder::varint_len(0)
-            + Encoder::varint_len(to_u64(extra))
+            + Encoder::varint_len(to_u64(pending - 1))
             + Encoder::varint_len(0);
         let mut prev_smallest = largest;
-        for i in (0..extra).rev() {
+        for i in (pending - kept..pending - 1).rev() {
             let pn = to_u64(i) * STRIDE;
             len += Encoder::varint_len(prev_smallest - pn - 2) + Encoder::varint_len(0);
             prev_smallest = pn;
@@ -1194,24 +1154,9 @@ mod tests {
         Frame::decode(&mut dec).unwrap()
     }
 
-    #[test]
-    fn write_frame_more_than_32_ranges() {
-        const RANGE_COUNT: usize = 40;
-
-        let mut tracker = tracker_with_initial_ranges(RANGE_COUNT);
-        assert_eq!(
-            tracker
-                .get_mut(PacketNumberSpace::Initial)
-                .unwrap()
-                .ranges
-                .len(),
-            RANGE_COUNT
-        );
-
-        let (builder, tokens) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
-        assert_ack_token_range_count(&tokens, RANGE_COUNT);
-
-        let frame = decode_ack_from_builder(&builder);
+    /// `start` is the index into [`tracker_with_initial_ranges`] of the oldest kept range.
+    fn assert_initial_ack_ranges(builder: &packet::Builder<Vec<u8>>, start: usize, count: usize) {
+        let frame = decode_ack_from_builder(builder);
         let Frame::Ack {
             largest_acknowledged,
             first_ack_range,
@@ -1221,17 +1166,27 @@ mod tests {
         else {
             panic!("not an ACK!");
         };
-        assert_eq!(ack_ranges.len() + 1, RANGE_COUNT);
+        assert_eq!(ack_ranges.len() + 1, count);
         let acked_ranges =
             Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges).unwrap();
-        let expected = (0..RANGE_COUNT)
+        let expected = (start..start + count)
             .rev()
             .map(|i| {
-                let pn = (i * 2) as u64;
+                let pn = to_u64(i * 2);
                 pn..=pn
             })
             .collect::<Vec<_>>();
         assert_eq!(acked_ranges, expected);
+    }
+
+    #[test]
+    fn write_frame_more_than_32_ranges() {
+        const RANGE_COUNT: usize = 40;
+
+        let mut tracker = tracker_with_initial_ranges(RANGE_COUNT);
+        let (builder, tokens) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
+        assert_ack_token_range_count(&tokens, RANGE_COUNT);
+        assert_initial_ack_ranges(&builder, 0, RANGE_COUNT);
     }
 
     #[test]
@@ -1262,28 +1217,11 @@ mod tests {
         assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
         assert_eq!(builder.len(), ack_frame_len(ACK_ONLY_RANGE_COUNT));
         assert_ack_token_range_count(&tokens, ACK_ONLY_RANGE_COUNT);
-
-        let frame = decode_ack_from_builder(&builder);
-        let Frame::Ack {
-            largest_acknowledged,
-            first_ack_range,
-            ack_ranges,
-            ..
-        } = frame
-        else {
-            panic!("not an ACK!");
-        };
-        assert_eq!(ack_ranges.len() + 1, ACK_ONLY_RANGE_COUNT);
-        let acked_ranges =
-            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges).unwrap();
-        let expected = ((MAX_TRACKED_RANGES - ACK_ONLY_RANGE_COUNT)..MAX_TRACKED_RANGES)
-            .rev()
-            .map(|i| {
-                let pn = to_u64(i * 2);
-                pn..=pn
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(acked_ranges, expected);
+        assert_initial_ack_ranges(
+            &builder,
+            MAX_TRACKED_RANGES - ACK_ONLY_RANGE_COUNT,
+            ACK_ONLY_RANGE_COUNT,
+        );
     }
 
     #[test]
@@ -1297,52 +1235,46 @@ mod tests {
         let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
         assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
         assert_ack_token_range_count(&tokens, 1);
-
-        let frame = decode_ack_from_builder(&builder);
-        let Frame::Ack { ack_ranges, .. } = frame else {
-            panic!("not an ACK!");
-        };
-        assert_eq!(ack_ranges.len(), 0);
+        assert_initial_ack_ranges(&builder, 1, 1);
     }
 
     #[test]
-    fn two_byte_ack_range_count_reduces_range_budget() {
+    fn ack_range_count_reserved_for_pending_ranges() {
         const RANGE_COUNT: usize = 65;
 
-        let mut tracker = tracker_with_initial_ranges(RANGE_COUNT);
-        assert_eq!(
-            tracker
-                .get_mut(PacketNumberSpace::Initial)
-                .unwrap()
-                .ranges
-                .len(),
-            RANGE_COUNT
-        );
-
-        // 64 extra ranges need a 2-byte count. Size the packet so the frame would fit if
-        // that count stayed one byte, and therefore exactly the last range is rewound.
+        // 64 extra ranges need a 2-byte count, 63 fit in one byte.
         assert_eq!(Encoder::varint_len(to_u64(RANGE_COUNT - 1)), 2);
         assert_eq!(Encoder::varint_len(to_u64(RANGE_COUNT - 2)), 1);
-        assert_eq!(
-            ack_frame_len(RANGE_COUNT) - ack_frame_len(RANGE_COUNT - 1),
-            2 + 1,
-            "new range plus the wider ACK Range Count"
-        );
-        let without_wider_count = ack_frame_len(RANGE_COUNT) - 1;
 
+        let mut tracker = tracker_with_initial_ranges(RANGE_COUNT);
         let mut builder = ack_builder(packet::LIMIT);
-        builder.set_limit(without_wider_count + packet::Builder::MINIMUM_FRAME_SIZE);
+        // One byte short of every range plus the reserved frame.
+        builder.set_limit(ack_frame_len(RANGE_COUNT) + packet::Builder::MINIMUM_FRAME_SIZE - 1);
 
+        // The dropped range leaves 63 extra ranges, still written in the 2 bytes
+        // reserved for 64.
         let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
         assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
-        assert_eq!(builder.len(), ack_frame_len(RANGE_COUNT - 1));
+        assert_eq!(
+            builder.len(),
+            ack_frame_len_with_pending(RANGE_COUNT - 1, RANGE_COUNT)
+        );
+        assert_eq!(
+            builder.len(),
+            ack_frame_len(RANGE_COUNT - 1) + 1,
+            "one byte of non-minimal count encoding"
+        );
         assert_ack_token_range_count(&tokens, RANGE_COUNT - 1);
+        assert_initial_ack_ranges(&builder, 1, RANGE_COUNT - 1);
+    }
 
-        let frame = decode_ack_from_builder(&builder);
-        let Frame::Ack { ack_ranges, .. } = frame else {
-            panic!("not an ACK!");
-        };
-        assert_eq!(ack_ranges.len() + 1, RANGE_COUNT - 1);
+    #[test]
+    fn single_range_ack_keeps_one_byte_count() {
+        let mut tracker = tracker_with_initial_ranges(1);
+        let (builder, tokens) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
+        assert_eq!(builder.len(), ack_frame_len(1));
+        assert_ack_token_range_count(&tokens, 1);
+        assert_initial_ack_ranges(&builder, 0, 1);
     }
 
     #[test]
@@ -1366,28 +1298,7 @@ mod tests {
         assert!(builder.remaining() >= packet::Builder::MINIMUM_FRAME_SIZE);
         assert!(builder.len() <= builder.limit());
         assert_ack_token_range_count(&tokens, RANGE_COUNT - 1);
-
-        let frame = decode_ack_from_builder(&builder);
-        let Frame::Ack {
-            largest_acknowledged,
-            first_ack_range,
-            ack_ranges,
-            ..
-        } = frame
-        else {
-            panic!("not an ACK!");
-        };
-        assert_eq!(ack_ranges.len() + 1, RANGE_COUNT - 1);
-        let acked_ranges =
-            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges).unwrap();
-        let expected = (1..RANGE_COUNT)
-            .rev()
-            .map(|i| {
-                let pn = to_u64(i * 2);
-                pn..=pn
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(acked_ranges, expected);
+        assert_initial_ack_ranges(&builder, 1, RANGE_COUNT - 1);
     }
 
     #[test]
@@ -1470,8 +1381,9 @@ mod tests {
 
     #[test]
     fn useful_ack_len() {
-        // 1 (type) + 8 (largest) + 8 (delay) + 1 (count) + 8 (first range) + 24 (3 ECN counts)
-        assert_eq!(RecvdPackets::USEFUL_ACK_LEN, 50);
+        // 1 (type) + 8 (largest) + 8 (delay) + 2 (count) + 8 (first range) + 24 (3 ECN counts).
+        // The count is 2 bytes: the width of the maximum tracked range count.
+        assert_eq!(RecvdPackets::USEFUL_ACK_LEN, 51);
     }
 
     #[test]
