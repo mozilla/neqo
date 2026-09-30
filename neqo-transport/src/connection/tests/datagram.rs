@@ -269,9 +269,10 @@ fn limit_data_size() {
 fn after_dgram_dropped_continue_writing_frames() {
     let (mut client, _) = connect_datagram();
 
-    // Both are queued: the first is too big for any packet and will be
-    // dropped when the write loop reaches it, but that must not stop the
-    // second, smaller one from being written in the same call.
+    // Both are queued: the first is too big for any packet and is dropped
+    // when the write loop reaches it, which must not stop the second,
+    // smaller one from being written by the same `write_frames` pass. The
+    // single `process_output` below covers both.
     assert_eq!(
         client.enqueue_datagram(
             StreamId::new(0),
