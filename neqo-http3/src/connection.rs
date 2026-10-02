@@ -1647,7 +1647,7 @@ impl Http3Connection {
 
     /// Test-only: not yet exposed to a production caller.
     #[cfg(test)]
-    pub(crate) fn extended_connect_set_datagram_high_water_mark(
+    pub(crate) fn extended_connect_set_max_buffered_datagrams(
         &self,
         session_id: StreamId,
         conn: &mut Connection,
@@ -1655,7 +1655,7 @@ impl Http3Connection {
     ) -> Res<()> {
         self.validate_extended_connect_session(session_id)?
             .borrow()
-            .set_datagram_high_water_mark(conn, mark);
+            .set_max_buffered_datagrams(conn, mark);
         Ok(())
     }
 

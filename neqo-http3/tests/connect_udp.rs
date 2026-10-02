@@ -675,8 +675,8 @@ fn connect_udp_session_rejected_by_webtransport_create_stream() {
 
 /// Backpressure surfaces end-to-end through connect-udp: once
 /// `connect_udp_send_datagram` fills the session's outgoing datagram queue
-/// up to connect-udp's built-in high water mark and reports
-/// `AboveWatermark`, draining it must deliver
+/// up to connect-udp's built-in max-buffered limit and reports
+/// `MaxBufferedReached`, draining it must deliver
 /// [`OutgoingDatagramSpaceAvailable`], so a datagram sender that backs off
 /// on that outcome learns it can resume.
 ///
@@ -695,7 +695,7 @@ fn outgoing_datagram_space_available_forwarded() {
     // datagram backpressure signal.
     while client.next_event().is_some() {}
 
-    // Connect-udp has no API to set a high water mark, so every session gets
+    // Connect-udp has no API to set a max-buffered limit, so every session gets
     // a built-in one of 10 datagrams: the tenth send reports the queue full.
     for _ in 0..9 {
         assert_eq!(
@@ -705,7 +705,7 @@ fn outgoing_datagram_space_available_forwarded() {
     }
     assert_eq!(
         client.connect_udp_send_datagram(session_id, PING, None, now()),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert!(
         !client
@@ -724,7 +724,7 @@ fn outgoing_datagram_space_available_forwarded() {
 }
 
 #[test]
-fn server_session_has_the_built_in_high_water_mark() {
+fn server_session_has_the_built_in_max_buffered_datagrams() {
     fixture_init();
     let (mut client, mut proxy, proxy_session) = establish_new_session_with_client_params(
         ConnectionParameters::default()
@@ -744,7 +744,7 @@ fn server_session_has_the_built_in_high_water_mark() {
     }
     assert_eq!(
         proxy_session.send_datagram(PONG, None, now()),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert!(
         !proxy
