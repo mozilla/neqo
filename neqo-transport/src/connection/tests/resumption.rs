@@ -19,9 +19,11 @@ use super::{
     get_tokens, new_client, resumed_server, send_something,
 };
 use crate::{
-    ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State, Version,
+    ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE,
+    ResumptionTokenError, State, Version,
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
+    version,
 };
 
 #[test]
@@ -363,4 +365,75 @@ fn resume_server() {
         server.enable_resumption(now(), token).unwrap_err(),
         Error::ConnectionState
     );
+}
+
+/// Offsets just past the version, RTT, transport parameters and Initial token fields.
+fn token_field_ends(token: &[u8]) -> [usize; 4] {
+    let mut dec = Decoder::from(token);
+    dec.decode_uint::<version::Wire>().unwrap();
+    let version = dec.offset();
+    dec.decode_varint().unwrap();
+    let rtt = dec.offset();
+    dec.decode_vvec().unwrap();
+    let tp = dec.offset();
+    dec.decode_vvec().unwrap();
+    [version, rtt, tp, dec.offset()]
+}
+
+/// A malformed token says which of its fields could not be decoded.
+#[test]
+fn resume_token_malformed() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let [version, rtt, tp, _] = token_field_ends(token.as_ref());
+    let truncate = |end| token.as_ref()[..end].to_vec();
+
+    // A 1-byte vvec holding 0xff truncates the transport parameters mid-varint.
+    let mut bad_tp = truncate(rtt);
+    bad_tp.extend_from_slice(&[0x01, 0xff, 0x00]);
+
+    for (token, expected) in [
+        (truncate(0), ResumptionTokenError::Version),
+        (truncate(version), ResumptionTokenError::Rtt),
+        (
+            truncate(rtt),
+            ResumptionTokenError::TransportParametersLength,
+        ),
+        (truncate(tp), ResumptionTokenError::InitialToken),
+        (bad_tp, ResumptionTokenError::TransportParameters),
+    ] {
+        let mut client = default_client();
+        assert_eq!(
+            client.enable_resumption(now(), &token).unwrap_err(),
+            Error::InvalidResumptionToken(expected)
+        );
+    }
+}
+
+/// A token the TLS stack refuses is reported, and leaves the connection usable.
+#[test]
+fn resume_token_refused_by_tls() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let [.., init_token] = token_field_ends(token.as_ref());
+    let mut refused = token.as_ref()[..init_token].to_vec();
+    refused.extend_from_slice(&[0; 8]);
+
+    let mut client = default_client();
+    let err = client.enable_resumption(now(), &refused).unwrap_err();
+    assert!(matches!(err, Error::Crypto(_)), "unexpected error {err:?}");
+
+    // The connection is untouched, so a good token still resumes.
+    assert_eq!(*client.state(), State::Init);
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+    let mut server = resumed_server(&client);
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().resumed());
 }
