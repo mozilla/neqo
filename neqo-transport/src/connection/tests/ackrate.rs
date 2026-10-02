@@ -6,14 +6,25 @@
 
 use std::time::Duration;
 
-use test_fixture::{DEFAULT_ADDR_V4, assertions};
+use test_fixture::{DEFAULT_ADDR_V4, assertions, now};
 
 use super::{
-    super::ConnectionParameters, DEFAULT_RTT, ack_bytes, connect_rtt_idle, default_client,
+    super::ConnectionParameters, DEFAULT_RTT, ack_bytes, connect, connect_rtt_idle, default_client,
     default_server, fill_cwnd, increase_cwnd, induce_persistent_congestion, new_client, new_server,
-    send_something,
+    send_something, send_with_extra,
 };
-use crate::{connection::tests::assert_path_challenge_min_len, stream_id::StreamType};
+use crate::{
+    CloseReason, Error,
+    connection::tests::{assert_error, assert_path_challenge_min_len},
+    frame::FrameType,
+    packet,
+    rtt::GRANULARITY,
+    stream_id::StreamType,
+    tparams::{
+        TransportParameter,
+        TransportParameterId::{MaxAckDelay, MinAckDelay},
+    },
+};
 
 /// With the default RTT here (100ms) and default ratio (4), endpoints won't send
 /// `ACK_FREQUENCY` as the ACK delay isn't different enough from the default.
@@ -200,4 +211,69 @@ fn migrate_ack_delay() {
     let af = client.process(Some(ack), now).dgram();
     assert!(af.is_some());
     assert_eq!(client.stats().frame_tx.ack_frequency, ad_before + 1);
+}
+
+struct AckFrequencyWriter {
+    delay: u64,
+}
+
+impl crate::connection::test_internal::FrameWriter for AckFrequencyWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder
+            .encode_varint(FrameType::AckFrequency)
+            .encode_varint(0_u64) // Sequence Number
+            .encode_varint(1_u64) // Ack-Eliciting Threshold
+            .encode_varint(self.delay) // Requested Max Ack Delay, in microseconds
+            .encode_byte(0); // Ignore Order
+    }
+}
+
+#[test]
+fn ack_frequency_below_min_ack_delay() {
+    // We advertise `GRANULARITY` as our `min_ack_delay`.
+    let smallest = u64::try_from(GRANULARITY.as_micros()).unwrap();
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let dgram = send_with_extra(
+        &mut server,
+        AckFrequencyWriter {
+            delay: smallest - 1,
+        },
+        now(),
+    );
+    client.process_input(dgram, now());
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let dgram = send_with_extra(&mut server, AckFrequencyWriter { delay: smallest }, now());
+    client.process_input(dgram, now());
+    assert_eq!(client.state().error(), None);
+    assert!(client.state().connected());
+}
+
+/// A peer's `min_ack_delay` can exceed the cap we put on the delay we request.
+#[test]
+fn large_min_ack_delay() {
+    let mut server = default_server();
+    server
+        .set_local_tparam(MaxAckDelay, TransportParameter::Integer(100))
+        .unwrap();
+    server
+        .set_local_tparam(MinAckDelay, TransportParameter::Integer(60_000))
+        .unwrap();
+    let mut client = default_client();
+
+    connect(&mut client, &mut server);
+
+    assert_ne!(client.stats().frame_tx.ack_frequency, 0);
+    assert_eq!(
+        server.stats().frame_rx.ack_frequency,
+        client.stats().frame_tx.ack_frequency
+    );
+    assert_eq!(server.state().error(), None);
+    assert!(client.state().connected());
 }
