@@ -46,10 +46,11 @@ fn gso_with_max_mtu() {
 
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
     // Increase MTU to the max.
+    let mut send_buffer = Vec::new();
     loop {
         fill_stream(&mut client, stream_id);
         let mut pkts = client
-            .process_multiple_output(now(), 2.try_into().unwrap())
+            .process_multiple_output(now(), &mut send_buffer, 2.try_into().unwrap())
             .dgram()
             .unwrap();
         if pkts.datagram_size().get() == 65507 {

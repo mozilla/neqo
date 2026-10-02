@@ -6,7 +6,7 @@
 
 mod common;
 
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{Datagram, Decoder, Encoder, Role, qtrace};
@@ -60,6 +60,32 @@ fn single_client() {
     let mut server = default_server();
     let mut client = default_client();
     connect(&mut client, &mut server);
+}
+
+#[test]
+fn process_multiple_output_batch() {
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    let mut client = default_client();
+    let server_conn = connect(&mut client, &mut server);
+
+    {
+        let mut conn = server_conn.borrow_mut();
+        let stream_id = conn.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(conn.stream_send(stream_id, &[0; 8192]).unwrap(), 8192);
+    }
+
+    let mut send_buffer = Vec::new();
+    let batch = server
+        .process_multiple(
+            None::<Datagram>,
+            now(),
+            &mut send_buffer,
+            NonZeroUsize::new(4).unwrap(),
+        )
+        .dgram()
+        .expect("a datagram batch");
+    assert_eq!(batch.num_datagrams(), 4);
+    assert_eq!(batch.data().len(), batch.datagram_size().get() * 4);
 }
 
 #[test]
@@ -938,13 +964,16 @@ fn saved_datagrams() {
         )
     };
 
+    let mut send_buffer = Vec::new();
+
     // Server sends a version negotation immediately. Saves second and third
     // input datagram for later.
     server
         .process_multiple(
             vec![invalid_dgram(), valid_dgram, invalid_dgram()],
             now(),
-            1.try_into().expect("1>0"),
+            &mut send_buffer,
+            NonZeroUsize::MIN,
         )
         .dgram()
         .expect("first packet triggers first vn");
@@ -954,13 +983,23 @@ fn saved_datagrams() {
     // which does require an immediate response. It thereby has to save the
     // fourth (new) datagram for the next call.
     server
-        .process_multiple(Some(invalid_dgram()), now(), 1.try_into().expect("1>0"))
+        .process_multiple(
+            Some(invalid_dgram()),
+            now(),
+            &mut send_buffer,
+            NonZeroUsize::MIN,
+        )
         .dgram()
         .expect("third packet triggers second vn");
 
     // Server processes the fourth datagram.
     server
-        .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
+        .process_multiple(
+            Vec::<Datagram>::new(),
+            now(),
+            &mut send_buffer,
+            NonZeroUsize::MIN,
+        )
         .dgram()
         .expect("fourth packet triggers third vn");
 }

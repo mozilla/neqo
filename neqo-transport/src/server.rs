@@ -19,8 +19,8 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Role, Tos, event::Provider as _, hex::Hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
-    qwarn,
+    Datagram, Role, Tos, datagram::BatchMeta, event::Provider as _, hex::Hex, qdebug, qerror,
+    qinfo, qlog::Qlog, qtrace, qwarn,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -400,28 +400,32 @@ impl Server {
 
     /// Process new input datagrams on the connection.
     pub fn process_multiple_input<
+        'b,
         A: AsRef<[u8]> + AsMut<[u8]>,
         I: IntoIterator<Item = Datagram<A>>,
     >(
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+        send_buffer: &'b mut Vec<u8>,
+    ) -> OutputBatch<'b> {
+        send_buffer.clear();
+
         // Process input datagrams from previous call.
         while let Some(SavedDatagram { d, t }) = self.saved_datagrams.pop_front() {
-            if let OutputBatch::DatagramBatch(b) = self.process_input(std::iter::once(d), t) {
+            if let Some(meta) = self.process_input(std::iter::once(d), t, &mut *send_buffer) {
                 self.saved_datagrams
                     .extend(dgrams.into_iter().map(|d| SavedDatagram {
                         d: d.to_owned(),
                         t: now,
                     }));
-                return OutputBatch::DatagramBatch(b);
+                return OutputBatch::rebuild(&meta, send_buffer);
             }
         }
 
         // Process input datagrams from this call.
-        if let o @ OutputBatch::DatagramBatch(_) = self.process_input(dgrams, now) {
-            return o;
+        if let Some(meta) = self.process_input(dgrams, now, &mut *send_buffer) {
+            return OutputBatch::rebuild(&meta, send_buffer);
         }
 
         OutputBatch::None
@@ -432,7 +436,8 @@ impl Server {
         &mut self,
         dgrams: I,
         now: Instant,
-    ) -> OutputBatch {
+        send_buffer: &mut Vec<u8>,
+    ) -> Option<BatchMeta> {
         let mut dgrams = dgrams.into_iter();
         while let Some(mut dgram) = dgrams.next() {
             qtrace!("Process datagram: {}", Hex::new(&dgram[..]));
@@ -465,13 +470,12 @@ impl Server {
                 continue;
             }
 
+            // An `Initial` always has a version; treat a missing one as unsupported.
             if packet.packet_type() == packet::Type::OtherVersion
                 || (packet.packet_type() == packet::Type::Initial
-                    && !self
-                        .conn_params
-                        .get_versions()
-                        .all()
-                        .contains(&packet.version().expect("packet has version")))
+                    && packet
+                        .version()
+                        .is_none_or(|v| !self.conn_params.get_versions().all().contains(&v)))
             {
                 if len < MIN_INITIAL_PACKET_SIZE {
                     qdebug!("[{self}] Unsupported version: too short");
@@ -505,8 +509,9 @@ impl Server {
                     t: now,
                 }));
 
-                return OutputBatch::DatagramBatch(
-                    Datagram::new(destination, source, Tos::default(), vn).into(),
+                return BatchMeta::write(
+                    &Datagram::new(destination, source, Tos::default(), vn),
+                    send_buffer,
                 );
             }
 
@@ -519,12 +524,12 @@ impl Server {
                     // Copy values from `packet` because they are currently still borrowing from
                     // `dgram`.
                     let initial = InitialDetails::new(&packet);
-                    if let o @ Output::Datagram(_) = self.handle_initial(initial, dgram, now) {
+                    if let Output::Datagram(d) = self.handle_initial(initial, dgram, now) {
                         self.saved_datagrams.extend(dgrams.map(|d| SavedDatagram {
                             d: d.to_owned(),
                             t: now,
                         }));
-                        return o.into();
+                        return BatchMeta::write(&d, send_buffer);
                     }
                 }
                 packet::Type::ZeroRtt => {
@@ -540,25 +545,35 @@ impl Server {
             }
         }
 
-        OutputBatch::None
+        None
     }
 
     /// Iterate through the pending connections looking for any that might want
     /// to send a datagram.  Stop at the first one that does.
-    fn process_next_output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> OutputBatch {
+    fn process_next_output<'b>(
+        &mut self,
+        now: Instant,
+        send_buffer: &'b mut Vec<u8>,
+        max_datagrams: NonZeroUsize,
+    ) -> OutputBatch<'b> {
         assert!(
             self.saved_datagrams.is_empty(),
             "Always process all inbound datagrams first."
         );
         let mut callback = None;
 
+        // Reused across connections; no output leaves the buffer empty.
         for connection in &mut self.connections {
-            match connection
-                .borrow_mut()
-                .process_multiple_output(now, max_datagrams)
-            {
+            match connection.borrow_mut().process_multiple_output(
+                now,
+                &mut *send_buffer,
+                max_datagrams,
+            ) {
                 OutputBatch::None => {}
-                d @ OutputBatch::DatagramBatch(_) => return d,
+                OutputBatch::DatagramBatch(b) => {
+                    let meta = b.meta();
+                    return OutputBatch::rebuild(&meta, send_buffer);
+                }
                 OutputBatch::Callback(next) => match callback {
                     Some(previous) => callback = Some(min(previous, next)),
                     None => callback = Some(next),
@@ -577,31 +592,36 @@ impl Server {
 
     /// Wrapper around [`Server::process_multiple`] that processes a single output
     /// datagram only.
-    #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use]
     pub fn process<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
         &mut self,
         dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
-            .try_into()
-            .expect("max_datagrams is 1")
+        Output::owned(|b, max| self.process_multiple(dgrams, now, b, max))
     }
 
-    pub fn process_multiple<A: AsRef<[u8]> + AsMut<[u8]>, I: IntoIterator<Item = Datagram<A>>>(
+    pub fn process_multiple<
+        'b,
+        A: AsRef<[u8]> + AsMut<[u8]>,
+        I: IntoIterator<Item = Datagram<A>>,
+    >(
         &mut self,
         dgrams: I,
         now: Instant,
+        send_buffer: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        if let o @ OutputBatch::DatagramBatch(_) = self.process_multiple_input(dgrams, now) {
+    ) -> OutputBatch<'b> {
+        let written = self
+            .process_multiple_input(dgrams, now, &mut *send_buffer)
+            .meta();
+        if let Some(meta) = written {
             // Return immediately. Do any maintenance on next call.
-            return o;
+            return OutputBatch::rebuild(&meta, send_buffer);
         }
 
         // Process output datagrams.
-        let maybe_callback = match self.process_next_output(now, max_datagrams) {
+        let maybe_callback = match self.process_next_output(now, send_buffer, max_datagrams) {
             // Return immediately. Do any maintenance on next call.
             o @ OutputBatch::DatagramBatch(_) => return o,
             o @ (OutputBatch::Callback(_) | OutputBatch::None) => o,
