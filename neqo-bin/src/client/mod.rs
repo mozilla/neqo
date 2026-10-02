@@ -12,7 +12,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,
-    pin::Pin,
     process::exit,
     time::Instant,
 };
@@ -28,10 +27,6 @@ impl std::str::FromStr for EchConfig {
         hex::decode(s).map(EchConfig)
     }
 }
-use futures::{
-    FutureExt as _, TryFutureExt as _,
-    future::{Either, select},
-};
 use http::Uri as Url;
 use neqo_common::{Datagram, Role, qdebug, qerror, qinfo, qlog::Qlog};
 use neqo_http3::Header;
@@ -44,9 +39,8 @@ use nss::{
 };
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
-use tokio::time::Sleep;
 
-use crate::{SharedArgs, now, report_stats};
+use crate::{SharedArgs, deadline, now, report_stats, sleep_until};
 
 mod http09;
 mod http3;
@@ -355,14 +349,13 @@ enum Ready {
 // Wait for the socket to be readable or the timeout to fire.
 async fn ready(
     socket: &crate::udp::Socket,
-    mut timeout: Option<&mut Pin<Box<Sleep>>>,
+    timeout: Option<tokio::time::Instant>,
 ) -> Result<Ready, io::Error> {
-    let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
-    let timeout_ready = timeout
-        .as_mut()
-        .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
-        .map(|()| Ok(Ready::Timeout));
-    select(socket_ready, timeout_ready).await.factor_first().0
+    tokio::select! {
+        biased;
+        res = socket.readable() => res.map(|()| Ready::Socket),
+        () = sleep_until(timeout) => Ok(Ready::Timeout),
+    }
 }
 
 /// Handles a given task on the provided [`Client`].
@@ -400,7 +393,7 @@ struct Runner<'a, H: Handler> {
     socket: &'a mut crate::udp::Socket,
     client: H::Client,
     handler: H,
-    timeout: Option<Pin<Box<Sleep>>>,
+    timeout: Option<tokio::time::Instant>,
     args: &'a Args,
     recv_buf: RecvBuf,
 }
@@ -453,11 +446,9 @@ impl<'a, H: Handler> Runner<'a, H> {
                 (true, CloseState::Closed) => break,
             }
 
-            match ready(self.socket, self.timeout.as_mut()).await? {
+            match ready(self.socket, self.timeout).await? {
                 Ready::Socket => self.process_multiple_input().await?,
-                Ready::Timeout => {
-                    self.timeout = None;
-                }
+                Ready::Timeout => self.timeout = None,
             }
         }
 
@@ -498,7 +489,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 },
                 OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
-                    self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    self.timeout = deadline(new_timeout);
                     break;
                 }
                 OutputBatch::None => {
