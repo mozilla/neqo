@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -13,11 +11,15 @@ use std::{
     rc::Rc,
     time::Instant,
 };
+#[cfg(test)]
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
     StreamType, ZeroRttState,
@@ -1659,16 +1661,52 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Test-only; see [`Self::extended_connect_set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn extended_connect_set_datagram_max_age(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) -> Res<()> {
+        self.validate_extended_connect_session(session_id)?
+            .borrow()
+            .set_datagram_max_age(conn, max_age, now);
+        Ok(())
+    }
+
+    /// Test-only; see [`Self::extended_connect_set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn extended_connect_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+        conn: &Connection,
+    ) -> Res<DatagramQueueCapacity> {
+        Ok(self
+            .validate_extended_connect_session(session_id)?
+            .borrow()
+            .datagram_queue_capacity(conn))
+    }
+
     /// Expire stale outgoing datagrams on every active extended-CONNECT
     /// session's queue and count them per session. Called once per
-    /// `process_http3` tick. The transport counts expiries on the queue
-    /// itself, whether its own timer sweep or this one sheds them, so this
-    /// sweep picks up the right number regardless of whether it runs before
-    /// or after `Connection::process_output` within a tick.
+    /// `process_http3` tick, i.e. on every packet received or sent, so the
+    /// scan of every receive stream is skipped unless a queued datagram has
+    /// reached its max-age or a queue holds an uncollected expiry count. The
+    /// transport counts expiries on the queue itself, whether its own timer
+    /// sweep or this one sheds them, so this sweep picks up the right number
+    /// regardless of whether it runs before or after
+    /// `Connection::process_output` within a tick.
     ///
     /// Returns the total number of datagrams expired, for the caller to fold
     /// into a stats counter.
     pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> u64 {
+        if !conn.has_pending_datagram_counts()
+            && conn.next_datagram_expiry().is_none_or(|e| e > now)
+        {
+            return 0;
+        }
         self.recv_streams
             .values()
             .filter_map(|s| s.extended_connect_session())
@@ -1860,6 +1898,10 @@ impl Http3Connection {
         wt: &Rc<RefCell<extended_connect::session::Session>>,
         conn: &mut Connection,
     ) {
+        // The queue lives on `conn`, not the session, so it needs an
+        // explicit drop here rather than going away with the session.
+        conn.drop_session_datagrams(wt.borrow().id());
+
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 
         #[expect(

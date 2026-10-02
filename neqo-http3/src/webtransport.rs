@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[cfg(test)]
-use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Display, Formatter},
@@ -13,8 +11,12 @@ use std::{
     rc::Rc,
     time::Instant,
 };
+#[cfg(test)]
+use std::{num::NonZeroUsize, time::Duration};
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
+#[cfg(test)]
+use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
     Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
     send_stream, server::ConnectionRef, streams::SendOrder,
@@ -501,13 +503,16 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        // Snapshot the stats before tearing the session down, so the caller sees
-        // the final values. This also rejects non-WebTransport sessions.
+        // Collect expiries and snapshot the stats before tearing the session down,
+        // so the caller sees the final values.  This also rejects non-WebTransport
+        // sessions.
         //
         // `extended_connect_close_session` then checks the type again. That is
         // deliberate: it is shared with connect-udp, which needs the check for its own
-        // close path, so it cannot rely on this one having happened. Two lookups once
-        // per session close is not worth a validation-skipping variant.
+        // close path, so it cannot rely on this one having happened.
+        self.webtransport_session(session_id)?
+            .borrow_mut()
+            .expire_datagrams(conn, now);
         let stats = self.webtransport_session_stats(session_id)?;
         self.extended_connect_close_session(
             conn,
@@ -810,6 +815,63 @@ impl ServerSession {
                 mark,
             )
             .expect("test session must exist");
+    }
+
+    /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
+    /// to the implementation-defined default with `None`.
+    ///
+    /// Test-only; see [`Self::set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_set_datagram_max_age(
+                session_id,
+                &mut self.stream_handler.conn.borrow_mut(),
+                max_age,
+                now,
+            )
+            .expect("test session must exist");
+    }
+
+    /// This session's statistics, e.g. `datagrams_expired_outgoing`.
+    ///
+    /// Test-only; see [`Self::set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn stats(&self) -> extended_connect::stats::SessionStats {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .webtransport_session_stats(session_id)
+            .expect("test session must exist")
+    }
+
+    /// Snapshot of the outgoing-datagram queue's current byte/count state.
+    ///
+    /// Test-only; see [`Self::set_max_buffered_datagrams`].
+    #[cfg(test)]
+    pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
+        let session_id = self.stream_handler.stream_id();
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .base_handler_mut()
+            .extended_connect_datagram_queue_capacity(
+                session_id,
+                &self.stream_handler.conn.borrow(),
+            )
+            .expect("test session must exist")
+    }
+
+    /// Test-only: see `Connection::next_datagram_expiry`.
+    #[cfg(test)]
+    pub(crate) fn next_datagram_expiry(&self) -> Option<Instant> {
+        self.stream_handler.conn.borrow().next_datagram_expiry()
     }
 
     // TODO: Currently not called in neqo or gecko. It should likely be called at least from gecko.
