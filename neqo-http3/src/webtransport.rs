@@ -77,7 +77,7 @@ pub trait ClientSession {
     ) -> Res<()>;
 
     /// A snapshot of this session's outgoing-datagram queue; see
-    /// [`DatagramQueueCapacity`].  The count max-buffered limit is not included.
+    /// [`DatagramQueueCapacity`].  The `outgoingMaxBufferedDatagrams` limit is not included.
     ///
     /// # Errors
     ///
