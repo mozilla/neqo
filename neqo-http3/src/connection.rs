@@ -1891,9 +1891,8 @@ impl Http3Connection {
         wt: &Rc<RefCell<extended_connect::session::Session>>,
         conn: &mut Connection,
     ) {
-        // The queue lives on `conn`, not the session, so it needs an
-        // explicit drop here rather than going away with the session.
-        conn.drop_session_datagrams(wt.borrow().id());
+        // The queue lives on `conn` and would outlive the session.
+        wt.borrow_mut().drop_queued_datagrams(conn);
 
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 

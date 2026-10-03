@@ -528,6 +528,7 @@ impl Session {
 
     /// Drop this session's queue, counting what was still on it plus any
     /// sent, expired or too-big counts not yet taken.
+    /// Not called on whole-connection close: the queues go with the `Connection`.
     pub(crate) fn drop_queued_datagrams(&mut self, conn: &mut Connection) {
         let dropped = conn.drop_session_datagrams(self.id);
         self.protocol.record_sent_outgoing_datagrams(dropped.sent);

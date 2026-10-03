@@ -314,6 +314,7 @@ fn session_reset_by_client_drops_the_servers_queued_datagrams() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let session_id = wt_session.stream_id();
+    let session = wt_session.session();
 
     for id in 0..3 {
         assert_eq!(
@@ -329,6 +330,10 @@ fn session_reset_by_client_drops_the_servers_queued_datagrams() {
     drop(wt.server.process(Some(reset), now()));
 
     assert_eq!(wt_session.next_datagram_expiry(), None);
+    assert_eq!(
+        session.borrow().stats().unwrap().datagrams_dropped_outgoing,
+        3
+    );
 }
 
 /// A close capsule without a FIN leaves the server's session in `FinPending`
