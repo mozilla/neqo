@@ -87,6 +87,43 @@ pub trait ClientSession {
         session_id: StreamId,
     ) -> Res<DatagramQueueCapacity>;
 
+    /// Set the number of concurrent incoming unidirectional streams a WebTransport session
+    /// anticipates (`anticipatedConcurrentIncomingUnidirectionalStreams`).
+    /// Pass `0` for `null`.
+    ///
+    /// This raises a connection-wide stream limit computed as the sum of the anticipated values
+    /// set for all not-yet-closed WebTransport sessions on this connection, capped at
+    /// [`crate::MAX_ANTICIPATED_INCOMING_STREAMS`] streams per direction; it does not create a
+    /// per-session limit.  Closed sessions are excluded so a stale one cannot keep inflating the
+    /// total; sessions still negotiating are included, since the W3C API supplies this value at
+    /// construction.  A `value` that would push the sum past the cap is accepted but only takes
+    /// effect up to it. The transport limit only ever rises, so lowering `value` does not reduce
+    /// it. The limit is a concurrency window, not a cumulative budget: as the peer closes streams
+    /// it opened, it may open further streams without another call here.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, is not a WebTransport session, or is closing.
+    fn webtransport_set_anticipated_incoming_uni_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()>;
+
+    /// Bidirectional counterpart to
+    /// [`Self::webtransport_set_anticipated_incoming_uni_streams`]
+    /// (`anticipatedConcurrentIncomingBidirectionalStreams`).
+    /// Pass `0` for `null`.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, is not a WebTransport session, or is closing.
+    fn webtransport_set_anticipated_incoming_bidi_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()>;
+
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
     /// to the implementation-defined default with `None`.
     ///
@@ -283,6 +320,34 @@ impl ClientSession for Http3Client {
     ) -> Res<DatagramQueueCapacity> {
         self.handler()
             .webtransport_datagram_queue_capacity(self.connection(), session_id)
+    }
+
+    fn webtransport_set_anticipated_incoming_uni_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_set_anticipated_incoming_streams(
+            conn,
+            session_id,
+            StreamType::UniDi,
+            value,
+        )
+    }
+
+    fn webtransport_set_anticipated_incoming_bidi_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_set_anticipated_incoming_streams(
+            conn,
+            session_id,
+            StreamType::BiDi,
+            value,
+        )
     }
 
     fn webtransport_set_datagram_max_age(

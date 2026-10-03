@@ -578,6 +578,7 @@ impl Streams {
 
     /// See `Connection::set_remote_max_streams`.
     pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        let max = max.min(1 << 60);
         if max > self.remote_stream_limits[stream_type].max_active() {
             self.remote_stream_limits[stream_type].set_max_active(max);
         }

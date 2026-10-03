@@ -3826,13 +3826,10 @@ impl Connection {
     ///
     /// This is a local receive limit advertised to the peer via `MAX_STREAMS`
     /// (RFC 9000, Section 4.6). It is monotonic: if `max` is not greater than the
-    /// current limit, it has no effect.
-    ///
-    /// # Panics
-    ///
-    /// If `max > 2^60`, as [`ConnectionParameters::max_streams`] does.
+    /// current limit, it has no effect.  A `max` above 2^60, the most a
+    /// `MAX_STREAMS` frame can carry, is clamped to it.
     pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
-        assert!(max <= (1 << 60), "max_streams is too large");
+        debug_assert!(max <= (1 << 60), "max_streams is too large");
         self.streams.set_remote_max_streams(stream_type, max);
     }
 

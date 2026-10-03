@@ -16,6 +16,7 @@ use std::{
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
 use neqo_transport::{
     AppError, Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
+    StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::FxHashSet as HashSet;
@@ -68,6 +69,8 @@ pub(crate) struct Session {
     /// Set when a datagram capsule was refused with `FlowControlLimit`, so a
     /// resume event fires once the control stream is writable again.
     datagram_capsule_blocked: bool,
+    anticipated_incoming_uni: u16,
+    anticipated_incoming_bidi: u16,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -128,6 +131,8 @@ impl Session {
             protocol,
             draining: false,
             datagram_capsule_blocked: false,
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         }
     }
 
@@ -159,6 +164,8 @@ impl Session {
             protocol,
             draining: false,
             datagram_capsule_blocked: false,
+            anticipated_incoming_uni: 0,
+            anticipated_incoming_bidi: 0,
         })
     }
 
@@ -170,6 +177,21 @@ impl Session {
     /// Returns the stream ID of this extended CONNECT session.
     pub(crate) const fn id(&self) -> StreamId {
         self.id
+    }
+
+    pub(crate) const fn set_anticipated_incoming(&mut self, stream_type: StreamType, value: u16) {
+        match stream_type {
+            StreamType::UniDi => self.anticipated_incoming_uni = value,
+            StreamType::BiDi => self.anticipated_incoming_bidi = value,
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn anticipated_incoming(&self, stream_type: StreamType) -> u16 {
+        match stream_type {
+            StreamType::UniDi => self.anticipated_incoming_uni,
+            StreamType::BiDi => self.anticipated_incoming_bidi,
+        }
     }
 
     /// Mark session as draining. Returns `true` if this was the first call
@@ -359,6 +381,11 @@ impl Session {
     #[must_use]
     pub(crate) const fn is_active(&self) -> bool {
         matches!(self.state, State::Active)
+    }
+
+    #[must_use]
+    pub(crate) const fn is_closing(&self) -> bool {
+        self.state.closing_state()
     }
 
     pub(crate) fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
