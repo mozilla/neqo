@@ -14,10 +14,8 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    AppError, Connection, DatagramQueueOutcome, DatagramTracking, StreamId,
+    AppError, Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::FxHashSet as HashSet;
@@ -528,6 +526,7 @@ impl Session {
 
     /// Drop this session's queue, counting what was still on it plus any
     /// sent, expired or too-big counts not yet taken.
+    /// Not called on whole-connection close: the queues go with the `Connection`.
     pub(crate) fn drop_queued_datagrams(&mut self, conn: &mut Connection) {
         let dropped = conn.drop_session_datagrams(self.id);
         self.protocol.record_sent_outgoing_datagrams(dropped.sent);
@@ -564,8 +563,6 @@ impl Session {
             .record_expired_outgoing_datagrams(conn.take_session_expired_datagrams(self.id));
     }
 
-    /// Test-only.
-    #[cfg(test)]
     #[must_use]
     pub(crate) fn datagram_queue_capacity(&self, conn: &Connection) -> DatagramQueueCapacity {
         conn.datagram_queue_capacity(self.id)

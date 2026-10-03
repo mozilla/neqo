@@ -17,11 +17,9 @@ use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
-    StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramQueueCapacity, DatagramQueueOutcome,
+    DatagramTracking, State, StreamId, StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -1671,15 +1669,18 @@ impl Http3Connection {
         Ok(())
     }
 
-    /// Test-only.
-    #[cfg(test)]
-    pub(crate) fn extended_connect_datagram_queue_capacity(
+    /// See [`crate::webtransport::ClientSession::webtransport_datagram_queue_capacity`].
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub(crate) fn webtransport_datagram_queue_capacity(
         &self,
-        session_id: StreamId,
         conn: &Connection,
+        session_id: StreamId,
     ) -> Res<DatagramQueueCapacity> {
         Ok(self
-            .validate_extended_connect_session(session_id)?
+            .webtransport_session(session_id)?
             .borrow()
             .datagram_queue_capacity(conn))
     }
@@ -1891,9 +1892,8 @@ impl Http3Connection {
         wt: &Rc<RefCell<extended_connect::session::Session>>,
         conn: &mut Connection,
     ) {
-        // The queue lives on `conn`, not the session, so it needs an
-        // explicit drop here rather than going away with the session.
-        conn.drop_session_datagrams(wt.borrow().id());
+        // The queue lives on `conn` and would outlive the session.
+        wt.borrow_mut().drop_queued_datagrams(conn);
 
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 

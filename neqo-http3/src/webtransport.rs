@@ -14,11 +14,9 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
-    send_stream, server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
+    StreamType, recv_stream, send_stream, server::ConnectionRef, streams::SendOrder,
 };
 
 use crate::{
@@ -77,6 +75,17 @@ pub trait ClientSession {
         session_id: StreamId,
         max_buffered_datagrams: Option<NonZeroUsize>,
     ) -> Res<()>;
+
+    /// A snapshot of this session's outgoing-datagram queue; see
+    /// [`DatagramQueueCapacity`].  The count max-buffered limit is not included.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity>;
 
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
     /// to the implementation-defined default with `None`.
@@ -266,6 +275,14 @@ impl ClientSession for Http3Client {
             session_id,
             max_buffered_datagrams,
         )
+    }
+
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity> {
+        self.handler()
+            .webtransport_datagram_queue_capacity(self.connection(), session_id)
     }
 
     fn webtransport_set_datagram_max_age(
@@ -959,7 +976,8 @@ impl ServerSession {
 
     /// Snapshot of the outgoing-datagram queue's current byte/count state.
     ///
-    /// Test-only; no production caller reads this yet.
+    /// Test-only; production callers use
+    /// [`ClientSession::webtransport_datagram_queue_capacity`].
     #[cfg(test)]
     pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
         let session_id = self.stream_handler.stream_id();
@@ -967,10 +985,7 @@ impl ServerSession {
             .handler
             .borrow_mut()
             .base_handler_mut()
-            .extended_connect_datagram_queue_capacity(
-                session_id,
-                &self.stream_handler.conn.borrow(),
-            )
+            .webtransport_datagram_queue_capacity(&self.stream_handler.conn.borrow(), session_id)
             .expect("test session must exist")
     }
 
