@@ -33,7 +33,7 @@ use futures::{
     future::{Either, select},
 };
 use http::Uri as Url;
-use neqo_common::{Datagram, Role, qdebug, qerror, qinfo, qlog::Qlog};
+use neqo_common::{Datagram, Role, qlog::Qlog};
 use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
@@ -45,6 +45,7 @@ use nss::{
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
+use tracing::{debug, error, info};
 
 use crate::{SharedArgs, now, report_stats};
 
@@ -228,12 +229,12 @@ impl Args {
         };
 
         if self.key_update {
-            qerror!("internal option key_update set by user");
+            error!("internal option key_update set by user");
             exit(127)
         }
 
         if self.resume {
-            qerror!("internal option resume set by user");
+            error!("internal option resume set by user");
             exit(127)
         }
 
@@ -250,7 +251,7 @@ impl Args {
                 self.shared.alpn = String::from("h3");
                 if let Some(testcase) = &self.test {
                     if testcase.as_str() != "upload" {
-                        qerror!("Unsupported test case: {testcase}");
+                        error!("Unsupported test case: {testcase}");
                         exit(127)
                     }
 
@@ -260,14 +261,14 @@ impl Args {
             "handshake" | "transfer" | "retry" | "ecn" => {}
             "resumption" => {
                 if self.urls.len() < 2 {
-                    qerror!("Warning: resumption test won't work without >1 URL");
+                    error!("Warning: resumption test won't work without >1 URL");
                     exit(127);
                 }
                 self.resume = true;
             }
             "zerortt" => {
                 if self.urls.len() < 2 {
-                    qerror!("Warning: zerortt test won't work without >1 URL");
+                    error!("Warning: zerortt test won't work without >1 URL");
                     exit(127);
                 }
                 self.shared.quic_parameters.no_sni_slicing = false;
@@ -323,11 +324,11 @@ fn get_output_file(
         out_path.push(url_path);
 
         if all_paths.contains(&out_path) {
-            qerror!("duplicate path {}", out_path.display());
+            error!("duplicate path {}", out_path.display());
             return None;
         }
 
-        qinfo!("Saving {url} to {}", out_path.display());
+        info!("Saving {url} to {}", out_path.display());
 
         if let Some(parent) = out_path.parent() {
             create_dir_all(parent).ok()?;
@@ -470,7 +471,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 .socket
                 .max_gso_segments()
                 .try_into()
-                .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+                .inspect_err(|_| error!("Socket return GSO size of 0"))
                 .map_err(|_| io::Error::from(ErrorKind::Unsupported))?;
 
             match self.client.process_multiple_output(now(), max_datagrams) {
@@ -487,7 +488,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                         Err(e)
                             if e.raw_os_error() == Some(libc::EIO) && dgram.num_datagrams() > 1 =>
                         {
-                            qinfo!(
+                            info!(
                                 "`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload"
                             );
                             // Drop the packets and let QUIC handle retransmission.
@@ -497,12 +498,12 @@ impl<'a, H: Handler> Runner<'a, H> {
                     }
                 },
                 OutputBatch::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {new_timeout:?}");
+                    debug!("Setting timeout of {new_timeout:?}");
                     self.timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
                 OutputBatch::None => {
-                    qdebug!("Output::None");
+                    debug!("Output::None");
                     break;
                 }
             }
@@ -588,7 +589,7 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
-            qerror!("Resumption to {host} cannot work without at least 2 URLs");
+            error!("Resumption to {host} cannot work without at least 2 URLs");
             exit(127);
         }
 
@@ -599,16 +600,16 @@ pub async fn client(mut args: Args) -> Res<()> {
             )
         });
         let Some(remote_addr) = remote_addr else {
-            qerror!("No compatible address found for: {host}");
+            error!("No compatible address found for: {host}");
             exit(1);
         };
         let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
         if socket.may_fragment() {
-            qinfo!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
+            info!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
             args.shared.quic_parameters.no_pmtud = true;
         }
         let real_local = socket.local_addr();
-        qinfo!(
+        info!(
             "{} Client connecting: {real_local:?} -> {remote_addr:?}",
             args.shared.alpn
         );
@@ -654,9 +655,9 @@ pub async fn client(mut args: Args) -> Res<()> {
 
         if let (Some(path), Some(tok)) = (&args.save_token, &token) {
             if let Err(e) = std::fs::write(path, tok.as_ref()) {
-                qerror!("Failed to save token to {}: {e}", path.display());
+                error!("Failed to save token to {}: {e}", path.display());
             } else {
-                qinfo!("Resumption token saved to {}", path.display());
+                info!("Resumption token saved to {}", path.display());
             }
         }
     }

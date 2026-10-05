@@ -762,7 +762,6 @@ dependencies = [
  "hex",
  "http",
  "libc",
- "log",
  "neqo-bin",
  "neqo-common",
  "neqo-http3",
@@ -778,6 +777,7 @@ dependencies = [
  "test-fixture 0.32.0",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

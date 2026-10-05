@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug, qwarn};
+use neqo_common::{Datagram, event::Provider as _};
 use neqo_http3::Error;
 use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
@@ -21,6 +21,7 @@ use neqo_transport::{
 };
 use nss::{AllowZeroRtt, AntiReplay};
 use rustc_hash::FxHashMap as HashMap;
+use tracing::{debug, warn};
 
 use super::Args;
 use crate::{
@@ -74,10 +75,10 @@ impl HttpServer {
 
     fn save_partial(&mut self, stream_id: StreamId, partial: Vec<u8>, conn: &ConnectionRef) {
         if partial.len() < 4096 {
-            qdebug!("Saving partial URL: {}", String::from_utf8_lossy(&partial));
+            debug!("Saving partial URL: {}", String::from_utf8_lossy(&partial));
             self.read_state.insert(stream_id, partial);
         } else {
-            qdebug!(
+            debug!(
                 "Giving up on partial URL {}",
                 String::from_utf8_lossy(&partial)
             );
@@ -104,7 +105,7 @@ impl HttpServer {
 
     fn stream_readable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         if !stream_id.is_client_initiated() || !stream_id.is_bidi() {
-            qdebug!("Stream {stream_id} not client-initiated bidi, ignoring");
+            debug!("Stream {stream_id} not client-initiated bidi, ignoring");
             return;
         }
         let (sz, fin) = conn
@@ -115,7 +116,7 @@ impl HttpServer {
         // A zero-length read with no FIN is unexpected but harmless; leave any
         // buffered partial data untouched and wait for more.
         if sz == 0 && !fin {
-            qdebug!("size 0 but !fin");
+            debug!("size 0 but !fin");
             return;
         }
 
@@ -145,7 +146,7 @@ impl HttpServer {
             return;
         };
 
-        qdebug!("Path = '{path}'");
+        debug!("Path = '{path}'");
         let resp = super::response_for_path(path, self.is_qns_test)
             .unwrap_or_else(|()| b"404".as_slice().into());
 
@@ -153,7 +154,7 @@ impl HttpServer {
         if stream_state.data_to_send.is_none() {
             stream_state.data_to_send = Some(resp);
         } else {
-            qdebug!("Data already set, doing nothing");
+            debug!("Data already set, doing nothing");
         }
         let writable = stream_state.writable;
         if writable {
@@ -163,7 +164,7 @@ impl HttpServer {
 
     fn stream_writable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
         let Some(stream_state) = self.write_state.get_mut(&stream_id) else {
-            qwarn!("Unknown stream {stream_id}, ignoring event");
+            warn!("Unknown stream {stream_id}, ignoring event");
             return;
         };
 
@@ -171,7 +172,7 @@ impl HttpServer {
         let remove = if let Some(resp) = &mut stream_state.data_to_send {
             match resp.send(|chunk| conn.borrow_mut().stream_send(stream_id, chunk)) {
                 SendResult::StreamClosed => {
-                    qwarn!("Stream {stream_id} closed by peer, stopping send");
+                    warn!("Stream {stream_id} closed by peer, stopping send");
                     true
                 }
                 SendResult::Done => {
@@ -243,7 +244,7 @@ impl super::HttpServer for HttpServer {
                     | ConnectionEvent::SendStreamCreatable { .. }
                     | ConnectionEvent::SendStreamComplete { .. }
                     | ConnectionEvent::PathMigrated { .. } => (),
-                    e => qwarn!("unhandled event {e:?}"),
+                    e => warn!("unhandled event {e:?}"),
                 }
             }
         }
