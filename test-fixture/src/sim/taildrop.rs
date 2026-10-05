@@ -13,8 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, qinfo, qtrace};
+use neqo_common::Datagram;
 use neqo_transport::Output;
+use tracing::{info, trace};
 
 use super::{
     Node, Rng,
@@ -213,7 +214,7 @@ impl TailDrop {
             self.stats.update_maxq(self.used);
             self.queue.push_back((now, d));
         } else {
-            qtrace!("taildrop dropping {} bytes", d.len());
+            trace!("taildrop dropping {} bytes", d.len());
             self.stats.dropped += 1;
         }
     }
@@ -295,7 +296,7 @@ impl Node for TailDrop {
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!("{test_name}: taildrop: {stats}", stats = self.stats);
+        info!("{test_name}: taildrop: {stats}", stats = self.stats);
     }
 }
 
@@ -315,8 +316,9 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Datagram, Dscp, Ecn, Encoder, Tos, qinfo};
+    use neqo_common::{Datagram, Dscp, Ecn, Encoder, Tos};
     use neqo_transport::Output;
+    use tracing::info;
 
     use crate::{
         now,
@@ -452,7 +454,7 @@ mod test {
         let successes = (0..trials)
             .filter(|_| state.should_mark(used, capacity))
             .count();
-        qinfo!("{successes} out of {trials} trials at {used}/{capacity}");
+        info!("{successes} out of {trials} trials at {used}/{capacity}");
         successes
     }
 
