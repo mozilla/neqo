@@ -16,7 +16,7 @@ workspace = true
 
 [dependencies]
 log = { workspace = true }
-neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
+neqo-common = { path = "../neqo-common", features = ["log-bridge", "test-fixture"] }
 neqo-http3 = { path = "../neqo-http3", default-features = false, features = ["draft-29"] }
 neqo-transport = { path = "../neqo-transport", default-features = false, features = ["draft-29"] }
 nss = { workspace = true }

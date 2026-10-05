@@ -316,10 +316,6 @@ pub struct ReadySimulator {
 }
 
 impl ReadySimulator {
-    #[expect(
-        clippy::must_use_candidate,
-        reason = "run duration only needed in some tests"
-    )]
     pub fn run(mut self) -> Duration {
         #[expect(clippy::disallowed_methods, reason = "Simulations run in real time")]
         let real_start = Instant::now();

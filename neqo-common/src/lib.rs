@@ -23,6 +23,9 @@ pub mod tos;
 use enum_map::Enum;
 use static_assertions::const_assert;
 use strum::Display;
+// Used by the `q*!` logging macros, so callers need no `tracing` dependency.
+#[doc(hidden)]
+pub use tracing;
 
 #[cfg(feature = "build-fuzzing-corpus")]
 pub use self::fuzz::write_item_to_fuzzing_corpus;
