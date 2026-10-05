@@ -189,7 +189,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9d92b1fab272fe943881b77cc6e920d6543e5b1bfadbd5ed81c7c5a755742394"
 dependencies = [
  "clap",
- "log",
 ]
 
 [[package]]
@@ -762,7 +761,6 @@ dependencies = [
  "hex",
  "http",
  "libc",
- "log",
  "neqo-bin",
  "neqo-common",
  "neqo-http3",
@@ -778,6 +776,7 @@ dependencies = [
  "test-fixture 0.34.0",
  "thiserror",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

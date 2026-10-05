@@ -11,28 +11,17 @@ use tracing_subscriber::{
     Layer as _, filter::Targets, layer::SubscriberExt as _, util::SubscriberInitExt as _,
 };
 
-const fn to_tracing_level_filter(filter: log::LevelFilter) -> LevelFilter {
-    match filter {
-        log::LevelFilter::Off => LevelFilter::OFF,
-        log::LevelFilter::Error => LevelFilter::ERROR,
-        log::LevelFilter::Warn => LevelFilter::WARN,
-        log::LevelFilter::Info => LevelFilter::INFO,
-        log::LevelFilter::Debug => LevelFilter::DEBUG,
-        log::LevelFilter::Trace => LevelFilter::TRACE,
-    }
-}
-
 /// Initialize the logging system with optional level filtering.
 ///
 /// Neqo emits through `tracing`, printed by `tracing-subscriber`'s default
 /// formatter and filtered by `RUST_LOG`. With the `log-bridge` feature, records
 /// from dependencies that still use `log` are bridged into `tracing`. It can be
 /// called multiple times safely.
-pub fn init(level_filter: Option<log::LevelFilter>) {
+pub fn init(level_filter: Option<LevelFilter>) {
     static INIT_ONCE: Once = Once::new();
 
     INIT_ONCE.call_once(|| {
-        init_tracing(level_filter.map(to_tracing_level_filter));
+        init_tracing(level_filter);
     });
 }
 

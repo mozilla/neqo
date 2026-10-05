@@ -20,7 +20,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{Datagram, event::Provider, hex::Hex, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, event::Provider, hex::Hex};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, OutputBatch,
@@ -28,6 +28,7 @@ use neqo_transport::{
 };
 use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
+use tracing::{debug, error, info, warn};
 
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
 use crate::{
@@ -179,9 +180,9 @@ impl super::Handler for Handler {
                     ..
                 } => {
                     if self.url_handler.stream_handler(stream_id).is_some() {
-                        qdebug!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
+                        debug!("READ HEADERS[{stream_id}]: fin={fin} {headers:?}");
                     } else {
-                        qwarn!("Data on unexpected stream: {stream_id}");
+                        warn!("Data on unexpected stream: {stream_id}");
                     }
                     if fin {
                         self.url_handler.on_stream_fin(client, stream_id);
@@ -191,7 +192,7 @@ impl super::Handler for Handler {
                     let mut stream_done = false;
                     match self.url_handler.stream_handler(stream_id) {
                         None => {
-                            qwarn!("Data on unexpected stream: {stream_id}");
+                            warn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => loop {
                             let (sz, fin) =
@@ -221,7 +222,7 @@ impl super::Handler for Handler {
                 Http3ClientEvent::DataWritable { stream_id } => {
                     match self.url_handler.stream_handler(stream_id) {
                         None => {
-                            qwarn!("Data on unexpected stream: {stream_id}");
+                            warn!("Data on unexpected stream: {stream_id}");
                         }
                         Some(handler) => {
                             handler.process_data_writable(client, stream_id, now());
@@ -230,18 +231,18 @@ impl super::Handler for Handler {
                 }
                 Http3ClientEvent::StateChange(Http3State::Connected)
                 | Http3ClientEvent::RequestsCreatable => {
-                    qinfo!("{event:?}");
+                    info!("{event:?}");
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ZeroRttRejected => {
-                    qinfo!("{event:?}");
+                    info!("{event:?}");
                     // All 0-RTT data was rejected. We need to retransmit it.
                     self.url_handler.reinit();
                     self.url_handler.process_urls(client);
                 }
                 Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
                 _ => {
-                    qwarn!("Unhandled event {event:?}");
+                    warn!("Unhandled event {event:?}");
                 }
             }
         }
@@ -279,20 +280,20 @@ impl StreamHandler for DownloadStreamHandler {
     fn process_data_readable(&mut self, stream_id: StreamId, fin: bool, data: &[u8]) -> Res<()> {
         if let Some(out_file) = &mut self.out_file {
             out_file.write_all(data)?;
-        } else if log::log_enabled!(log::Level::Debug) {
+        } else if tracing::enabled!(tracing::Level::DEBUG) {
             if !self.output_read_data {
-                qdebug!("READ[{stream_id}]: {} bytes", data.len());
+                debug!("READ[{stream_id}]: {} bytes", data.len());
             } else if let Ok(txt) = std::str::from_utf8(data) {
-                qdebug!("READ[{stream_id}]: {txt}");
+                debug!("READ[{stream_id}]: {txt}");
             } else {
-                qdebug!("READ[{stream_id}]: 0x{}", Hex::new(data));
+                debug!("READ[{stream_id}]: 0x{}", Hex::new(data));
             }
         }
 
         if fin {
             self.out_file.take().map_or_else(
                 || {
-                    qdebug!("<FIN[{stream_id}]>");
+                    debug!("<FIN[{stream_id}]>");
                     Ok(())
                 },
                 |mut out_file| out_file.flush(),
@@ -322,14 +323,14 @@ impl StreamHandler for UploadStreamHandler {
             let trimmed_txt = txt.trim_end_matches(char::from(0));
             let parsed: usize = trimmed_txt.parse().map_err(|_| Error::InvalidInput)?;
             if parsed == self.data.len() {
-                qinfo!(
+                info!(
                     "Stream ID: {stream_id:?}, Upload time: {:?}",
                     now().duration_since(self.start)
                 );
             }
             Ok(())
         } else {
-            qerror!("Unexpected data [{stream_id}]: 0x{}", Hex::new(data));
+            error!("Unexpected data [{stream_id}]: 0x{}", Hex::new(data));
             Err(crate::client::Error::Http3(Error::InvalidInput))
         }
     }
@@ -344,7 +345,7 @@ impl StreamHandler for UploadStreamHandler {
             .data
             .send(|chunk| client.send_data(stream_id, chunk, now))
         {
-            SendResult::StreamClosed => qwarn!("Stream {stream_id} is closed"),
+            SendResult::StreamClosed => warn!("Stream {stream_id} is closed"),
             // Stream may be closed; ignore errors.
             SendResult::Done => _ = client.stream_close_send(stream_id, now),
             SendResult::MoreData => {}
@@ -393,7 +394,7 @@ impl UrlHandler {
             Priority::default(),
         ) {
             Ok(client_stream_id) => {
-                qdebug!("Successfully created stream id {client_stream_id} for {url}");
+                debug!("Successfully created stream id {client_stream_id} for {url}");
 
                 let handler: Box<dyn StreamHandler> = match self.args.method.as_str() {
                     "GET" => {
