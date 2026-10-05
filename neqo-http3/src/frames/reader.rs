@@ -9,9 +9,9 @@ use std::{cmp::min, fmt::Debug, time::Instant};
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
     hex::{HexSnipMiddle, HexWithLen},
-    qtrace,
 };
 use neqo_transport::{Connection, Error as TransportError, StreamId};
+use tracing::trace;
 
 use super::hframe::HFrameType;
 use crate::{Error, RecvStream, Res};
@@ -193,7 +193,7 @@ impl FrameReader {
                 match stream_reader.read_data(&mut self.buffer[..to_read], now) {
                     Ok((0, f)) => (None, false, f),
                     Ok((amount, f)) => {
-                        qtrace!("FrameReader::receive: reading {amount} byte, fin={f}");
+                        trace!("FrameReader::receive: reading {amount} byte, fin={f}");
                         (self.consume::<T>(amount)?, true, f)
                     }
                     // A `RESET_STREAM` could cause the transport to report `NoMoreData` or
@@ -234,13 +234,13 @@ impl FrameReader {
         match &mut self.state {
             FrameReaderState::GetType { decoder } => {
                 if let Some(v) = decoder.consume(&mut input) {
-                    qtrace!("FrameReader::receive: read frame type {v}");
+                    trace!("FrameReader::receive: read frame type {v}");
                     self.frame_type_decoded::<T>(HFrameType(v))?;
                 }
             }
             FrameReaderState::GetLength { decoder } => {
                 if let Some(len) = decoder.consume(&mut input) {
-                    qtrace!(
+                    trace!(
                         "FrameReader::receive: frame type {:?} length {len}",
                         self.frame_type
                     );
@@ -249,7 +249,7 @@ impl FrameReader {
             }
             FrameReaderState::GetData { decoder } => {
                 if let Some(data) = decoder.consume(&mut input) {
-                    qtrace!(
+                    trace!(
                         "received frame {:?}: {}",
                         self.frame_type,
                         HexWithLen::new(&data[..])

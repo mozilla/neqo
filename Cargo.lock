@@ -809,7 +809,6 @@ dependencies = [
  "codspeed-criterion-compat",
  "enumset",
  "http",
- "log",
  "neqo-common",
  "neqo-http3",
  "neqo-qpack",
@@ -822,6 +821,7 @@ dependencies = [
  "strum",
  "test-fixture 0.32.0",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

@@ -4,8 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Bytes, Encoder, qdebug, to_u64};
+use neqo_common::{Bytes, Encoder, to_u64};
 use static_assertions::const_assert;
+use tracing::debug;
 
 use super::{hframe::HFrameType, reader::FrameDecoder};
 use crate::Res;
@@ -53,7 +54,7 @@ impl FrameDecoder<Self> for Capsule {
         if frame_type == CAPSULE_TYPE_DATAGRAM
             && let Some(payload) = data
         {
-            qdebug!("Decoded Datagram Capsule len={}", payload.len());
+            debug!("Decoded Datagram Capsule len={}", payload.len());
             return Ok(Some(Self::Datagram {
                 payload: Bytes::from(payload.to_vec()),
             }));
