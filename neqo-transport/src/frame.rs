@@ -258,6 +258,7 @@ pub enum Frame<'a> {
     Datagram {
         data: &'a [u8],
         fill: bool,
+        frame_len: usize,
     },
 }
 
@@ -718,7 +719,11 @@ impl<'a> Frame<'a> {
                     qtrace!("DATAGRAM frame, with length");
                     d(dec.decode_vvec())?
                 };
-                Ok(Self::Datagram { data, fill })
+                Ok(Self::Datagram {
+                    data,
+                    fill,
+                    frame_len: dec.offset() - pos,
+                })
             }
         }
     }
@@ -1204,6 +1209,7 @@ mod tests {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: true,
+            frame_len: 4,
         };
 
         just_dec(&f, "30010203");
@@ -1212,6 +1218,7 @@ mod tests {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: false,
+            frame_len: 5,
         };
         just_dec(&f, "3103010203");
     }
@@ -1234,6 +1241,7 @@ mod tests {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: true,
+            frame_len: 4,
         };
 
         just_dec(&f, "4030010203");
@@ -1293,7 +1301,8 @@ mod tests {
         assert_eq!(
             Frame::Datagram {
                 data: &[1, 2, 3],
-                fill: false
+                fill: false,
+                frame_len: 5,
             }
             .dump(),
             "Datagram { len: 3 }"
