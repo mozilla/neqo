@@ -17,9 +17,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, expect_usize, qtrace, qwarn, to_u64};
+use neqo_common::{Buffer, Role, expect_usize, to_u64};
 use smallvec::SmallVec;
 use strum::Display;
+use tracing::{trace, warn};
 
 use crate::{
     AppError, Error, Res,
@@ -226,7 +227,7 @@ impl RxStreamOrderer {
         let span = self.end - self.retired;
         let needed = expect_usize(span / to_u64(Self::RANGE_TARGET));
         if self.data_ranges.len() > Self::MAX_GAPS + needed {
-            qwarn!("Too many gaps in the reassembly buffer, closing connection");
+            warn!("Too many gaps in the reassembly buffer, closing connection");
             return Err(Error::ProtocolViolation);
         }
         Ok(())
@@ -253,7 +254,7 @@ impl RxStreamOrderer {
     /// happens on 32-bit machines that hold far too much data at the same time.
     #[expect(clippy::too_many_lines, reason = "Yeah, but splitting it reads worse.")]
     pub fn inbound_frame(&mut self, mut new_start: u64, mut new_data: &[u8]) -> Res<()> {
-        qtrace!("Inbound data offset={new_start} len={}", new_data.len());
+        trace!("Inbound data offset={new_start} len={}", new_data.len());
 
         // Get entry before where new entry would go, so we can see if we already
         // have the new bytes.
@@ -317,7 +318,7 @@ impl RxStreamOrderer {
                 // NNNNNNNN            NN
                 // Add a range containing only new data
                 let overlap = prev_end.saturating_sub(new_start);
-                qtrace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
+                trace!("New frame {new_start}-{new_end} received, overlap: {overlap}");
                 new_start += overlap;
                 // This conversion is guaranteed to work because the overlap cannot exceed
                 // the size of the new data, which has to fit in usize.
@@ -333,11 +334,11 @@ impl RxStreamOrderer {
                 //   NNNN
                 // NNNN
                 // Do nothing
-                qtrace!("Dropping frame with already-received range {new_start}-{new_end}");
+                trace!("Dropping frame with already-received range {new_start}-{new_end}");
                 return Ok(());
             }
         } else {
-            qtrace!("New frame {new_start}-{new_end} received");
+            trace!("New frame {new_start}-{new_end} received");
             None
         };
 
@@ -374,7 +375,7 @@ impl RxStreamOrderer {
                     // Fills in the hole, exactly (probably common)
                     break;
                 } else if next_end >= new_end {
-                    qtrace!(
+                    trace!(
                         "New frame {new_start}-{new_end} overlaps with next frame by {overlap}, truncating"
                     );
                     // Safe conversion because any overlap has to be held in a buffer.
@@ -382,7 +383,7 @@ impl RxStreamOrderer {
                     to_add = &new_data[..truncate_to];
                     break;
                 }
-                qtrace!(
+                trace!(
                     "New frame {new_start}-{new_end} spans entire next frame {next_start}-{next_end}, replacing"
                 );
                 to_remove.push(next_start);
@@ -523,7 +524,7 @@ impl RxStreamOrderer {
 
     /// Copy received data (if any) into the buffer. Returns bytes copied.
     fn read(&mut self, buf: &mut [u8]) -> usize {
-        qtrace!("Reading {} bytes, {} available", buf.len(), self.buffered());
+        trace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
 
         for (&range_start, range_data) in &mut self.data_ranges {
@@ -761,7 +762,7 @@ impl RecvStream {
             mem::discriminant(&self.state),
             mem::discriminant(&new_state)
         );
-        qtrace!(
+        trace!(
             "RecvStream {} state {} -> {new_state}",
             self.stream_id.as_u64(),
             self.state
@@ -898,7 +899,7 @@ impl RecvStream {
             | RecvStreamState::AbortReading { .. }
             | RecvStreamState::WaitForReset { .. }
             | RecvStreamState::ResetRecvd { .. } => {
-                qtrace!("data received when we are in state {}", self.state);
+                trace!("data received when we are in state {}", self.state);
             }
         }
 
@@ -1203,7 +1204,7 @@ impl RecvStream {
     /// in a terminal or aborting state.
     #[must_use]
     pub fn stop_sending(&mut self, err: AppError) -> bool {
-        qtrace!("stop_sending called when in state {}", self.state);
+        trace!("stop_sending called when in state {}", self.state);
         match &mut self.state {
             RecvStreamState::Recv {
                 fc,
@@ -1378,9 +1379,10 @@ impl RecvStream {
 mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
-    use neqo_common::{Encoder, event::Provider as _, expect_usize, qtrace, to_u64};
+    use neqo_common::{Encoder, event::Provider as _, expect_usize, to_u64};
     use static_assertions::const_assert;
     use test_fixture::now;
+    use tracing::trace;
 
     use super::{RecvStream, RecvStreamState};
     use crate::{
@@ -1396,7 +1398,7 @@ mod tests {
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
         const ZEROES: &[u8] = &[0; 100];
-        qtrace!("recv_ranges {ranges:?}");
+        trace!("recv_ranges {ranges:?}");
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
@@ -1408,7 +1410,7 @@ mod tests {
         let mut total_recvd = 0;
         loop {
             let recvd = s.read(&mut buf[..]);
-            qtrace!("recv_ranges read {recvd}");
+            trace!("recv_ranges read {recvd}");
             total_recvd += recvd;
             if recvd == 0 {
                 assert_eq!(total_recvd, available);

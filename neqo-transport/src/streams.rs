@@ -12,7 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qdebug, qtrace};
+use neqo_common::{Buffer, Role};
+use tracing::{debug, trace};
 
 use crate::{
     AppError, ConnectionEvents, Error, Res,
@@ -229,10 +230,9 @@ impl Streams {
                 stream_id,
                 maximum_stream_data,
             } => {
-                qtrace!(
+                trace!(
                     "Stream {} Received MaxStreamData {}",
-                    *stream_id,
-                    *maximum_stream_data
+                    *stream_id, *maximum_stream_data
                 );
                 stats.max_stream_data += 1;
                 // Terminate connection with STREAM_STATE_ERROR if receive-only
@@ -252,12 +252,12 @@ impl Streams {
                 self.handle_max_streams(*stream_type, *maximum_streams);
             }
             Frame::DataBlocked { data_limit } => {
-                qdebug!("Received DataBlocked with data limit {data_limit}");
+                debug!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
-                qtrace!("Received StreamDataBlocked");
+                trace!("Received StreamDataBlocked");
                 stats.stream_data_blocked += 1;
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)

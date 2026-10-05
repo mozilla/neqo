@@ -6,9 +6,10 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider as _, qdebug};
+use neqo_common::event::Provider as _;
 use nss::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
+use tracing::debug;
 
 use super::{
     super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
@@ -309,7 +310,7 @@ fn zero_rtt_loss_accepted() {
         assertions::assert_coalesced_0rtt(&c0rtt.as_dgram_ref().unwrap()[..]);
 
         // Drop CI/0-RTT a number of times
-        qdebug!("Drop CI/0-RTT {i} extra times");
+        debug!("Drop CI/0-RTT {i} extra times");
         for _ in 0..i {
             now += client.process_output(now).callback();
             ci = client.process_output(now);

@@ -18,7 +18,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Encoder, qdebug, to_u64};
+use neqo_common::{Buffer, Encoder, to_u64};
+use tracing::debug;
 
 use crate::{
     ConnectionEvents, Error, MAX_DATAGRAM_FRAME_SIZE, Res, Stats,
@@ -179,7 +180,7 @@ impl QuicDatagrams {
                 let dgram = self
                     .take_from_session_queue(session)
                     .expect("just peeked Some above, with no intervening mutation");
-                qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
+                debug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
                 self.conn_events
                     .datagram_outcome(&dgram.id.into(), OutgoingDatagramOutcome::DroppedTooBig);
                 stats.datagram_tx.dropped_too_big += 1;
@@ -261,7 +262,7 @@ impl QuicDatagrams {
         min_rtt: Duration,
     ) -> Res<DatagramQueueOutcome> {
         if to_u64(data.len()) > self.remote_datagram_size {
-            qdebug!(
+            debug!(
                 "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
                 data.len(),
                 self.remote_datagram_size

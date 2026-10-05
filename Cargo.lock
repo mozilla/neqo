@@ -845,7 +845,6 @@ dependencies = [
  "enum-map",
  "enumset",
  "indexmap",
- "log",
  "mtu",
  "neqo-common",
  "neqo-transport",
@@ -860,6 +859,7 @@ dependencies = [
  "strum",
  "test-fixture 0.32.0",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]

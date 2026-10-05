@@ -16,7 +16,8 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Buffer, Length, MAX_VARINT, Role, const_min_u64, qdebug, qtrace, to_u64};
+use neqo_common::{Buffer, Length, MAX_VARINT, Role, const_min_u64, to_u64};
+use tracing::{debug, trace};
 
 use crate::{
     Error, Res,
@@ -439,7 +440,7 @@ where
         }
 
         self.max_active = new_max_active;
-        qdebug!(
+        debug!(
             "Increasing max {subject} receive window by {} B, \
                 previous max_active: {} MiB, \
                 new max_active: {} MiB, \
@@ -500,10 +501,9 @@ impl ReceiverFlowControl<()> {
 
     pub fn consume(&mut self, count: u64) -> Res<()> {
         if self.consumed + count > self.max_allowed {
-            qtrace!(
+            trace!(
                 "Session RX window exceeded: consumed:{} new:{count} limit:{}",
-                self.consumed,
-                self.max_allowed
+                self.consumed, self.max_allowed
             );
             return Err(Error::FlowControl);
         }
@@ -575,7 +575,7 @@ impl ReceiverFlowControl<StreamId> {
         }
 
         if consumed > self.max_allowed {
-            qtrace!("Stream RX window exceeded: {consumed}");
+            trace!("Stream RX window exceeded: {consumed}");
             return Err(Error::FlowControl);
         }
         let new_consumed = consumed - self.consumed;
@@ -758,8 +758,9 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Encoder, Role, qdebug, to_u64};
+    use neqo_common::{Encoder, Role, to_u64};
     use nss::random;
+    use tracing::debug;
 
     use super::{
         AutoTuneSubject, LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits,
@@ -1376,7 +1377,7 @@ mod test {
                 "{summary} Observed bandwidth is smaller than the link rate."
             );
 
-            qdebug!("{summary}");
+            debug!("{summary}");
         }
 
         Ok(())
@@ -1462,7 +1463,7 @@ mod test {
 
             // Stop if we've reached the maximum and it's not growing anymore
             if fc.max_active() == MAX_LOCAL_MAX_DATA && fc.max_active() == prev_max {
-                qdebug!(
+                debug!(
                     "Reached and stabilized at max window: {} MiB",
                     fc.max_active() / 1024 / 1024
                 );
@@ -1477,7 +1478,7 @@ mod test {
             fc.max_active() / 1024 / 1024
         );
 
-        qdebug!(
+        debug!(
             "Connection flow control window reached max: {} MiB",
             fc.max_active() / 1024 / 1024
         );

@@ -16,8 +16,9 @@
 
 use std::ops::RangeInclusive;
 
-use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT};
 use strum::FromRepr;
+use tracing::trace;
 
 use crate::{
     AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
@@ -590,10 +591,10 @@ impl<'a> Frame<'a> {
                 };
                 let fill = !t.is_stream_with_length();
                 let data = if fill {
-                    qtrace!("STREAM frame, extends to the end of the packet");
+                    trace!("STREAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    qtrace!("STREAM frame, with length");
+                    trace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
                 if o + u64::try_from(data.len())? > MAX_VARINT {
@@ -712,10 +713,10 @@ impl<'a> Frame<'a> {
             FrameType::Datagram | FrameType::DatagramWithLen => {
                 let fill = t == FrameType::Datagram;
                 let data = if fill {
-                    qtrace!("DATAGRAM frame, extends to the end of the packet");
+                    trace!("DATAGRAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    qtrace!("DATAGRAM frame, with length");
+                    trace!("DATAGRAM frame, with length");
                     d(dec.decode_vvec())?
                 };
                 Ok(Self::Datagram { data, fill })
