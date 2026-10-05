@@ -19,7 +19,9 @@ use crate::{
     datagram_queue::{DatagramQueueOutcome, default_max_age},
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
-    packet, recovery,
+    packet,
+    quic_datagrams::DATAGRAM_FRAME_TYPE_VARINT_LEN,
+    recovery,
     send_stream::{RetransmissionPriority, TransmissionPriority},
     streams::SendGroupId,
 };
@@ -38,7 +40,7 @@ const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
 const DATAGRAM_LEN_SMALLER_THAN_MTU: u64 = to_u64(MIN_INITIAL_PACKET_SIZE);
 const_assert!(DATAGRAM_LEN_SMALLER_THAN_MTU < to_u64(DATAGRAM_LEN_MTU));
-const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE];
+const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE - DATAGRAM_FRAME_TYPE_VARINT_LEN];
 const_assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
 const DATA_SMALLER_THAN_MTU_2: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE / 2];
 const_assert!(DATA_SMALLER_THAN_MTU_2.len() < DATA_SMALLER_THAN_MTU.len());
@@ -119,7 +121,7 @@ fn datagram_enabled_on_client() {
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
         server.max_datagram_size(),
-        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU)
+        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - DATAGRAM_FRAME_TYPE_VARINT_LEN as u64)
     );
     assert_eq!(
         client.enqueue_datagram(
@@ -163,7 +165,7 @@ fn datagram_enabled_on_server() {
 
     assert_eq!(
         client.max_datagram_size(),
-        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU)
+        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - DATAGRAM_FRAME_TYPE_VARINT_LEN as u64)
     );
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
@@ -524,13 +526,19 @@ fn datagram_sent_once() {
 
 #[test]
 fn dgram_too_big() {
-    let mut client =
-        new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
+    let mut client = new_client(
+        ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU - 1),
+    );
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
     let out = server
-        .test_write_frames(InsertDatagram { data: DATA_MTU }, now())
+        .test_write_frames(
+            InsertDatagram {
+                data: DATA_SMALLER_THAN_MTU,
+            },
+            now(),
+        )
         .dgram()
         .unwrap();
     client.process_input(out, now());
@@ -584,7 +592,10 @@ fn multiple_datagram_events() {
     const THIRD_DATAGRAM: &[u8] = &[2; DATA_SIZE];
     const FOURTH_DATAGRAM: &[u8] = &[3; DATA_SIZE];
 
-    let mut client = new_client(ConnectionParameters::default().datagram_size(to_u64(DATA_SIZE)));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .datagram_size(to_u64(DATA_SIZE + DATAGRAM_FRAME_TYPE_VARINT_LEN)),
+    );
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
@@ -832,7 +843,7 @@ fn enqueue_datagram_rejects_more_than_the_peers_limit() {
     assert_eq!(
         client.enqueue_datagram(
             session,
-            vec![0; limit + 1],
+            vec![0; limit],
             Some(1),
             now(),
             SendGroupId::new(0),
@@ -843,7 +854,7 @@ fn enqueue_datagram_rejects_more_than_the_peers_limit() {
     assert_eq!(
         client.enqueue_datagram(
             session,
-            vec![0; limit],
+            vec![0; limit - DATAGRAM_FRAME_TYPE_VARINT_LEN],
             Some(2),
             now(),
             SendGroupId::new(0),

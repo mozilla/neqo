@@ -109,18 +109,21 @@ impl QuicDatagrams {
     fn encode_datagram<B: Buffer>(
         data: &[u8],
         tracking: DatagramTracking,
+        remote_datagram_size: usize,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut Stats,
     ) {
         let len = data.len();
         let length_len = Encoder::varint_len(to_u64(len));
-        // Include a length if there is space for another frame after this one.
-        if builder.remaining()
-            >= DATAGRAM_FRAME_TYPE_VARINT_LEN
-                + length_len
-                + len
-                + packet::Builder::MINIMUM_FRAME_SIZE
+        let frame_size_with_len = DATAGRAM_FRAME_TYPE_VARINT_LEN + length_len + len;
+
+        // Include a length if there is space for another frame after this one
+        // and adding a length won't exceed the datagram frame size limit.
+        // We accept datagrams based on the encoded size of a frame without a length,
+        // so the varint length could cause the limit to be exceeded.
+        if remote_datagram_size >= frame_size_with_len
+            && builder.remaining() >= frame_size_with_len + packet::Builder::MINIMUM_FRAME_SIZE
         {
             builder.encode_frame(FrameType::DatagramWithLen, |b| {
                 b.encode_vvec(data);
@@ -174,7 +177,14 @@ impl QuicDatagrams {
                 let dgram = self
                     .take_from_session_queue(session)
                     .expect("just peeked Some above, with no intervening mutation");
-                Self::encode_datagram(&dgram.data, dgram.id.into(), builder, tokens, stats);
+                Self::encode_datagram(
+                    &dgram.data,
+                    dgram.id.into(),
+                    self.remote_datagram_size as usize,
+                    builder,
+                    tokens,
+                    stats,
+                );
             } else if full_mtu && builder.packet_empty() {
                 let dgram = self
                     .take_from_session_queue(session)
@@ -244,8 +254,8 @@ impl QuicDatagrams {
     ///
     /// # Errors
     ///
-    /// Returns `TooMuchData` if `data` is bigger than the allowed remote
-    /// datagram size.
+    /// Returns `TooMuchData` if the frame size would exceed the allowed remote
+    /// max datagram frame size.
     #[expect(
         clippy::too_many_arguments,
         reason = "Connection::enqueue_datagram's parameters plus the RTT the default max-age derives from"
@@ -260,10 +270,11 @@ impl QuicDatagrams {
         send_order: SendOrder,
         min_rtt: Duration,
     ) -> Res<DatagramQueueOutcome> {
-        if to_u64(data.len()) > self.remote_datagram_size {
+        let frame_len = data.len().saturating_add(DATAGRAM_FRAME_TYPE_VARINT_LEN);
+        if frame_len > self.remote_datagram_size as usize {
             qdebug!(
-                "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
-                data.len(),
+                "QUIC DATAGRAM frame exceeds remote limit, dropping it, frame size {}, remote DATAGRAM frame size limit {}.",
+                frame_len,
                 self.remote_datagram_size
             );
             return Err(Error::TooMuchData);
