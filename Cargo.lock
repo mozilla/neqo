@@ -868,9 +868,9 @@ version = "0.32.0"
 dependencies = [
  "cfg_aliases",
  "libc",
- "log",
  "neqo-common",
  "quinn-udp",
+ "tracing",
  "windows",
 ]
 
@@ -983,8 +983,8 @@ checksum = "3ca72c3f2792761ab5fa848490694cbc728c7f659669ed4320c4c79c12150966"
 dependencies = [
  "cfg_aliases",
  "libc",
- "log",
  "socket2",
+ "tracing",
  "windows-sys",
 ]
 
