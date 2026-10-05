@@ -45,6 +45,12 @@ const_assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
 const DATA_SMALLER_THAN_MTU_2: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE / 2];
 const_assert!(DATA_SMALLER_THAN_MTU_2.len() < DATA_SMALLER_THAN_MTU.len());
 
+/// A peer limit well below the path MTU, so that it, not the MTU, bounds the
+/// DATAGRAM frame.
+const FRAME_LIMIT: usize = 500;
+const DATA_AT_FRAME_LIMIT: &[u8] = &[0; FRAME_LIMIT];
+const_assert!(FRAME_LIMIT < DATAGRAM_LEN_MTU);
+
 struct InsertDatagram<'a> {
     data: &'a [u8],
 }
@@ -62,6 +68,17 @@ impl crate::connection::test_internal::FrameWriter for InsertEmptyDatagram {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder.encode_varint(FrameType::DatagramWithLen);
         builder.encode_vvec(&[]);
+    }
+}
+
+struct InsertDatagramWithLen<'a> {
+    data: &'a [u8],
+}
+
+impl crate::connection::test_internal::FrameWriter for InsertDatagramWithLen<'_> {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::DatagramWithLen);
+        builder.encode_vvec(self.data);
     }
 }
 
@@ -524,18 +541,82 @@ fn datagram_sent_once() {
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
+
+/// RFC 9221, Section 3: `max_datagram_frame_size` is "the maximum size of a
+/// DATAGRAM frame (including the frame type, length, and payload)".  A
+/// payload of `max_datagram_size()` bytes must therefore still fit the peer's
+/// limit once the frame type and the length prefix are added.  In an
+/// otherwise empty packet `write_frames` picks `DATAGRAM` with a length
+/// field, so that is the frame size the sender has to stay under.
 #[test]
-fn dgram_too_big() {
-    let mut client = new_client(
-        ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU - 1),
+fn max_datagram_size_leaves_room_for_the_frame_header() {
+    let mut client =
+        new_client(ConnectionParameters::default().datagram_size(MAX_DATAGRAM_FRAME_SIZE));
+    let mut server = new_server(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
+    connect_force_idle(&mut client, &mut server);
+
+    let max = client
+        .max_datagram_size()
+        .expect("the peer enabled DATAGRAM frames");
+    assert_eq!(max, to_u64(FRAME_LIMIT - DATAGRAM_FRAME_TYPE_VARINT_LEN));
+    assert_eq!(
+        client.enqueue_datagram(
+            StreamId::new(0),
+            vec![0; usize::try_from(max).unwrap()],
+            None,
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
     );
+
+    let out = client.process_output(now()).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.datagram, 1);
+    server.process_input(out, now());
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data.len() == usize::try_from(max).unwrap()
+    ));
+}
+
+/// The receiving side of the same rule (RFC 9221, Section 3): "An endpoint
+/// that receives a DATAGRAM frame that is larger than the value it sent in
+/// its max_datagram_frame_size transport parameter MUST terminate the
+/// connection with an error of type PROTOCOL_VIOLATION."  The injected frame
+/// has a payload of exactly the limit, so with its type byte it is one over.
+#[test]
+fn datagram_frame_over_local_limit_is_a_protocol_violation() {
+    let mut client = new_client(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
     let out = server
         .test_write_frames(
             InsertDatagram {
-                data: DATA_SMALLER_THAN_MTU,
+                data: DATA_AT_FRAME_LIMIT,
+            },
+            now(),
+        )
+        .dgram()
+        .unwrap();
+    client.process_input(out, now());
+
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+#[test]
+fn dgram_with_length_too_big() {
+    let mut client = new_client(
+        ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU - 3),
+    );
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let out = server
+        .test_write_frames(
+            InsertDatagramWithLen {
+                data: &DATA_SMALLER_THAN_MTU,
             },
             now(),
         )
