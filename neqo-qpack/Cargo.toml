@@ -15,21 +15,18 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-transport = { path = "./../neqo-transport", default-features = false }
 rustc-hash = { workspace = true }
 static_assertions = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 test-fixture = { path = "../test-fixture" }
 
-[package.metadata.cargo-machete]
-ignored = ["log"]
-
 [features]
-bench = ["neqo-common/bench", "neqo-transport/bench", "log/release_max_level_warn"]
+bench = ["neqo-common/bench", "neqo-transport/bench"]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
         "neqo-transport/build-fuzzing-corpus",
