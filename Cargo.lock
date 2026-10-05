@@ -828,13 +828,13 @@ dependencies = [
 name = "neqo-qpack"
 version = "0.32.0"
 dependencies = [
- "log",
  "neqo-common",
  "neqo-transport",
  "rustc-hash",
  "static_assertions",
  "test-fixture 0.32.0",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
