@@ -25,7 +25,6 @@ use neqo_common::{
     event::Provider as _,
     hex::Hex,
     qlog::{Qlog, new_trace},
-    qtrace,
 };
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
@@ -40,6 +39,7 @@ use qlog::{
     events::EventImportance,
     streamer::{EventTimePrecision, QlogStreamer},
 };
+use tracing::trace;
 
 pub mod assertions;
 pub mod header_protection;
@@ -539,7 +539,7 @@ fn split_packet(buf: &[u8]) -> (&[u8], Option<&[u8]>) {
     dec.skip_vvec(); // The rest of the packet.
     let p1 = &buf[..dec.offset()];
     let p2 = (dec.remaining() > 0).then(|| dec.decode_remainder());
-    qtrace!("split packet: {} {:?}", Hex::new(p1), p2.map(Hex::new));
+    trace!("split packet: {} {:?}", Hex::new(p1), p2.map(Hex::new));
     (p1, p2)
 }
 
