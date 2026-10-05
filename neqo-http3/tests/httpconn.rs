@@ -10,7 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{Datagram, event::Provider as _, expect_usize, qtrace};
+use neqo_common::{Datagram, event::Provider as _, expect_usize};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
@@ -18,6 +18,7 @@ use neqo_http3::{
 use neqo_transport::{CloseReason, ConnectionParameters, Error, Output, StreamDataLimit};
 use nss::{AuthenticationStatus, ResumptionToken};
 use test_fixture::*;
+use tracing::trace;
 
 const RESPONSE_DATA: &[u8] = &[0x61, 0x62, 0x63];
 
@@ -150,7 +151,7 @@ fn simple_connect() {
 fn fetch() {
     let (mut hconn_c, mut hconn_s, dgram) = connect();
 
-    qtrace!("-----client");
+    trace!("-----client");
     let req = hconn_c
         .fetch(
             now(),
@@ -163,13 +164,13 @@ fn fetch() {
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req, now()).unwrap();
     let out = hconn_c.process(dgram, now());
-    qtrace!("-----server");
+    trace!("-----server");
     let out = hconn_s.process(out.dgram(), now());
     drop(hconn_c.process(out.dgram(), now()));
     process_server_events(&hconn_s, now());
     let out = hconn_s.process(None::<Datagram>, now());
 
-    qtrace!("-----client");
+    trace!("-----client");
     drop(hconn_c.process(out.dgram(), now()));
     let out = hconn_s.process(None::<Datagram>, now());
     drop(hconn_c.process(out.dgram(), now()));
@@ -481,7 +482,7 @@ fn fetch_noresponse_will_idletimeout() {
     let (dgram, mut now) =
         connect_peers_with_network_propagation_delay(&mut hconn_c, &mut hconn_s, 10);
 
-    qtrace!("-----client");
+    trace!("-----client");
     let req = hconn_c
         .fetch(
             now,
@@ -494,7 +495,7 @@ fn fetch_noresponse_will_idletimeout() {
     assert_eq!(req, 0);
     hconn_c.stream_close_send(req, now).unwrap();
     let _out = hconn_c.process(dgram, now);
-    qtrace!("-----server");
+    trace!("-----server");
 
     let mut done = false;
     while !done {

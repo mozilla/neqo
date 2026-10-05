@@ -6,8 +6,9 @@
 
 use std::ops::Deref;
 
-use neqo_common::{Buffer, Decoder, Encoder, qdebug};
+use neqo_common::{Buffer, Decoder, Encoder};
 use nss::{ZeroRttCheckResult, ZeroRttChecker};
+use tracing::debug;
 
 use crate::{Error, Http3Parameters, Res};
 
@@ -205,7 +206,7 @@ impl HSettings {
                         .push(HSetting::new(HSettingType::EnableConnect, value));
                 }
                 (Some(t), Some(v)) => {
-                    qdebug!("Ignoring unknown setting type {t} with value {v}");
+                    debug!("Ignoring unknown setting type {t} with value {v}");
                 }
                 _ => return Err(Error::NotEnoughData),
             }
