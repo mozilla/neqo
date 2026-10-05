@@ -28,13 +28,13 @@ use crate::{
     server_events::{Http3ServerEvents, StreamHandler},
 };
 
-/// Connect-udp has no API of its own to set an outgoing-datagram high water
-/// mark (unlike `WebTransport`'s `outgoingMaxBufferedDatagrams`), so every
+/// Connect-udp has no API of its own to set an outgoing-datagram max-buffered
+/// limit (unlike `WebTransport`'s `outgoingMaxBufferedDatagrams`), so every
 /// connect-udp session, created or accepted, gets this one.  It matches the
 /// depth the legacy connection-wide datagram queue enforced for everyone
 /// before per-session queues replaced it, so connect-udp keeps the
 /// backpressure signal PR #3859 added.
-const DATAGRAM_HIGH_WATER_MARK: NonZeroUsize = NonZeroUsize::new(10).expect("nonzero");
+const MAX_BUFFERED_DATAGRAMS: NonZeroUsize = NonZeroUsize::new(10).expect("nonzero");
 
 pub trait ClientSession {
     /// Whether `CONNECT_UDP` is enabled on the connection.
@@ -204,7 +204,7 @@ impl Handler for Http3Connection {
             headers,
             extended_connect::ExtendedConnectType::ConnectUdp,
         )?;
-        conn.set_datagram_high_water_mark(id, Some(DATAGRAM_HIGH_WATER_MARK));
+        conn.set_max_buffered_datagrams(id, Some(MAX_BUFFERED_DATAGRAMS));
         Ok(id)
     }
 
@@ -229,7 +229,7 @@ impl Handler for Http3Connection {
             now,
         )?;
         if !matches!(accept_res, SessionAcceptAction::Reject(_)) {
-            conn.set_datagram_high_water_mark(stream_id, Some(DATAGRAM_HIGH_WATER_MARK));
+            conn.set_max_buffered_datagrams(stream_id, Some(MAX_BUFFERED_DATAGRAMS));
         }
         Ok(())
     }

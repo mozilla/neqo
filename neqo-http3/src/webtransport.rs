@@ -794,17 +794,17 @@ impl ServerSession {
             )
     }
 
-    /// Set the outgoing-datagram queue's high water mark for this session.
+    /// Set the outgoing-datagram queue's max-buffered limit for this session.
     ///
     /// Test-only: not yet exposed to a production caller.
     #[cfg(test)]
-    pub(crate) fn set_datagram_high_water_mark(&self, mark: Option<NonZeroUsize>) {
+    pub(crate) fn set_max_buffered_datagrams(&self, mark: Option<NonZeroUsize>) {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
             .borrow_mut()
             .base_handler_mut()
-            .extended_connect_set_datagram_high_water_mark(
+            .extended_connect_set_max_buffered_datagrams(
                 session_id,
                 &mut self.stream_handler.conn.borrow_mut(),
                 mark,

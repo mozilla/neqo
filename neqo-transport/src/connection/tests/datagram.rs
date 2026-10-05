@@ -868,11 +868,11 @@ fn expiring_a_blocked_queue_via_the_session_sweep_signals_space_available() {
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
 
     assert_eq!(
@@ -1010,23 +1010,23 @@ fn datagram_is_too_big_only_for_an_empty_full_mtu_packet() {
 fn enqueue_expires_stale_datagrams_before_charging_the_new_one() {
     // The application can write again after the deadline but before the
     // timer tick that would have expired the previous datagram. That stale
-    // entry must not count against the watermark, and a sender it blocked
+    // entry must not count against the max-buffered limit, and a sender it blocked
     // must be resumed.
     let (mut client, _server) = connect_datagram();
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
 
     let later = now + Duration::from_millis(10);
     assert_eq!(
         client.enqueue_datagram(session, vec![2], Some(2), later, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark),
+        Ok(DatagramQueueOutcome::MaxBufferedReached),
         "the new datagram alone fills a mark of 1"
     );
     assert_eq!(
@@ -1064,18 +1064,18 @@ fn process_timer_expires_a_stale_datagram_with_no_packets_pending() {
 #[test]
 fn expiring_a_blocked_session_queue_signals_space_available() {
     // Expiry, not a send, is how one of these queues is expected to shed
-    // load: a sender waiting above the high water mark for a queue that then
+    // load: a sender waiting above the max-buffered limit for a queue that then
     // ages out entirely would otherwise wait forever, since no send will ever
     // revisit an empty queue.
     let (mut client, _server) = connect_datagram();
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
 
     client.process_timer(now + Duration::from_millis(10));
@@ -1095,10 +1095,10 @@ fn shrinking_max_age_signals_space_available() {
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
 
     client.set_datagram_max_age(
@@ -1116,15 +1116,15 @@ fn shrinking_max_age_signals_space_available() {
 }
 
 #[test]
-fn resume_signal_fires_once_a_blocked_queue_drains_below_watermark() {
+fn resume_signal_fires_once_a_blocked_queue_drains_below_max_buffered() {
     let (mut client, mut server) = connect_datagram();
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
     assert_eq!(
         client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert!(
         !client
@@ -1143,21 +1143,21 @@ fn resume_signal_fires_once_a_blocked_queue_drains_below_watermark() {
         client
             .events()
             .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
-        "draining a blocked queue back below its watermark must fire a resume signal"
+        "draining a blocked queue back below its max-buffered limit must fire a resume signal"
     );
 }
 
-/// With a high water mark above one, a send that leaves the queue still at
+/// With a max-buffered limit above one, a send that leaves the queue still at
 /// the mark must not resume the sender, or it would write straight back into
 /// a full queue; the resume fires once, when the queue first drops below the
 /// mark, and not again for the rest of the drain.
 #[test]
-fn partial_drain_at_the_high_water_mark_does_not_resume() {
+fn partial_drain_at_the_max_buffered_limit_does_not_resume() {
     let (mut client, mut server) = connect_datagram();
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(2).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(2).unwrap()));
     // Each is too big to share a packet with the next, so they go out one
     // per `process_output`.
     assert_eq!(
@@ -1180,7 +1180,7 @@ fn partial_drain_at_the_high_water_mark_does_not_resume() {
             SendGroupId::new(0),
             0
         ),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert_eq!(
         client.enqueue_datagram(
@@ -1191,7 +1191,7 @@ fn partial_drain_at_the_high_water_mark_does_not_resume() {
             SendGroupId::new(0),
             0
         ),
-        Ok(DatagramQueueOutcome::AboveWatermark),
+        Ok(DatagramQueueOutcome::MaxBufferedReached),
         "a datagram queued above the mark is still accepted, not dropped"
     );
     assert!(client.next_event().is_none());
@@ -1241,7 +1241,7 @@ fn space_available_event_fires_on_each_fill_drain_cycle() {
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(2).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(2).unwrap()));
     for cycle in 0..3 {
         assert_eq!(
             client.enqueue_datagram(
@@ -1263,7 +1263,7 @@ fn space_available_event_fires_on_each_fill_drain_cycle() {
                 SendGroupId::new(0),
                 0
             ),
-            Ok(DatagramQueueOutcome::AboveWatermark)
+            Ok(DatagramQueueOutcome::MaxBufferedReached)
         );
 
         while let Some(out) = client.process_output(now).dgram() {
@@ -1287,7 +1287,7 @@ fn no_space_available_event_when_never_blocked() {
     let now = now();
     let session = StreamId::new(0);
 
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(2).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(2).unwrap()));
     assert_eq!(
         client.enqueue_datagram(
             session,
@@ -1324,9 +1324,9 @@ fn dropped_too_big_unblocks() {
     let session = StreamId::new(0);
 
     // Within the peer's datagram-size limit (so accepted) but too big for any
-    // packet (so dropped at send time); a high water mark of one makes it block
+    // packet (so dropped at send time); a max-buffered limit of one makes it block
     // the sender by itself.
-    client.set_datagram_high_water_mark(session, Some(NonZeroUsize::new(1).unwrap()));
+    client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
     assert_eq!(
         client.enqueue_datagram(
             session,
@@ -1336,7 +1336,7 @@ fn dropped_too_big_unblocks() {
             SendGroupId::new(0),
             0
         ),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert!(client.next_event().is_none());
 
