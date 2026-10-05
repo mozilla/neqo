@@ -18,9 +18,9 @@ use std::{
     slice::{self, ChunksMut},
 };
 
-use log::{Level, log_enabled};
-use neqo_common::{Datagram, Tos, datagram, qdebug, qtrace};
+use neqo_common::{Datagram, Tos, datagram};
 use quinn_udp::{EcnCodepoint, RecvMeta, Transmit, UdpSocketState};
+use tracing::{debug, trace};
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock;
 
@@ -73,7 +73,7 @@ pub fn send_inner(
     match state.try_send(socket, &transmit) {
         Ok(()) => {}
         Err(e) if is_emsgsize(&e) => {
-            qdebug!(
+            debug!(
                 "Failed to send datagram of size {} bytes, in {} segments, each {} bytes, from {} to {}. PMTUD probe? Ignoring error: {e}",
                 d.data().len(),
                 d.num_datagrams(),
@@ -87,13 +87,13 @@ pub fn send_inner(
             // The send queue is momentarily full. Don't map to WouldBlock: the
             // socket IS writable, so edge-triggered epoll/kqueue won't re-signal
             // and the send loop would hang. Drop the packet; QUIC will retransmit.
-            qdebug!("Interface send queue full (ENOBUFS), dropping packet: {e}");
+            debug!("Interface send queue full (ENOBUFS), dropping packet: {e}");
             return Ok(());
         }
         e @ Err(_) => return e,
     }
 
-    qtrace!(
+    trace!(
         "sent {} bytes, in {} segments, each {} bytes, from {} to {} ",
         d.data().len(),
         d.num_datagrams(),
@@ -157,9 +157,9 @@ pub fn recv_inner<'a, S: SocketRef>(
 
     let n = state.recv((&socket).into(), &mut iovs, &mut metas)?;
 
-    if log_enabled!(Level::Trace) {
+    if tracing::enabled!(tracing::Level::TRACE) {
         for meta in metas.iter().take(n) {
-            qtrace!(
+            trace!(
                 "received {} bytes, in {} segments, each {} bytes, from {} to {local_address}",
                 meta.len,
                 if meta.stride == 0 {
@@ -220,12 +220,9 @@ impl<'a> Iterator for DatagramIter<'a> {
 
             // Ignore empty datagrams.
             if meta.len == 0 || meta.stride == 0 {
-                qdebug!(
+                debug!(
                     "ignoring empty datagram from {} to {} len {} stride {}",
-                    meta.addr,
-                    self.local_address,
-                    meta.len,
-                    meta.stride
+                    meta.addr, self.local_address, meta.len, meta.stride
                 );
                 continue;
             }
