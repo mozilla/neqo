@@ -422,12 +422,14 @@ impl Session {
     }
 
     /// Send a datagram, as a QUIC datagram or, when the peer offers no QUIC
-    /// datagram support, an HTTP DATAGRAM Capsule.
+    /// datagram support, an HTTP DATAGRAM Capsule (connect-udp only).
     ///
     /// # Errors
     ///
     /// Returns an error if:
     /// - The session is not in Active state (`Error::Unavailable`).
+    /// - The peer supports neither QUIC DATAGRAM nor the HTTP DATAGRAM Capsule fallback
+    ///   (`Error::Transport(neqo_transport::Error::NotAvailable)`).
     /// - `send_group_id` is neither `SendGroupId::new(0)` (ungrouped) nor a group already
     ///   registered for this session (`Error::InvalidInput`).
     /// - The encoded datagram (including the session-id/protocol prefix) is longer than the peer's
@@ -452,7 +454,14 @@ impl Session {
             return Err(Error::Unavailable);
         }
 
-        if conn.remote_datagram_size() == 0 && self.protocol.datagram_capsule_support() {
+        if conn.remote_datagram_size() == 0 {
+            if !self.protocol.datagram_capsule_support() {
+                // WebTransport only negotiates with a peer that supports QUIC
+                // DATAGRAM, and connect-udp always has the Capsule fallback.
+                debug_assert!(false, "no datagram path to the peer");
+                qdebug!("[{self}]: peer supports neither QUIC DATAGRAM nor the Capsule fallback");
+                return Err(Error::Transport(neqo_transport::Error::NotAvailable));
+            }
             qtrace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
             // The Capsule path errors when the control stream's flow-control
             // window is exhausted, then emits a resume event once the stream is
