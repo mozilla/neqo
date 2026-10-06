@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
+use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
 #[cfg(test)]
 use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
@@ -400,6 +400,7 @@ impl Session {
     ) -> Res<()> {
         qdebug!("[{self}]: close_session");
         self.state = State::Done;
+        self.expire_datagrams(conn, now);
         self.drop_queued_datagrams(conn);
 
         if let Some(close_frame) = self.protocol.close_frame(error, message) {
@@ -472,8 +473,8 @@ impl Session {
                 self.datagram_capsule_blocked = true;
             }
             res?;
-            // This path never touches the queue, so it carries no
-            // backpressure signal.
+            // Never touches the queue or packet builder - count it sent immediately.
+            self.protocol.record_sent_outgoing_datagrams(1);
             return Ok(DatagramQueueOutcome::Ok);
         }
 
@@ -510,7 +511,32 @@ impl Session {
             send_order,
         )?;
         qtrace!("[{self}] enqueued datagram: {outcome:?}");
+        match &outcome {
+            DatagramQueueOutcome::Ok | DatagramQueueOutcome::MaxBufferedReached => {}
+            DatagramQueueOutcome::Rejected => self.report_dropped(1),
+            DatagramQueueOutcome::Overflowed { dropped } => self.report_dropped(*dropped),
+        }
         Ok(outcome)
+    }
+
+    /// Count `count` outgoing datagrams discarded without being sent and
+    /// without expiring.
+    fn report_dropped(&mut self, count: usize) {
+        self.protocol
+            .record_dropped_outgoing_datagrams(to_u64(count));
+    }
+
+    /// Drop this session's queue, counting what was still on it plus any
+    /// sent, expired or too-big counts not yet taken.
+    /// Not called on whole-connection close: the queues go with the `Connection`.
+    pub(crate) fn drop_queued_datagrams(&mut self, conn: &mut Connection) {
+        let dropped = conn.drop_session_datagrams(self.id);
+        self.protocol.record_sent_outgoing_datagrams(dropped.sent);
+        self.protocol
+            .record_expired_outgoing_datagrams(dropped.expired);
+        self.protocol
+            .record_dropped_outgoing_datagrams(dropped.too_big);
+        self.report_dropped(dropped.queued);
     }
 
     /// Set the outgoing-datagram queue's `outgoingMaxBufferedDatagrams`, or
@@ -560,10 +586,15 @@ impl Session {
         expired
     }
 
-    /// Drop this session's queue, which lives on `conn` and would otherwise
-    /// outlive the session.
-    pub(crate) fn drop_queued_datagrams(&self, conn: &mut Connection) {
-        conn.drop_session_datagrams(self.id);
+    /// Count this session's own datagrams written into a packet, or dropped
+    /// as too big for the path MTU, since the last call. See
+    /// `Connection::take_session_sent_datagrams` and
+    /// `Connection::take_session_too_big_datagrams`.
+    pub(crate) fn report_sent_datagrams(&mut self, conn: &mut Connection) {
+        let sent = conn.take_session_sent_datagrams(self.id);
+        self.protocol.record_sent_outgoing_datagrams(sent);
+        let too_big = conn.take_session_too_big_datagrams(self.id);
+        self.protocol.record_dropped_outgoing_datagrams(too_big);
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
@@ -770,9 +801,19 @@ pub(crate) trait Protocol: Debug + Display {
         None
     }
 
+    /// Record that `count` outgoing datagrams were actually handed to the
+    /// packet builder. A no-op default for protocols that don't track
+    /// [`SessionStats`].
+    fn record_sent_outgoing_datagrams(&mut self, _count: u64) {}
+
     /// Record that `count` outgoing datagrams expired before being sent.
     /// A no-op default for protocols that don't track [`SessionStats`].
     fn record_expired_outgoing_datagrams(&mut self, _count: u64) {}
+
+    /// Record that `count` outgoing datagrams were discarded without being
+    /// sent and without expiring. A no-op default for protocols that don't
+    /// track [`SessionStats`].
+    fn record_dropped_outgoing_datagrams(&mut self, _count: u64) {}
 
     fn protocol(&self) -> Option<&str> {
         None
