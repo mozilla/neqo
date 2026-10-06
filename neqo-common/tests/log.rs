@@ -4,24 +4,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{qdebug, qerror, qinfo, qtrace, qwarn};
+use tracing::{debug, error, info, trace, warn};
 
 #[test]
 fn basic() {
-    qerror!("error");
-    qwarn!("warn");
-    qinfo!("info");
-    qdebug!("debug");
-    qtrace!("trace");
+    neqo_common::log::init(None);
+    error!("error");
+    warn!("warn");
+    info!("info");
+    debug!("debug");
+    trace!("trace");
 }
 
 #[test]
 fn args() {
+    neqo_common::log::init(None);
     let num = 1;
     let obj = test_fixture::now();
-    qerror!("error {num} {obj:?}");
-    qwarn!("warn {num} {obj:?}");
-    qinfo!("info {num} {obj:?}");
-    qdebug!("debug {num} {obj:?}");
-    qtrace!("trace {num} {obj:?}");
+    error!("error {num} {obj:?}");
+    warn!("warn {num} {obj:?}");
+    info!("info {num} {obj:?}");
+    debug!("debug {num} {obj:?}");
+    trace!("trace {num} {obj:?}");
 }
