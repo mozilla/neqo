@@ -8,7 +8,8 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{qdebug, qlog::Qlog};
+use neqo_common::qlog::Qlog;
+use tracing::debug;
 
 use crate::{
     ConnectionParameters, SlowStart, Stats,
@@ -160,7 +161,7 @@ impl PacketSender {
     fn maybe_update_pacer_mtu(&mut self) {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
-            qdebug!(
+            debug!(
                 "PLPMTU changed from {} to {current_mtu}, updating pacer",
                 self.pacer.mtu()
             );

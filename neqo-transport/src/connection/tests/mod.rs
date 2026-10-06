@@ -15,9 +15,10 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Datagram, Decoder, Role, event::Provider as _, qdebug, qtrace};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _};
 use nss::{AllowZeroRtt, AuthenticationStatus, ResumptionToken, random};
 use test_fixture::{DEFAULT_ADDR, fixture_init, new_neqo_qlog, now};
+use tracing::{debug, trace};
 
 use super::{CloseReason, Connection, ConnectionId, Output, State, test_internal};
 use crate::{
@@ -238,7 +239,7 @@ where
             did_ping[a.role()] = true;
         }
         input = output.and_then(&mut modifier);
-        qtrace!("handshake: t += {:?}", rtt / 2);
+        trace!("handshake: t += {:?}", rtt / 2);
         now += rtt / 2;
         #[allow(clippy::allow_attributes, // TODO: Switch to expect once MSRV>=1.99.
                 clippy::mut_mut, reason = "Correct here.")]
@@ -374,7 +375,7 @@ where
     // Drain events from both as well.
     _ = client.events().count();
     _ = server.events().count();
-    qtrace!("----- connected and idle with RTT {rtt:?}");
+    trace!("----- connected and idle with RTT {rtt:?}");
     now
 }
 
@@ -398,7 +399,7 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
     const BLOCK_SIZE: usize = 4_096;
     loop {
         let bytes_sent = c.stream_send(stream, &[0x42; BLOCK_SIZE]).unwrap();
-        qtrace!("fill_cwnd wrote {bytes_sent} bytes");
+        trace!("fill_cwnd wrote {bytes_sent} bytes");
         if bytes_sent < BLOCK_SIZE {
             break;
         }
@@ -412,13 +413,13 @@ fn fill_stream(c: &mut Connection, stream: StreamId) {
 /// pacing, this looks at the congestion window to tell when to stop.
 /// Returns a list of datagrams and the new time.
 fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Datagram>, Instant) {
-    qtrace!("fill_cwnd starting cwnd: {}", cwnd_avail(c));
+    trace!("fill_cwnd starting cwnd: {}", cwnd_avail(c));
     fill_stream(c, stream);
 
     let mut total_dgrams = Vec::new();
     loop {
         let pkt = c.process_output(now);
-        qtrace!(
+        trace!(
             "fill_cwnd cwnd remaining={}, output: {pkt:?}",
             cwnd_avail(c)
         );
@@ -436,7 +437,7 @@ fn fill_cwnd(c: &mut Connection, stream: StreamId, mut now: Instant) -> (Vec<Dat
         }
     }
 
-    qtrace!(
+    trace!(
         "fill_cwnd sent {} bytes",
         total_dgrams.iter().map(Datagram::len).sum::<usize>()
     );
@@ -492,14 +493,14 @@ where
     let mut srv_buf = [0; 4_096];
 
     let in_dgrams = in_dgrams.into_iter();
-    qdebug!("[{dest}] ack_bytes {} datagrams", in_dgrams.len());
+    debug!("[{dest}] ack_bytes {} datagrams", in_dgrams.len());
     for dgram in in_dgrams {
         dest.process_input(dgram, now);
     }
 
     loop {
         let (bytes_read, _fin) = dest.stream_recv(stream, &mut srv_buf).unwrap();
-        qtrace!("[{dest}] ack_bytes read {bytes_read} bytes");
+        trace!("[{dest}] ack_bytes read {bytes_read} bytes");
         if bytes_read == 0 {
             break;
         }
@@ -529,13 +530,13 @@ fn induce_persistent_congestion(
 ) -> Instant {
     // Note: wait some arbitrary time that should be longer than pto
     // timer. This is rather brittle.
-    qtrace!("[{client}] induce_persistent_congestion");
+    trace!("[{client}] induce_persistent_congestion");
     now += AT_LEAST_PTO;
 
     let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qtrace!("[{client}] first PTO");
+    trace!("[{client}] first PTO");
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
     assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
@@ -543,7 +544,7 @@ fn induce_persistent_congestion(
     pto_counts[0] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qtrace!("[{client}] second PTO");
+    trace!("[{client}] second PTO");
     now += AT_LEAST_PTO * 2;
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
@@ -553,7 +554,7 @@ fn induce_persistent_congestion(
     pto_counts[1] = 1;
     assert_eq!(client.stats.borrow().pto_counts, pto_counts);
 
-    qtrace!("[{client}] third PTO");
+    trace!("[{client}] third PTO");
     now += AT_LEAST_PTO * 4;
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
@@ -618,7 +619,7 @@ fn send_something_paced_with_modifier(
     let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
     assert!(sender.stream_send(stream_id, DEFAULT_STREAM_DATA).is_ok());
     assert!(sender.stream_close_send(stream_id).is_ok());
-    qdebug!("[{sender}] send_something on {stream_id}");
+    debug!("[{sender}] send_something on {stream_id}");
     let dgram = match sender.process_output(now) {
         Output::Callback(t) => {
             assert!(allow_pacing, "send_something: unexpected delay");

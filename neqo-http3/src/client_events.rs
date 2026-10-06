@@ -7,10 +7,10 @@
 use neqo_common::{
     Bytes, Header,
     event::{Provider as EventProvider, Queue as EventQueue},
-    qtrace,
 };
 use neqo_transport::{AppError, StreamId, StreamType};
 use nss::ResumptionToken;
+use tracing::trace;
 
 use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
@@ -408,7 +408,7 @@ impl Http3ClientEvents {
                         succeeded,
                     )));
             }
-            _ => qtrace!("HSetting {feature_type:?} {succeeded} not handled"),
+            _ => trace!("HSetting {feature_type:?} {succeeded} not handled"),
         }
     }
 }

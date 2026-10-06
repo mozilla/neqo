@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qtrace};
+use tracing::{debug, trace};
 
 use crate::{
     cc::{
@@ -259,7 +259,7 @@ impl Cubic {
                 0.0
             }
         };
-        qtrace!("[{self}] New epoch");
+        trace!("[{self}] New epoch");
     }
 
     #[cfg(test)]
@@ -485,7 +485,7 @@ impl WindowAdjustment for Cubic {
             return;
         };
 
-        qdebug!(
+        debug!(
             "Spurious cong event: recovering cubic state from {} to {stored}",
             self.current
         );

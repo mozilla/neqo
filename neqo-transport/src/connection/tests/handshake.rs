@@ -19,7 +19,7 @@ use std::{
 
 #[cfg(not(feature = "disable-encryption"))]
 use neqo_common::Decoder;
-use neqo_common::{Datagram, event::Provider as _, qdebug, to_u64};
+use neqo_common::{Datagram, event::Provider as _, to_u64};
 use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
@@ -28,6 +28,7 @@ use test_fixture::{
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
     damage_ech_config, fixture_init, now, split_datagram, strip_padding,
 };
+use tracing::debug;
 
 use super::{
     super::{Connection, Output, State},
@@ -53,7 +54,7 @@ const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";
 
 fn full_handshake(pmtud: bool) {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = new_client(ConnectionParameters::default().pmtud(pmtud));
     let out = client.process_output(now());
     let out2 = client.process_output(now());
@@ -61,14 +62,14 @@ fn full_handshake(pmtud: bool) {
     assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
     assert_eq!(out2.as_dgram_ref().unwrap().len(), client.plpmtu());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = new_server(ConnectionParameters::default().pmtud(pmtud));
     server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
@@ -80,17 +81,17 @@ fn full_handshake(pmtud: bool) {
 
     assert!(maybe_authenticate(&mut client));
 
-    qdebug!("---- client: SH..FIN -> FIN");
+    debug!("---- client: SH..FIN -> FIN");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*client.state(), State::Connected);
 
-    qdebug!("---- server: FIN -> ACKS");
+    debug!("---- server: FIN -> ACKS");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*server.state(), State::Confirmed);
 
-    qdebug!("---- client: ACKS -> 0");
+    debug!("---- client: ACKS -> 0");
     let out = client.process(out.dgram(), now());
     if pmtud {
         // PMTUD causes a PING probe to be sent here
@@ -114,19 +115,19 @@ fn handshake_pmtud() {
 
 #[test]
 fn handshake_failed_authentication() {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let out = client.process_output(now());
     let out2 = client.process_output(now());
     assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
@@ -139,14 +140,14 @@ fn handshake_failed_authentication() {
 
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
-    qdebug!("---- client: Alert(certificate_revoked)");
+    debug!("---- client: Alert(certificate_revoked)");
     client.authenticated(AuthenticationStatus::CertRevoked, now());
 
-    qdebug!("---- client: -> Alert(certificate_revoked)");
+    debug!("---- client: -> Alert(certificate_revoked)");
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- server: Alert(certificate_revoked)");
+    debug!("---- server: Alert(certificate_revoked)");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(44)));

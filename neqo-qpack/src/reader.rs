@@ -6,8 +6,8 @@
 
 use std::{mem, str};
 
-use neqo_common::qdebug;
 use neqo_transport::{Connection, StreamId};
+use tracing::debug;
 
 use crate::{Error, Res, huffman, prefix::Prefix};
 
@@ -211,7 +211,7 @@ impl IntReader {
             b = s.read_byte()?;
 
             if (self.cnt == 63) && (b > 1 || (b == 1 && ((self.value >> 63) == 1))) {
-                qdebug!("Error decoding prefixed encoded int - IntegerOverflow");
+                debug!("Error decoding prefixed encoded int - IntegerOverflow");
                 return Err(Error::IntegerOverflow);
             }
             self.value += u64::from(b & 0x7f) << self.cnt;
@@ -306,7 +306,7 @@ impl LiteralReader {
     /// When this object is complete.
     pub fn read<T: ReadByte + Reader>(&mut self, s: &mut T) -> Res<Vec<u8>> {
         loop {
-            qdebug!("state = {:?}", self.state);
+            debug!("state = {:?}", self.state);
             match &mut self.state {
                 LiteralReaderState::ReadHuffman => {
                     let b = s.read_byte()?;

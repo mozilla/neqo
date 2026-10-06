@@ -33,7 +33,7 @@ use futures::{
     FutureExt as _,
     future::{Either, select, select_all},
 };
-use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
+use neqo_common::{Datagram, hex::Hex};
 use neqo_http3::Http3Server;
 use neqo_transport::{
     Connection, OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress,
@@ -46,6 +46,7 @@ use nss::{
 };
 use thiserror::Error;
 use tokio::time::Sleep;
+use tracing::{debug, error, info, warn};
 
 use crate::{SharedArgs, now, report_stats, send_data::SendData};
 
@@ -182,7 +183,7 @@ impl Args {
                     self.shared.quic_parameters.quic_version = vec![Version::Version1];
                 }
             } else {
-                qwarn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
+                warn!("Both -V and --qns-test were set. Ignoring testcase specific versions");
             }
 
             // These are the default for all tests except http3.
@@ -196,7 +197,7 @@ impl Args {
                 "handshake" | "transfer" | "resumption" | "multiconnect" | "v2" | "ecn" => {}
                 "connectionmigration" => {
                     if self.shared.quic_parameters.preferred_address().is_none() {
-                        qerror!("No preferred addresses set for connectionmigration test");
+                        error!("No preferred addresses set for connectionmigration test");
                         exit(127);
                     }
                 }
@@ -291,7 +292,7 @@ pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
     if args.ech {
         let (sk, pk) = generate_ech_keys().expect("should create ECH keys");
         server.enable_ech(random::<1>()[0], "public.example", &sk, &pk);
-        qinfo!("ECHConfigList: {}", Hex::new(server.ech_config()));
+        info!("ECHConfigList: {}", Hex::new(server.ech_config()));
     }
 }
 
@@ -306,12 +307,12 @@ pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
 pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendData, ()> {
     if is_qns_test {
         if path.split('/').any(|segment| segment == "..") {
-            qerror!("Rejecting path with '..' component: {path}");
+            error!("Rejecting path with '..' component: {path}");
             return Err(());
         }
         let file_path: PathBuf = ["/www", path.trim_matches('/')].iter().collect();
         fs::read(file_path).map(SendData::from).map_err(|e| {
-            qerror!("Failed to read {path}: {e}");
+            error!("Failed to read {path}: {e}");
         })
     } else {
         Ok(path
@@ -406,7 +407,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
             .min()
             .expect("At least one socket must be present")
             .try_into()
-            .inspect_err(|_| qerror!("Socket return GSO size of 0"))
+            .inspect_err(|_| error!("Socket return GSO size of 0"))
             .map_err(|_| io::Error::from(io::ErrorKind::Unsupported))?;
 
         loop {
@@ -432,7 +433,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                                 if e.raw_os_error() == Some(libc::EIO)
                                     && dgram.num_datagrams() > 1 =>
                             {
-                                qinfo!(
+                                info!(
                                     "`libc::sendmsg` failed with {e}; quinn-udp will halt segmentation offload"
                                 );
                                 // Drop the packets and let QUIC handle retransmission.
@@ -441,7 +442,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                             Err(e) if e.kind() == io::ErrorKind::ConnectionReset => {
                                 // See `read_and_process`. This call consumes the pending error,
                                 // so retry once, then let QUIC handle retransmission.
-                                qdebug!("Ignoring {e} on send, a peer probably closed its socket");
+                                debug!("Ignoring {e} on send, a peer probably closed its socket");
                                 if !retry_on_reset {
                                     break;
                                 }
@@ -452,7 +453,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                     }
                 }
                 OutputBatch::Callback(new_timeout) => {
-                    qdebug!("Setting timeout of {new_timeout:?}");
+                    debug!("Setting timeout of {new_timeout:?}");
                     *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
                     break;
                 }
@@ -474,7 +475,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                     // like quinn does.
                     //
                     // <https://github.com/quinn-rs/quinn/blob/35fe3379205ed2ace0e6a858f60f3a8a2ff6510e/quinn/src/endpoint.rs#L925-L929>
-                    qdebug!("Ignoring {e} on receive, a peer probably closed its socket");
+                    debug!("Ignoring {e} on receive, a peer probably closed its socket");
                     continue;
                 }
                 Err(e) => return Err(e),
@@ -584,14 +585,14 @@ pub fn run(
 
     let hosts = args.listen_addresses();
     if hosts.is_empty() {
-        qerror!("No valid hosts defined");
+        error!("No valid hosts defined");
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "No hosts").into());
     }
     let sockets: Vec<crate::udp::Socket> = hosts
         .into_iter()
         .map(|host| {
             let socket = crate::udp::Socket::bind(host)?;
-            qinfo!("Server waiting for connection on: {}", socket.local_addr());
+            info!("Server waiting for connection on: {}", socket.local_addr());
 
             Ok(socket)
         })

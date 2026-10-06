@@ -14,11 +14,12 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
+use neqo_common::{Bytes, Encoder, Header, to_u64};
 use neqo_transport::{
     Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
     send_stream, server::ConnectionRef, streams::SendOrder,
 };
+use tracing::{debug, info, trace};
 
 use crate::{
     Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
@@ -353,7 +354,7 @@ impl ClientSession for Http3Client {
         send_group_id: SendGroupId,
         send_order: SendOrder,
     ) -> Res<DatagramQueueOutcome> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        trace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_send_datagram(
             session_id,
@@ -457,7 +458,7 @@ impl Handler for Http3Connection {
         target: T,
         headers: &[Header],
     ) -> Res<StreamId> {
-        qinfo!("[{self}] Create WebTransport");
+        info!("[{self}] Create WebTransport");
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -478,7 +479,7 @@ impl Handler for Http3Connection {
         accept_res: &SessionAcceptAction,
         now: Instant,
     ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={accept_res}");
+        trace!("Respond to WebTransport session with accept={accept_res}");
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -500,7 +501,7 @@ impl Handler for Http3Connection {
         message: &str,
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
-        qtrace!("Close WebTransport session {session_id:?}");
+        trace!("Close WebTransport session {session_id:?}");
         // Snapshot the stats before tearing the session down, so the caller sees
         // the final values. This also rejects non-WebTransport sessions.
         //
@@ -689,7 +690,7 @@ impl ServerSession {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn response(&self, accept: &SessionAcceptAction, now: Instant) -> Res<()> {
-        qdebug!("[{self}] Set a response for a WebTransport session");
+        debug!("[{self}] Set a response for a WebTransport session");
         self.stream_handler
             .handler
             .borrow_mut()

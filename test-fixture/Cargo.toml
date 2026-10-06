@@ -15,7 +15,6 @@ readme.workspace = true
 workspace = true
 
 [dependencies]
-log = { workspace = true }
 neqo-common = { path = "../neqo-common", features = ["test-fixture"] }
 neqo-http3 = { path = "../neqo-http3", default-features = false, features = ["draft-29"] }
 neqo-transport = { path = "../neqo-transport", default-features = false, features = ["draft-29"] }
@@ -23,18 +22,15 @@ nss = { workspace = true }
 nss-test-fixture = { workspace = true }
 qlog = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 
 [features]
 bench = [
         "neqo-common/bench",
         "neqo-http3/bench",
         "neqo-transport/bench",
-        "log/release_max_level_warn",
 ]
 disable-random = []
-
-[package.metadata.cargo-machete]
-ignored = ["log"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

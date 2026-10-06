@@ -18,10 +18,11 @@ use std::{
 };
 
 use indexmap::IndexMap;
-use neqo_common::{Buffer, Encoder, Role, expect_usize, qdebug, qerror, qtrace, to_u64};
+use neqo_common::{Buffer, Encoder, Role, expect_usize, to_u64};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
 use static_assertions::const_assert;
+use tracing::{debug, error, trace};
 
 use crate::{
     AppError, Error, MAX_LOCAL_MAX_STREAM_DATA, Res,
@@ -387,7 +388,7 @@ impl RangeTracker {
 
     fn unmark_range(&mut self, off: u64, len: usize) {
         if len == 0 {
-            qdebug!("unmark 0-length range at {off}");
+            debug!("unmark 0-length range at {off}");
             return;
         }
 
@@ -408,7 +409,7 @@ impl RangeTracker {
             }
 
             if *cur_state == RangeState::Acked {
-                qdebug!(
+                debug!(
                     "Attempted to unmark Acked range {cur_off}-{cur_len} with unmark_range {off}-{end_off}"
                 );
             } else {
@@ -665,7 +666,7 @@ impl State {
     }
 
     fn transition(&mut self, new_state: Self) {
-        qtrace!("SendStream state {self:?} -> {new_state:?}");
+        trace!("SendStream state {self:?} -> {new_state:?}");
         *self = new_state;
     }
 }
@@ -965,7 +966,7 @@ impl SendStream {
             } => {
                 let (offset, slice) = send_buf.next_bytes()?;
                 if retransmission_only {
-                    qtrace!(
+                    trace!(
                         "next_bytes apply retransmission limit at {}",
                         self.retransmission_offset
                     );
@@ -1028,7 +1029,7 @@ impl SendStream {
     fn length_and_fill(data_len: usize, space: usize) -> (usize, bool) {
         if data_len >= space {
             // More data than space allows, or an exact fit => fast path.
-            qtrace!("SendStream::length_and_fill fill {space}");
+            trace!("SendStream::length_and_fill fill {space}");
             return (space, true);
         }
 
@@ -1041,7 +1042,7 @@ impl SendStream {
         // From here we can always fit `data_len`, but we might as well fill
         // if there is no space for the length field plus another frame.
         let fill = data_len + length_len + packet::Builder::MINIMUM_FRAME_SIZE > space;
-        qtrace!("SendStream::length_and_fill {data_len} fill {fill}");
+        trace!("SendStream::length_and_fill {data_len} fill {fill}");
         (data_len, fill)
     }
 
@@ -1083,14 +1084,14 @@ impl SendStream {
                     0
                 };
             if overhead > builder.remaining() {
-                qtrace!("[{self}] write_frame no space for header");
+                trace!("[{self}] write_frame no space for header");
                 return;
             }
 
             let (length, fill) = Self::length_and_fill(data.len(), builder.remaining() - overhead);
             let fin = fin_offset.is_some_and(|fo| fo == offset + to_u64(length));
             if length == 0 && !fin {
-                qtrace!("[{self}] write_frame no data, no fin");
+                trace!("[{self}] write_frame no data, no fin");
                 return;
             }
 
@@ -1136,7 +1137,7 @@ impl SendStream {
             | State::Send { .. }
             | State::DataSent { .. }
             | State::DataRecvd { .. } => {
-                qtrace!("[{self}] Reset acked while in {:?} state?", self.state);
+                trace!("[{self}] Reset acked while in {:?} state?", self.state);
             }
             State::ResetSent {
                 final_retired,
@@ -1168,7 +1169,7 @@ impl SendStream {
                     *frame_acked = true;
                 }
             }
-            State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
+            State::ResetRecvd { .. } => trace!("[{self}] already in ResetRecvd state"),
         }
     }
 
@@ -1255,7 +1256,7 @@ impl SendStream {
         if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
             fc.frame_lost(limit);
         } else {
-            qtrace!("[{self}] Ignoring lost STREAM_DATA_BLOCKED({limit})");
+            trace!("[{self}] Ignoring lost STREAM_DATA_BLOCKED({limit})");
         }
     }
 
@@ -1361,7 +1362,7 @@ impl SendStream {
                     }
                 }
             }
-            _ => qtrace!("[{self}] mark_as_acked called from state {:?}", self.state),
+            _ => trace!("[{self}] mark_as_acked called from state {:?}", self.state),
         }
     }
 
@@ -1372,7 +1373,7 @@ impl SendStream {
     )]
     pub fn mark_as_lost(&mut self, offset: u64, len: usize, fin: bool) {
         self.retransmission_offset = max(self.retransmission_offset, offset + to_u64(len));
-        qtrace!(
+        trace!(
             "[{self}] mark_as_lost retransmission offset={}",
             self.retransmission_offset
         );
@@ -1410,12 +1411,12 @@ impl SendStream {
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
     pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
-        qdebug!("[{self}] low watermark {watermark}, avail {}", self.avail());
+        debug!("[{self}] low watermark {watermark}, avail {}", self.avail());
         self.writable_event_low_watermark = watermark;
     }
 
     pub fn set_max_stream_data(&mut self, limit: u64) {
-        qdebug!("setting max_stream_data to {limit}");
+        debug!("setting max_stream_data to {limit}");
         if let State::Ready { fc, .. } | State::Send { fc, .. } = &mut self.state {
             let previous_limit = fc.available();
             if let Some(current_limit) = fc.update(limit) {
@@ -1458,7 +1459,7 @@ impl SendStream {
 
     fn send_internal(&mut self, buf: &[u8], atomic: bool) -> Res<usize> {
         if buf.is_empty() {
-            qerror!("[{self}] zero-length send on stream");
+            error!("[{self}] zero-length send on stream");
             return Err(Error::InvalidInput);
         }
 
@@ -1531,13 +1532,13 @@ impl SendStream {
                     committed,
                 });
             }
-            State::DataSent { .. } => qtrace!("[{self}] already in DataSent state"),
-            State::DataRecvd { .. } => qtrace!("[{self}] already in DataRecvd state"),
-            State::ResetSent { .. } => qtrace!("[{self}] already in ResetSent state"),
+            State::DataSent { .. } => trace!("[{self}] already in DataSent state"),
+            State::DataRecvd { .. } => trace!("[{self}] already in DataRecvd state"),
+            State::ResetSent { .. } => trace!("[{self}] already in ResetSent state"),
             State::ResetSentReliable { .. } => {
-                qtrace!("[{self}] already in ResetSentReliable state");
+                trace!("[{self}] already in ResetSentReliable state");
             }
-            State::ResetRecvd { .. } => qtrace!("[{self}] already in ResetRecvd state"),
+            State::ResetRecvd { .. } => trace!("[{self}] already in ResetRecvd state"),
         }
     }
 
@@ -1649,7 +1650,7 @@ impl SendStream {
             | State::ResetSent { .. }
             | State::ResetSentReliable { .. }
             | State::ResetRecvd { .. } => {
-                qtrace!("[{}] reset called in terminal state", self.stream_id);
+                trace!("[{}] reset called in terminal state", self.stream_id);
                 return;
             }
         };
@@ -1724,7 +1725,7 @@ impl SendStream {
             return;
         }
 
-        qtrace!(
+        trace!(
             "[{self}] writable, low watermark {low_watermark}, avail {}",
             self.avail()
         );
@@ -2056,7 +2057,7 @@ impl SendStreams {
                 stream.set_sendorder(sendorder);
             }
             self.insert_into_group(gid, stream_id, sendorder);
-            qtrace!("stream {stream_id} sendorder -> {sendorder:?} in group {gid:?}");
+            trace!("stream {stream_id} sendorder -> {sendorder:?} in group {gid:?}");
         }
         Ok(())
     }
@@ -2219,12 +2220,12 @@ impl SendStreams {
 
         // First: unfair streams (non-WebTransport H3 streams, by creation order).
         // Then: all fair streams via per-group round-robin (includes null sendGroup).
-        qtrace!("processing streams...  unfair:");
+        trace!("processing streams...  unfair:");
         for stream in self.map.values_mut() {
             if stream.is_fair() || !stream.has_data_at(priority) {
                 continue;
             }
-            qtrace!("   {stream}");
+            trace!("   {stream}");
             if !stream.write_frames(priority, builder, tokens, stats) {
                 break;
             }
@@ -2324,7 +2325,7 @@ impl SendStreams {
                         // lower-sendOrder bucket jump ahead while a same-bucket peer still has
                         // sendable data (WebTransport send-order rules).
                         for stream_id in order_grp.iter() {
-                            qtrace!("send group {idx}: stream {stream_id}");
+                            trace!("send group {idx}: stream {stream_id}");
                             // End the group's turn only if an actual STREAM frame was written,
                             // not on any builder growth (see flow-control note above).
                             let before = stats.stream;
@@ -2347,7 +2348,7 @@ impl SendStreams {
                     // sendOrder streams have no priority among themselves, so this only affects
                     // latency, not the WebTransport "MUST NOT starve" guarantee.
                     for stream_id in grp.regular.iter() {
-                        qtrace!("send group {idx}: stream {stream_id}");
+                        trace!("send group {idx}: stream {stream_id}");
                         let before = stats.stream;
                         if let Some(stream) = map.get_mut(&stream_id)
                             && !stream.write_frames(priority, builder, tokens, stats)
@@ -2418,8 +2419,9 @@ mod tests {
     use std::{cell::RefCell, collections::VecDeque, num::NonZeroUsize, rc::Rc};
 
     use neqo_common::{
-        Encoder, MAX_VARINT, event::Provider as _, expect_usize, hex::HexWithLen, qtrace, to_u64,
+        Encoder, MAX_VARINT, event::Provider as _, expect_usize, hex::HexWithLen, to_u64,
     };
+    use tracing::trace;
 
     use super::RecoveryToken;
     use crate::{
@@ -4037,7 +4039,7 @@ mod tests {
     fn frame_sent_sid(stream: u64, offset: usize, len: usize, fin: bool, space: usize) -> bool {
         const BUF: &[u8] = &[0x42; 128];
 
-        qtrace!("frame_sent stream={stream} offset={offset} len={len} fin={fin}, space={space}");
+        trace!("frame_sent stream={stream} offset={offset} len={len} fin={fin}, space={space}");
 
         let mut s = stream_with_sent(stream, offset);
 
@@ -4062,7 +4064,7 @@ mod tests {
             &mut tokens,
             &mut stats,
         );
-        qtrace!(
+        trace!(
             "STREAM frame: {}",
             HexWithLen::new(&builder.as_ref()[header_len..])
         );
@@ -4146,7 +4148,7 @@ mod tests {
 
     fn stream_frame_at_boundary(data: &[u8]) {
         fn send_with_extra_capacity(data: &[u8], extra: usize, expect_full: bool) -> Vec<u8> {
-            qtrace!("send_with_extra_capacity {} + {extra}", data.len());
+            trace!("send_with_extra_capacity {} + {extra}", data.len());
             let mut s = stream_with_sent(0, 0);
             s.send(data).unwrap();
             s.close();

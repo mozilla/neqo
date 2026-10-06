@@ -17,8 +17,9 @@ mod tests;
 
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
-use neqo_common::{Bytes, Header, Role, qdebug};
+use neqo_common::{Bytes, Header, Role};
 use neqo_transport::StreamId;
+use tracing::debug;
 
 use crate::{
     Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res, SendStreamEvents,
@@ -152,7 +153,7 @@ impl ExtendedConnectFeature {
             && self.enabled()
             && !transport_prereqs.reliable_reset
         {
-            qdebug!(
+            debug!(
                 "WebTransport negotiated without peer reliable reset; stream resets use RESET_STREAM"
             );
         }

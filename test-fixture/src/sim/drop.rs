@@ -11,8 +11,9 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, qtrace};
+use neqo_common::Datagram;
 use neqo_transport::Output;
+use tracing::trace;
 
 use super::{Node, Rng};
 
@@ -64,7 +65,7 @@ impl Node for Drop {
     fn process(&mut self, d: Option<Datagram>, _now: Instant) -> Output {
         d.map_or(Output::None, |dgram| {
             if self.drop() {
-                qtrace!("drop {}", dgram.len());
+                trace!("drop {}", dgram.len());
                 Output::None
             } else {
                 Output::Datagram(dgram)

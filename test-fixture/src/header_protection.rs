@@ -13,12 +13,13 @@
 
 use std::ops::Range;
 
-use neqo_common::{Datagram, Decoder, Role, hex::HexWithLen, qtrace};
+use neqo_common::{Datagram, Decoder, Role, hex::HexWithLen};
 use nss::{
     Mode, RecordProtection as Aead,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf, hp,
 };
+use tracing::trace;
 
 pub use crate::{CountingConnectionIdGenerator, default_client, now};
 
@@ -145,7 +146,7 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
                 .expect("Failed to convert sample slice to array for header protection mask"),
         )
         .expect("Failed to generate header protection mask");
-    qtrace!(
+    trace!(
         "sample={} mask={}",
         HexWithLen::new(&packet[sample_start..sample_end]),
         HexWithLen::new(mask)

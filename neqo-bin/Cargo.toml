@@ -39,7 +39,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = { workspace = true, features = ["std"] }
 http = { workspace = true }
 libc = { workspace = true }
-log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-http3 = { path = "./../neqo-http3" }
 neqo-transport = { path = "./../neqo-transport", default-features = false }
@@ -53,6 +52,7 @@ serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 tokio = { version = "1", default-features = false, features = ["net", "time", "macros", "rt"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "5", package = "codspeed-criterion-compat", default-features = false, features = [
@@ -63,7 +63,7 @@ test-fixture = { path = "../test-fixture" }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_warn"]
+bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench"]
 blapi = ["neqo-transport/blapi"]
 default = ["blapi"]
 draft-29 = ["neqo-http3/draft-29", "neqo-transport/draft-29"]

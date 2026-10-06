@@ -9,7 +9,7 @@ mod common;
 use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use neqo_common::{Datagram, Decoder, Encoder, Role, qtrace};
+use neqo_common::{Datagram, Decoder, Encoder, Role};
 use neqo_transport::{
     CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output, State,
     StreamType, Version,
@@ -25,6 +25,7 @@ use test_fixture::{
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
     new_client, now, split_datagram,
 };
+use tracing::trace;
 
 /// Take a pair of connections in any state and complete the handshake.
 /// The `datagram` argument is a packet that was received from the server.
@@ -773,7 +774,7 @@ fn closed() {
     let res = client.process_output(now());
     assert!(res.callback() > Duration::new(0, 0));
 
-    qtrace!("60s later");
+    trace!("60s later");
     let res = server.process_output(now() + Duration::from_secs(60));
     assert_eq!(res, Output::None);
 }

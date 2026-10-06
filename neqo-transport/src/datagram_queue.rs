@@ -21,7 +21,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{qdebug, qtrace, to_u64};
+use neqo_common::to_u64;
+use tracing::{debug, trace};
 
 use crate::{
     rtt::{DEFAULT_INITIAL_RTT, GRANULARITY},
@@ -413,7 +414,7 @@ impl DatagramQueue {
     /// a caller with several writables on one session has to scale the value
     /// it sets here, or leave the mark `None` and gate per writable itself.
     pub fn set_max_buffered_datagrams(&mut self, mark: Option<NonZeroUsize>) {
-        qtrace!("Setting max-buffered limit to {mark:?}");
+        trace!("Setting max-buffered limit to {mark:?}");
         self.max_buffered_datagrams = mark;
     }
 
@@ -424,7 +425,7 @@ impl DatagramQueue {
     /// away from [`DEFAULT_MAX_QUEUED_BYTES`].
     #[cfg(test)]
     pub fn set_max_queued_bytes(&mut self, bytes: usize) {
-        qtrace!("Setting max queued bytes to {bytes}");
+        trace!("Setting max queued bytes to {bytes}");
         self.max_queued_bytes = bytes;
     }
 
@@ -447,7 +448,7 @@ impl DatagramQueue {
         default_max_age: Duration,
     ) {
         let clamped = max_age.map(|v| v.max(EXPLICIT_MAX_AGE_FLOOR));
-        qtrace!("Setting max age to {max_age:?} (clamped: {clamped:?})");
+        trace!("Setting max age to {max_age:?} (clamped: {clamped:?})");
         self.max_age = clamped;
         _ = self.expire(now, default_max_age);
     }
@@ -523,11 +524,9 @@ impl DatagramQueue {
             let dgram = group.pop_front(order)?;
             (dgram, group.is_empty())
         };
-        qdebug!(
+        debug!(
             "Queue at byte budget ({}/{}), dropping datagram {:?} from group {group_id:?}",
-            self.total_bytes,
-            self.max_queued_bytes,
-            dgram.id,
+            self.total_bytes, self.max_queued_bytes, dgram.id,
         );
         Some(self.finish_removal(group_id, group_empty, dgram))
     }
@@ -587,11 +586,10 @@ impl DatagramQueue {
             }
         }
         if outranked && evicted_count == 0 {
-            qdebug!(
+            debug!(
                 "Queue at byte budget ({}/{}), dropping incoming datagram {id:?} \
                  (group={send_group_id:?}, order={send_order}): lower priority than everything queued",
-                self.total_bytes,
-                self.max_queued_bytes
+                self.total_bytes, self.max_queued_bytes
             );
             // A full queue is backpressure whatever the max-buffered limit says,
             // and the caller is told to wait for a resume signal on every
@@ -622,11 +620,10 @@ impl DatagramQueue {
             self.block_on(ANY_PROGRESS);
             DatagramQueueOutcome::MaxBufferedReached
         };
-        qtrace!(
+        trace!(
             "Enqueued datagram {id:?} (group={send_group_id:?}, order={send_order}), \
              total={} ({} bytes), outcome: {outcome:?}",
-            self.total_count,
-            self.total_bytes,
+            self.total_count, self.total_bytes,
         );
 
         outcome
@@ -663,7 +660,7 @@ impl DatagramQueue {
         let group = self.groups.get_mut(&group_id)?;
         let (order, dgram) = group.pop_highest()?;
         let drained = group.is_empty();
-        qtrace!(
+        trace!(
             "Datagram {:?} taken (group={group_id:?}, order={order})",
             dgram.id
         );
