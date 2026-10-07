@@ -6,7 +6,11 @@
 
 #![expect(clippy::missing_errors_doc, reason = "Passing up tokio errors.")]
 
-use std::{io, iter, net::SocketAddr};
+use std::{
+    io, iter,
+    net::SocketAddr,
+    task::{Context, Poll},
+};
 
 use neqo_common::{datagram, qdebug, qwarn};
 use neqo_udp::{DatagramIter, RecvBuf};
@@ -100,6 +104,11 @@ impl Socket {
     /// See [`tokio::net::UdpSocket::readable`].
     pub async fn readable(&self) -> Result<(), io::Error> {
         self.inner.readable().await
+    }
+
+    /// See [`tokio::net::UdpSocket::poll_recv_ready`].
+    pub fn poll_readable(&self, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        self.inner.poll_recv_ready(cx)
     }
 
     /// Send a [`datagram::Batch`] on the given [`Socket`].
