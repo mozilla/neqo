@@ -122,13 +122,15 @@ impl Display for HttpServer {
 }
 
 impl super::HttpServer for HttpServer {
-    fn process_multiple<'a, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
+    fn process_multiple<'a, 'b, D: IntoIterator<Item = Datagram<&'a mut [u8]>>>(
         &mut self,
         dgrams: D,
         now: Instant,
+        send_buf: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        self.server.process_multiple(dgrams, now, max_datagrams)
+    ) -> OutputBatch<'b> {
+        self.server
+            .process_multiple(dgrams, now, send_buf, max_datagrams)
     }
 
     fn process_events(&mut self, _now: Instant) {

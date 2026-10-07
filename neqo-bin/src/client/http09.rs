@@ -190,12 +190,13 @@ impl TryFrom<&State> for CloseState {
 }
 
 impl super::Client for Connection {
-    fn process_multiple_output(
+    fn process_multiple_output<'b>(
         &mut self,
         now: Instant,
+        send_buf: &'b mut Vec<u8>,
         max_datagrams: NonZeroUsize,
-    ) -> OutputBatch {
-        self.process_multiple_output(now, max_datagrams)
+    ) -> OutputBatch<'b> {
+        self.process_multiple_output(now, send_buf, max_datagrams)
     }
 
     fn process_multiple_input<'a>(

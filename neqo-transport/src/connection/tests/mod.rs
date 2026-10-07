@@ -10,6 +10,7 @@ use std::{
     convert::identity,
     mem,
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -801,4 +802,48 @@ fn server_receives_new_token() {
             ..
         }
     ));
+}
+
+/// One buffer shared across connections must yield only the later one's bytes.
+#[test]
+fn shared_send_buffer_across_connections() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    client.stream_close_send(stream_id).unwrap();
+
+    // Dirty the buffer, so the reuse below can leak.
+    let mut buf = Vec::new();
+    let batch = client
+        .process_multiple_output(now(), &mut buf, NonZeroUsize::MIN)
+        .dgram()
+        .expect("a datagram");
+    assert_eq!(batch.num_datagrams(), 1);
+    assert_eq!(batch.data().len(), batch.datagram_size().get());
+    let d = Datagram::new(
+        batch.source(),
+        batch.destination(),
+        batch.tos(),
+        batch.data(),
+    );
+
+    // A connection with nothing to send must leave the buffer empty.
+    let mut idle = default_client();
+    let mut idle_server = default_server();
+    connect_force_idle(&mut idle, &mut idle_server);
+    assert!(
+        idle.process_multiple_output(now(), &mut buf, NonZeroUsize::MIN)
+            .dgram()
+            .is_none()
+    );
+    assert!(buf.is_empty());
+
+    server.process_input(d, now());
+    assert!(
+        server
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::RecvStreamReadable { .. }))
+    );
 }

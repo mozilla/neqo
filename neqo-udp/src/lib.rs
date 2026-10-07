@@ -30,6 +30,12 @@ use windows::Win32::Networking::WinSock;
 /// offloading, multiple smaller datagrams.
 const RECV_BUF_SIZE: usize = u16::MAX as usize;
 
+/// Send buffer size
+///
+/// Has to hold the largest PMTUD probe, which reaches the top of
+/// `neqo-transport`'s search table; that top also bounds a batch.
+const SEND_BUF_SIZE: usize = u16::MAX as usize;
+
 /// The number of buffers to pass to the OS on [`Socket::recv`].
 ///
 /// Platforms without segmentation offloading, i.e. platforms not able to read
@@ -57,10 +63,30 @@ impl Default for RecvBuf {
     }
 }
 
+/// A UDP send buffer, empty but with its pages resident.
+///
+/// Pre-touching avoids faulting pages in on the first large batch.
+pub struct SendBuf(Vec<u8>);
+
+impl Default for SendBuf {
+    fn default() -> Self {
+        // `vec![0; _]` lowers to `alloc_zeroed`, which may not touch a page.
+        let mut buf = vec![0xff; SEND_BUF_SIZE];
+        buf.clear();
+        Self(buf)
+    }
+}
+
+impl AsMut<Vec<u8>> for SendBuf {
+    fn as_mut(&mut self) -> &mut Vec<u8> {
+        &mut self.0
+    }
+}
+
 pub fn send_inner(
     state: &UdpSocketState,
     socket: quinn_udp::UdpSockRef<'_>,
-    d: &datagram::Batch,
+    d: &datagram::Batch<'_>,
 ) -> io::Result<()> {
     let transmit = Transmit {
         destination: d.destination(),
@@ -269,7 +295,7 @@ impl<S: SocketRef> Socket<S> {
     }
 
     /// Send a [`datagram::Batch`] on the given [`Socket`].
-    pub fn send(&self, d: &datagram::Batch) -> io::Result<()> {
+    pub fn send(&self, d: &datagram::Batch<'_>) -> io::Result<()> {
         send_inner(&self.state, (&self.inner).into(), d)
     }
 
@@ -341,13 +367,14 @@ mod tests {
         let receiver = socket()?;
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
-        let datagram: datagram::Batch = Datagram::new(
+        let mut buf = b"Hello, world!".to_vec();
+        let datagram = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
-            b"Hello, world!".to_vec(),
-        )
-        .into();
+            NonZeroUsize::new(buf.len()).unwrap(),
+            &mut buf,
+        );
 
         sender.send(&datagram)?;
 
@@ -454,13 +481,13 @@ mod tests {
         let receiver_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
 
         let max_gso_segments = sender.max_gso_segments();
-        let msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
+        let mut msg = vec![0xAB; SEGMENT_SIZE * max_gso_segments];
         let batch = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect0)),
             NonZeroUsize::new(SEGMENT_SIZE).expect("SEGMENT_SIZE cannot be zero"),
-            msg,
+            &mut msg,
         );
 
         sender.send(&batch)?;
@@ -499,12 +526,13 @@ mod tests {
         // `effective_segment_size()` returns `None`, and Windows silently truncates
         // the oversized datagram instead of returning `EMSGSIZE`.
         let segment_size = usize::from(u16::MAX) + 1;
+        let mut oversized = vec![0; segment_size * 2];
         let oversized_batch = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
             NonZeroUsize::new(segment_size).unwrap(),
-            vec![0; segment_size * 2],
+            &mut oversized,
         );
         sender.send(&oversized_batch)?;
 
@@ -515,13 +543,14 @@ mod tests {
         }
 
         // Now send a normal datagram to ensure that the socket is still usable.
-        let normal_datagram = Datagram::new(
+        let mut buf = b"Hello World!".to_vec();
+        let normal_datagram = datagram::Batch::new(
             sender.inner.local_addr()?,
             receiver.inner.local_addr()?,
             Tos::from((Dscp::Le, Ecn::Ect1)),
-            b"Hello World!".to_vec(),
-        )
-        .into();
+            NonZeroUsize::new(buf.len()).unwrap(),
+            &mut buf,
+        );
         sender.send(&normal_datagram)?;
 
         let mut recv_buf = RecvBuf::default();
