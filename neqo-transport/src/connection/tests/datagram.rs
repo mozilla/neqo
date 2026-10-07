@@ -571,8 +571,8 @@ fn max_dgram_size_leaves_room_for_frame_header() {
 
 /// The receiving side of the same rule (RFC 9221, Section 3): "An endpoint
 /// that receives a DATAGRAM frame that is larger than the value it sent in
-/// its max_datagram_frame_size transport parameter MUST terminate the
-/// connection with an error of type PROTOCOL_VIOLATION."  The injected frame
+/// its `max_datagram_frame_size` transport parameter MUST terminate the
+/// connection with an error of type `PROTOCOL_VIOLATION`."  The injected frame
 /// has a payload of exactly the limit, so with its type byte it is one over.
 #[test]
 fn dgram_frame_over_local_limit_is_protocol_violation() {

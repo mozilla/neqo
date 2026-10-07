@@ -109,7 +109,7 @@ impl QuicDatagrams {
     fn encode_datagram<B: Buffer>(
         data: &[u8],
         tracking: DatagramTracking,
-        remote_datagram_size: usize,
+        remote_datagram_size: u64,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut Stats,
@@ -122,7 +122,7 @@ impl QuicDatagrams {
         // and adding a length won't exceed the datagram frame size limit.
         // We accept datagrams based on the encoded size of a frame without a length,
         // so the varint length could cause the limit to be exceeded.
-        if remote_datagram_size >= frame_size_with_len
+        if remote_datagram_size >= to_u64(frame_size_with_len)
             && builder.remaining() >= frame_size_with_len + packet::Builder::MINIMUM_FRAME_SIZE
         {
             builder.encode_frame(FrameType::DatagramWithLen, |b| {
@@ -180,7 +180,7 @@ impl QuicDatagrams {
                 Self::encode_datagram(
                     &dgram.data,
                     dgram.id.into(),
-                    self.remote_datagram_size as usize,
+                    self.remote_datagram_size,
                     builder,
                     tokens,
                     stats,
@@ -271,10 +271,9 @@ impl QuicDatagrams {
         min_rtt: Duration,
     ) -> Res<DatagramQueueOutcome> {
         let frame_len = data.len().saturating_add(DATAGRAM_FRAME_TYPE_VARINT_LEN);
-        if frame_len > self.remote_datagram_size as usize {
+        if to_u64(frame_len) > self.remote_datagram_size {
             qdebug!(
-                "QUIC DATAGRAM frame exceeds remote limit, dropping it, frame size {}, remote DATAGRAM frame size limit {}.",
-                frame_len,
+                "QUIC DATAGRAM frame exceeds remote limit, dropping it, frame size {frame_len}, remote DATAGRAM frame size limit {}.",
                 self.remote_datagram_size
             );
             return Err(Error::TooMuchData);
