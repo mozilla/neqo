@@ -195,6 +195,7 @@ impl Http3ServerHandler {
             return;
         }
 
+        self.base_handler.expire_datagram_queues(conn, now);
         let res = self.check_connection_events(conn, now);
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn, now);

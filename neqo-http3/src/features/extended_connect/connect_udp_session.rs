@@ -23,6 +23,9 @@ use crate::{
     send_message::SendMessage,
 };
 
+/// The only context ID RFC 9298 defines: the payload is a UDP packet.
+const CONTEXT_ID: u64 = 0;
+
 #[derive(Debug)]
 pub struct Session {
     frame_reader: FrameReader,
@@ -99,8 +102,8 @@ impl Protocol for Session {
         }
     }
 
-    fn write_datagram_prefix(&self, encoder: &mut Encoder) {
-        encoder.encode_varint(0u64);
+    fn datagram_prefix(&self) -> Option<u64> {
+        Some(CONTEXT_ID)
     }
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {
@@ -131,8 +134,8 @@ impl Protocol for Session {
         buf: &[u8],
         now: Instant,
     ) -> Res<()> {
-        let mut dgram_data = Encoder::default();
-        self.write_datagram_prefix(&mut dgram_data);
+        let mut dgram_data = Encoder::with_capacity(Encoder::varint_len(CONTEXT_ID) + buf.len());
+        dgram_data.encode_varint(CONTEXT_ID);
         dgram_data.encode(buf);
         // TODO: Make Capsule abstract over either an owned (Bytes) or borrowed (&[u8]) type
         // to avoid this allocation.

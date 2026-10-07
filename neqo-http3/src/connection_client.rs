@@ -746,6 +746,8 @@ impl Http3Client {
         qtrace!("[{self}] Process http3 internal");
         match self.base_handler.state() {
             Http3State::ZeroRtt | Http3State::Connected | Http3State::GoingAway(..) => {
+                self.base_handler
+                    .expire_datagram_queues(&mut self.conn, now);
                 let res = self.check_connection_events(now);
                 if self.check_result(now, &res) {
                     return;

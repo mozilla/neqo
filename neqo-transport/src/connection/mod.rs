@@ -44,16 +44,17 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
     packet,
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
+    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagrams},
     recovery::{self, SendProfile, sent},
     recv_stream,
-    rtt::{GRANULARITY, RttEstimate},
+    rtt::{DEFAULT_INITIAL_RTT, GRANULARITY, RttEstimate},
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
@@ -472,11 +473,7 @@ impl Connection {
 
         let stats = StatsCell::default();
         let events = ConnectionEvents::default();
-        let quic_datagrams = QuicDatagrams::new(
-            conn_params.get_datagram_size(),
-            conn_params.get_outgoing_datagram_queue(),
-            events.clone(),
-        );
+        let quic_datagrams = QuicDatagrams::new(conn_params.get_datagram_size(), events.clone());
 
         let c = Self {
             role,
@@ -1113,6 +1110,12 @@ impl Connection {
 
         self.streams.cleanup_closed_streams();
 
+        // Not gated on anything else needing to happen: expiry is not a
+        // send, so stale datagrams must not wait on some other timer to
+        // also be due.
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams.expire_datagrams(now, min_rtt);
+
         let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
 
@@ -1245,6 +1248,11 @@ impl Connection {
         if let Some(key_update_time) = self.crypto.states().update_time() {
             qtrace!("[{self}] Key update timer {key_update_time:?}");
             delays.push(key_update_time);
+        }
+
+        if let Some(dgram_time) = self.quic_datagrams.next_datagram_expiry(self.min_rtt()) {
+            qtrace!("[{self}] Datagram expiry timer {dgram_time:?}");
+            delays.push(dgram_time);
         }
 
         // `release_resumption_token_timer` is not considered here, because
@@ -2418,6 +2426,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
         now: Instant,
+        full_mtu: bool,
     ) {
         let rtt = self.paths.primary().map_or_else(
             || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
@@ -2475,7 +2484,8 @@ impl Connection {
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
-        self.quic_datagrams.write_frames(builder, tokens, stats);
+        self.quic_datagrams
+            .write_frames(builder, tokens, stats, full_mtu);
         if builder.is_full() {
             return;
         }
@@ -2616,7 +2626,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, now, full_mtu);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
@@ -4144,28 +4154,127 @@ impl Connection {
         Ok(min(data_len_possible, max_dgram_size))
     }
 
-    /// Queue a datagram for sending.
+    /// The primary path's minimum RTT estimate, from which `QuicDatagrams`
+    /// derives the default outgoing-datagram max-age.
+    fn min_rtt(&self) -> Duration {
+        self.paths
+            .primary()
+            .map_or(DEFAULT_INITIAL_RTT, |p| p.borrow().rtt().minimum())
+    }
+
+    /// Enqueue a datagram on `session`'s outgoing queue: byte-budgeted,
+    /// max-buffered-tracked, and scheduled by `send_group_id`/
+    /// `send_order` and age. `session` is opaque to `Connection` — nothing
+    /// here requires it to be a real stream, only a stable per-caller tag
+    /// (in practice, an Extended CONNECT session's control-stream `StreamId`).
+    /// `send_group_id` of `SendGroupId::new(0)` means ungrouped.
     ///
-    /// The QUIC datagram is always queued. Returns `Ok(true)` if space remains
-    /// afterwards, or `Ok(false)` if the outgoing QUIC datagram queue is now
-    /// full. On `Ok(false)` the application should stop sending and wait for an
-    /// [`OutgoingDatagramSpaceAvailable`] event before sending again; nothing
-    /// already queued is dropped.
+    /// The *path* MTU is applied later, at packet-build time, exactly like
+    /// queued stream data.
     ///
     /// # Errors
     ///
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The function does not check if the
-    /// datagram can fit into a packet (i.e. MTU limit). This is checked during
-    /// creation of an actual packet and the datagram will be dropped if it does
-    /// not fit into the packet. The app is encourage to use `max_datagram_size`
-    /// to check the estimated max datagram size and to use smaller datagrams.
-    /// `max_datagram_size` is just a current estimate and will change over
-    /// time depending on the encoded size of the packet number, ack frames, etc.
+    /// Returns `TooMuchData` if `data` is longer than
+    /// [`Self::remote_datagram_size`], which includes any non-empty datagram
+    /// while that is `0` (the peer sent no `max_datagram_frame_size` and so
+    /// does not support DATAGRAM frames at all). "Longer than" compares the
+    /// payload, as [`Self::max_datagram_size`] always has; RFC 9221 defines
+    /// the limit for the whole frame, type and length included, so a payload
+    /// of exactly the limit is over by the frame type plus any length. In
+    /// practice that is 1 to 3 bytes: a datagram that fits a real path MTU is
+    /// under 16384 bytes, so its length takes at most 2. That reading
+    /// predates this queue and is tracked separately, since fixing it means
+    /// changing `max_datagram_size` too.
+    pub fn enqueue_datagram(
+        &mut self,
+        session: StreamId,
+        data: Vec<u8>,
+        id: Option<DatagramId>,
+        now: Instant,
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams.enqueue_datagram(
+            session,
+            data,
+            id,
+            now,
+            send_group_id,
+            send_order,
+            min_rtt,
+        )
+    }
+
+    /// See `DatagramQueue::set_max_buffered_datagrams`.
+    pub fn set_max_buffered_datagrams(&mut self, session: StreamId, mark: Option<NonZeroUsize>) {
+        self.quic_datagrams
+            .set_max_buffered_datagrams(session, mark);
+    }
+
+    /// See `DatagramQueue::set_max_age`. Unlike the inner engine's own
+    /// method, does not take a default max-age: this connection's own RTT
+    /// estimate supplies it.
+    pub fn set_datagram_max_age(
+        &mut self,
+        session: StreamId,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams
+            .set_datagram_max_age(session, max_age, now, min_rtt);
+    }
+
+    /// See `DatagramQueue::capacity`.
+    #[must_use]
+    pub fn datagram_queue_capacity(&self, session: StreamId) -> DatagramQueueCapacity {
+        self.quic_datagrams.datagram_queue_capacity(session)
+    }
+
+    /// Expire stale datagrams on a single session's queue and return how many
+    /// of its datagrams have expired since the last call, whichever sweep
+    /// shed them, for a caller that counts expiries per session.
     ///
-    /// [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
-    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<bool> {
-        self.quic_datagrams.add_datagram(buf, id.into())
+    /// This is the second of two sweeps over the same queues. `process_timer`
+    /// runs the first on the connection's own schedule and never reports what
+    /// it shed; this one lets a caller attribute expiries to a session and
+    /// pick them up on its own tick, before or after `process_output`. The
+    /// count accumulates on the queue, so the order of the two within a tick
+    /// changes nothing: every expiry is reported exactly once, by whoever
+    /// drains it. Each call re-derives the RTT-based default max-age, which
+    /// is one `min_rtt` per session per tick.
+    pub fn expire_session_datagrams(&mut self, session: StreamId, now: Instant) -> u64 {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams
+            .expire_session_datagrams(session, now, min_rtt)
+    }
+
+    /// [`Self::expire_session_datagrams`] without the sweep: only return the
+    /// count accumulated so far.
+    pub fn take_session_expired_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_expired_count(session)
+    }
+
+    /// Whether any session has an expiry count waiting to be picked up by
+    /// [`Self::expire_session_datagrams`]. `process_timer` sheds stale
+    /// datagrams on its own schedule, so a caller that sweeps only when given
+    /// a reason to needs this to learn that there is now something to count.
+    ///
+    /// A queue's counts clear only when drained or when
+    /// [`Self::drop_session_datagrams`] removes the queue. A caller that
+    /// stops sweeping a session without dropping its queue therefore leaves
+    /// this `true` for the rest of the connection, and re-processes the
+    /// connection for nothing on every tick.
+    #[must_use]
+    pub fn has_pending_datagram_counts(&self) -> bool {
+        self.quic_datagrams.has_pending_counts()
+    }
+
+    /// Remove every datagram queued on `session`'s behalf, e.g. because the
+    /// session is closing. Returns how many were removed.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> usize {
+        self.quic_datagrams.drop_session_datagrams(session)
     }
 
     /// Return the PLMTU of the primary path.
