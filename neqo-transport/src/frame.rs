@@ -1181,6 +1181,13 @@ mod tests {
     }
 
     #[test]
+    fn decode_ack_delay() {
+        assert_eq!(Frame::decode_ack_delay(100, 3), 800);
+        assert_eq!(Frame::decode_ack_delay(MAX_VARINT, 2), MAX_VARINT << 2);
+        assert_eq!(Frame::decode_ack_delay(MAX_VARINT, 3), u64::MAX); // Saturates.
+    }
+
+    #[test]
     fn ack_frequency() {
         let f = Frame::AckFrequency {
             seqno: 10,

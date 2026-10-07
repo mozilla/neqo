@@ -1314,6 +1314,8 @@ fn logged_ack_delays(server_exponent: Option<u64>) -> (f64, f64, u32) {
 }
 
 #[test]
+#[allow(clippy::allow_attributes, // Only the MSRV's clippy flags `float_cmp` here.
+        clippy::float_cmp, reason = "The values are exact.")]
 fn ack_delay_is_logged_in_milliseconds() {
     let (sent, received, delay) = logged_ack_delays(None);
     // Encoded in units of 8 microseconds.
@@ -1323,6 +1325,8 @@ fn ack_delay_is_logged_in_milliseconds() {
 }
 
 #[test]
+#[allow(clippy::allow_attributes, // Only the MSRV's clippy flags `float_cmp` here.
+        clippy::float_cmp, reason = "The values are exact.")]
 fn ack_delay_is_logged_with_the_senders_exponent() {
     let (sent, received, delay) = logged_ack_delays(Some(5));
     // The server still encodes in units of 8 microseconds, but has told the client
