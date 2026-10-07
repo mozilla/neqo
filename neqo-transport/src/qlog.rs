@@ -75,37 +75,36 @@ pub fn tparams_set(
                 TransportInitiator::Remote => tph.remote(),
             };
             let int = |id| Some(tp.get_integer(id));
-            let ev_data =
-                EventData::QuicParametersSet(Box::new(ParametersSet {
-                    initiator: Some(owner),
-                    original_destination_connection_id: tp
-                        .get_bytes(OriginalDestinationConnectionId)
-                        .map(to_hex),
-                    stateless_reset_token: tp.get_bytes(StatelessResetToken).map(|_| String::new()), // Don't log the SRT
-                    disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
-                    max_idle_timeout: int(TransportParameterId::IdleTimeout),
-                    max_udp_payload_size: int(MaxUdpPayloadSize),
-                    ack_delay_exponent: int(AckDelayExponent),
-                    max_ack_delay: int(MaxAckDelay),
-                    active_connection_id_limit: int(ActiveConnectionIdLimit),
-                    initial_max_data: int(InitialMaxData),
-                    initial_max_stream_data_bidi_local: int(InitialMaxStreamDataBidiLocal),
-                    initial_max_stream_data_bidi_remote: int(InitialMaxStreamDataBidiRemote),
-                    initial_max_stream_data_uni: int(InitialMaxStreamDataUni),
-                    initial_max_streams_bidi: int(InitialMaxStreamsBidi),
-                    initial_max_streams_uni: int(InitialMaxStreamsUni),
-                    preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
-                        Some(PreferredAddress {
-                            ip_v4: paddr.ipv4()?.ip().to_string(),
-                            ip_v6: paddr.ipv6()?.ip().to_string(),
-                            port_v4: paddr.ipv4()?.port(),
-                            port_v6: paddr.ipv6()?.port(),
-                            connection_id: cid.connection_id().to_string(),
-                            stateless_reset_token: String::new(), // Don't log the SRT
-                        })
-                    }),
-                    ..Default::default()
-                }));
+            let ev_data = EventData::QuicParametersSet(Box::new(ParametersSet {
+                initiator: Some(owner),
+                original_destination_connection_id: tp
+                    .get_bytes(OriginalDestinationConnectionId)
+                    .map(to_hex),
+                stateless_reset_token: tp.get_bytes(StatelessResetToken).map(|_| String::new()), // Don't log the SRT
+                disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
+                max_idle_timeout: int(TransportParameterId::IdleTimeout),
+                max_udp_payload_size: int(MaxUdpPayloadSize),
+                ack_delay_exponent: int(AckDelayExponent),
+                max_ack_delay: int(MaxAckDelay),
+                active_connection_id_limit: int(ActiveConnectionIdLimit),
+                initial_max_data: int(InitialMaxData),
+                initial_max_stream_data_bidi_local: int(InitialMaxStreamDataBidiLocal),
+                initial_max_stream_data_bidi_remote: int(InitialMaxStreamDataBidiRemote),
+                initial_max_stream_data_uni: int(InitialMaxStreamDataUni),
+                initial_max_streams_bidi: int(InitialMaxStreamsBidi),
+                initial_max_streams_uni: int(InitialMaxStreamsUni),
+                preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
+                    Some(PreferredAddress {
+                        ip_v4: paddr.ipv4()?.ip().to_string(),
+                        ip_v6: paddr.ipv6()?.ip().to_string(),
+                        port_v4: paddr.ipv4()?.port(),
+                        port_v6: paddr.ipv6()?.port(),
+                        connection_id: cid.connection_id().to_string(),
+                        stateless_reset_token: String::new(), // Don't log the SRT
+                    })
+                }),
+                ..Default::default()
+            }));
 
             Some(ev_data)
         },
