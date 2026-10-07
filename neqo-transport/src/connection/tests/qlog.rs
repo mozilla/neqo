@@ -11,14 +11,14 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::Datagram;
-use test_fixture::{now, strip_padding};
+use neqo_common::{Datagram, Decoder};
+use test_fixture::{datagram, now, strip_padding};
 
 use super::{
     super::State, Connection, ConnectionParameters, connect, default_client, default_server,
     maybe_authenticate, new_client_with_qlog, new_server_with_qlog, send_something,
 };
-use crate::saved::SavedDatagrams;
+use crate::{saved::SavedDatagrams, version::Version};
 
 /// The lines of a JSON-SEQ trace that are events, i.e. everything but the header.
 fn events(trace: &str) -> impl Iterator<Item = &str> + Clone {
@@ -186,6 +186,95 @@ fn fill_saved_datagrams(client: &mut Connection, server: &mut Connection, t: Ins
 }
 
 #[test]
+fn dropping_a_datagram_is_reported() {
+    let mut client = default_client();
+    let (mut server, contents) = new_server_with_qlog(ConnectionParameters::default());
+    let mut t = now();
+    _ = handshake_but_for_the_last_flight(&mut client, &mut server, &mut t);
+
+    // One more than the store holds, so the last one is dropped.
+    let mut last = 0;
+    for _ in 0..=SavedDatagrams::CAPACITY {
+        let d = strip_padding(send_something(&mut client, t));
+        last = d.len();
+        server.process_input(d, t + RTT / 2);
+    }
+    assert_eq!(server.stats().saved_datagrams, SavedDatagrams::CAPACITY);
+    drop(server);
+
+    let trace = contents.to_string();
+    let buffered = named(&trace, "quic:packet_buffered").count();
+    assert_eq!(buffered, SavedDatagrams::CAPACITY, "trace: {trace}");
+    assert!(
+        named(&trace, "quic:packet_dropped")
+            .filter_map(raw_length)
+            .any(|len| len == last as u64)
+    );
+}
+
+/// The DCID and SCID of the client's first Initial, to address a packet back at it.
+fn client_cids(client: &mut Connection) -> (Vec<u8>, Vec<u8>) {
+    let initial = client
+        .process_output(now())
+        .dgram()
+        .expect("a datagram")
+        .to_vec();
+    // Skip the first byte and the version, then the length-prefixed DCID and SCID.
+    let mut dec = Decoder::from(&initial[5..]);
+    let dcid = dec.decode_vec(1).expect("client DCID").to_vec();
+    let scid = dec.decode_vec(1).expect("client SCID").to_vec();
+    (dcid, scid)
+}
+
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn an_accepted_retry_is_not_reported_as_dropped() {
+    let (mut client, contents) = new_client_with_qlog(ConnectionParameters::default());
+    let (dcid, scid) = client_cids(&mut client);
+    let mut server_scid = dcid.clone();
+    server_scid[0] ^= 0xff;
+
+    let retry =
+        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+            .expect("build retry");
+    drop(client.process(Some(datagram(retry)), now()));
+    assert_eq!(client.stats().dropped_rx, 0, "the Retry was accepted");
+    drop(client);
+
+    let trace = contents.to_string();
+    assert_eq!(named(&trace, "quic:packet_dropped").count(), 0);
+}
+
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn rejected_retry_is_reported_as_dropped() {
+    let (mut client, contents) = new_client_with_qlog(ConnectionParameters::default());
+    let (dcid, scid) = client_cids(&mut client);
+    let mut server_scid = dcid.clone();
+    server_scid[0] ^= 0xff;
+
+    let retry =
+        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+            .expect("build retry");
+    let len = retry.len();
+    // The first is accepted, so the second is an extra one and is discarded.
+    drop(client.process(Some(datagram(retry.clone())), now()));
+    assert_eq!(client.stats().dropped_rx, 0, "the first Retry was accepted");
+    drop(client.process(Some(datagram(retry)), now()));
+    assert_eq!(client.stats().dropped_rx, 1, "the second was rejected");
+    drop(client);
+
+    let trace = contents.to_string();
+    let mut dropped = named(&trace, "quic:packet_dropped");
+    assert_eq!(
+        dropped.next().and_then(raw_length),
+        Some(len as u64),
+        "{trace}"
+    );
+    assert_eq!(dropped.next(), None, "trace: {trace}");
+}
+
+#[test]
 fn received_datagram_is_reported_once() {
     let mut client = default_client();
     let (mut server, contents) = new_server_with_qlog(ConnectionParameters::default());
@@ -233,4 +322,95 @@ fn replayed_datagrams_are_not_counted_twice() {
     for id in &buffered {
         assert!(ids.contains(id), "packet_buffered names {id}: {trace}");
     }
+}
+
+#[test]
+fn rejected_version_negotiation_is_reported() {
+    let (mut client, contents) = new_client_with_qlog(ConnectionParameters::default());
+    let (dcid, scid) = client_cids(&mut client);
+
+    // Offering the version already in use has to be ignored, per RFC 9000.
+    let vn = crate::packet::Builder::version_negotiation(
+        &scid,
+        &dcid,
+        Version::default().wire_version(),
+        &[Version::default()],
+    );
+    let len = vn.len();
+    drop(client.process(Some(datagram(vn)), now()));
+    assert_eq!(client.stats().dropped_rx, 1, "the VN was rejected");
+    drop(client);
+
+    let trace = contents.to_string();
+    let dropped = named(&trace, "quic:packet_dropped").collect::<Vec<_>>();
+    assert_eq!(dropped.len(), 1, "trace: {trace}");
+    // Reported against the datagram it arrived in, at the size that arrived.
+    assert_eq!(raw_length(dropped[0]), Some(len as u64), "trace: {trace}");
+    assert!(number(dropped[0], "\"datagram_id\":").is_some());
+}
+
+#[test]
+fn every_received_byte_is_accounted_for() {
+    let (mut client, client_log) = new_client_with_qlog(ConnectionParameters::default());
+    let (mut server, server_log) = new_server_with_qlog(ConnectionParameters::default());
+    let mut t = now();
+    let last = handshake_but_for_the_last_flight(&mut client, &mut server, &mut t);
+    // Buffered by the server, and replayed when the flight below supplies the keys.
+    fill_saved_datagrams(&mut client, &mut server, t);
+    t += RTT;
+    _ = server.process(Some(last), t).dgram();
+    assert_eq!(*server.state(), State::Confirmed);
+
+    // Held back, so that it reaches the client only once it is closing.
+    let late = send_something(&mut server, t);
+    client.close(t, 0, "done");
+    assert!(matches!(client.state(), State::Closing { .. }));
+    client.process_input(late, t);
+    drop((client, server));
+
+    let server_trace = server_log.to_string();
+    assert!(named(&server_trace, "quic:packet_buffered").count() > 0);
+    accounts_for_every_byte(&client_log.to_string());
+    accounts_for_every_byte(&server_trace);
+}
+
+/// Every byte that arrived in a datagram is accounted for by that datagram's packet
+/// events, and none is counted twice.
+fn accounts_for_every_byte(trace: &str) {
+    let mut datagrams = 0;
+    for d in named(trace, "quic:datagrams_received") {
+        let id = number(d, "\"datagram_ids\":[").expect("a datagram_id");
+        let accounted = ["quic:packet_received", "quic:packet_dropped"]
+            .into_iter()
+            .flat_map(|name| named(trace, name))
+            .filter(|p| number(p, "\"datagram_id\":") == Some(id))
+            .filter_map(raw_length)
+            .sum::<u64>();
+        assert_eq!(raw_list_length(d), Some(accounted), "datagram {id}: {d}");
+        datagrams += 1;
+    }
+    assert!(datagrams > 0, "nothing arrived in {trace}");
+}
+
+#[test]
+fn trailing_bytes_are_reported_as_padding() {
+    let mut client = default_client();
+    let (mut server, contents) = new_server_with_qlog(ConnectionParameters::default());
+    // A client Initial is padded out, so the server sees trailing bytes it cannot use.
+    let ci = client.process_output(now()).dgram().expect("a datagram");
+    let len = ci.len();
+    server.process_input(ci, now());
+    drop(server);
+
+    let trace = contents.to_string();
+    let padding = named(&trace, "quic:packet_dropped")
+        .next()
+        .expect("the padding");
+    // Named as padding, with no packet type invented for it.
+    assert_eq!(field(padding, "\"details\":"), Some("padding"));
+    assert_eq!(field(padding, "\"packet_type\":"), None);
+    // This is the case the accounting rests on, so hold it to the sum as well: the
+    // handshake tests strip padding, so nothing else covers it.
+    assert!(raw_length(padding).unwrap() < len as u64);
+    accounts_for_every_byte(&trace);
 }

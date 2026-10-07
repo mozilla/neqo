@@ -7,22 +7,24 @@
 // Functions that handle capturing QLOG traces.
 
 use std::{
+    fmt::Display,
     ops::Deref as _,
     time::{Duration, Instant},
 };
 
 use neqo_common::{Decoder, Ecn, hex::Hex, qinfo, qlog::Qlog, to_u64};
+pub use qlog::events::quic::PacketDroppedTrigger; // Re-export
 use qlog::events::{
     ApplicationError, EventData, RawInfo, TupleEndpointInfo,
     quic::{
         AckRange, CongestionStateUpdated, CongestionStateUpdatedTrigger, ConnectionClosed,
         ConnectionClosedTrigger, ConnectionStarted, ConnectionState, ConnectionStateUpdated,
-        ErrorSpace, MtuUpdated, PacketBuffered, PacketBufferedTrigger, PacketDropped,
-        PacketDroppedTrigger, PacketHeader, PacketLost, PacketLostTrigger,
-        PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent, PacketType,
-        PacketsAcked, ParametersSet, PreferredAddress, QuicFrame, QuicVersionInformation,
-        RecoveryMetricsUpdated, RecoveryParametersSet, StreamType, TimerEventType, TimerType,
-        TimerUpdated, TransportInitiator, UdpDatagramsReceived, UdpDatagramsSent,
+        ErrorSpace, MtuUpdated, PacketBuffered, PacketBufferedTrigger, PacketDropped, PacketHeader,
+        PacketLost, PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace, PacketReceived,
+        PacketSent, PacketType, PacketsAcked, ParametersSet, PreferredAddress, QuicFrame,
+        QuicVersionInformation, RecoveryMetricsUpdated, RecoveryParametersSet, StreamType,
+        TimerEventType, TimerType, TimerUpdated, TransportInitiator, UdpDatagramsReceived,
+        UdpDatagramsSent,
     },
 };
 
@@ -262,22 +264,30 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, datagram_id: u32, now:
         now,
     );
 }
-pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, now: Instant) {
+
+/// `packet_type` is `None` when the header did not parse.
+///
+/// `len` is what was dropped: the packet itself, or the trailing bytes of a
+/// datagram that could not be used.
+pub fn packet_dropped<D: Display>(
+    qlog: &mut Qlog,
+    packet_type: Option<packet::Type>,
+    len: usize,
+    datagram_id: u32,
+    details: Option<D>,
+    trigger: PacketDroppedTrigger,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
-            let header =
-                PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
-            let raw = raw(decrypt_err.len());
-
-            let ev_data = EventData::QuicPacketDropped(PacketDropped {
-                header: Some(header),
-                raw: Some(raw),
-                details: Some(decrypt_err.error.to_string()),
-                trigger: Some(PacketDroppedTrigger::DecryptionFailure),
-                ..Default::default()
-            });
-
-            Some(ev_data)
+            Some(EventData::QuicPacketDropped(PacketDropped {
+                header: packet_type
+                    .map(|pt| PacketHeader::with_type(pt.into(), None, None, None, None)),
+                raw: Some(raw(len)),
+                datagram_id: Some(datagram_id),
+                details: details.map(|d| d.to_string()),
+                trigger: Some(trigger),
+            }))
         },
         now,
     );
