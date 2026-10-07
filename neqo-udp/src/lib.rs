@@ -254,18 +254,28 @@ fn raise_buffer_size(
     get: impl Fn() -> io::Result<usize>,
     set: impl Fn(usize) -> io::Result<()>,
 ) {
-    match get() {
-        Ok(size) if size >= min => qdebug!("{name} buffer is {size} >= {min}, not changing"),
-        Ok(size) => match set(min) {
-            Ok(()) => qdebug!("Raised {name} buffer from {size} to {min}, now {:?}", get()),
-            Err(e) => qwarn!("Cannot raise {name} buffer from {size} to {min}: {e}"),
-        },
+    let current = match get() {
+        Ok(size) if size >= min => {
+            qdebug!("{name} buffer is {size} >= {min}, not changing");
+            return;
+        }
+        Ok(size) => size,
         Err(e) => {
             qdebug!("Cannot read {name} buffer size: {e}");
-            match set(min) {
-                Ok(()) => qdebug!("Raised {name} buffer to {min}, now {:?}", get()),
-                Err(e) => qwarn!("Cannot raise {name} buffer to {min}: {e}"),
+            0
+        }
+    };
+    // Halve the request until the OS accepts it, e.g., NetBSD caps it at `kern.sbmax`.
+    for size in iter::successors(Some(min), |s| Some(s / 2)).take_while(|&s| s > current) {
+        match set(size) {
+            Ok(()) => {
+                qdebug!(
+                    "Raised {name} buffer from {current} to {size}, now {:?}",
+                    get()
+                );
+                return;
             }
+            Err(e) => qwarn!("Cannot raise {name} buffer to {size}: {e}"),
         }
     }
 }
