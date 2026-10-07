@@ -359,6 +359,18 @@ impl<'a> Frame<'a> {
         )
     }
 
+    /// Converts an ACK frame's `ack_delay` to microseconds, saturating.
+    #[must_use]
+    pub const fn decode_ack_delay(ack_delay: u64, exponent: u64) -> u64 {
+        // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000. We already checked that in
+        // TransportParameter::decode.
+        if ack_delay.leading_zeros() as u64 >= exponent {
+            ack_delay << exponent
+        } else {
+            u64::MAX
+        }
+    }
+
     /// Converts `AckRanges` as encoded in a ACK frame (see -transport
     /// 19.3.1) into ranges of acked packets (end, start), inclusive of
     /// start and end values.
