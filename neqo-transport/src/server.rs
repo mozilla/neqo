@@ -18,9 +18,10 @@ use std::{
     time::Instant,
 };
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::Hex;
 use neqo_common::{
-    Datagram, Role, Tos, event::Provider as _, hex::Hex, qdebug, qerror, qinfo, qlog::Qlog, qtrace,
-    qwarn,
+    Datagram, Role, Tos, event::Provider as _, qdebug, qerror, qinfo, qlog::Qlog, qtrace, qwarn,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -435,6 +436,7 @@ impl Server {
     ) -> OutputBatch {
         let mut dgrams = dgrams.into_iter();
         while let Some(mut dgram) = dgrams.next() {
+            #[cfg(feature = "log-payload")]
             qtrace!("Process datagram: {}", Hex::new(&dgram[..]));
 
             // This is only looking at the first packet header in the datagram.
@@ -445,6 +447,7 @@ impl Server {
             let res =
                 Public::decode_server(&mut dgram[..], self.cid_generator.borrow().as_decoder());
             let Ok((packet, _remainder)) = res else {
+                #[cfg(feature = "log-payload")]
                 qtrace!("[{self}] Discarding {dgram:?}");
                 continue;
             };

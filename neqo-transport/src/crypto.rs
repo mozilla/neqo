@@ -216,6 +216,7 @@ impl Crypto {
                 epoch: space.into(),
                 data: d.to_vec(),
             };
+            #[cfg(feature = "log-payload")]
             qtrace!("Handshake record received {rec:?} ");
             rec
         });
@@ -336,6 +337,7 @@ impl Crypto {
             if r.ct != TLS_CT_HANDSHAKE {
                 return Err(Error::ProtocolViolation);
             }
+            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Adding CRYPTO data {r:?}");
             self.streams.send(r.epoch.into(), &r.data)?;
         }
@@ -721,6 +723,7 @@ impl CryptoDxState {
         data: &mut [u8],
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
             Hex::new(data[hdr.clone()].as_ref()),
@@ -744,6 +747,7 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
+        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] encrypt ct={}", Hex::new(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
@@ -762,6 +766,7 @@ impl CryptoDxState {
         data: &mut [u8],
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
             Hex::new(data[hdr.clone()].as_ref()),

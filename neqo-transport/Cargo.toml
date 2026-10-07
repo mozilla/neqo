@@ -52,6 +52,7 @@ build-fuzzing-corpus = [
 disable-encryption = ["nss/disable-encryption"]
 draft-29 = []
 gecko = [] # mtu no longer requires a gecko feature; kept for compatibility with downstream consumers
+log-payload = []
 
 [package.metadata.cargo-machete]
 ignored = ["criterion"]

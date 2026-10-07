@@ -67,6 +67,7 @@ bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/rele
 blapi = ["neqo-transport/blapi"]
 default = ["blapi"]
 draft-29 = ["neqo-http3/draft-29", "neqo-transport/draft-29"]
+log-payload = ["neqo-http3/log-payload"]
 
 [build-dependencies]
 cfg_aliases = { workspace = true }

@@ -14,13 +14,11 @@ use std::{
     time::Instant,
 };
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::HexWithLen;
 use neqo_common::{
-    Datagram, Decoder, Encoder, Header, Role,
-    event::Provider as EventProvider,
-    hex::{Hex, HexWithLen},
-    qdebug, qinfo,
-    qlog::Qlog,
-    qtrace, qwarn,
+    Datagram, Decoder, Encoder, Header, Role, event::Provider as EventProvider, hex::Hex, qdebug,
+    qinfo, qlog::Qlog, qtrace, qwarn,
 };
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
@@ -435,6 +433,7 @@ impl Http3Client {
         let Some(settings_slice) = dec.decode_vvec() else {
             return Err(Error::InvalidResumptionToken);
         };
+        #[cfg(feature = "log-payload")]
         qtrace!("[{self}]   settings {}", HexWithLen::new(settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
