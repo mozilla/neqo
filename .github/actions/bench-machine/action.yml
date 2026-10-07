@@ -1,0 +1,56 @@
+name: Prepare machine for benchmarks
+description: >
+  Widen the loopback MTU, install the debug symbols samply needs, and report which CPUs to
+  pin benchmarks to. The runners already set the governor, disable SMT and turbo, relax the
+  perf restrictions, and reserve an isolated CPU die. Each job gets its own runner, so
+  nothing has to be restored afterwards.
+
+inputs:
+  mtu:
+    description: MTU to set on the loopback interface
+    default: ""
+
+outputs:
+  server-cpu:
+    description: CPU to pin the server to
+    value: ${{ steps.machine.outputs.server-cpu }}
+  client-cpu:
+    description: CPU to pin the client to
+    value: ${{ steps.machine.outputs.client-cpu }}
+  bench-cpus:
+    description: Both CPUs, for benchmarks that serve from a thread of their own
+    value: ${{ steps.machine.outputs.bench-cpus }}
+
+runs:
+  using: composite
+  steps:
+    - id: machine
+      shell: bash
+      env:
+        MTU: ${{ inputs.mtu }}
+      run: |
+        # The runner's hostname does not resolve, which makes `sudo` warn on every call.
+        grep -qw "$(hostname)" /etc/hosts ||
+          echo "127.0.0.1 $(hostname)" | sudo tee -a /etc/hosts > /dev/null
+
+        [ -z "$MTU" ] || sudo ip link set dev lo mtu "$MTU"
+
+        # `libc6-dbg` lets samply symbolicate libc frames.
+        [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+        sudo apt-get install -y --no-install-recommends libc6-dbg
+
+        ALLOWED=$(sed -n 's/^Cpus_allowed_list:[[:space:]]*//p' /proc/self/status)
+        CPUS=()
+        for RANGE in ${ALLOWED//,/ }; do  # A bare CPU number is a range of one.
+          for ((CPU=${RANGE%-*}; CPU<=${RANGE#*-}; CPU++)); do CPUS+=("$CPU"); done
+        done
+        if [ ${#CPUS[@]} -lt 2 ]; then
+          echo "::error::Need a CPU each for client and server, runner allows only: $ALLOWED"
+          exit 1
+        fi
+        echo "Runner allows CPUs $ALLOWED, pinning the server to ${CPUS[-1]}, the client to ${CPUS[-2]}"
+        {
+          echo "server-cpu=${CPUS[-1]}"
+          echo "client-cpu=${CPUS[-2]}"
+          echo "bench-cpus=${CPUS[-2]},${CPUS[-1]}"
+        } >> "$GITHUB_OUTPUT"

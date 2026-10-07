@@ -118,7 +118,9 @@ neqo/
 - **rustfmt.yml** (Format): cargo fmt check with nightly
 - **deny.yml**: cargo deny for advisories, bans, licenses, sources
 - **machete.yml**: Checks for unused dependencies
-- **bench.yml**: Performance benchmarks (runs on dedicated hardware)
+- **bench.yml**: Criterion benchmark reports on CodSpeed macro runners
+- **perfcompare.yml**: Client/server comparison reports on CodSpeed macro runners
+- **codspeed.yml**: Criterion and client/server benchmarks uploaded to CodSpeed. One workflow, so that a commit produces one CodSpeed run; CodSpeed groups results by GitHub Actions run.
 - **sanitize.yml**: Runs tests with address/memory sanitizers
 - **semver.yml**: Checks for semver compliance
 - **firefox.yml**: Integration test with Firefox

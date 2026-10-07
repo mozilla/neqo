@@ -11,7 +11,7 @@ on:
     # These must exactly match the `name:` of each producer workflow. Nothing
     # validates this: renaming a producer workflow silently stops its PR
     # comments from posting, with no error anywhere.
-    workflows: ["QNS PR", "cargo bench", "Performance comparison", "Profile"]
+    workflows: ["QNS PR", "cargo bench", "Performance comparison"]
     types:
       - completed # zizmor: ignore[dangerous-triggers]
 
@@ -44,8 +44,14 @@ jobs:
         shell: bash
         run: echo "number=$(cat comment-data/pr-number)" >> "$GITHUB_OUTPUT"
 
-      - shell: bash
+      - id: mode
+        shell: bash
         run: |
+          if [ ! -s comment-data/contents ]; then
+            echo "mode=delete" >> "$GITHUB_OUTPUT" # No results, so remove any stale comment.
+            exit 0
+          fi
+          echo "mode=recreate" >> "$GITHUB_OUTPUT"
           {
             echo
             cat comment-data/log-md
@@ -54,6 +60,6 @@ jobs:
       - uses: thollander/actions-comment-pull-request@24bffb9b452ba05a4f3f77933840a6a841d1b32b # v3.0.1
         with:
           file-path: comment-data/contents
-          mode: recreate
+          mode: ${{ steps.mode.outputs.mode }}
           pr-number: ${{ steps.pr-number.outputs.number }}
           comment-tag: ${{ github.event.workflow_run.name }}-comment

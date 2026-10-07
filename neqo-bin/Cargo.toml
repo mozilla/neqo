@@ -63,7 +63,7 @@ test-fixture = { path = "../test-fixture" }
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [features]
-bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_info"]
+bench = ["neqo-bin/bench", "neqo-http3/bench", "neqo-transport/bench", "log/release_max_level_warn"]
 blapi = ["neqo-transport/blapi"]
 default = ["blapi"]
 draft-29 = ["neqo-http3/draft-29", "neqo-transport/draft-29"]

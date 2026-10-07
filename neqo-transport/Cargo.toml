@@ -40,7 +40,7 @@ serde_json = { workspace = true }
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["neqo-common/bench", "nss/bench", "blapi", "test-fixture/bench", "log/release_max_level_info"]
+bench = ["neqo-common/bench", "blapi", "test-fixture/bench", "log/release_max_level_warn"]
 blapi = ["nss/blapi"]
 default = ["blapi"]
 build-fuzzing-corpus = [

@@ -19,7 +19,7 @@ description = "Neqo, the Mozilla implementation of QUIC in Rust."
 keywords = ["quic", "http3", "neqo", "mozilla", "ietf", "firefox"]
 categories = ["network-programming", "web-programming"]
 readme = "README.md"
-version = "0.31.1"
+version = "0.32.0"
 # Keep in sync with `.rustfmt.toml` `edition`.
 edition = "2024"
 license = "MIT OR Apache-2.0"
@@ -37,7 +37,7 @@ libc = { version = "0.2", default-features = false }
 log = { version = "0.4", default-features = false }
 nss = { version = "0.16", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
 nss-test-fixture = { version = "0.1", package = "test-fixture", git = "https://github.com/mozilla/nss-rs" }
-qlog = { version = "0.16.0", default-features = false }
+qlog = { version = "0.18.1", default-features = false }
 quinn-udp = { version = "0.6", default-features = false, features = ["log", "fast-apple-datapath"] }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }

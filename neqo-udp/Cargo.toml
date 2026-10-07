@@ -32,7 +32,7 @@ cfg_aliases = { workspace = true }
 ignored = ["cfg_aliases"]
 
 [features]
-bench = ["neqo-common/bench", "log/release_max_level_info"]
+bench = ["neqo-common/bench", "log/release_max_level_warn"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

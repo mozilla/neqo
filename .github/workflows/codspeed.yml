@@ -3,6 +3,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
+    # `edited` so a retargeted PR gets a run: when a stack is reordered, the head push can
+    # conflict with the old base, which makes GitHub skip that `synchronize` run. Other edits
+    # are skipped by the `if:` on each root job below.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 
 env:
@@ -11,7 +15,9 @@ env:
   RUSTUP_TOOLCHAIN: stable
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref_name }}
+  # An `edited` run that isn't a base change skips all its jobs. Give it a group of its own so
+  # that editing a PR's title or description doesn't cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.ref_name }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -25,20 +31,48 @@ jobs:
   bench-matrix:
     name: Determine bench matrix
     runs-on: ubuntu-24.04
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     outputs:
       benches: ${{ steps.matrix.outputs.benches }}
+      batches: ${{ steps.matrix.outputs.batches }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - id: matrix
-        uses: ./.github/actions/bench-matrix
 
-  benchmarks:
-    name: Run ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
-    runs-on: ${{ matrix.bench.runner }}
-    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
-    # environment: codspeed
+      # Results are filed under the PR head and compared against the PR base, so make sure that
+      # the test merge commit is built from both, rather than a stale one, e.g., one still made
+      # against the old base just after a retarget, which leaves the head SHA unchanged.
+      - name: Check that the merge commit is of the PR head into the PR base
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # `git cat-file` still lists the parents in a shallow clone, unlike `git rev-parse HEAD^2`.
+          mapfile -t parents < <(git cat-file -p HEAD | sed -n 's/^parent //p')
+          if [ "${#parents[@]}" -ne 2 ] || [ "${parents[1]}" != "$HEAD_SHA" ]; then
+            echo "::error::$GITHUB_SHA is not a merge of the PR head $HEAD_SHA. Push to the PR, or close and reopen it, to get a fresh merge commit."
+            exit 1
+          fi
+          # The base branch may have moved on since the event, so also accept a first parent
+          # that descends from the event's base. A merge against the pre-retarget base doesn't.
+          if [ "${parents[0]}" != "$BASE_SHA" ]; then
+            status="$(gh api "repos/$REPO/compare/$BASE_SHA...${parents[0]}" --jq .status || echo error)"
+            if [ "$status" != "ahead" ]; then
+              echo "::error::$GITHUB_SHA merges into ${parents[0]}, which isn't the PR base $BASE_SHA or a descendant of it ($status). Push to the PR, or close and reopen it, to get a fresh merge commit."
+              exit 1
+            fi
+          fi
+
+      - id: matrix
+        uses: $/.github/actions/bench-matrix
+
+  build-bench:
+    name: Build ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
+    runs-on: ubuntu-24.04
     needs: bench-matrix
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
@@ -50,7 +84,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: stable
           tools: cargo-codspeed
@@ -62,9 +96,238 @@ jobs:
           MODE: ${{ matrix.bench.mode }}
         run: cargo codspeed build --package "$CRATE" --locked --features bench --bench "$BENCH" --measurement-mode "$MODE"
 
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codspeed-build-${{ matrix.bench.batch }}-${{ matrix.bench.bench }}
+          path: | # `cargo codspeed run` looks under the target directory.
+            target/codspeed
+            dist
+          retention-days: 1
+
+  benchmarks:
+    name: Run ${{ join(matrix.batch.benches.*.bench, ', ') }} (${{ matrix.batch.mode }})
+    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
+    # TODO: Restore `environment: codspeed` once GitHub supports filtering deployment messages.
+    # environment: codspeed
+    needs: [bench-matrix, build-bench]
+    if: ${{ !cancelled() && needs.bench-matrix.result == 'success' && needs.bench-matrix.outputs.batches != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        batch: ${{ fromJson(needs.bench-matrix.outputs.batches) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The runner image ships a toolchain with a different profile, and reconciling
+      # against it hits an EXDEV rename bug in rustup, so install into a job-local home.
+      - name: Use a fresh Rust toolchain home
+        run: |
+          {
+            echo "RUSTUP_HOME=$RUNNER_TEMP/rustup"
+            echo "CARGO_HOME=$RUNNER_TEMP/cargo"
+          } >> "$GITHUB_ENV"
+
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+          tools: cargo-codspeed
+          nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: codspeed-build-${{ matrix.batch.id }}-* # `cargo codspeed run` runs all of them.
+          merge-multiple: true
+          path: .
+
+      - name: Set up bench binaries
+        run: |
+          find target/codspeed -type f -exec chmod +x {} + # Artifacts drop the executable bit.
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
+          } >> "$GITHUB_ENV"
+
+      - name: Set the loopback MTU # Same packetization as the other benchmark workflows.
+        env:
+          MTU: 1500 # Step-scoped: `neqo-bin` benches append `/mtu-$MTU` to their names.
+        run: sudo ip link set dev lo mtu "$MTU"
+
       - name: Run bench & upload results
         uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
         with:
-          mode: ${{ matrix.bench.mode }}
+          mode: ${{ matrix.batch.mode }}
           run: cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
+
+  # The client/server jobs live here, rather than in a workflow of their own, so that all of a
+  # commit's results land in a single CodSpeed run: CodSpeed groups them by GitHub Actions run.
+  build-neqo:
+    name: Build neqo
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: $/.github/actions/install-build-deps
+        with:
+          version: stable
+
+      - name: Build neqo
+        run: |
+          cargo build --locked --release --features bench --bin neqo-client --bin neqo-server
+          mkdir -p binaries
+          cp target/release/neqo-client target/release/neqo-server binaries/
+
+      - uses: $/.github/actions/bundle-nss
+        with:
+          path: binaries
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: neqo-binaries
+          path: binaries
+          retention-days: 1
+
+  build-others:
+    name: Build ${{ matrix.impl }}
+    runs-on: ubuntu-24.04
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
+    strategy:
+      matrix:
+        impl: [quiche, s2n]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions # Cone mode also gets the Cargo.toml rust-cache needs.
+      - uses: $/.github/actions/quic-build
+        with:
+          impl: ${{ matrix.impl }}
+          artifact-name: ${{ matrix.impl }}-binaries
+
+  perfcompare:
+    name: ${{ matrix.combo.client }}-${{ matrix.combo.server }}
+    runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
+    needs: [bench-matrix, build-neqo, build-others] # `bench-matrix` checks the merge commit.
+    # Job-scoped, so they cannot leak into `benchmarks`, where `MTU` is deliberately step-scoped.
+    env:
+      TRANSFER_SIZE: 33554432 # 32 MiB
+      MTU: 1500
+    strategy:
+      fail-fast: false
+      matrix:
+        combo:
+          - { client: neqo, server: neqo }
+          - { client: neqo, server: quiche }
+          - { client: quiche, server: neqo }
+          - { client: neqo, server: s2n }
+          - { client: s2n, server: neqo }
+    steps:
+      # CodSpeed needs the Git metadata to identify the repository and commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download neqo
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: neqo-binaries
+          path: binaries
+
+      # Combos never pair two different non-neqo impls, so at most one of these applies.
+      - name: Download external impl binaries
+        if: matrix.combo.client != 'neqo' || matrix.combo.server != 'neqo'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ (matrix.combo.client != 'neqo' && matrix.combo.client || matrix.combo.server) }}-binaries
+          path: binaries
+
+      - run: chmod +x binaries/*
+
+      # Pin client and server to separate CPUs, as the other perf workflows do. Unpinned, the
+      # two can share a core or straddle the 9950X's CCDs, which dominates a walltime median.
+      - name: Prepare machine
+        id: machine
+        uses: $/.github/actions/bench-machine
+        with:
+          mtu: ${{ env.MTU }} # Same packetization as the other client/server benchmarks.
+
+      - name: Setup test environment
+        uses: $/.github/actions/testdata-setup
+        with:
+          sizes: ${{ env.TRANSFER_SIZE }}
+
+      # Separate ports would only matter if combos ran concurrently on this runner; they
+      # run sequentially in the matrix, so the command generator's default port is fine.
+      - name: Generate commands
+        id: commands
+        uses: $/.github/actions/perfcompare-commands
+        with:
+          client: ${{ matrix.combo.client }}
+          server: ${{ matrix.combo.server }}
+          size: ${{ env.TRANSFER_SIZE }}
+          neqo-path: binaries
+
+      - name: Set environment
+        run: |
+          {
+            echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/binaries/lib:$LD_LIBRARY_PATH"
+            echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/binaries/test-fixture/db"
+          } >> "$GITHUB_ENV"
+
+      - name: Start server
+        env:
+          SERVER_CMD: ${{ steps.commands.outputs.server-cmd }}
+          SERVER_CPU: ${{ steps.machine.outputs.server-cpu }}
+        run: |
+          # shellcheck disable=SC2086
+          taskset -c "$SERVER_CPU" $SERVER_CMD &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+          sleep 1
+
+      - name: Verify transfer
+        env:
+          CLIENT_CMD_SAVE: ${{ steps.commands.outputs.client-cmd-save }}
+        run: |
+          eval "$CLIENT_CMD_SAVE"
+          SIZE=$(stat -c%s "$TRANSFER_SIZE")
+          if [ "$SIZE" -lt "$TRANSFER_SIZE" ]; then
+            echo "Transfer failed: expected $TRANSFER_SIZE bytes, got $SIZE"
+            exit 1
+          fi
+          rm -f "$TRANSFER_SIZE"
+
+      - name: Create benchmark config
+        env:
+          BENCH_NAME: ${{ steps.commands.outputs.bench-name }}
+          CLIENT_CMD: ${{ steps.commands.outputs.client-cmd }}
+          CLIENT_CPU: ${{ steps.machine.outputs.client-cpu }}
+        run: |
+          {
+            echo "benchmarks:"
+            echo "  - name: \"$BENCH_NAME\""
+            # `exec` is tokenized, not run through a shell, so the prefix is just more argv.
+            echo "    exec: taskset -c $CLIENT_CPU $CLIENT_CMD"
+            echo "    options:"
+            echo "      min-rounds: 500"
+          } > "$GITHUB_WORKSPACE/codspeed.yml"
+
+      - name: Run benchmark
+        uses: CodSpeedHQ/action@373d6868929f444bc08d901fd0eb0ad52a8875ea # v5.2.1
+        with:
+          mode: walltime
+          working-directory: ${{ github.workspace }}
+          config: ${{ github.workspace }}/codspeed.yml
+          token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
+
+      - name: Stop server
+        if: always()
+        run: kill "$SERVER_PID" 2>/dev/null || true

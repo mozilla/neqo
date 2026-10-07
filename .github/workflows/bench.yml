@@ -2,6 +2,8 @@ name: cargo bench
 on:
   workflow_call:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 env:
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -11,27 +13,49 @@ env:
   # `cycles:u` stays first: samply makes the first `-e` event its sample table, the rest markers.
   # Per-symbol IPC comes from the `perf report` dumps. No cache or TLB events: only 4 counters.
   PERF_OPT: record -N -F2999 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
+  # No `instructions` on GitHub-hosted runners.
+  PERF_OPT_GITHUB: record -N -F2999 --call-graph fp -e cycles:u,cycles:k,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   # Exact counts, so IPC has no sampling error. `--no-big-num`, as separators are locale-dependent.
   # Tracepoints cost none of the four counters. With the `lo` deltas: sends per byte.
   PERF_TRACEPOINTS: syscalls:sys_enter_sendmsg,syscalls:sys_enter_sendmmsg,syscalls:sys_enter_recvmsg,syscalls:sys_enter_recvmmsg
   PERF_STAT_OPT: stat --no-big-num -e instructions:u,cycles:u,cycles:k,task-clock,page-faults,major-faults,context-switches,cpu-migrations
-  MTU: 1504 # https://github.com/microsoft/msquic/issues/4618
+  MTU: 1500
   CFLAGS: -fno-omit-frame-pointer
   CXXFLAGS: -fno-omit-frame-pointer
   WORKSPACE: ${{ github.workspace }}
   BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: Build bench binaries
+  targets:
+    name: Determine bench targets
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
+    outputs:
+      targets: ${{ steps.matrix.outputs.all }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: matrix
+        uses: $/.github/actions/bench-matrix
+
+  build:
+    name: Build ${{ matrix.target.bench }} (${{ matrix.ref }})
+    runs-on: ubuntu-24.04
+    needs: targets
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.targets) }}
+        ref: [pr, baseline]
     defaults:
       run:
         shell: bash
@@ -42,52 +66,99 @@ jobs:
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: "recursive"
           persist-credentials: false
 
-      - uses: ./neqo/.github/actions/build-neqo
+      - uses: $/.github/actions/build-neqo
         with:
-          artifact-name: bench-build
-          benches: "true"
+          artifact-name: bench-build-${{ matrix.target.bench }}-${{ matrix.ref }}
+          bench: ${{ matrix.target.crate }} ${{ matrix.target.bench }}
+          bins: "false"
+          ref: ${{ matrix.ref }}
           baseline-ref: origin/${{ env.BASE_REF }}
 
+      # Here, rather than re-downloading every binary later.
+      - name: Enumerate variants
+        if: ${{ matrix.ref == 'pr' }}
+        env:
+          BENCH: ${{ matrix.target.bench }}
+          MODE: ${{ matrix.target.mode }}
+        run: |
+          chmod +x "dist/neqo/$BENCH"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/dist/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export TEST_FIXTURE_DB="$GITHUB_WORKSPACE/dist/test-fixture/db"
+          "dist/neqo/$BENCH" --bench --list 2>/dev/null |
+            sed -n 's/: benchmark$//p' > variants.txt || true
+          # A `harness = false` bench lists nothing and is profiled whole.
+          jq -Rsc --arg bench "$BENCH" --arg mode "$MODE" '
+            [splits("\n")] | map(select(length > 0))
+            | (if length == 0 then [""] else . end)
+            | map({bench: $bench, mode: $mode, variant: .})' variants.txt > variants.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: ${{ matrix.ref == 'pr' }}
+        with:
+          name: variants-${{ matrix.target.bench }}
+          path: variants.json
+          retention-days: 1
+
   build-samply:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: $/.github/workflows/build-samply.yml
 
-  bench:
-    name: cargo bench
-    runs-on: "self-hosted" # zizmor: ignore[self-hosted-runner]
-    needs: [build, build-samply]
+  bench-variants:
+    name: Determine benchmarks
+    runs-on: ubuntu-24.04
+    needs: build
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }} # A failed build must not skip the other targets.
+    outputs:
+      benchmarks: ${{ steps.benchmarks.outputs.benchmarks }}
     defaults:
       run:
         shell: bash
 
     steps:
-      - name: Check free disk space
-        run: |
-          df -h /
-          AVAIL=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
-          if [ "$AVAIL" -lt 25 ]; then
-            echo "::error::Only ${AVAIL}G free on $(hostname); need 25G. Runner needs cleanup."
-            exit 1
-          fi
-
-      - name: Checkout mozilla/neqo
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          repository: mozilla/neqo
-          path: neqo
-          persist-credentials: false
-          clean: false
-      - run: |
-          cd neqo
-          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          pattern: variants-* # One directory each, as they share a file name.
+          path: variants
 
-      - name: Set PATH and environment
+      - name: Merge benchmarks
+        id: benchmarks
         run: |
-          echo "$HOME/.cargo/bin" >> "${GITHUB_PATH}"
+          mkdir -p variants # There may be none.
+          find variants -name variants.json -exec cat {} + | jq -sc '
+            # Artifact names must be filesystem-safe; only the timed benchmarks need pinning.
+            add // [] | map(. + {
+              slug: (.bench + (if .variant == "" then "" else " " + .variant end)
+                     | gsub("[^A-Za-z0-9._-]+"; "_")),
+              runner: (if .mode == "walltime"
+                       then "codspeed-macro-x86-ryzen-9950x-ubuntu-24-04"
+                       else "ubuntu-24.04" end)})' > benchmarks.json
 
+          echo "benchmarks=$(<benchmarks.json)" >> "$GITHUB_OUTPUT"
+
+  bench:
+    name: cargo bench (${{ matrix.benchmark.bench }} ${{ matrix.benchmark.variant }})
+    runs-on: ${{ matrix.benchmark.runner }} # zizmor: ignore[self-hosted-runner]
+    needs: [build, build-samply, bench-variants]
+    if: ${{ !cancelled() && needs.build-samply.result == 'success' && needs.bench-variants.outputs.benchmarks != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        benchmark: ${{ fromJSON(needs.bench-variants.outputs.benchmarks) }}
+    env:
+      BENCHMARK_NAME: ${{ matrix.benchmark.bench }}
+      BENCHMARK_VARIANT: ${{ matrix.benchmark.variant }}
+      BENCHMARK_SLUG: ${{ matrix.benchmark.slug }}
+      MODE: ${{ matrix.benchmark.mode }}
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # No checkout: this job only consumes artifacts.
       - name: Install Rust
+        if: ${{ matrix.benchmark.mode == 'walltime' }}
         uses: $/.github/actions/install-build-deps
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
@@ -99,65 +170,49 @@ jobs:
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: bench-build
+          pattern: bench-build-${{ matrix.benchmark.bench }}-* # Both refs, into one tree.
+          merge-multiple: true
           path: dist
 
       - name: Set up build artifacts
         run: |
-          chmod +x dist/neqo/* dist/neqo-baseline/*
+          chmod +x dist/neqo/* dist/neqo-baseline/* 2>/dev/null || true # No baseline for a new bench.
           {
             echo "LD_LIBRARY_PATH=$GITHUB_WORKSPACE/dist/lib:$LD_LIBRARY_PATH"
             echo "TEST_FIXTURE_DB=$GITHUB_WORKSPACE/dist/test-fixture/db"
           } >> "$GITHUB_ENV"
 
-      # Disable turboboost, hyperthreading, use performance governor, and isolate CPUs with cset.
       - name: Prepare machine
-        id: cpu-tuning
-        uses: ./neqo/.github/actions/cpu-tuning
+        id: machine
+        if: ${{ matrix.benchmark.mode == 'walltime' }}
+        uses: $/.github/actions/bench-machine
         with:
           mtu: ${{ env.MTU }}
 
+      - name: Enable perf
+        if: ${{ matrix.benchmark.mode != 'walltime' }}
+        uses: $/.github/actions/enable-perf
+
       - name: Run cargo bench
         env:
-          BENCH_SET: ${{ steps.cpu-tuning.outputs.bench-set }}
+          BENCH_CPUS: ${{ steps.machine.outputs.bench-cpus }} # Two: the benches serve from a thread.
+          RECORD_OPT: ${{ matrix.benchmark.mode == 'walltime' && env.PERF_OPT || env.PERF_OPT_GITHUB }}
         run: |
+          # Only the pinned runner has CPUs to pin to.
+          PIN=()
+          [ -z "$BENCH_CPUS" ] || PIN=(setarch --addr-no-randomize taskset -c "$BENCH_CPUS")
           # `MTU` is part of the benchmark names `--exact` matches; `LC_ALL=C` keeps perf parseable.
-          bench_exec() { sudo nice -n -20 env "MTU=$MTU" "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" setarch --addr-no-randomize cset proc --set="$BENCH_SET" --exec "$@"; }
-          filter_cset() { grep -v '^cset' || test $? = 1; }
+          bench_exec() { env "MTU=$MTU" "LC_ALL=C" "${PIN[@]}" "$@"; }
+          # Only `perf` needs root, for the tracepoints; `sudo` resets NSS's paths.
+          perf_exec() { sudo env "MTU=$MTU" "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" "${PIN[@]}" perf "$@"; }
           shopt -s extglob nullglob
 
-          # Kill any stale processes from previous runs that may be holding port 4433.
-          sudo fuser -k 4433/udp 4433/tcp || true
-
-          cd neqo
-          if [ -d target ]; then
-            sudo chown -R --no-dereference "$(id -u)" target
-          fi
-          # Start empty, so a removed benchmark leaves no stale file to compare against.
-          rm -rf target/criterion ../profiles ../stats ../results.txt ../results-baseline.txt
-          # Run baseline and PR builds interleaved.
-          sanitize_name() { echo "$1" | tr '/ ()' '___-' | tr -s '_'; }
           variants() { "$1" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true; }
-          for PR_BENCH in ../dist/neqo/!(neqo-client|neqo-server); do
-            BIN_NAME=$(basename "$PR_BENCH")
-            BASELINE_BENCH="../dist/neqo-baseline/$BIN_NAME"
-            [ -f "$BASELINE_BENCH" ] || BASELINE_BENCH=""
-            VARIANTS=$(variants "$PR_BENCH")
-            if [ -n "$VARIANTS" ]; then
-              BASELINE_VARIANTS=""
-              [ -n "$BASELINE_BENCH" ] && BASELINE_VARIANTS=$(variants "$BASELINE_BENCH")
-              while IFS= read -r VARIANT; do
-                if [ -n "$BASELINE_BENCH" ] && grep -qxF "$VARIANT" <<< "$BASELINE_VARIANTS"; then
-                  bench_exec "$BASELINE_BENCH" -- --bench --save-baseline baseline --noplot --exact "$VARIANT" | filter_cset | tee -a ../results-baseline.txt
-                fi
-                # --baseline-lenient allows us to add new benchmarks in pull requests.
-                bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot --exact "$VARIANT" | filter_cset | tee -a ../results.txt
-              done <<< "$VARIANTS"
-            else
-              [ -n "$BASELINE_BENCH" ] && bench_exec "$BASELINE_BENCH" -- --bench --save-baseline baseline --noplot | filter_cset | tee -a ../results-baseline.txt
-              bench_exec "$PR_BENCH" -- --bench --baseline-lenient baseline --noplot | filter_cset | tee -a ../results.txt
-            fi
-          done
+          PR_BENCH="dist/neqo/$BENCHMARK_NAME"
+          BASELINE_BENCH="dist/neqo-baseline/$BENCHMARK_NAME"
+          [ -f "$BASELINE_BENCH" ] || BASELINE_BENCH=""
+          [ -x "$PR_BENCH" ] || { echo "::error::Missing benchmark $PR_BENCH"; exit 1; }
+
           lo_stat() { cat "/sys/class/net/lo/statistics/$1"; }
           # Run `perf $1` on the benchmark in $3.., writing to $2, and append the `lo` deltas
           # like `perf stat`'s own lines: into its output, or beside the binary `perf.data`.
@@ -165,106 +220,193 @@ jobs:
             local sub="$1" out="$2" tx pkt; shift 2
             tx=$(lo_stat tx_bytes); pkt=$(lo_stat tx_packets)
             # shellcheck disable=SC2086
-            bench_exec perf -- $sub -o "$out" "$@" | filter_cset
+            perf_exec $sub -o "$out" "$@"
             [ "${out##*.}" = txt ] || out="$out.lo"
             printf '%20s      lo-tx-bytes\n%20s      lo-tx-packets\n' \
               "$(( $(lo_stat tx_bytes) - tx ))" "$(( $(lo_stat tx_packets) - pkt ))" \
-              | sudo tee -a "$out" >/dev/null
+              | sudo tee -a "$out" >/dev/null # `$out` is root-owned, `perf` wrote it.
           }
-          # Run `perf $1` over every benchmark in $2 for $5 seconds, writing $4 under $3/<side>/.
+          # Run `perf $1` over this benchmark for $5 seconds, writing $4 under $3/<side>/.
           # The transfers run over `[::1]`, so `lo` sees exactly them. Compare per byte:
           # criterion fits whole iterations in, so the sides do different amounts of work.
-          perf_dir() {
-            local subcmd="$1" dir="$2" out ext="$4" secs="$5"
-            out="$3/$(basename "$dir")"
-            local BENCH BIN_NAME VARIANTS SAFE_NAME VARIANT
+          perf_one() {
+            local subcmd="$1" side="$2" out_root="$3" ext="$4" secs="$5"
+            local bench="dist/$side/$BENCHMARK_NAME" out="$out_root/$side"
+            [ -f "$bench" ] || return 0
             mkdir -p "$out"
-            for BENCH in "$dir"/!(neqo-client|neqo-server); do
-              BIN_NAME=$(basename "$BENCH")
-              VARIANTS=$(variants "$BENCH")
-              if [ -n "$VARIANTS" ]; then
-                while IFS= read -r VARIANT; do
-                  SAFE_NAME="${BIN_NAME}_$(sanitize_name "$VARIANT")"
-                  measure "$subcmd" "$out/$SAFE_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs" --exact "$VARIANT"
-                done <<< "$VARIANTS"
-              else
-                measure "$subcmd" "$out/$BIN_NAME.$ext" "$BENCH" --bench --noplot --profile-time "$secs"
-              fi
-            done
+            if [ -n "$BENCHMARK_VARIANT" ]; then
+              measure "$subcmd" "$out/$BENCHMARK_SLUG.$ext" "$bench" --bench --noplot --profile-time "$secs" --exact "$BENCHMARK_VARIANT"
+            else
+              measure "$subcmd" "$out/$BENCHMARK_SLUG.$ext" "$bench" --bench --noplot --profile-time "$secs"
+            fi
           }
-          # `perf stat` fails outright on an event it cannot open, so add the tracepoints
-          # only once they open. Probe them alone, or another event's failure is blamed here.
-          if bench_exec perf -- stat -e "$PERF_TRACEPOINTS" -- true >/dev/null 2>&1; then
-            PERF_STAT_OPT="$PERF_STAT_OPT,$PERF_TRACEPOINTS"
-          else
-            echo "::warning::syscall tracepoints unavailable, continuing without them"
+          # codspeed.yml measures the simulated benchmarks.
+          if [ "$MODE" = walltime ]; then
+            # Run the baseline and PR builds interleaved for this benchmark.
+            if [ -n "$BENCHMARK_VARIANT" ]; then
+              if [ -n "$BASELINE_BENCH" ] && grep -qxF "$BENCHMARK_VARIANT" < <(variants "$BASELINE_BENCH"); then
+                bench_exec "$BASELINE_BENCH" --bench --save-baseline baseline --noplot --exact "$BENCHMARK_VARIANT" | tee -a results-baseline.txt
+              fi
+              # --baseline-lenient allows us to add new benchmarks in pull requests.
+              bench_exec "$PR_BENCH" --bench --baseline-lenient baseline --noplot --exact "$BENCHMARK_VARIANT" | tee -a results.txt
+            else
+              [ -n "$BASELINE_BENCH" ] && bench_exec "$BASELINE_BENCH" --bench --save-baseline baseline --noplot | tee -a results-baseline.txt
+              bench_exec "$PR_BENCH" --bench --baseline-lenient baseline --noplot | tee -a results.txt
+            fi
+            # `perf stat` fails outright on an event it cannot open, so add the tracepoints
+            # only once they open. Probe them alone, or another event's failure is blamed here.
+            if perf_exec stat -e "$PERF_TRACEPOINTS" -- true >/dev/null 2>&1; then
+              PERF_STAT_OPT="$PERF_STAT_OPT,$PERF_TRACEPOINTS"
+            else
+              echo "::warning::syscall tracepoints unavailable, continuing without them"
+            fi
+            # `stat` for both sides first, so `record`'s overhead cannot skew the IPC comparison.
+            for SIDE in neqo neqo-baseline; do
+              perf_one "$PERF_STAT_OPT" "$SIDE" stats txt 5
+            done
+            sudo chown -R "$(id -u)" stats # Take back what root `perf` wrote.
           fi
-          # `stat` for both sides first, so `record`'s overhead cannot skew the IPC comparison.
-          for SIDE in ../dist/neqo ../dist/neqo-baseline; do
-            perf_dir "$PERF_STAT_OPT" "$SIDE" ../stats txt 5
-          done
           # Longer, because the flamegraphs need samples, not just an exact ratio.
-          for SIDE in ../dist/neqo ../dist/neqo-baseline; do
-            perf_dir "$PERF_OPT" "$SIDE" ../profiles perf 15
+          for SIDE in neqo neqo-baseline; do
+            perf_one "$RECORD_OPT" "$SIDE" profiles perf 15
           done
-          # bench_exec runs as root via sudo nice, so fix ownership of all files it wrote
-          sudo chown -R "$(id -u)" target/criterion ../profiles ../stats
+          sudo chown -R "$(id -u)" profiles
 
-      # Runs before the machine is restored, because symbolication needs `kptr_restrict`.
       - name: Post-process perf data
         timeout-minutes: 30
+        uses: $/.github/actions/process-perf
+        with:
+          path: profiles/*/*.perf
+          reports: ${{ matrix.benchmark.mode == 'walltime' }} # IPC needs `instructions`.
+
+      - name: Record benchmark failure
+        if: failure()
         run: |
-          for f in profiles/*/*.perf; do
-            # Convert for profiler.firefox.com
-            samply import "$f" -o "$f.samply.json.gz" --save-only --presymbolicate
-            # Generate flamegraphs from the cycles event (perf.data has multiple events)
-            perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
-            # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
-            perf report -i "$f" --stdio --no-children -g none \
-              -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
+          mkdir -p benchmark-status
+          echo "${BENCHMARK_NAME} ${BENCHMARK_VARIANT} failed; see the job log" > benchmark-status/failed
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: benchmark-${{ matrix.benchmark.slug }}
+          path: |
+            profiles/*/*.samply.json.gz
+            profiles/*/*.svg
+            profiles/*/*.report.txt
+            profiles/*/*.lo
+            stats/*/*.txt
+            results.txt
+            results-baseline.txt
+            benchmark-status
+          if-no-files-found: ignore
+          compression-level: 9
+
+  results:
+    name: Assemble benchmark results
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
+    needs: bench
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout mozilla/neqo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mozilla/neqo
+          path: neqo
+          persist-credentials: false
+      - run: |
+          cd neqo
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: benchmark-*
+          path: benchmarks
+
+      - name: Merge benchmark results
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          : > results.txt
+          : > results-baseline.txt
+          mkdir -p profiles/neqo profiles/neqo-baseline stats/neqo stats/neqo-baseline
+          : > failed-benchmarks.txt
+
+          for benchmark in benchmarks/benchmark-*; do
+            [ -d "$benchmark" ] || continue
+            cat "$benchmark/results.txt" >> results.txt 2>/dev/null || true
+            cat "$benchmark/results-baseline.txt" >> results-baseline.txt 2>/dev/null || true
+            cat "$benchmark/benchmark-status/failed" >> failed-benchmarks.txt 2>/dev/null || true
+            for side in neqo neqo-baseline; do
+              if [ -d "$benchmark/profiles/$side" ]; then
+                cp -a "$benchmark/profiles/$side/." "profiles/$side/"
+              fi
+              if [ -d "$benchmark/stats/$side" ]; then
+                cp -a "$benchmark/stats/$side/." "stats/$side/"
+              fi
+            done
           done
 
-      # Re-enable turboboost, hyperthreading, use powersave governor, remove all CPU sets, restore MTU.
-      - name: Restore machine
-        if: always()
-        uses: ./neqo/.github/actions/cpu-tuning
-        with:
-          mode: restore
+      - name: List per-benchmark profiles
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api --paginate --slurp "/repos/$REPOSITORY/actions/runs/$RUN_ID/artifacts" |
+            jq -r '[.[].artifacts[] | select(.name | startswith("benchmark-"))]
+              | sort_by(.name)
+              | select(length > 0)
+              | "<details><summary>Profiles for profiler.firefox.com (\(length))</summary>\n",
+                (.[] | "- [\(.name | sub("^benchmark-"; ""))](https://github.com/\(env.REPOSITORY)/actions/runs/\(env.RUN_ID)/artifacts/\(.id))"),
+                "\n</details>"' > profiles.md
 
       - name: Format results as Markdown
         id: results
         env:
           EVENT_PATH: ${{ github.event_path }}
-          TESTBED: "On-prem"
         run: |
+          cp "$EVENT_PATH" event.json
+          if [ ! -s results.txt ] && [ ! -s profiles.md ]; then
+            : > results.md # An empty comment deletes the previous one.
+            exit 0
+          fi
           SHA=$(cd neqo && git log origin/"$BASE_REF" -1 --format=%H)
           echo "$SHA" > baseline-sha.txt
           python3 neqo/.github/scripts/format-bench-results.py results.txt stats
           # Build final markdown output
           {
             echo "### Benchmark results"
-            echo
-            if [ -s significant-results.md ]; then
-              echo "Significant performance differences relative to $SHA."
-              cat significant-results.md
-            else
-              echo "No significant performance differences relative to $SHA."
+            if [ -s results.txt ]; then
+              echo
+              if [ -s significant-results.md ]; then
+                echo "Significant performance differences relative to $SHA."
+                cat significant-results.md
+              else
+                echo "No significant performance differences relative to $SHA."
+              fi
+              echo
+              echo "<details><summary>All results</summary>"
+              echo
+              cat all-bench-results.md
+              echo
+              echo "</details>"
             fi
-            echo
-            echo "<details><summary>All results</summary>"
-            echo
-            cat all-bench-results.md
-            echo
-            echo "</details>"
             if [ -s perf-stat.md ]; then
               echo
               cat perf-stat.md
             fi
+            if [ -s profiles.md ]; then
+              echo
+              cat profiles.md
+            fi
           } > results.md
-          rm -f all-bench-results.md significant-results.md perf-stat.md
+          rm -f all-bench-results.md significant-results.md perf-stat.md profiles.md
           cat results.md > "$GITHUB_STEP_SUMMARY"
-          echo "$TESTBED" > testbed.txt
-          cp "$EVENT_PATH" event.json
 
       - name: Export profiler.firefox.com data
         id: export_samply
@@ -293,7 +435,7 @@ jobs:
           compression-level: 9
 
       - name: Export PR comment data
-        uses: ./neqo/.github/actions/pr-comment-data-export
+        uses: $/.github/actions/pr-comment-data-export
         with:
           name: ${{ github.workflow }}
           contents: results.md
@@ -310,8 +452,10 @@ jobs:
             echo "No performance regression detected."
           fi
 
-      - name: Remove benchmark artifacts
+      - name: Fail on benchmark errors
         if: always()
         run: |
-          rm -- * || true
-          rm -r -- dist profiles stats comment-data || true
+          if [ -s failed-benchmarks.txt ]; then
+            cat failed-benchmarks.txt
+            exit 1
+          fi

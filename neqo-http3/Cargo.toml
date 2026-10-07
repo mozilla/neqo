@@ -43,7 +43,7 @@ bench = [
         "neqo-qpack/bench",
         "neqo-transport/bench",
         "test-fixture/bench",
-        "log/release_max_level_info",
+        "log/release_max_level_warn",
 ]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",

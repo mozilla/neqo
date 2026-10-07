@@ -15,7 +15,9 @@ use std::{
 };
 
 use qlog::{
-    CommonFields, Configuration, TraceSeq, VantagePoint, VantagePointType, streamer::QlogStreamer,
+    CommonFields, Error, ReferenceTime, TimeFormat, TraceSeq, VantagePoint, VantagePointType,
+    events::{EventData, EventImportance},
+    streamer::{EventTimePrecision, QlogStreamer},
 };
 
 use crate::Role;
@@ -40,7 +42,7 @@ impl Qlog {
     ///
     /// # Errors
     ///
-    /// Will return `qlog::Error` if it cannot write to the new file.
+    /// Will return `Error` if it cannot write to the new file.
     pub fn enabled_with_file<D: Display>(
         mut qlog_path: PathBuf,
         role: Role,
@@ -48,7 +50,7 @@ impl Qlog {
         description: Option<String>,
         file_prefix: D,
         now: Instant,
-    ) -> Result<Self, qlog::Error> {
+    ) -> Result<Self, Error> {
         qlog_path.push(format!("{file_prefix}.sqlog"));
 
         let file = OpenOptions::new()
@@ -59,13 +61,12 @@ impl Qlog {
             .open(&qlog_path)?;
 
         let streamer = QlogStreamer::new(
-            qlog::QLOG_VERSION.to_string(),
             title,
             description,
-            None,
             now,
             new_trace(role),
-            qlog::events::EventImportance::Extra,
+            EventImportance::Extra,
+            EventTimePrecision::MicroSeconds,
             Box::new(BufWriter::new(file)),
         );
         Self::enabled(streamer, qlog_path)
@@ -78,8 +79,8 @@ impl Qlog {
     ///
     /// # Errors
     ///
-    /// Will return `qlog::Error` if it cannot write to the new log.
-    pub fn enabled(mut streamer: QlogStreamer, qlog_path: PathBuf) -> Result<Self, qlog::Error> {
+    /// Will return `Error` if it cannot write to the new log.
+    pub fn enabled(mut streamer: QlogStreamer, qlog_path: PathBuf) -> Result<Self, Error> {
         streamer.start_log()?;
 
         Ok(Self {
@@ -105,7 +106,7 @@ impl Qlog {
     /// If logging enabled, closure may generate an event to be logged.
     pub fn add_event_at<F>(&mut self, f: F, now: Instant)
     where
-        F: FnOnce() -> Option<qlog::events::EventData>,
+        F: FnOnce() -> Option<EventData>,
     {
         self.add_event_with_stream(|s| {
             if let Some(ev_data) = f() {
@@ -119,7 +120,7 @@ impl Qlog {
     /// frames to.
     pub fn add_event_with_stream<F>(&mut self, f: F)
     where
-        F: FnOnce(&mut QlogStreamer) -> Result<(), qlog::Error>,
+        F: FnOnce(&mut QlogStreamer) -> Result<(), Error>,
     {
         let Some(inner) = self.inner.as_mut() else {
             return;
@@ -136,7 +137,7 @@ impl Qlog {
 
         match f(&mut shared_streamer.streamer) {
             // `Error::Done` means "event was below the importance threshold" - not an actual error.
-            Ok(()) | Err(qlog::Error::Done) => (),
+            Ok(()) | Err(Error::Done) => (),
             Err(e) => {
                 log::error!("Qlog event generation failed with error {e}; closing qlog.");
                 // Set the inner Option to None to disable future logging for other references.
@@ -167,28 +168,22 @@ impl Drop for SharedStreamer {
 #[must_use]
 pub fn new_trace(role: Role) -> TraceSeq {
     TraceSeq {
-        vantage_point: VantagePoint {
+        vantage_point: Some(VantagePoint {
             name: Some(format!("neqo-{role}")),
             ty: match role {
                 Role::Client => VantagePointType::Client,
                 Role::Server => VantagePointType::Server,
             },
             flow: None,
-        },
+        }),
         title: Some(format!("neqo-{role} trace")),
         description: Some(format!("neqo-{role} trace")),
-        configuration: Some(Configuration {
-            time_offset: Some(0.0),
-            original_uris: None,
-        }),
+        event_schemas: vec![qlog::events::QUIC_URI.to_string()],
         common_fields: Some(CommonFields {
-            group_id: None,
-            protocol_type: None,
-            reference_time: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs_f64() * 1_000.0)
-                .ok(),
-            time_format: Some("relative".to_string()),
+            protocol_types: Some(vec!["QUIC".to_string()]),
+            reference_time: ReferenceTime::new_monotonic(Some(SystemTime::now())),
+            time_format: Some(TimeFormat::RelativeToEpoch),
+            ..Default::default()
         }),
     }
 }
@@ -196,18 +191,21 @@ pub fn new_trace(role: Role) -> TraceSeq {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
+    use std::io::Error;
+
+    use qlog::{
+        Error::IoError,
+        events::{EventData, quic::SpinBitUpdated},
+    };
     use test_fixture::EXPECTED_LOG_HEADER;
 
     use super::Qlog;
 
-    const EV_DATA: qlog::events::EventData =
-        qlog::events::EventData::SpinBitUpdated(qlog::events::connectivity::SpinBitUpdated {
-            state: true,
-        });
+    const EV_DATA: EventData = EventData::QuicSpinBitUpdated(SpinBitUpdated { state: true });
 
     const EXPECTED_LOG_EVENT: &str = concat!(
         "\u{1e}",
-        r#"{"time":0.0,"name":"connectivity:spin_bit_updated","data":{"state":true}}"#,
+        r#"{"time":0.0,"name":"quic:spin_bit_updated","data":{"state":true}}"#,
         "\n"
     );
 
@@ -245,7 +243,7 @@ mod test {
         let (mut log, contents) = test_fixture::new_neqo_qlog();
         let mut log_clone = log.clone();
         let before_error = contents.to_string();
-        log.add_event_with_stream(|_| Err(qlog::Error::IoError(std::io::Error::other("e"))));
+        log.add_event_with_stream(|_| Err(IoError(Error::other("e"))));
         // The cloned instance still has inner=Some, but the RefCell contains None.
         log_clone.add_event_at(|| Some(EV_DATA), test_fixture::now());
         assert_eq!(contents.to_string(), before_error);
@@ -261,7 +259,7 @@ mod test {
         // Disabled on a clone whose underlying streamer was killed by a write error.
         let mut log = log;
         let clone = log.clone();
-        log.add_event_with_stream(|_| Err(qlog::Error::IoError(std::io::Error::other("e"))));
+        log.add_event_with_stream(|_| Err(IoError(Error::other("e"))));
         assert!(!clone.is_enabled());
     }
 }

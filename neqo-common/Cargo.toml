@@ -39,7 +39,7 @@ criterion = { version = "5", package = "codspeed-criterion-compat", default-feat
 test-fixture = { path = "../test-fixture" }
 
 [features]
-bench = ["test-fixture/bench", "log/release_max_level_info"]
+bench = ["test-fixture/bench", "log/release_max_level_warn"]
 build-fuzzing-corpus = ["hex/alloc", "sha1"]
 ci = []
 test-fixture = []

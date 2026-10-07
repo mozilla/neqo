@@ -125,7 +125,10 @@ impl Node {
         Self::new_client(
             Http3Parameters::default().connection_parameters(
                 // Simulator logic does not work with multi-packet MLKEM crypto flights.
-                ConnectionParameters::default().mlkem(false),
+                // Simulated peer address never resolves, interface MTU is pointless.
+                ConnectionParameters::default()
+                    .mlkem(false)
+                    .pmtud_iface_mtu(false),
             ),
             boxed![ReachState::new(Http3State::Connected)],
             goals,
@@ -136,7 +139,10 @@ impl Node {
         Self::new_server(
             Http3Parameters::default().connection_parameters(
                 // Simulator logic does not work with multi-packet MLKEM crypto flights.
-                ConnectionParameters::default().mlkem(false),
+                // Simulated peer address never resolves, interface MTU is pointless.
+                ConnectionParameters::default()
+                    .mlkem(false)
+                    .pmtud_iface_mtu(false),
             ),
             boxed![ReachState::new(Http3State::Connected)],
             goals,

@@ -93,8 +93,6 @@ def flush(
 
 def _should_skip_line(line: str) -> bool:
     """Return True if the line should be skipped."""
-    if re.match(r"^cset:.*last message", line):
-        return True
     if line.startswith("Criterion.rs ERROR:"):
         return True
     if not line.strip():
