@@ -280,7 +280,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
 }
 
 pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
-    qlog.add_event_with_stream(|stream| {
+    qlog.add_event_with_stream(now, |stream, now| {
         for pkt in pkts {
             let header =
                 PacketHeader::with_type(pkt.packet_type().into(), Some(pkt.pn()), None, None, None);
@@ -298,7 +298,7 @@ pub fn packets_lost(qlog: &mut Qlog, pkts: &[sent::Packet], now: Instant) {
 
             stream.add_event_data_with_instant(ev_data, now)?;
         }
-        Ok(())
+        Ok(!pkts.is_empty())
     });
 }
 

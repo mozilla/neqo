@@ -6,6 +6,7 @@
 
 use std::{
     cell::RefCell,
+    cmp::max,
     fmt::{self, Display},
     fs::OpenOptions,
     io::BufWriter,
@@ -35,6 +36,8 @@ pub struct Qlog {
 pub struct SharedStreamer {
     qlog_path: PathBuf,
     streamer: QlogStreamer,
+    /// The time of the most recent event written.
+    last: Option<Instant>,
 }
 
 impl Qlog {
@@ -87,6 +90,7 @@ impl Qlog {
             inner: Some(Rc::new(RefCell::new(Some(SharedStreamer {
                 qlog_path,
                 streamer,
+                last: None,
             })))),
         })
     }
@@ -108,19 +112,19 @@ impl Qlog {
     where
         F: FnOnce() -> Option<EventData>,
     {
-        self.add_event_with_stream(|s| {
-            if let Some(ev_data) = f() {
-                s.add_event_data_with_instant(ev_data, now)?;
-            }
-            Ok(())
+        self.add_event_with_stream(now, |s, now| {
+            let Some(ev_data) = f() else {
+                return Ok(false);
+            };
+            s.add_event_data_with_instant(ev_data, now).map(|()| true)
         });
     }
 
-    /// If logging enabled, closure is given the Qlog stream to write events and
-    /// frames to.
-    pub fn add_event_with_stream<F>(&mut self, f: F)
+    /// If logging enabled, closure is given the Qlog stream to write timestamped events and
+    /// frames to. Reports whether it wrote an event.
+    pub fn add_event_with_stream<F>(&mut self, now: Instant, f: F)
     where
-        F: FnOnce(&mut QlogStreamer) -> Result<(), Error>,
+        F: FnOnce(&mut QlogStreamer, Instant) -> Result<bool, Error>,
     {
         let Some(inner) = self.inner.as_mut() else {
             return;
@@ -135,9 +139,12 @@ impl Qlog {
             return;
         };
 
-        match f(&mut shared_streamer.streamer) {
+        let now = shared_streamer.last.map_or(now, |last| max(last, now));
+
+        match f(&mut shared_streamer.streamer, now) {
+            Ok(true) => shared_streamer.last = Some(now),
             // `Error::Done` means "event was below the importance threshold" - not an actual error.
-            Ok(()) | Err(Error::Done) => (),
+            Ok(false) | Err(Error::Done) => (),
             Err(e) => {
                 log::error!("Qlog event generation failed with error {e}; closing qlog.");
                 // Set the inner Option to None to disable future logging for other references.
@@ -191,17 +198,26 @@ pub fn new_trace(role: Role) -> TraceSeq {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::io::Error;
+    use std::{
+        io::Error,
+        time::{Duration, Instant},
+    };
 
     use qlog::{
         Error::IoError,
         events::{EventData, quic::SpinBitUpdated},
+        streamer::QlogStreamer,
     };
     use test_fixture::EXPECTED_LOG_HEADER;
 
     use super::Qlog;
 
     const EV_DATA: EventData = EventData::QuicSpinBitUpdated(SpinBitUpdated { state: true });
+
+    /// A write that fails, which closes the qlog.
+    fn write_error(_: &mut QlogStreamer, _: Instant) -> Result<bool, qlog::Error> {
+        Err(IoError(Error::other("e")))
+    }
 
     const EXPECTED_LOG_EVENT: &str = concat!(
         "\u{1e}",
@@ -243,10 +259,32 @@ mod test {
         let (mut log, contents) = test_fixture::new_neqo_qlog();
         let mut log_clone = log.clone();
         let before_error = contents.to_string();
-        log.add_event_with_stream(|_| Err(IoError(Error::other("e"))));
+        log.add_event_with_stream(test_fixture::now(), write_error);
         // The cloned instance still has inner=Some, but the RefCell contains None.
         log_clone.add_event_at(|| Some(EV_DATA), test_fixture::now());
         assert_eq!(contents.to_string(), before_error);
+    }
+
+    #[test]
+    fn no_event_does_not_advance_the_clamp() {
+        let (mut log, contents) = test_fixture::new_neqo_qlog();
+        let now = test_fixture::now();
+        let later = now + Duration::from_secs(1);
+
+        log.add_event_at(|| Some(EV_DATA), now);
+        // Offered a later time, but writes nothing, so the clamp stays put.
+        log.add_event_at(|| None, later);
+        // Back at the earlier time, and so must be logged at it.
+        log.add_event_at(|| Some(EV_DATA), now);
+
+        // Events carry the same data, so if written at the same time they produce identical lines.
+        let output = contents.to_string();
+        let events = output
+            .lines()
+            .filter(|l| l.contains("spin_bit_updated"))
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], events[1]);
     }
 
     #[test]
@@ -259,7 +297,7 @@ mod test {
         // Disabled on a clone whose underlying streamer was killed by a write error.
         let mut log = log;
         let clone = log.clone();
-        log.add_event_with_stream(|_| Err(IoError(Error::other("e"))));
+        log.add_event_with_stream(test_fixture::now(), write_error);
         assert!(!clone.is_enabled());
     }
 }
