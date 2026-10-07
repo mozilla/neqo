@@ -9,19 +9,22 @@
 //! reports its own size, that everything received is accounted for, and that
 //! events do not go backwards in time.
 
-use std::time::{Duration, Instant};
+use std::{
+    net::{Ipv4Addr, Ipv6Addr, SocketAddrV4, SocketAddrV6},
+    time::{Duration, Instant},
+};
 
 use neqo_common::{Datagram, Decoder};
 use test_fixture::{datagram, now, strip_padding};
 
 use super::{
     super::State, Connection, ConnectionParameters, connect, default_client, default_server,
-    maybe_authenticate, new_client_with_qlog, new_server_with_qlog, send_something,
+    maybe_authenticate, new_client_with_qlog, new_server, new_server_with_qlog, send_something,
 };
 use crate::{
     saved::SavedDatagrams,
     stateless_reset::Token as Srt,
-    tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
+    tparams::{PreferredAddress, TransportParameter, TransportParameterId::StatelessResetToken},
     version::Version,
 };
 
@@ -276,7 +279,17 @@ fn server_logs_its_original_destination_connection_id() {
 #[test]
 fn stateless_reset_token_is_not_logged() {
     let (mut client, contents) = new_client_with_qlog(ConnectionParameters::default());
-    let mut server = default_server();
+    // Both address families, as only then is the preferred address logged.
+    let spa = PreferredAddress::new(
+        Some(SocketAddrV4::new(Ipv4Addr::new(192, 0, 2, 1), 443)),
+        Some(SocketAddrV6::new(
+            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
+            443,
+            0,
+            0,
+        )),
+    );
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
     server
         .set_local_tparam(
             StatelessResetToken,
@@ -287,10 +300,23 @@ fn stateless_reset_token_is_not_logged() {
     drop(client);
 
     let trace = contents.to_string();
-    let mut logged =
-        named(&trace, "quic:parameters_set").filter_map(|l| field(l, "\"stateless_reset_token\":"));
-    assert_eq!(logged.next(), Some(""), "trace: {trace}");
-    assert_eq!(logged.next(), None, "trace: {trace}");
+    // The transport parameter, the preferred address and NEW_CONNECTION_ID all carry one.
+    assert!(
+        named(&trace, "quic:parameters_set").any(|l| l.contains("\"preferred_address\":")),
+        "trace: {trace}"
+    );
+    assert!(
+        named(&trace, "quic:packet_received")
+            .any(|l| l.contains("\"frame_type\":\"new_connection_id\"")),
+        "trace: {trace}"
+    );
+    let logged = trace
+        .split("\"stateless_reset_token\":")
+        .skip(1)
+        .map(|rest| field(rest, "").unwrap())
+        .collect::<Vec<_>>();
+    assert!(logged.len() > 2, "trace: {trace}");
+    assert!(logged.iter().all(|t| t.is_empty()), "trace: {trace}");
 }
 
 /// The DCID and SCID of the client's first Initial, to address a packet back at it.

@@ -1505,7 +1505,7 @@ impl Connection {
             qlog::packet_dropped(
                 &mut self.qlog,
                 None,
-                packet_len,
+                remaining,
                 datagram_id,
                 None,
                 PacketDroppedTrigger::InternalError,
@@ -1875,7 +1875,6 @@ impl Connection {
             ),
         ] {
             if len > 0 {
-                let details = details.map(ToOwned::to_owned);
                 qlog::packet_dropped(
                     &mut self.qlog,
                     packet_type,
@@ -1982,7 +1981,7 @@ impl Connection {
                         Some(e.packet_type()),
                         e.len(),
                         datagram_id,
-                        Some(e.error.to_string()),
+                        Some(&e.error.to_string()),
                         PacketDroppedTrigger::DecryptionFailure,
                         now,
                     );

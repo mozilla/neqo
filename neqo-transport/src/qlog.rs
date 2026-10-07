@@ -101,7 +101,7 @@ pub fn tparams_set(
                             port_v4: paddr.ipv4()?.port(),
                             port_v6: paddr.ipv6()?.port(),
                             connection_id: cid.connection_id().to_string(),
-                            stateless_reset_token: to_hex(cid.reset_token()),
+                            stateless_reset_token: String::new(), // Don't log the SRT
                         })
                     }),
                     ..Default::default()
@@ -275,13 +275,14 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, datagram_id: u32, now:
 
 /// `packet_type` is `None` when the header did not parse.
 ///
-/// `len` runs from this packet to the end of the datagram.
+/// `len` is what was dropped: the packet itself, or the trailing bytes of a
+/// datagram that could not be used.
 pub fn packet_dropped(
     qlog: &mut Qlog,
     packet_type: Option<packet::Type>,
     len: usize,
     datagram_id: u32,
-    details: Option<String>,
+    details: Option<&str>,
     trigger: PacketDroppedTrigger,
     now: Instant,
 ) {
@@ -292,7 +293,7 @@ pub fn packet_dropped(
                     .map(|pt| PacketHeader::with_type(pt.into(), None, None, None, None)),
                 raw: Some(raw(len)),
                 datagram_id: Some(datagram_id),
-                details,
+                details: details.map(ToOwned::to_owned),
                 trigger: Some(trigger),
             }))
         },
@@ -806,14 +807,14 @@ impl From<Frame<'_>> for QuicFrame {
                 sequence_number,
                 retire_prior,
                 connection_id,
-                stateless_reset_token,
+                ..
             } => {
                 Self::NewConnectionId {
                     sequence_number,
                     retire_prior_to: retire_prior,
                     connection_id_length: u8::try_from(connection_id.len()).ok(), /* CID is at most 20 bytes, so always fits. */
                     connection_id: to_hex(connection_id),
-                    stateless_reset_token: Some(to_hex(stateless_reset_token)),
+                    stateless_reset_token: Some(String::new()), // Don't log the SRT
                     raw: None,
                 }
             }
