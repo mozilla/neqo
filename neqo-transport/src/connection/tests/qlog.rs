@@ -15,8 +15,8 @@ use neqo_common::Datagram;
 use test_fixture::{now, strip_padding};
 
 use super::{
-    super::State, Connection, ConnectionParameters, connect, default_client, maybe_authenticate,
-    new_client_with_qlog, new_server_with_qlog, send_something,
+    super::State, Connection, ConnectionParameters, connect, default_client, default_server,
+    maybe_authenticate, new_client_with_qlog, new_server_with_qlog, send_something,
 };
 use crate::saved::SavedDatagrams;
 
@@ -107,6 +107,26 @@ fn packets_name_their_datagram() {
     // Both directions, because each side decides the `datagram_id` for what it logs.
     names_its_datagram(&client_log.to_string(), "sent");
     names_its_datagram(&server_log.to_string(), "received");
+}
+
+#[test]
+fn datagram_ids_have_no_gaps() {
+    let (mut client, contents) = new_client_with_qlog(ConnectionParameters::default());
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    // Nothing to send, then something, so that an ID wasted on the first would show.
+    assert!(client.process_output(now()).dgram().is_none());
+    send_something(&mut client, now());
+    drop(client);
+
+    let trace = contents.to_string();
+    let mut ids = events(&trace).filter_map(datagram_ids).collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        (0..).take(ids.len()).collect::<Vec<_>>(),
+        "trace: {trace}"
+    );
 }
 
 /// Every packet names a datagram that was itself reported, and some datagram carried
