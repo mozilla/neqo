@@ -230,11 +230,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, datagram_id: u32, now:
     qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
-            let raw = RawInfo {
-                length: Some(to_u64(meta.length())),
-                payload_length: None,
-                data: None,
-            };
+            let raw = raw(meta.length());
 
             let mut frames = Vec::new();
             while d.remaining() > 0 {
@@ -271,10 +267,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
         || {
             let header =
                 PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
-            let raw = RawInfo {
-                length: Some(to_u64(decrypt_err.len())),
-                ..Default::default()
-            };
+            let raw = raw(decrypt_err.len());
 
             let ev_data = EventData::QuicPacketDropped(PacketDropped {
                 header: Some(header),
