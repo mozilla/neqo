@@ -107,9 +107,10 @@ impl Qlog {
     }
 
     /// Make an opaque identifier for a datagram.
-    pub fn next_datagram_id(&mut self) -> u32 {
+    #[must_use]
+    pub fn next_datagram_id(&self) -> u32 {
         self.inner
-            .as_mut()
+            .as_ref()
             .and_then(|inner| {
                 inner.borrow_mut().as_mut().map(|shared| {
                     let id = shared.next_datagram_id;
