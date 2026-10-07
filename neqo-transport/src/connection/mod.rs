@@ -4116,7 +4116,7 @@ impl Connection {
     }
 
     /// Enqueue a datagram on `session`'s outgoing queue: byte-budgeted,
-    /// high-water-mark-tracked, and scheduled by `send_group_id`/
+    /// max-buffered-tracked, and scheduled by `send_group_id`/
     /// `send_order` and age. `session` is opaque to `Connection` — nothing
     /// here requires it to be a real stream, only a stable per-caller tag
     /// (in practice, an Extended CONNECT session's control-stream `StreamId`).
@@ -4152,10 +4152,10 @@ impl Connection {
         )
     }
 
-    /// See `DatagramQueue::set_high_water_mark`.
-    pub fn set_datagram_high_water_mark(&mut self, session: StreamId, mark: Option<NonZeroUsize>) {
+    /// See `DatagramQueue::set_max_buffered_datagrams`.
+    pub fn set_max_buffered_datagrams(&mut self, session: StreamId, mark: Option<NonZeroUsize>) {
         self.quic_datagrams
-            .set_datagram_high_water_mark(session, mark);
+            .set_max_buffered_datagrams(session, mark);
     }
 
     /// See `DatagramQueue::set_max_age`. Unlike the inner engine's own

@@ -6,7 +6,7 @@
 
 //! Outbound QUIC datagram queueing and backpressure: see
 //! [`crate::datagram_queue`] for the per-session queue's own byte-budget and
-//! high-water-mark contract. [`QuicDatagrams`] holds one such queue per
+//! max-buffered contract. [`QuicDatagrams`] holds one such queue per
 //! session and round-robins between them at packet-build time.
 
 // https://datatracker.ietf.org/doc/html/draft-ietf-quic-datagram
@@ -62,13 +62,13 @@ pub struct QuicDatagrams {
     local_datagram_size: u64,
     /// The max size of a datagram that would be acceptable by the peer.
     remote_datagram_size: u64,
-    /// Per-session outgoing-datagram queues (byte budget, high-water-mark,
+    /// Per-session outgoing-datagram queues (byte budget, max-buffered,
     /// send-group/send-order priority, max-age), keyed by the session's control stream ID.
     ///
     /// An entry is created lazily on first use and only removed by
     /// [`Self::drop_session_datagrams`] (session teardown) — *not* whenever
     /// it happens to drain empty, since a temporarily empty queue can still
-    /// carry an application-set high-water-mark/max-age that must survive
+    /// carry an application-set max-buffered/max-age that must survive
     /// until the session closes.
     ///
     /// Sized for one session per connection, which is what WebTransport in
@@ -249,7 +249,7 @@ impl QuicDatagrams {
 
     /// Enqueue a datagram on `session`'s outgoing queue. See
     /// [`DatagramQueue::enqueue`]. Expires anything already past its
-    /// max-age first, so a stale entry cannot hold the watermark or the byte
+    /// max-age first, so a stale entry cannot hold the max-buffered limit or the byte
     /// budget against the new one; `min_rtt` supplies the default max-age.
     ///
     /// # Errors
@@ -284,10 +284,10 @@ impl QuicDatagrams {
         Ok(queue.enqueue(data, id, now, send_group_id, send_order))
     }
 
-    /// See [`DatagramQueue::set_high_water_mark`].
-    pub fn set_datagram_high_water_mark(&mut self, session: StreamId, mark: Option<NonZeroUsize>) {
+    /// See [`DatagramQueue::set_max_buffered_datagrams`].
+    pub fn set_max_buffered_datagrams(&mut self, session: StreamId, mark: Option<NonZeroUsize>) {
         let queue = self.queue_mut(session);
-        queue.set_high_water_mark(mark);
+        queue.set_max_buffered_datagrams(mark);
         if queue.resume_if_unblocked() {
             self.conn_events.datagram_space_available();
         }

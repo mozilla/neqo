@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! Per-session outgoing-datagram scheduling: byte budget, high-water-mark
+//! Per-session outgoing-datagram scheduling: byte budget, max-buffered
 //! backpressure, send-group/send-order priority, and max-age expiry.
 //!
 //! [`DatagramQueue`] holds one session's outgoing datagrams, ordered by
@@ -132,10 +132,10 @@ pub type DatagramId = u64;
 #[must_use]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DatagramQueueOutcome {
-    /// The queue was below the high water mark.
+    /// The queue was below the max-buffered limit.
     Ok,
-    /// The queue had space, but it was at or above the high water mark.
-    AboveWatermark,
+    /// The queue had space, but it was at or above the max-buffered limit.
+    MaxBufferedReached,
     /// The incoming datagram was itself the lowest-priority thing that
     /// would exist in the queue, so it was refused outright rather than
     /// evicting something that outranks it. Nothing else was disturbed.
@@ -299,7 +299,7 @@ impl GroupQueue {
 }
 
 /// Per-session outgoing datagram queue with send-group round-robin, within-group
-/// send-order priority, high water mark, and max-age support.
+/// send-order priority, max-buffered limit, and max-age support.
 ///
 /// ## Scheduling
 ///
@@ -354,17 +354,17 @@ pub struct DatagramQueue {
     /// value but mean different things.
     rr_next: SendGroupId,
     /// Total datagram count across all groups. Cached rather than summed
-    /// from `groups` on read: [`Self::below_watermark`] needs the actual
+    /// from `groups` on read: [`Self::below_max_buffered`] needs the actual
     /// value, not just emptiness, and runs on every [`Self::enqueue`] call.
     total_count: usize,
     /// Total charged bytes across all groups: the sum of each queued
     /// datagram's allocated capacity plus [`PER_DATAGRAM_OVERHEAD`].
     total_bytes: usize,
     max_queued_bytes: usize,
-    high_water_mark: Option<NonZeroUsize>,
+    max_buffered_datagrams: Option<NonZeroUsize>,
     /// `Some(charge)` once [`Self::enqueue`] returns anything but
     /// [`DatagramQueueOutcome::Ok`], where `charge` is the space a resume
-    /// signal has to wait for: `1` for [`DatagramQueueOutcome::AboveWatermark`]
+    /// signal has to wait for: `1` for [`DatagramQueueOutcome::MaxBufferedReached`]
     /// and [`DatagramQueueOutcome::Overflowed`], which admit the datagram, so
     /// any freed byte is progress; the refused datagram's actual charge for
     /// [`DatagramQueueOutcome::Rejected`], so a caller retrying that exact
@@ -387,11 +387,11 @@ pub struct DatagramQueue {
 }
 
 impl DatagramQueue {
-    /// Whether the total queued count is below the high water mark, i.e.
+    /// Whether the total queued count is below the max-buffered limit, i.e.
     /// [`Self::enqueue`] would currently report [`DatagramQueueOutcome::Ok`]
-    /// rather than [`DatagramQueueOutcome::AboveWatermark`].
-    fn below_watermark(&self) -> bool {
-        self.high_water_mark
+    /// rather than [`DatagramQueueOutcome::MaxBufferedReached`].
+    fn below_max_buffered(&self) -> bool {
+        self.max_buffered_datagrams
             .is_none_or(|mark| self.total_count < mark.get())
     }
 
@@ -412,9 +412,9 @@ impl DatagramQueue {
     /// `outgoingMaxBufferedDatagrams` per `WebTransportDatagramsWritable`, so
     /// a caller with several writables on one session has to scale the value
     /// it sets here, or leave the mark `None` and gate per writable itself.
-    pub fn set_high_water_mark(&mut self, mark: Option<NonZeroUsize>) {
-        qtrace!("Setting high water mark to {mark:?}");
-        self.high_water_mark = mark;
+    pub fn set_max_buffered_datagrams(&mut self, mark: Option<NonZeroUsize>) {
+        qtrace!("Setting max-buffered limit to {mark:?}");
+        self.max_buffered_datagrams = mark;
     }
 
     /// Set the byte budget enforced by [`Self::enqueue`]'s eviction and
@@ -593,7 +593,7 @@ impl DatagramQueue {
                 self.total_bytes,
                 self.max_queued_bytes
             );
-            // A full queue is backpressure whatever the high water mark says,
+            // A full queue is backpressure whatever the max-buffered limit says,
             // and the caller is told to wait for a resume signal on every
             // outcome but `Ok`: arm one, or it waits forever. `new_charge`
             // is the exact charge *this* write needs before a retry can
@@ -610,17 +610,17 @@ impl DatagramQueue {
         self.total_bytes += new_charge;
 
         // An overflowing queue is full, so backpressure applies regardless of where
-        // the high water mark sits.
+        // the max-buffered limit sits.
         let outcome = if evicted_count > 0 {
             self.block_on(ANY_PROGRESS);
             DatagramQueueOutcome::Overflowed {
                 dropped: evicted_count,
             }
-        } else if self.below_watermark() && self.total_bytes <= self.max_queued_bytes {
+        } else if self.below_max_buffered() && self.total_bytes <= self.max_queued_bytes {
             DatagramQueueOutcome::Ok
         } else {
             self.block_on(ANY_PROGRESS);
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         };
         qtrace!(
             "Enqueued datagram {id:?} (group={send_group_id:?}, order={send_order}), \
@@ -703,17 +703,17 @@ impl DatagramQueue {
 
     /// Call after anything that can unblock the queue: a removal
     /// ([`Self::take_next`], [`Self::expire`], [`Self::set_max_age`]) or a
-    /// relaxed bound ([`Self::set_high_water_mark`], or in tests
+    /// relaxed bound ([`Self::set_max_buffered_datagrams`], or in tests
     /// `set_max_queued_bytes`). `true` once, the moment a queue that
     /// [`Self::enqueue`] reported as anything but [`DatagramQueueOutcome::Ok`]
-    /// drains back below the high water mark and has freed the charge it is
+    /// drains back below the max-buffered limit and has freed the charge it is
     /// waiting on, for the caller to fire a resume signal. `false` every
     /// other time, including every call while the queue was never blocked.
     ///
-    /// An empty queue always counts as unblocked, regardless of the high
-    /// water mark or byte budget: `max_queued_bytes == 0` would otherwise
+    /// An empty queue always counts as unblocked, regardless of the max-buffered
+    /// limit or byte budget: `max_queued_bytes == 0` would otherwise
     /// wedge the sender permanently, since a byte total is never below zero,
-    /// not even once the queue is empty. `high_water_mark` cannot itself be
+    /// not even once the queue is empty. `max_buffered_datagrams` cannot itself be
     /// zero - it is a `NonZeroUsize` - so it needs no matching case.
     ///
     /// Exact, not advisory: a [`DatagramQueueOutcome::Rejected`] retry of the
@@ -732,7 +732,7 @@ impl DatagramQueue {
             return false;
         };
         let unblocked = self.is_empty()
-            || (self.below_watermark()
+            || (self.below_max_buffered()
                 && self.max_queued_bytes.saturating_sub(self.total_bytes) >= charge);
         if unblocked {
             self.blocked = None;
@@ -835,7 +835,7 @@ impl Default for DatagramQueue {
             total_count: 0,
             total_bytes: 0,
             max_queued_bytes: DEFAULT_MAX_QUEUED_BYTES,
-            high_water_mark: None,
+            max_buffered_datagrams: None,
             blocked: None,
             max_age: None,
             expired: 0,
@@ -940,9 +940,9 @@ mod tests {
     }
 
     #[test]
-    fn high_water_mark() {
+    fn max_buffered_datagrams() {
         let mut q = DatagramQueue::default();
-        q.set_high_water_mark(Some(NonZeroUsize::new(2).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(2).unwrap()));
         let t = now();
 
         assert_eq!(
@@ -951,19 +951,19 @@ mod tests {
         );
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(
             q.enqueue(vec![3], Some(3), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(q.len(), 3);
     }
 
     #[test]
-    fn clearing_the_high_water_mark_lifts_the_backpressure() {
+    fn clearing_the_max_buffered_limit_lifts_the_backpressure() {
         let mut q = DatagramQueue::default();
-        q.set_high_water_mark(Some(NonZeroUsize::new(2).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(2).unwrap()));
         let t = now();
 
         assert_eq!(
@@ -972,10 +972,10 @@ mod tests {
         );
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
 
-        q.set_high_water_mark(None);
+        q.set_max_buffered_datagrams(None);
         assert_eq!(
             q.enqueue(vec![3], Some(3), t, g(0), 0),
             DatagramQueueOutcome::Ok
@@ -983,22 +983,22 @@ mod tests {
     }
 
     #[test]
-    fn raising_the_water_mark_resumes_without_a_removal() {
+    fn raising_the_max_buffered_limit_resumes_without_a_removal() {
         let mut q = DatagramQueue::default();
-        q.set_high_water_mark(Some(NonZeroUsize::new(1).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(1).unwrap()));
         let t = now();
 
         enq(&mut q, vec![1], 1, t, 0, 0);
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
         assert!(!q.resume_if_unblocked());
 
-        q.set_high_water_mark(Some(NonZeroUsize::new(3).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(3).unwrap()));
         assert!(
             q.resume_if_unblocked(),
-            "a raised high water mark unblocks with nothing removed"
+            "a raised max-buffered limit unblocks with nothing removed"
         );
     }
 
@@ -1066,7 +1066,7 @@ mod tests {
         // is told to wait rather than getting `Ok`.
         assert_eq!(
             queue.enqueue(vec![1], Some(1), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t, g(0), 0),
@@ -1086,7 +1086,7 @@ mod tests {
 
         assert_eq!(
             queue.enqueue(vec![1], Some(1), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(
             queue.enqueue(vec![2], Some(2), t, g(0), 0),
@@ -1302,10 +1302,10 @@ mod tests {
     }
 
     #[test]
-    fn below_watermark_recovers_after_drain() {
+    fn below_max_buffered_recovers_after_drain() {
         let mut q = DatagramQueue::default();
         let t = now();
-        q.set_high_water_mark(Some(NonZeroUsize::new(2).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(2).unwrap()));
 
         assert_eq!(
             q.enqueue(vec![1], Some(1), t, g(0), 0),
@@ -1313,7 +1313,7 @@ mod tests {
         );
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
 
         drop(q.drain(t, usize::MAX, NO_DEFAULT));
@@ -1321,7 +1321,7 @@ mod tests {
         assert_eq!(
             q.enqueue(vec![3], Some(3), t, g(0), 0),
             DatagramQueueOutcome::Ok,
-            "draining the queue must put it back below the high water mark"
+            "draining the queue must put it back below the max-buffered limit"
         );
     }
 
@@ -1903,7 +1903,7 @@ mod tests {
 
     #[test]
     fn overflow_arms_the_resume_signal() {
-        // An overflowing queue is full whether or not a high water mark is
+        // An overflowing queue is full whether or not a max-buffered limit is
         // set, and the caller is told to wait on every outcome but `Ok`: a
         // resume signal has to follow.
         let mut q = DatagramQueue::default();
@@ -1948,7 +1948,7 @@ mod tests {
 
     #[test]
     fn rejection_does_not_resume_while_still_over_the_byte_budget() {
-        // No high water mark set (the default) means `below_watermark()` is
+        // No max-buffered limit set (the default) means `below_max_buffered()` is
         // unconditionally true, so the byte budget itself has to gate resume
         // or a rejected sender spins: told to resume, rejected again.
         let mut q = DatagramQueue::default();
@@ -2003,12 +2003,12 @@ mod tests {
         // too - nothing will ever take from it.
         let mut q = DatagramQueue::default();
         let t0 = now();
-        q.set_high_water_mark(Some(NonZeroUsize::new(1).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(1).unwrap()));
         q.set_max_age(Some(Duration::from_millis(10)), t0, NO_DEFAULT);
 
         assert_eq!(
             q.enqueue(vec![1], Some(1), t0, g(0), 0),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(q.expire(t0 + Duration::from_millis(10), NO_DEFAULT), 1);
         assert!(
@@ -2164,11 +2164,11 @@ mod tests {
     fn take_all_returns_everything_and_resets_the_queue() {
         let mut q = DatagramQueue::default();
         let t = now();
-        q.set_high_water_mark(Some(NonZeroUsize::new(1).unwrap()));
+        q.set_max_buffered_datagrams(Some(NonZeroUsize::new(1).unwrap()));
         enq(&mut q, vec![1], 1, t, 0, 0);
         assert_eq!(
             q.enqueue(vec![2], Some(2), t, g(1), 5),
-            DatagramQueueOutcome::AboveWatermark
+            DatagramQueueOutcome::MaxBufferedReached
         );
 
         let taken = q.take_all();

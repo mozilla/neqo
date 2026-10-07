@@ -499,14 +499,14 @@ impl Session {
         Ok(outcome)
     }
 
-    /// Test-only; see `Http3Connection::extended_connect_set_datagram_high_water_mark`.
+    /// Test-only; see `Http3Connection::extended_connect_set_max_buffered_datagrams`.
     #[cfg(test)]
-    pub(crate) fn set_datagram_high_water_mark(
+    pub(crate) fn set_max_buffered_datagrams(
         &self,
         conn: &mut Connection,
         mark: Option<NonZeroUsize>,
     ) {
-        conn.set_datagram_high_water_mark(self.id, mark);
+        conn.set_max_buffered_datagrams(self.id, mark);
     }
 
     /// Expire stale queued datagrams, counting them against this session's

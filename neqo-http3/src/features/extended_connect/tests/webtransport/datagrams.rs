@@ -123,24 +123,24 @@ fn datagram_of_exactly_the_peers_limit_is_accepted() {
 }
 
 #[test]
-fn datagram_high_water_mark_signals_backpressure() {
+fn max_buffered_datagrams_signals_backpressure() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     let t0 = now();
 
-    wt_session.set_datagram_high_water_mark(Some(NonZeroUsize::new(2).unwrap()));
+    wt_session.set_max_buffered_datagrams(Some(NonZeroUsize::new(2).unwrap()));
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
         Ok(DatagramQueueOutcome::Ok)
     );
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(2), t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark),
-        "the second datagram crosses the high water mark"
+        Ok(DatagramQueueOutcome::MaxBufferedReached),
+        "the second datagram crosses the max-buffered limit"
     );
 }
 
-/// Draining a queue that reported `AboveWatermark` must surface the resume
+/// Draining a queue that reported `MaxBufferedReached` must surface the resume
 /// event on both sides: [`Http3ClientEvent::OutgoingDatagramSpaceAvailable`]
 /// to the client and [`Http3ServerEvent::OutgoingDatagramSpaceAvailable`] to
 /// the server.
@@ -153,7 +153,7 @@ fn outgoing_datagram_space_available_forwarded() {
 
     let (conn, handler) = wt.client.connection_and_handler();
     handler
-        .extended_connect_set_datagram_high_water_mark(
+        .extended_connect_set_max_buffered_datagrams(
             session_id,
             conn,
             Some(NonZeroUsize::new(1).unwrap()),
@@ -162,7 +162,7 @@ fn outgoing_datagram_space_available_forwarded() {
     assert_eq!(
         wt.client
             .webtransport_send_datagram(session_id, DGRAM, None, t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert!(
         !wt.client
@@ -171,10 +171,10 @@ fn outgoing_datagram_space_available_forwarded() {
         "client resume event fired before the queue drained"
     );
 
-    wt_session.set_datagram_high_water_mark(Some(NonZeroUsize::new(1).unwrap()));
+    wt_session.set_max_buffered_datagrams(Some(NonZeroUsize::new(1).unwrap()));
     assert_eq!(
         wt_session.send_datagram(DGRAM, Some(1), t0, SendGroupId::new(0), 0),
-        Ok(DatagramQueueOutcome::AboveWatermark)
+        Ok(DatagramQueueOutcome::MaxBufferedReached)
     );
     assert!(
         !wt.server
