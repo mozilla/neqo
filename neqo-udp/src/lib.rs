@@ -280,16 +280,21 @@ fn raise_buffer_size(
     }
 }
 
+/// Raise the socket send buffer to hold a batch of `segments`, if it is smaller.
+fn raise_send_buffer_for<S: SocketRef>(state: &UdpSocketState, socket: &S, segments: usize) {
+    raise_buffer_size(
+        "Send",
+        min_send_buf_size(segments),
+        || state.send_buffer_size(socket.into()),
+        |min| state.set_send_buffer_size(socket.into(), min),
+    );
+}
+
 /// Raise the socket send buffer to hold one full send batch, if it is smaller.
 ///
 /// Call again after anything that changes [`UdpSocketState::max_gso_segments`].
 pub fn raise_send_buffer_size<S: SocketRef>(state: &UdpSocketState, socket: &S) {
-    raise_buffer_size(
-        "Send",
-        min_send_buf_size(state.max_gso_segments()),
-        || state.send_buffer_size(socket.into()),
-        |min| state.set_send_buffer_size(socket.into(), min),
-    );
+    raise_send_buffer_for(state, socket, state.max_gso_segments());
 }
 
 /// Raise the socket kernel receive buffer to 1 MiB, if it is smaller.
@@ -340,12 +345,7 @@ impl<S: SocketRef> Socket<S> {
     #[cfg(apple)]
     pub unsafe fn enable_apple_fast_path(&self) {
         // Grow the buffer before publishing the larger batch size.
-        raise_buffer_size(
-            "Send",
-            min_send_buf_size(quinn_udp::BATCH_SIZE),
-            || self.state.send_buffer_size((&self.inner).into()),
-            |min| self.state.set_send_buffer_size((&self.inner).into(), min),
-        );
+        raise_send_buffer_for(&self.state, &self.inner, quinn_udp::BATCH_SIZE);
         // SAFETY: Caller ensures the APIs are available on this OS version.
         unsafe { self.state.set_apple_fast_path() }
     }
@@ -386,7 +386,11 @@ mod tests {
         clippy::unwrap_in_result,
         reason = "OK in tests."
     )]
-    use std::{env, num::NonZeroUsize};
+    use std::{
+        cell::{Cell, RefCell},
+        env,
+        num::NonZeroUsize,
+    };
 
     use neqo_common::{Dscp, Ecn};
 
@@ -397,16 +401,6 @@ mod tests {
         // Reverse non-blocking flag set by `UdpSocketState` to make the test non-racy.
         socket.inner.set_nonblocking(false)?;
         Ok(socket)
-    }
-
-    #[cfg(apple)]
-    fn assert_send_buffer_covers_one_batch(socket: &Socket<std::net::UdpSocket>) {
-        let size = socket
-            .state
-            .send_buffer_size((&socket.inner).into())
-            .expect("send buffer size to be readable");
-        let min = min_send_buf_size(socket.state.max_gso_segments());
-        assert!(size >= min, "send buffer is {size}, want {min}");
     }
 
     #[test]
@@ -441,6 +435,59 @@ mod tests {
         // Unless the OS refused to shrink below the minimum, the raise must have grown it.
         assert!(raised > shrunk || shrunk >= MIN_RECV_BUF_SIZE);
         Ok(())
+    }
+
+    /// Mock buffer that rejects sizes above `cap`, like NetBSD's `kern.sbmax`; `None` is
+    /// unreadable.
+    fn raise_with_cap(
+        initial: Option<usize>,
+        min: usize,
+        cap: usize,
+    ) -> (Option<usize>, Vec<usize>) {
+        let size = Cell::new(initial);
+        let tried = RefCell::new(Vec::new());
+        raise_buffer_size(
+            "Test",
+            min,
+            || size.get().ok_or_else(|| io::ErrorKind::Other.into()),
+            |s| {
+                tried.borrow_mut().push(s);
+                if s > cap {
+                    return Err(io::ErrorKind::OutOfMemory.into());
+                }
+                size.set(Some(s));
+                Ok(())
+            },
+        );
+        (size.get(), tried.into_inner())
+    }
+
+    #[test]
+    fn raise_buffer_halves_until_accepted() {
+        let (size, tried) = raise_with_cap(Some(4096), 1 << 20, 200_000);
+        assert_eq!(size, Some(1 << 17));
+        assert_eq!(tried, [1 << 20, 1 << 19, 1 << 18, 1 << 17]);
+    }
+
+    #[test]
+    fn raise_buffer_never_shrinks() {
+        let (size, tried) = raise_with_cap(Some(1 << 18), 1 << 20, 0);
+        assert_eq!(size, Some(1 << 18));
+        assert_eq!(tried, [1 << 20, 1 << 19]);
+    }
+
+    #[test]
+    fn raise_buffer_unreadable_size() {
+        let (size, tried) = raise_with_cap(None, 1 << 20, 200_000);
+        assert_eq!(size, Some(1 << 17));
+        assert_eq!(tried, [1 << 20, 1 << 19, 1 << 18, 1 << 17]);
+    }
+
+    #[test]
+    fn raise_buffer_already_large_enough() {
+        let (size, tried) = raise_with_cap(Some(1 << 20), 1 << 20, 0);
+        assert_eq!(size, Some(1 << 20));
+        assert!(tried.is_empty());
     }
 
     #[test]
@@ -672,7 +719,9 @@ mod tests {
         }
         assert!(socket.max_gso_segments() > 1);
         socket.raise_send_buffer_size();
-        assert_send_buffer_covers_one_batch(&socket);
+        let size = socket.state.send_buffer_size((&socket.inner).into())?;
+        let min = min_send_buf_size(socket.max_gso_segments());
+        assert!(size >= min, "send buffer is {size}, want {min}");
         Ok(())
     }
 
