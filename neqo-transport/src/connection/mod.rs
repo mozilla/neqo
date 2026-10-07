@@ -2794,7 +2794,7 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
-        let datagram_id = self.qlog.next_datagram_id();
+        let mut datagram_id = None; // Taken with the first packet, so none is wasted on nothing.
 
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
@@ -2885,7 +2885,7 @@ impl Connection {
                     packet_tos,
                     self.version,
                 ),
-                datagram_id,
+                *datagram_id.get_or_insert_with(|| self.qlog.next_datagram_id()),
                 now,
             );
 
@@ -2967,13 +2967,15 @@ impl Connection {
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
             path.borrow_mut().add_sent(encoder.len()); // Only now is the size of the datagram final.
-            qlog::datagram_io(
-                &mut self.qlog,
-                Direction::Tx,
-                datagram_id,
-                encoder.len(),
-                now,
-            );
+            if let Some(datagram_id) = datagram_id {
+                qlog::datagram_io(
+                    &mut self.qlog,
+                    Direction::Tx,
+                    datagram_id,
+                    encoder.len(),
+                    now,
+                );
+            }
             Ok(SendOption::Yes)
         }
     }
