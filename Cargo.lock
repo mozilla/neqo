@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -535,7 +535,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
 ]
 
 [[package]]
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -778,14 +778,14 @@ dependencies = [
  "serde_json",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -799,14 +799,14 @@ dependencies = [
  "sha1",
  "static_assertions",
  "strum",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -822,26 +822,26 @@ dependencies = [
  "sfv",
  "static_assertions",
  "strum",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "log",
  "neqo-common",
  "neqo-transport",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -860,13 +860,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1273,7 +1273,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "log",
  "neqo-common",
