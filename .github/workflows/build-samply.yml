@@ -6,7 +6,8 @@ permissions:
   contents: read
 
 env:
-  SAMPLY_REV: a2252a6ef2ec2c9c77337b71644be58c93c7c6a8 # 2026-08-27 TODO: Bump occasionally.
+  # renovate: depName=https://github.com/mstange/samply datasource=git-refs branch=main
+  SAMPLY_REV: a2252a6ef2ec2c9c77337b71644be58c93c7c6a8
 
 jobs:
   build-samply:
