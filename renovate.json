@@ -25,6 +25,19 @@
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm%(?<currentValue>[0-9]+)",
         "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n(?:[^\\n]*\\\\\\n)*[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/"
       ]
+    },
+    {
+      "description": "Rust tools installed by cargo-binstall, pinned as 'name@X'",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.*\\.yml$/",
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "\\b(?<depName>hyperfine|inferno)@(?<currentValue>[\\^~=]?[0-9][0-9.]*)"
+      ],
+      "datasourceTemplate": "crate",
+      "versioningTemplate": "cargo"
     }
   ],
   "packageRules": [
