@@ -27,6 +27,7 @@ runs:
     - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
       with:
         distribution: zulu
+        # renovate: depName=java-jdk datasource=java-version
         java-version: 23
 
     - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
