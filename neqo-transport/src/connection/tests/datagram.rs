@@ -533,11 +533,9 @@ fn datagram_sent_once() {
 }
 
 /// RFC 9221, Section 3: `max_datagram_frame_size` is "the maximum size of a
-/// DATAGRAM frame (including the frame type, length, and payload)".  A
+/// DATAGRAM frame (including the frame type, length, and payload)". A
 /// payload of `max_datagram_size()` bytes must therefore still fit the peer's
-/// limit once the frame type and the length prefix are added.  In an
-/// otherwise empty packet `write_frames` picks `DATAGRAM` with a length
-/// field, so that is the frame size the sender has to stay under.
+/// limit once the frame type is added.
 #[test]
 fn max_dgram_size_leaves_room_for_frame_header() {
     let mut client = default_client();
