@@ -273,8 +273,8 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         shutil.which("hyperfine") or "hyperfine",
         "--command-name",
         name,
-        "--time-unit",
-        "millisecond",
+        "--metrics",
+        "time_wall_clock:ms",
         "--export-json",
         str(out_dir / f"{name}.json"),
         "--output",
@@ -307,11 +307,8 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "".join(f"{key} {delta}\n" for key, delta in deltas.items() if delta),
         encoding="utf-8",
     )
-    # Surface hyperfine's own outlier warnings in the PR summary, not just the raw log.
     if result.stderr:
         print(result.stderr, end="")
-        if "outlier" in result.stderr.lower():
-            (out_dir / f"{name}.outliers").write_text(result.stderr, encoding="utf-8")
 
 
 def perf(cfg, scmd, ccmd, name):
@@ -357,8 +354,8 @@ def _load_result(path):
     if not path.exists():
         return None
     res = json.loads(path.read_text(encoding="utf-8"))["results"][0]
-    res.setdefault("median", median(res["times"]))
-    return res
+    times = [m["time_wall_clock"]["value"] for m in res["measurements"]]
+    return {**res["summary"]["time_wall_clock"], "times": times}
 
 
 def process(cfg, name, bold, root):
@@ -372,7 +369,8 @@ def process(cfg, name, bold, root):
     md_dev = mad(times, med)
 
     outlier_flag = ""
-    if (out_dir / f"{name}.outliers").exists():
+    # hyperfine 1.x's outlier warning: a modified Z-score above 10.
+    if any(abs(t - med) > 10 * md_dev for t in times):
         outliers = [t for t in times if abs(t - med) > 3 * md_dev]
         if outliers:
             detail = (
