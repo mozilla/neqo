@@ -38,6 +38,18 @@
       ],
       "datasourceTemplate": "crate",
       "versioningTemplate": "cargo"
+    },
+    {
+      "description": "VM releases, limited to those the pinned vmactions/*-vm commit has a conf/<release>.conf for",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "uses: vmactions/(?<depName>[a-z]+)-vm@(?<sha>[0-9a-f]{40})[^\\n]*\\n\\s+with:\\n\\s+release: \"(?<currentValue>[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "custom.vmactions-releases",
+      "registryUrlTemplate": "https://api.github.com/repos/vmactions/{{{depName}}}-vm/contents/conf?ref={{{sha}}}"
     }
   ],
   "packageRules": [
@@ -70,6 +82,14 @@
         ],
         "executionMode": "update"
       }
+    },
+    {
+      "description": "Pinned as a major version only.",
+      "matchDepNames": [
+        "java-jdk"
+      ],
+      "extractVersion": "^(?<version>\\d+)\\.\\d+\\.\\d+",
+      "versioning": "loose"
     },
     {
       "matchDepNames": [
@@ -105,11 +125,10 @@
         "{\"releases\": [$distinct(releases[$match(version, /^llvm-\\d+\\.\\d+\\.\\d+(p\\d+)?\\.tgz$/)].$replace(version, /^llvm-(\\d+)\\..*$/, \"$1\")).{\"version\": $}]}"
       ]
     },
-    "openbsd-releases": {
-      "defaultRegistryUrlTemplate": "https://cdn.openbsd.org/pub/OpenBSD/",
-      "format": "html",
+    "vmactions-releases": {
+      "format": "json",
       "transformTemplates": [
-        "{\"releases\": releases[$match(version, /^\\d+\\.\\d+\\//)].{\"version\": $replace(version, /\\/$/, \"\")}}"
+        "{\"releases\": [$[$match(name, /^\\d+[.]\\d+[.]conf$/)].{\"version\": $replace(name, /[.]conf$/, \"\")}]}"
       ]
     }
   }

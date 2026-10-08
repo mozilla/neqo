@@ -148,6 +148,7 @@ runs:
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@a2f9a41fa97f6848b8c3b791087dfcdaa5b473ff # v1.5.8
       with:
+        release: "15.1"
         usesh: true
         disable-cache: true
         copyback: true
@@ -158,7 +159,6 @@ runs:
     - if: ${{ inputs.platform == 'openbsd' }}
       uses: vmactions/openbsd-vm@5f7b2c933b8846a138361d6843c52af4bef5d945 # v1.4.8
       with:
-        # renovate: depName=openbsd datasource=custom.openbsd-releases
         release: "7.9"
         usesh: true
         disable-cache: true
@@ -170,6 +170,7 @@ runs:
     - if: ${{ inputs.platform == 'netbsd' }}
       uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92 # v1.5.2
       with:
+        release: "11.0"
         usesh: true
         disable-cache: true
         copyback: true
