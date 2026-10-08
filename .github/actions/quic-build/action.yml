@@ -31,7 +31,7 @@ runs:
           # renovate: depName=https://github.com/google/quiche datasource=git-refs branch=main
           echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
           # renovate: depName=cloudflare/quiche datasource=github-tags
-          echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
+          echo "CLOUDFLARE_QUICHE_VERSION=0.30.0"
           # renovate: depName=aws/s2n-quic datasource=github-tags
           echo "S2N_QUIC_VERSION=v1.90.0"
         } >> "$GITHUB_ENV"
