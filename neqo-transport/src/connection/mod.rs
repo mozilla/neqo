@@ -49,7 +49,7 @@ use crate::{
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
     packet,
     path::{Path, PathRef, Paths},
-    qlog,
+    qlog::{self, TransportInitiator},
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagrams},
     recovery::{self, SendProfile, sent},
     recv_stream,
@@ -1605,7 +1605,6 @@ impl Connection {
                     self.conn_params.randomize_first_pn_enabled(),
                 )?;
                 self.original_destination_cid = Some(dcid);
-                self.set_state(State::WaitInitial, now);
 
                 // We need to make sure that we set this transport parameter.
                 // This has to happen prior to processing the packet so that
@@ -1616,6 +1615,7 @@ impl Connection {
                         .local_mut()
                         .set_bytes(OriginalDestinationConnectionId, packet.dcid().to_vec());
                 }
+                self.set_state(State::WaitInitial, now);
             }
             (packet::Type::VersionNegotiation, State::WaitInitial, Role::Client) => {
                 if let Ok(versions) = packet.supported_versions() {
@@ -3129,7 +3129,12 @@ impl Connection {
             self.cid_manager.set_limit(max_active_cids);
         }
         self.set_initial_limits();
-        qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow(), now);
+        qlog::tparams_set(
+            &mut self.qlog,
+            &self.tps.borrow(),
+            TransportInitiator::Remote,
+            now,
+        );
         Ok(())
     }
 
@@ -3777,6 +3782,14 @@ impl Connection {
         if state > self.state {
             qdebug!("[{self}] State change from {:?} -> {state:?}", self.state);
             let old_state = self.state.clone();
+            if old_state == State::Init {
+                qlog::tparams_set(
+                    &mut self.qlog,
+                    &self.tps.borrow(),
+                    TransportInitiator::Local,
+                    now,
+                );
+            }
             self.state = state.clone();
             if self.state.closed() {
                 self.streams.clear_streams();
