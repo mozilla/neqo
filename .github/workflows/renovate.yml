@@ -23,9 +23,11 @@ jobs:
             -e RENOVATE_TOKEN \
             -e RENOVATE_ALLOWED_COMMANDS \
             -e RENOVATE_USER_AGENT \
-            renovate/renovate \
+            "$RENOVATE_IMAGE" \
             mozilla/neqo
         env:
+          # renovate: depName=renovate/renovate datasource=docker
+          RENOVATE_IMAGE: renovate/renovate:44.145.1@sha256:6f1f3e2d9d0c3f99aa1f61f7509d302185de7deb173ac8c5ff88a5ce283ec435
           RENOVATE_TOKEN: ${{ secrets.RENOVATE }} # zizmor: ignore[secrets-outside-env]
           RENOVATE_ALLOWED_COMMANDS: '["^sed -i ''s[|]/OpenBSD/[0-9]+[.][0-9]+/[|]/OpenBSD/[0-9]+[.][0-9]+/[|]g'' [.]github/actions/check-vm/action[.]yml$", "^sed -i ''s[|]/usr/local/llvm[0-9]+/[|]/usr/local/llvm[0-9]+/[|]g'' [.]github/actions/check-vm/action[.]yml$"]'
           RENOVATE_USER_AGENT: "Renovate/{{renovateVersion}} (mozilla/neqo)" # cdn.openbsd.org 403s the default UA
