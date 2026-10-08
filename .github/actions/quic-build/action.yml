@@ -33,7 +33,7 @@ runs:
           # renovate: depName=cloudflare/quiche datasource=github-tags
           echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
           # renovate: depName=aws/s2n-quic datasource=github-tags
-          echo "S2N_QUIC_VERSION=v1.82.0"
+          echo "S2N_QUIC_VERSION=v1.90.0"
         } >> "$GITHUB_ENV"
 
     - name: Install Rust
