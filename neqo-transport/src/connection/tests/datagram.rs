@@ -595,6 +595,42 @@ fn dgram_frame_over_local_limit_is_protocol_violation() {
 }
 
 #[test]
+fn queued_datagram_exceeding_updated_limit_is_dropped() {
+    let (mut client, _) = connect_datagram();
+    client
+        .quic_datagrams
+        .set_remote_datagram_size(to_u64(FRAME_LIMIT));
+    let max = client
+        .max_datagram_size()
+        .expect("the peer enabled DATAGRAM frames");
+
+    assert_eq!(
+        client.enqueue_datagram(
+            StreamId::new(0),
+            vec![0; usize::try_from(max).unwrap()],
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+
+    client
+        .quic_datagrams
+        .set_remote_datagram_size(to_u64(FRAME_LIMIT - 1));
+
+    assert!(client.process_output(now()).dgram().is_none());
+    assert_eq!(client.stats().frame_tx.datagram, 0);
+    assert_eq!(client.stats().datagram_tx.dropped_too_big, 1);
+    assert!(matches!(
+        client.next_event().unwrap(),
+        ConnectionEvent::OutgoingDatagramOutcome { id, outcome }
+            if id == 1 && outcome == OutgoingDatagramOutcome::DroppedTooBig
+    ));
+}
+
+#[test]
 fn dgram_with_length_field_at_frame_limit() {
     let mut client = default_client();
     let mut server = new_server(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));

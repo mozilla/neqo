@@ -173,7 +173,9 @@ impl QuicDatagrams {
             let Some(len) = queue.peek_next_len() else {
                 unreachable!("next_active_session_from only returns non-empty sessions")
             };
-            if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
+            let frame_len = to_u64(len + DATAGRAM_FRAME_TYPE_VARINT_LEN);
+
+            if frame_len <= min(to_u64(builder.remaining()), self.remote_datagram_size) {
                 let dgram = self
                     .take_from_session_queue(session)
                     .expect("just peeked Some above, with no intervening mutation");
@@ -185,23 +187,31 @@ impl QuicDatagrams {
                     tokens,
                     stats,
                 );
-            } else if full_mtu && builder.packet_empty() {
+                continue;
+            }
+
+            if self.remote_datagram_size < frame_len || full_mtu && builder.packet_empty() {
                 let dgram = self
                     .take_from_session_queue(session)
                     .expect("just peeked Some above, with no intervening mutation");
-                qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
+                qdebug!(
+                    "QUIC datagram ({}) exceeds remote limit ({}) or does not fit MTU.",
+                    dgram.data.len(),
+                    self.remote_datagram_size
+                );
                 self.conn_events
                     .datagram_outcome(&dgram.id.into(), OutgoingDatagramOutcome::DroppedTooBig);
                 stats.datagram_tx.dropped_too_big += 1;
-            } else {
-                // Leave it queued; try again on a later, emptier packet. This
-                // stops at the first session whose head does not fit rather
-                // than trying the others: the cursor stays on it, so it goes
-                // first next time, and a datagram that fits is rarely more
-                // than a packet away. Skipping ahead would trade that
-                // fairness for a fuller packet.
-                return;
+                continue;
             }
+
+            // Leave it queued; try again on a later, emptier packet. This
+            // stops at the first session whose head does not fit rather
+            // than trying the others: the cursor stays on it, so it goes
+            // first next time, and a datagram that fits is rarely more
+            // than a packet away. Skipping ahead would trade that
+            // fairness for a fuller packet.
+            return;
         }
     }
 
