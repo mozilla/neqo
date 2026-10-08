@@ -100,7 +100,7 @@ runs:
               ARCH=$([[ "$(uname -m)" == "aarch64" ]] && echo "arm64" || echo "amd64")
               # renovate: depName=bazelbuild/bazelisk datasource=github-releases
               sudo curl -fsSL -o /usr/local/bin/bazel \
-                "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.1/bazelisk-linux-$ARCH"
+                "https://github.com/bazelbuild/bazelisk/releases/download/v1.29.0/bazelisk-linux-$ARCH"
               sudo chmod +x /usr/local/bin/bazel
             fi
             git clone --depth 1 https://github.com/google/quiche google-quiche-src
