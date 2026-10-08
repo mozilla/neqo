@@ -35,7 +35,7 @@
       "versioning": "regex:^(?<major>\\d+)$",
       "postUpgradeTasks": {
         "commands": [
-          "sed -i 's|/usr/local/llvm{{{currentMajor}}}/|/usr/local/llvm{{{newMajor}}}/|g' .github/actions/check-vm/action.yml"
+          "sed -i 's|/usr/local/llvm{{{currentValue}}}/|/usr/local/llvm{{{newMajor}}}/|g' .github/actions/check-vm/action.yml"
         ],
         "fileFilters": [
           ".github/actions/check-vm/action.yml"
