@@ -17,11 +17,12 @@ use qlog::events::{
     quic::{
         AckRange, CongestionStateUpdated, CongestionStateUpdatedTrigger, ConnectionClosed,
         ConnectionClosedTrigger, ConnectionStarted, ConnectionState, ConnectionStateUpdated,
-        ErrorSpace, MtuUpdated, PacketDropped, PacketDroppedTrigger, PacketHeader, PacketLost,
-        PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent,
-        PacketType, PacketsAcked, ParametersSet, PreferredAddress, QuicFrame,
-        QuicVersionInformation, RecoveryMetricsUpdated, RecoveryParametersSet, StreamType,
-        TimerEventType, TimerType, TimerUpdated, TransportInitiator,
+        ErrorSpace, MtuUpdated, PacketBuffered, PacketBufferedTrigger, PacketDropped,
+        PacketDroppedTrigger, PacketHeader, PacketLost, PacketLostTrigger,
+        PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent, PacketType,
+        PacketsAcked, ParametersSet, PreferredAddress, QuicFrame, QuicVersionInformation,
+        RecoveryMetricsUpdated, RecoveryParametersSet, StreamType, TimerEventType, TimerType,
+        TimerUpdated, TransportInitiator, UdpDatagramsReceived, UdpDatagramsSent,
     },
 };
 
@@ -51,6 +52,14 @@ use crate::{
 /// Allocation-performing hex conversion for qlog only.
 fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
     Hex::new(v).to_string()
+}
+
+/// A length is all that is known about most of what is logged raw.
+fn raw(len: usize) -> RawInfo {
+    RawInfo {
+        length: Some(to_u64(len)),
+        ..Default::default()
+    }
 }
 
 pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
@@ -217,15 +226,11 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
+pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, datagram_id: u32, now: Instant) {
     qlog.add_event_at(
         || {
             let mut d = Decoder::from(meta.payload());
-            let raw = RawInfo {
-                length: Some(to_u64(meta.length())),
-                payload_length: None,
-                data: None,
-            };
+            let raw = raw(meta.length());
 
             let mut frames = Vec::new();
             while d.remaining() > 0 {
@@ -242,12 +247,14 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
                     header: meta.into(),
                     frames: Some(frames),
                     raw: Some(raw),
+                    datagram_id: Some(datagram_id),
                     ..Default::default()
                 })),
                 Direction::Rx => Some(EventData::QuicPacketReceived(PacketReceived {
                     header: meta.into(),
                     frames: Some(frames),
                     raw: Some(raw),
+                    datagram_id: Some(datagram_id),
                     ..Default::default()
                 })),
             }
@@ -260,10 +267,7 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
         || {
             let header =
                 PacketHeader::with_type(decrypt_err.packet_type().into(), None, None, None, None);
-            let raw = RawInfo {
-                length: Some(to_u64(decrypt_err.len())),
-                ..Default::default()
-            };
+            let raw = raw(decrypt_err.len());
 
             let ev_data = EventData::QuicPacketDropped(PacketDropped {
                 header: Some(header),
@@ -274,6 +278,52 @@ pub fn packet_dropped(qlog: &mut Qlog, decrypt_err: &packet::DecryptionError, no
             });
 
             Some(ev_data)
+        },
+        now,
+    );
+}
+
+/// A packet was set aside because the keys to decrypt it are not available yet.
+/// It is logged again, as received, once it can be processed.
+pub fn packet_buffered(qlog: &mut Qlog, datagram_id: u32, len: usize, now: Instant) {
+    qlog.add_event_at(
+        || {
+            Some(EventData::QuicPacketBuffered(PacketBuffered {
+                header: None,
+                raw: Some(raw(len)),
+                datagram_id: Some(datagram_id),
+                trigger: Some(PacketBufferedTrigger::KeysUnavailable),
+            }))
+        },
+        now,
+    );
+}
+
+pub fn datagram_io(
+    qlog: &mut Qlog,
+    direction: Direction,
+    datagram_id: u32,
+    len: usize,
+    now: Instant,
+) {
+    qlog.add_event_at(
+        || {
+            let (count, raw, datagram_ids) =
+                (Some(1), Some(vec![raw(len)]), Some(vec![datagram_id]));
+            Some(match direction {
+                Direction::Tx => EventData::QuicUdpDatagramsSent(UdpDatagramsSent {
+                    count,
+                    raw,
+                    datagram_ids,
+                    ..Default::default()
+                }),
+                Direction::Rx => EventData::QuicUdpDatagramsReceived(UdpDatagramsReceived {
+                    count,
+                    raw,
+                    datagram_ids,
+                    ..Default::default()
+                }),
+            })
         },
         now,
     );

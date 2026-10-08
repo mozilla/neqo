@@ -35,6 +35,8 @@ pub struct Qlog {
 pub struct SharedStreamer {
     qlog_path: PathBuf,
     streamer: QlogStreamer,
+    /// Hands out [`Qlog::next_datagram_id`].
+    next_datagram_id: u32,
 }
 
 impl Qlog {
@@ -87,6 +89,7 @@ impl Qlog {
             inner: Some(Rc::new(RefCell::new(Some(SharedStreamer {
                 qlog_path,
                 streamer,
+                next_datagram_id: 0,
             })))),
         })
     }
@@ -101,6 +104,21 @@ impl Qlog {
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.inner.as_ref().is_some_and(|rc| rc.borrow().is_some())
+    }
+
+    /// Make an opaque identifier for a datagram.
+    #[must_use]
+    pub fn next_datagram_id(&self) -> u32 {
+        self.inner
+            .as_ref()
+            .and_then(|inner| {
+                inner.borrow_mut().as_mut().map(|shared| {
+                    let id = shared.next_datagram_id;
+                    shared.next_datagram_id = id.wrapping_add(1);
+                    id
+                })
+            })
+            .unwrap_or_default()
     }
 
     /// If logging enabled, closure may generate an event to be logged.
