@@ -116,7 +116,7 @@ jobs:
         uses: $/.github/actions/install-build-deps
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: hyperfine, inferno
+          tools: hyperfine@^2, inferno@^0.12
           nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
           rust-cache: "false"
 
