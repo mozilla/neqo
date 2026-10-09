@@ -129,7 +129,7 @@ fn datagram_enabled_on_client() {
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
         server.max_datagram_size(),
-        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - DATAGRAM_FRAME_TYPE_VARINT_LEN as u64)
+        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - to_u64(DATAGRAM_FRAME_TYPE_VARINT_LEN))
     );
     assert_eq!(
         client.enqueue_datagram(
@@ -173,7 +173,7 @@ fn datagram_enabled_on_server() {
 
     assert_eq!(
         client.max_datagram_size(),
-        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - DATAGRAM_FRAME_TYPE_VARINT_LEN as u64)
+        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - to_u64(DATAGRAM_FRAME_TYPE_VARINT_LEN))
     );
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
