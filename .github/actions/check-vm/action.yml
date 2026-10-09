@@ -46,8 +46,8 @@ runs:
           case "$PLATFORM" in
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
-            openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.8p4 nss # rustup does not support OpenBSD at all
+            openbsd)    # renovate: depName=llvm datasource=custom.openbsd-packages registryUrl=https://cdn.openbsd.org/pub/OpenBSD/7.9/packages/amd64/
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm%21 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
@@ -148,6 +148,7 @@ runs:
     - if: ${{ inputs.platform == 'freebsd' }}
       uses: vmactions/freebsd-vm@a2f9a41fa97f6848b8c3b791087dfcdaa5b473ff # v1.5.8
       with:
+        release: "15.1"
         usesh: true
         disable-cache: true
         copyback: true
@@ -158,6 +159,7 @@ runs:
     - if: ${{ inputs.platform == 'openbsd' }}
       uses: vmactions/openbsd-vm@5f7b2c933b8846a138361d6843c52af4bef5d945 # v1.4.8
       with:
+        release: "7.9"
         usesh: true
         disable-cache: true
         copyback: true
@@ -168,6 +170,7 @@ runs:
     - if: ${{ inputs.platform == 'netbsd' }}
       uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92 # v1.5.2
       with:
+        release: "11.0"
         usesh: true
         disable-cache: true
         copyback: true

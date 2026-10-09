@@ -1,0 +1,135 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "prHourlyLimit": 0,
+  "dependencyDashboard": false,
+  "gitAuthor": "Lars Eggert <200328+larseggert@users.noreply.github.com>",
+  "enabledManagers": [
+    "custom.regex"
+  ],
+  "customManagers": [
+    {
+      "description": "Pinned versions annotated with '# renovate: depName=X datasource=Y'",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.*\\.yml$/",
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)(?: registryUrl=(?<registryUrl>\\S+))?\\n\\s+[A-Za-z_-]+: \"?(?<currentValue>v?[0-9][0-9.]*)\"?\\s",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n[^\\n]*[A-Z_]+=(?<currentValue>v?[0-9][0-9.]*)\"",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) branch=(?<currentValue>\\S+)\\n[^\\n]*[A-Z_]+[:=] *(?<currentDigest>[0-9a-f]{40})",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n\\s+[A-Z_]+: \\S+?:(?<currentValue>[^@\\s]+)@(?<currentDigest>sha256:[0-9a-f]{64})",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+) registryUrl=(?<registryUrl>\\S+)\\n[^\\n]*llvm%(?<currentValue>[0-9]+)",
+        "# renovate: depName=(?<depName>\\S+) datasource=(?<datasource>\\S+)\\n(?:[^\\n]*\\\\\\n)*[^\\n]*releases/download/v(?<currentValue>[0-9][0-9.]*)/"
+      ]
+    },
+    {
+      "description": "Rust tools installed by cargo-binstall, pinned as 'name@X'",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.github/workflows/.*\\.yml$/",
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "\\b(?<depName>hyperfine|inferno)@(?<currentValue>[\\^~=]?[0-9][0-9.]*)"
+      ],
+      "datasourceTemplate": "crate",
+      "versioningTemplate": "cargo"
+    },
+    {
+      "description": "VM releases, limited to those the pinned vmactions/*-vm commit has a conf/<release>.conf for",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/action\\.yml$/"
+      ],
+      "matchStrings": [
+        "uses: vmactions/(?<depName>[a-z]+)-vm@(?<sha>[0-9a-f]{40})[^\\n]*\\n\\s+with:\\n\\s+release: \"(?<currentValue>[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "custom.vmactions-releases",
+      "registryUrlTemplate": "https://api.github.com/repos/vmactions/{{{depName}}}-vm/contents/conf?ref={{{sha}}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchDepNames": [
+        "llvm"
+      ],
+      "versioning": "regex:^(?<major>\\d+)$",
+      "postUpgradeTasks": {
+        "commands": [
+          "sed -i 's|/usr/local/llvm{{{currentValue}}}/|/usr/local/llvm{{{newMajor}}}/|g' .github/actions/check-vm/action.yml"
+        ],
+        "fileFilters": [
+          ".github/actions/check-vm/action.yml"
+        ],
+        "executionMode": "update"
+      }
+    },
+    {
+      "matchDepNames": [
+        "openbsd"
+      ],
+      "versioning": "loose",
+      "postUpgradeTasks": {
+        "commands": [
+          "sed -i 's|/OpenBSD/{{{currentVersion}}}/|/OpenBSD/{{{newVersion}}}/|g' .github/actions/check-vm/action.yml"
+        ],
+        "fileFilters": [
+          ".github/actions/check-vm/action.yml"
+        ],
+        "executionMode": "update"
+      }
+    },
+    {
+      "description": "Pinned as a major version only.",
+      "matchDepNames": [
+        "java-jdk"
+      ],
+      "extractVersion": "^(?<version>\\d+)\\.\\d+\\.\\d+",
+      "versioning": "loose"
+    },
+    {
+      "matchDepNames": [
+        "cloudflare/quiche"
+      ],
+      "extractVersion": "^(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "description": "Commit pins follow a busy branch; update at most monthly (the workflow runs weekly).",
+      "matchDatasources": [
+        "git-refs"
+      ],
+      "schedule": [
+        "* * 1-7 * *"
+      ],
+      "updateNotScheduled": false
+    },
+    {
+      "description": "Renovate releases several times a day; update at most monthly.",
+      "matchDepNames": [
+        "renovate/renovate"
+      ],
+      "schedule": [
+        "* * 1-7 * *"
+      ],
+      "updateNotScheduled": false
+    }
+  ],
+  "customDatasources": {
+    "openbsd-packages": {
+      "format": "html",
+      "transformTemplates": [
+        "{\"releases\": [$distinct(releases[$match(version, /^llvm-\\d+\\.\\d+\\.\\d+(p\\d+)?\\.tgz$/)].$replace(version, /^llvm-(\\d+)\\..*$/, \"$1\")).{\"version\": $}]}"
+      ]
+    },
+    "vmactions-releases": {
+      "format": "json",
+      "transformTemplates": [
+        "{\"releases\": [$[$match(name, /^\\d+[.]\\d+[.]conf$/)].{\"version\": $replace(name, /[.]conf$/, \"\")}]}"
+      ]
+    }
+  }
+}
