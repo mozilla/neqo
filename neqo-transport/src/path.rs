@@ -1154,6 +1154,17 @@ impl Path {
         }
     }
 
+    /// Get the number of bytes that can be sent on this path now.
+    pub fn send_budget(&self) -> usize {
+        self.sender().cwnd_avail().min(self.amplification_limit())
+    }
+
+    /// Whether a PMTUD probe is needed and fits in the budget. Probes consume the
+    /// congestion window like any other packet; see RFC 9000, Section 14.4.
+    pub fn can_send_pmtud_probe(&self) -> bool {
+        self.pmtud().needs_probe() && self.send_budget() >= self.pmtud().probe_size()
+    }
+
     /// Update the `QLog` instance.
     pub fn set_qlog(&mut self, qlog: Qlog) {
         self.sender.set_qlog(qlog.clone());
