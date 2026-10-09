@@ -3557,10 +3557,12 @@ impl Connection {
                     .ack_freq(seqno, tolerance - 1, delay, ignore_order);
             }
             Frame::Datagram {
-                data, frame_len, ..
+                data,
+                len_field_len,
+                ..
             } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams.handle_datagram(data, frame_len)?;
+                self.quic_datagrams.handle_datagram(data, len_field_len)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }

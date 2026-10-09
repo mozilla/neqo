@@ -417,11 +417,14 @@ impl QuicDatagrams {
         }
     }
 
-    pub fn handle_datagram(&self, data: &[u8], frame_len: usize) -> Res<()> {
-        // A `local_datagram_size` of 0 means we advertised a
-        // max_datagram_frame_size of 0, i.e. no DATAGRAM frame support
+    pub fn handle_datagram(&self, data: &[u8], len_field_len: Option<NonZeroUsize>) -> Res<()> {
+        let frame_len =
+            data.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN + len_field_len.map_or(0, Into::into);
+
+        // Because `DATAGRAM_FRAME_TYPE_VARINT_LEN`is > 0, this implicitly also checks that
+        // `local_datagram_size` is not 0, i.e., not no DATAGRAM frame support
         // (RFC 9221, Section 3).
-        if self.local_datagram_size == 0 || self.local_datagram_size < to_u64(frame_len) {
+        if self.local_datagram_size < to_u64(frame_len) {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events.add_datagram(data);
