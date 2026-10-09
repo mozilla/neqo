@@ -3393,7 +3393,7 @@ impl Connection {
 
                 let ranges =
                     Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges)?;
-                self.handle_ack(space, ranges, ecn_count.as_ref(), ack_delay, now)?;
+                self.handle_ack(space, ranges, ecn_count.as_ref(), ack_delay, now);
             }
             Frame::Crypto { offset, data } => {
                 qtrace!(
@@ -3604,23 +3604,15 @@ impl Connection {
         }
     }
 
-    fn decode_ack_delay(&self, v: u64) -> Res<Duration> {
+    fn decode_ack_delay(&self, v: u64) -> Duration {
         // If we have remote transport parameters, use them.
         // Otherwise, ack delay should be zero (because it's the handshake).
-        self.tps.borrow().remote_handshake().map_or_else(
-            || Ok(Duration::default()),
-            |r| {
-                let exponent = u32::try_from(r.get_integer(AckDelayExponent))?;
-                // ACK_DELAY_EXPONENT > 20 is invalid per RFC9000. We already checked that in
-                // TransportParameter::decode.
-                let corrected = if v.leading_zeros() >= exponent {
-                    v << exponent
-                } else {
-                    u64::MAX
-                };
-                Ok(Duration::from_micros(corrected))
-            },
-        )
+        self.tps
+            .borrow()
+            .remote_handshake()
+            .map_or_else(Duration::default, |r| {
+                Duration::from_micros(Frame::decode_ack_delay(v, r.get_integer(AckDelayExponent)))
+            })
     }
 
     fn handle_ack<R>(
@@ -3630,22 +3622,21 @@ impl Connection {
         ack_ecn: Option<&ecn::Count>,
         ack_delay: u64,
         now: Instant,
-    ) -> Res<()>
-    where
+    ) where
         R: IntoIterator<Item = RangeInclusive<packet::Number>> + Debug,
         R::IntoIter: ExactSizeIterator,
     {
         qdebug!("[{self}] Rx ACK space={space}, ranges={ack_ranges:?}");
 
         let Some(path) = self.paths.primary() else {
-            return Ok(());
+            return;
         };
         let (acked_packets, lost_packets) = self.loss_recovery.on_ack_received(
             &path,
             space,
             ack_ranges,
             ack_ecn,
-            self.decode_ack_delay(ack_delay)?,
+            self.decode_ack_delay(ack_delay),
             now,
         );
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
@@ -3683,7 +3674,6 @@ impl Connection {
             stats.frame_rx.largest_acknowledged =
                 max(stats.frame_rx.largest_acknowledged, largest_acknowledged);
         }
-        Ok(())
     }
 
     /// Tell 0-RTT packets that they were "lost".
@@ -4253,7 +4243,7 @@ impl Connection {
             qdebug!("[{self}] {meta}{s}");
         }
 
-        qlog::packet_io(&mut self.qlog, meta, now);
+        qlog::packet_io(&mut self.qlog, meta, &self.tps.borrow(), now);
     }
 }
 
