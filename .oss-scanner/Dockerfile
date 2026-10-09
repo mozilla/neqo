@@ -47,7 +47,8 @@ RUN CARGO_NET_OFFLINE=false cargo fetch --locked \
     && cargo build --locked --workspace --all-targets \
     && cargo test --locked --workspace --exclude mtu --no-run
 # LTO is off because of https://github.com/rust-fuzz/cargo-fuzz/issues/384.
-RUN CARGO_PROFILE_RELEASE_LTO=false cargo +nightly fuzz build --debug-assertions
+ENV CARGO_PROFILE_RELEASE_LTO=false
+RUN cargo +nightly fuzz build --debug-assertions
 
 # Check the image works, but don't fail the build on test failures. mtu tests need GitHub Actions.
 RUN timeout 1200 cargo test --locked --workspace --exclude mtu \
