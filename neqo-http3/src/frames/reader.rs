@@ -6,10 +6,11 @@
 
 use std::{cmp::min, fmt::Debug, time::Instant};
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::HexWithLen;
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
-    hex::{HexSnipMiddle, HexWithLen},
-    qtrace,
+    hex::HexSnipMiddle, qtrace,
 };
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 
@@ -249,6 +250,7 @@ impl FrameReader {
             }
             FrameReaderState::GetData { decoder } => {
                 if let Some(data) = decoder.consume(&mut input) {
+                    #[cfg(feature = "log-payload")]
                     qtrace!(
                         "received frame {:?}: {}",
                         self.frame_type,
