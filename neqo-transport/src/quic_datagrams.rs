@@ -109,24 +109,17 @@ impl QuicDatagrams {
     fn encode_datagram<B: Buffer>(
         data: &[u8],
         tracking: DatagramTracking,
+        frame_type: FrameType,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut Stats,
     ) {
-        let len = data.len();
-        let length_len = Encoder::varint_len(to_u64(len));
-        // Include a length if there is space for another frame after this one.
-        if builder.remaining()
-            >= DATAGRAM_FRAME_TYPE_VARINT_LEN
-                + length_len
-                + len
-                + packet::Builder::MINIMUM_FRAME_SIZE
-        {
-            builder.encode_frame(FrameType::DatagramWithLen, |b| {
+        if frame_type == FrameType::DatagramWithLen {
+            builder.encode_frame(frame_type, |b| {
                 b.encode_vvec(data);
             });
         } else {
-            builder.encode_frame(FrameType::Datagram, |b| {
+            builder.encode_frame(frame_type, |b| {
                 b.encode(data);
             });
             builder.mark_full();
@@ -170,20 +163,9 @@ impl QuicDatagrams {
             let Some(len) = queue.peek_next_len() else {
                 unreachable!("next_active_session_from only returns non-empty sessions")
             };
-            if len + DATAGRAM_FRAME_TYPE_VARINT_LEN <= builder.remaining() {
-                let dgram = self
-                    .take_from_session_queue(session)
-                    .expect("just peeked Some above, with no intervening mutation");
-                Self::encode_datagram(&dgram.data, dgram.id.into(), builder, tokens, stats);
-            } else if full_mtu && builder.packet_empty() {
-                let dgram = self
-                    .take_from_session_queue(session)
-                    .expect("just peeked Some above, with no intervening mutation");
-                qdebug!("QUIC datagram ({}) does not fit MTU.", dgram.data.len());
-                self.conn_events
-                    .datagram_outcome(&dgram.id.into(), OutgoingDatagramOutcome::DroppedTooBig);
-                stats.datagram_tx.dropped_too_big += 1;
-            } else {
+            let frame_len = len + DATAGRAM_FRAME_TYPE_VARINT_LEN;
+
+            if frame_len > builder.remaining() && !(full_mtu && builder.packet_empty()) {
                 // Leave it queued; try again on a later, emptier packet. This
                 // stops at the first session whose head does not fit rather
                 // than trying the others: the cursor stays on it, so it goes
@@ -192,6 +174,48 @@ impl QuicDatagrams {
                 // fairness for a fuller packet.
                 return;
             }
+
+            if to_u64(frame_len) > min(to_u64(builder.remaining()), self.remote_datagram_size) {
+                let dgram = self
+                    .take_from_session_queue(session)
+                    .expect("just peeked Some above, with no intervening mutation");
+                qdebug!(
+                    "QUIC datagram ({}) exceeds remote limit ({}) or does not fit MTU.",
+                    dgram.data.len(),
+                    self.remote_datagram_size
+                );
+                self.conn_events
+                    .datagram_outcome(&dgram.id.into(), OutgoingDatagramOutcome::DroppedTooBig);
+                stats.datagram_tx.dropped_too_big += 1;
+                continue;
+            }
+
+            let dgram = self
+                .take_from_session_queue(session)
+                .expect("just peeked Some above, with no intervening mutation");
+
+            let frame_len_with_len = frame_len + Encoder::varint_len(to_u64(len));
+
+            // Include a length if there is space for another frame after this one
+            // and adding a length won't exceed the datagram frame size limit.
+            // We accept datagrams based on the encoded size of a frame without a length,
+            // so the varint length could cause the limit to be exceeded.
+            let frame_type = if to_u64(frame_len_with_len) <= self.remote_datagram_size
+                && frame_len_with_len + packet::Builder::MINIMUM_FRAME_SIZE <= builder.remaining()
+            {
+                FrameType::DatagramWithLen
+            } else {
+                FrameType::Datagram
+            };
+
+            Self::encode_datagram(
+                &dgram.data,
+                dgram.id.into(),
+                frame_type,
+                builder,
+                tokens,
+                stats,
+            );
         }
     }
 
@@ -244,8 +268,8 @@ impl QuicDatagrams {
     ///
     /// # Errors
     ///
-    /// Returns `TooMuchData` if `data` is bigger than the allowed remote
-    /// datagram size.
+    /// Returns `TooMuchData` if the frame size would exceed the allowed remote
+    /// max datagram frame size.
     #[expect(
         clippy::too_many_arguments,
         reason = "Connection::enqueue_datagram's parameters plus the RTT the default max-age derives from"
@@ -260,10 +284,10 @@ impl QuicDatagrams {
         send_order: SendOrder,
         min_rtt: Duration,
     ) -> Res<DatagramQueueOutcome> {
-        if to_u64(data.len()) > self.remote_datagram_size {
+        let frame_len = data.len().saturating_add(DATAGRAM_FRAME_TYPE_VARINT_LEN);
+        if to_u64(frame_len) > self.remote_datagram_size {
             qdebug!(
-                "QUIC datagram exceeds remote limit, dropping it, datagram size {}, remote datagram size limit {}.",
-                data.len(),
+                "QUIC DATAGRAM frame exceeds remote limit, dropping it, frame size {frame_len}, remote DATAGRAM frame size limit {}.",
                 self.remote_datagram_size
             );
             return Err(Error::TooMuchData);
@@ -393,11 +417,14 @@ impl QuicDatagrams {
         }
     }
 
-    pub fn handle_datagram(&self, data: &[u8]) -> Res<()> {
-        // A `local_datagram_size` of 0 means we advertised a
-        // max_datagram_frame_size of 0, i.e. no DATAGRAM frame support
+    pub fn handle_datagram(&self, data: &[u8], len_field_len: Option<NonZeroUsize>) -> Res<()> {
+        let frame_len =
+            data.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN + len_field_len.map_or(0, Into::into);
+
+        // Because `DATAGRAM_FRAME_TYPE_VARINT_LEN`is > 0, this implicitly also checks that
+        // `local_datagram_size` is not 0, i.e., not no DATAGRAM frame support
         // (RFC 9221, Section 3).
-        if self.local_datagram_size == 0 || self.local_datagram_size < to_u64(data.len()) {
+        if self.local_datagram_size < to_u64(frame_len) {
             return Err(Error::ProtocolViolation);
         }
         self.conn_events.add_datagram(data);

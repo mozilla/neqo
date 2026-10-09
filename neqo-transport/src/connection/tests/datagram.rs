@@ -15,11 +15,13 @@ use super::{
 use crate::{
     CloseReason, Connection, ConnectionParameters, Error, MAX_DATAGRAM_FRAME_SIZE,
     MIN_INITIAL_PACKET_SIZE, Pmtud, Stats, StreamId, StreamType,
-    connection::tests::DEFAULT_ADDR,
+    connection::tests::{DEFAULT_ADDR, default_client},
     datagram_queue::{DatagramQueueOutcome, default_max_age},
     events::{ConnectionEvent, OutgoingDatagramOutcome},
     frame::FrameType,
-    packet, recovery,
+    packet,
+    quic_datagrams::DATAGRAM_FRAME_TYPE_VARINT_LEN,
+    recovery,
     send_stream::{RetransmissionPriority, TransmissionPriority},
     streams::SendGroupId,
 };
@@ -38,10 +40,18 @@ const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
 const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
 const DATAGRAM_LEN_SMALLER_THAN_MTU: u64 = to_u64(MIN_INITIAL_PACKET_SIZE);
 const_assert!(DATAGRAM_LEN_SMALLER_THAN_MTU < to_u64(DATAGRAM_LEN_MTU));
-const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE];
+const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE - DATAGRAM_FRAME_TYPE_VARINT_LEN];
 const_assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
 const DATA_SMALLER_THAN_MTU_2: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE / 2];
 const_assert!(DATA_SMALLER_THAN_MTU_2.len() < DATA_SMALLER_THAN_MTU.len());
+
+/// A peer limit well below the path MTU, so that it, not the MTU, bounds the
+/// DATAGRAM frame.
+const FRAME_LIMIT: usize = 500;
+const DATA_AT_FRAME_LIMIT: &[u8] = &[0; FRAME_LIMIT];
+const_assert!(FRAME_LIMIT < DATAGRAM_LEN_MTU);
+const LENGTH_FIELD_LEN: usize = Encoder::varint_len(to_u64(FRAME_LIMIT));
+const_assert!(Encoder::varint_len(to_u64(FRAME_LIMIT)) == LENGTH_FIELD_LEN);
 
 struct InsertDatagram<'a> {
     data: &'a [u8],
@@ -119,7 +129,7 @@ fn datagram_enabled_on_client() {
     assert_eq!(client.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
         server.max_datagram_size(),
-        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU)
+        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - to_u64(DATAGRAM_FRAME_TYPE_VARINT_LEN))
     );
     assert_eq!(
         client.enqueue_datagram(
@@ -163,7 +173,7 @@ fn datagram_enabled_on_server() {
 
     assert_eq!(
         client.max_datagram_size(),
-        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU)
+        Ok(DATAGRAM_LEN_SMALLER_THAN_MTU - to_u64(DATAGRAM_FRAME_TYPE_VARINT_LEN))
     );
     assert_eq!(server.max_datagram_size(), Err(Error::NotAvailable));
     assert_eq!(
@@ -522,20 +532,170 @@ fn datagram_sent_once() {
     assert_eq!(client.stats().frame_tx.datagram, dgram_sent + 1);
 }
 
+/// RFC 9221, Section 3: `max_datagram_frame_size` is "the maximum size of a
+/// DATAGRAM frame (including the frame type, length, and payload)". A
+/// payload of `max_datagram_size()` bytes must therefore still fit the peer's
+/// limit once the frame type is added.
 #[test]
-fn dgram_too_big() {
-    let mut client =
-        new_client(ConnectionParameters::default().datagram_size(DATAGRAM_LEN_SMALLER_THAN_MTU));
+fn max_dgram_size_leaves_room_for_frame_header() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
+    connect_force_idle(&mut client, &mut server);
+
+    let max = client
+        .max_datagram_size()
+        .expect("the peer enabled DATAGRAM frames");
+    assert_eq!(max, to_u64(FRAME_LIMIT - DATAGRAM_FRAME_TYPE_VARINT_LEN));
+    assert_eq!(
+        client.enqueue_datagram(
+            StreamId::new(0),
+            vec![0; usize::try_from(max).unwrap()],
+            None,
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+
+    let out = client.process_output(now()).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.datagram, 1);
+    server.process_input(out, now());
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data.len() == usize::try_from(max).unwrap()
+    ));
+}
+
+/// The receiving side of the same rule (RFC 9221, Section 3): "An endpoint
+/// that receives a DATAGRAM frame that is larger than the value it sent in
+/// its `max_datagram_frame_size` transport parameter MUST terminate the
+/// connection with an error of type `PROTOCOL_VIOLATION`."  The injected frame
+/// has a payload of exactly the limit, so with its type byte it is one over.
+#[test]
+fn dgram_frame_over_local_limit_is_protocol_violation() {
+    let mut client = new_client(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
     let out = server
-        .test_write_frames(InsertDatagram { data: DATA_MTU }, now())
+        .test_write_frames(
+            InsertDatagram {
+                data: DATA_AT_FRAME_LIMIT,
+            },
+            now(),
+        )
         .dgram()
         .unwrap();
     client.process_input(out, now());
 
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+#[test]
+fn queued_datagram_exceeding_updated_limit_is_dropped() {
+    let (mut client, _) = connect_datagram();
+    client
+        .quic_datagrams
+        .set_remote_datagram_size(to_u64(FRAME_LIMIT));
+    let max = client
+        .max_datagram_size()
+        .expect("the peer enabled DATAGRAM frames");
+
+    assert_eq!(
+        client.enqueue_datagram(
+            StreamId::new(0),
+            vec![0; usize::try_from(max).unwrap()],
+            Some(1),
+            now(),
+            SendGroupId::new(0),
+            0
+        ),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+
+    client
+        .quic_datagrams
+        .set_remote_datagram_size(to_u64(FRAME_LIMIT - 1));
+
+    assert!(client.process_output(now()).dgram().is_none());
+    assert_eq!(client.stats().frame_tx.datagram, 0);
+    assert_eq!(client.stats().datagram_tx.dropped_too_big, 1);
+    assert!(matches!(
+        client.next_event().unwrap(),
+        ConnectionEvent::OutgoingDatagramOutcome { id, outcome }
+            if id == 1 && outcome == OutgoingDatagramOutcome::DroppedTooBig
+    ));
+}
+
+#[test]
+fn dgram_with_length_field_at_frame_limit() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
+    connect_force_idle(&mut client, &mut server);
+
+    // Leave space for length field.
+    let data1 = DATA_AT_FRAME_LIMIT
+        [..FRAME_LIMIT - LENGTH_FIELD_LEN - DATAGRAM_FRAME_TYPE_VARINT_LEN]
+        .to_vec();
+    let data2 = vec![0; packet::Builder::MINIMUM_FRAME_SIZE];
+
+    for data in [data1.clone(), data2.clone()] {
+        assert_eq!(
+            client.enqueue_datagram(StreamId::new(0), data, None, now(), SendGroupId::new(0), 0),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+
+    let out = client.process_output(now()).dgram().unwrap();
+    assert!(client.process_output(now()).dgram().is_none());
+
+    server.process_input(out, now());
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data == data1
+    ));
+    // The second datagram in the same packet proves that the first one used
+    // the length-bearing form.
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data == data2
+    ));
+}
+
+#[test]
+fn dgram_with_length_field_above_frame_limit() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().datagram_size(to_u64(FRAME_LIMIT)));
+    connect_force_idle(&mut client, &mut server);
+
+    // DATAGRAM without space for the length field.
+    let data1 = DATA_AT_FRAME_LIMIT[..FRAME_LIMIT - DATAGRAM_FRAME_TYPE_VARINT_LEN].to_vec();
+    let data2 = vec![0; packet::Builder::MINIMUM_FRAME_SIZE];
+
+    for data in [data1.clone(), data2.clone()] {
+        assert_eq!(
+            client.enqueue_datagram(StreamId::new(0), data, None, now(), SendGroupId::new(0), 0),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+
+    let out = client.process_output(now()).dgram().unwrap();
+    server.process_input(out, now());
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data == data1
+    ));
+    assert!(server.next_event().is_none());
+
+    // The second datagram is in a new packet because the first datagram frame would exceed
+    // the peer's limit if the length field was added.
+    let out = client.process_output(now()).dgram().unwrap();
+    server.process_input(out, now());
+    assert!(matches!(
+        server.next_event().unwrap(),
+        ConnectionEvent::Datagram(data) if data == data2
+    ));
 }
 
 #[test]
@@ -584,7 +744,10 @@ fn multiple_datagram_events() {
     const THIRD_DATAGRAM: &[u8] = &[2; DATA_SIZE];
     const FOURTH_DATAGRAM: &[u8] = &[3; DATA_SIZE];
 
-    let mut client = new_client(ConnectionParameters::default().datagram_size(to_u64(DATA_SIZE)));
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .datagram_size(to_u64(DATA_SIZE + DATAGRAM_FRAME_TYPE_VARINT_LEN)),
+    );
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
@@ -832,7 +995,7 @@ fn enqueue_datagram_rejects_more_than_the_peers_limit() {
     assert_eq!(
         client.enqueue_datagram(
             session,
-            vec![0; limit + 1],
+            vec![0; limit],
             Some(1),
             now(),
             SendGroupId::new(0),
@@ -843,7 +1006,7 @@ fn enqueue_datagram_rejects_more_than_the_peers_limit() {
     assert_eq!(
         client.enqueue_datagram(
             session,
-            vec![0; limit],
+            vec![0; limit - DATAGRAM_FRAME_TYPE_VARINT_LEN],
             Some(2),
             now(),
             SendGroupId::new(0),

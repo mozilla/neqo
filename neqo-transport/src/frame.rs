@@ -14,7 +14,7 @@
     )
 )]
 
-use std::ops::RangeInclusive;
+use std::{num::NonZeroUsize, ops::RangeInclusive};
 
 use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
 use strum::FromRepr;
@@ -258,6 +258,11 @@ pub enum Frame<'a> {
     Datagram {
         data: &'a [u8],
         fill: bool,
+        /// Encoded size of the length field, `None` if the frame has none.
+        /// Needed to check the whole frame against our `max_datagram_frame_size`
+        /// (RFC 9221, Section 3); can't be derived from `data.len()`, as the
+        /// varint may be non-minimal.
+        len_field_len: Option<NonZeroUsize>,
     },
 }
 
@@ -711,14 +716,21 @@ impl<'a> Frame<'a> {
             }
             FrameType::Datagram | FrameType::DatagramWithLen => {
                 let fill = t == FrameType::Datagram;
-                let data = if fill {
+                let (data, len_field_len) = if fill {
                     qtrace!("DATAGRAM frame, extends to the end of the packet");
-                    dec.decode_remainder()
+                    (dec.decode_remainder(), None)
                 } else {
                     qtrace!("DATAGRAM frame, with length");
-                    d(dec.decode_vvec())?
+                    let len_start = dec.offset();
+                    let data = d(dec.decode_vvec())?;
+                    let len_field_len = dec.offset() - len_start - data.len();
+                    (data, NonZeroUsize::new(len_field_len))
                 };
-                Ok(Self::Datagram { data, fill })
+                Ok(Self::Datagram {
+                    data,
+                    fill,
+                    len_field_len,
+                })
             }
         }
     }
@@ -764,6 +776,8 @@ impl<B: Buffer> FrameEncoder for Encoder<B> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use neqo_common::{Decoder, Encoder, MAX_VARINT};
 
     use crate::{
@@ -1204,6 +1218,7 @@ mod tests {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: true,
+            len_field_len: None,
         };
 
         just_dec(&f, "30010203");
@@ -1212,6 +1227,7 @@ mod tests {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: false,
+            len_field_len: NonZeroUsize::new(1),
         };
         just_dec(&f, "3103010203");
     }
@@ -1234,6 +1250,7 @@ mod tests {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
             fill: true,
+            len_field_len: None,
         };
 
         just_dec(&f, "4030010203");
@@ -1293,7 +1310,8 @@ mod tests {
         assert_eq!(
             Frame::Datagram {
                 data: &[1, 2, 3],
-                fill: false
+                fill: false,
+                len_field_len: NonZeroUsize::new(1),
             }
             .dump(),
             "Datagram { len: 3 }"
