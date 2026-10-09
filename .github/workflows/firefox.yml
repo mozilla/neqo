@@ -37,6 +37,7 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
+  # renovate: depName=mozillabuild datasource=nuget registryUrl=https://community.chocolatey.org/api/v2/
   MOZILLABUILD_VERSION: 4.2.1
 
 jobs:
