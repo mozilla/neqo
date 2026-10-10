@@ -18,7 +18,7 @@ use log::debug;
 use neqo_common::{
     Buffer, Decoder, Encoder,
     hex::{Hex, HexWithLen},
-    qtrace, qwarn,
+    qtrace, qwarn, to_u64,
 };
 use nss::{Mode, RecordProtectionOps as _, random};
 use strum::{EnumIter, FromRepr};
@@ -422,11 +422,10 @@ impl<B: Buffer> Builder<B> {
         self.pn = pn;
     }
 
-    #[expect(clippy::cast_possible_truncation, reason = "AND'ing makes this safe.")]
     fn write_len(&mut self, expansion: usize) {
         let len = self.encoder.len() - (self.offsets.len + LONG_PACKET_LENGTH_LEN) + expansion;
-        self.encoder.as_mut()[self.offsets.len] = 0x40 | ((len >> 8) & 0x3f) as u8;
-        self.encoder.as_mut()[self.offsets.len + 1] = (len & 0xff) as u8;
+        self.encoder
+            .rewrite_varint(self.offsets.len, LONG_PACKET_LENGTH_LEN, to_u64(len));
     }
 
     fn pad_for_crypto(&mut self, crypto: &CryptoDxState) {
