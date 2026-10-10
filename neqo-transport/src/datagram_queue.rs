@@ -166,6 +166,9 @@ pub struct DatagramQueueCapacity {
     /// Exposed so a caller deriving a windowed credit grant from
     /// `remaining_bytes` has the window size to dedupe updates against.
     pub max_queued_bytes: usize,
+    /// The fixed overhead each datagram is charged on top of its allocated
+    /// capacity, for a caller that charges its own send credit the same way.
+    pub per_datagram_overhead: usize,
 }
 
 #[derive(Debug)]
@@ -812,6 +815,7 @@ impl DatagramQueue {
             remaining_bytes: self.max_queued_bytes.saturating_sub(self.total_bytes),
             queued_datagrams: self.total_count,
             max_queued_bytes: self.max_queued_bytes,
+            per_datagram_overhead: PER_DATAGRAM_OVERHEAD,
         }
     }
 
@@ -903,6 +907,22 @@ mod tests {
     }
 
     #[test]
+    fn reported_overhead_matches_the_charge() {
+        let mut q = DatagramQueue::default();
+        let t = now();
+        let before = q.capacity();
+        let data = vec![0; 1200];
+        let allocated = data.capacity();
+
+        enq(&mut q, data, 1, t, 0, 0);
+
+        assert_eq!(
+            q.capacity().remaining_bytes,
+            before.remaining_bytes - (allocated + before.per_datagram_overhead)
+        );
+    }
+
+    #[test]
     fn capacity_tracks_bytes_and_count() {
         let mut q = DatagramQueue::default();
         q.set_max_queued_bytes(3 * charge(2)); // room for exactly three 2-byte datagrams
@@ -914,6 +934,7 @@ mod tests {
                 remaining_bytes: 3 * charge(2),
                 queued_datagrams: 0,
                 max_queued_bytes: 3 * charge(2),
+                per_datagram_overhead: PER_DATAGRAM_OVERHEAD,
             }
         );
 
@@ -924,6 +945,7 @@ mod tests {
                 remaining_bytes: 2 * charge(2),
                 queued_datagrams: 1,
                 max_queued_bytes: 3 * charge(2),
+                per_datagram_overhead: PER_DATAGRAM_OVERHEAD,
             }
         );
 
@@ -935,6 +957,7 @@ mod tests {
                 remaining_bytes: 3 * charge(2),
                 queued_datagrams: 0,
                 max_queued_bytes: 3 * charge(2),
+                per_datagram_overhead: PER_DATAGRAM_OVERHEAD,
             }
         );
     }
