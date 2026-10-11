@@ -13,7 +13,43 @@ use super::{
     default_server, fill_cwnd, increase_cwnd, induce_persistent_congestion, new_client, new_server,
     send_something,
 };
-use crate::{connection::tests::assert_path_challenge_min_len, stream_id::StreamType};
+use crate::{
+    connection::tests::assert_path_challenge_min_len,
+    stream_id::StreamType,
+    tparams::{TransportParameter, TransportParameterId},
+};
+
+/// A peer's minimum ACK delay can exceed our preferred 50ms maximum.
+#[test]
+fn ack_rate_large_peer_minimum() {
+    const MIN_ACK_DELAY: Duration = Duration::from_millis(60);
+    let mut client = default_client();
+    let mut server = default_server();
+    server
+        .set_local_tparam(
+            TransportParameterId::MinAckDelay,
+            TransportParameter::Integer(u64::try_from(MIN_ACK_DELAY.as_micros()).unwrap()),
+        )
+        .unwrap();
+    server
+        .set_local_tparam(
+            TransportParameterId::MaxAckDelay,
+            TransportParameter::Integer(100),
+        )
+        .unwrap();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    assert_eq!(client.stats().frame_tx.ack_frequency, 1);
+    assert_eq!(server.stats().frame_rx.ack_frequency, 1);
+
+    // The first packet elicits an immediate ACK. The next uses the requested delay.
+    let d = send_something(&mut client, now);
+    now += DEFAULT_RTT / 2;
+    assert!(server.process(Some(d), now).dgram().is_some());
+    let d = send_something(&mut client, now);
+    now += DEFAULT_RTT / 2;
+    assert_eq!(server.process(Some(d), now).callback(), MIN_ACK_DELAY);
+}
 
 /// With the default RTT here (100ms) and default ratio (4), endpoints won't send
 /// `ACK_FREQUENCY` as the ACK delay isn't different enough from the default.
