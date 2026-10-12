@@ -47,6 +47,8 @@ impl LocalStreamState {
 pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
+    /// Maximum entry count derived from the decoder's advertised table capacity.
+    max_entries: u64,
     instruction_reader: DecoderInstructionReader,
     local_stream: LocalStreamState,
     max_blocked_streams: u16,
@@ -71,6 +73,7 @@ impl Encoder {
         Self {
             table: HeaderTable::new(true),
             max_table_size: qpack_settings.max_table_size_encoder,
+            max_entries: 0,
             instruction_reader: DecoderInstructionReader::default(),
             local_stream: LocalStreamState::NoStream,
             max_blocked_streams: 0,
@@ -108,6 +111,10 @@ impl Encoder {
         if cap > (1 << 30) - 1 {
             return Err(Error::EncoderStream);
         }
+
+        // RFC 9204, Section 4.5.1.1 uses the decoder's maximum, independent of the
+        // capacity selected by the encoder.
+        self.max_entries = cap / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE);
 
         if cap == self.table.capacity() {
             return Ok(());
@@ -419,11 +426,8 @@ impl Encoder {
         // by the main loop.
         let mut encoder_blocked = self.send_encoder_updates(conn).is_err();
 
-        let mut encoded_h = HeaderEncoder::new(
-            self.table.base(),
-            self.use_huffman,
-            self.table.capacity() / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE),
-        );
+        let mut encoded_h =
+            HeaderEncoder::new(self.table.base(), self.use_huffman, self.max_entries);
 
         // Avoid the dynamic table unless we have space to track.
         let stream_was_blocking = self.is_stream_blocker(stream_id);
