@@ -6,7 +6,7 @@
 
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
-use neqo_common::{event::Provider as _, qdebug};
+use neqo_common::{event::Provider as _, qdebug, to_u64};
 use nss::{AllowZeroRtt, AntiReplay};
 use test_fixture::{assertions, now};
 
@@ -134,10 +134,18 @@ fn zero_rtt_before_resumption_token() {
 
 #[test]
 fn zero_rtt_send_reject() {
+    for max_data in [2, 3, 6] {
+        for stream_type in [StreamType::UniDi, StreamType::BiDi] {
+            zero_rtt_send_reject_with_max_data(max_data, stream_type);
+        }
+    }
+}
+
+fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) {
     const MESSAGE: &[u8] = &[1, 2, 3];
 
     let mut client = default_client();
-    let mut server = default_server();
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(MESSAGE.len())));
     connect(&mut client, &mut server);
 
     let token = exchange_ticket(&mut client, &mut server, now());
@@ -149,7 +157,9 @@ fn zero_rtt_send_reject() {
         test_fixture::DEFAULT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        ConnectionParameters::default().versions(client.version(), Version::all()),
+        ConnectionParameters::default()
+            .max_data(to_u64(max_data))
+            .versions(client.version(), Version::all()),
     )
     .unwrap();
     // Using a freshly initialized anti-replay context
@@ -160,9 +170,13 @@ fn zero_rtt_send_reject() {
         .server_enable_0rtt(&ar, AllowZeroRtt {})
         .expect("enable 0-RTT");
 
-    // Write some data on the client.
-    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    client.stream_send(stream_id, MESSAGE).unwrap();
+    // Exhaust the connection's remembered flow-control limit with 0-RTT data.
+    let stream_id = client.stream_create(stream_type).unwrap();
+    assert_eq!(
+        client.stream_send(stream_id, MESSAGE).unwrap(),
+        MESSAGE.len()
+    );
+    assert_eq!(client.stream_avail_send_space(stream_id).unwrap(), 0);
 
     // Send ClientHello.
     let client_hs = client.process_output(now());
@@ -199,16 +213,36 @@ fn zero_rtt_send_reject() {
     assert!(res.is_err());
     assert_eq!(res.unwrap_err(), Error::InvalidStreamId);
 
-    // Open a new stream and send data. StreamId should start with 0.
-    let stream_id_after_reject = client.stream_create(StreamType::UniDi).unwrap();
+    // A new stream can use the full 1-RTT limit, even if it is lower than before.
+    let stream_id_after_reject = client.stream_create(stream_type).unwrap();
     assert_eq!(stream_id, stream_id_after_reject);
-    client.stream_send(stream_id_after_reject, MESSAGE).unwrap();
+    assert_eq!(
+        client
+            .stream_avail_send_space(stream_id_after_reject)
+            .unwrap(),
+        max_data
+    );
+    let message = vec![1; max_data];
+    assert_eq!(
+        client
+            .stream_send(stream_id_after_reject, &message)
+            .unwrap(),
+        message.len()
+    );
     let client_after_reject = client.process_output(now()).dgram();
     assert!(client_after_reject.is_some());
 
     // The server should receive new stream
     server.process_input(client_after_reject.unwrap(), now());
     assert!(server.events().any(recvd_stream_evt));
+    let mut received = vec![0; max_data];
+    assert_eq!(
+        server
+            .stream_recv(stream_id_after_reject, &mut received)
+            .unwrap(),
+        (message.len(), false)
+    );
+    assert_eq!(received, message);
 }
 
 #[test]
