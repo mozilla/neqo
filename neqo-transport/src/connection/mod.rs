@@ -47,7 +47,7 @@ use crate::{
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
-    packet,
+    packet::{self, metadata::Direction},
     path::{Path, PathRef, Paths},
     qlog,
     quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagrams},
@@ -1465,7 +1465,8 @@ impl Connection {
             );
             for saved in self.saved_datagrams.take_saved() {
                 qtrace!("[{self}] input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(saved.d, saved.t, now);
+                // Reported as received when it arrived, so not again here.
+                self.input_with_id(saved.d, saved.datagram_id, saved.t, now);
             }
         }
     }
@@ -1481,6 +1482,8 @@ impl Connection {
         epoch: Epoch,
         d: Datagram<impl AsRef<[u8]>>,
         remaining: usize,
+        packet_len: usize,
+        datagram_id: u32,
         now: Instant,
     ) {
         let d = Datagram::new(
@@ -1489,11 +1492,13 @@ impl Connection {
             d.tos(),
             d[d.len() - remaining..].to_vec(),
         );
-        self.saved_datagrams.save(epoch, d, now);
-        self.stats.borrow_mut().saved_datagrams += 1;
-        // We already counted the datagram as received in [`input_path`]. We
-        // will do so again when we (re-)process it, so reduce the count now.
-        self.stats.borrow_mut().packets_rx -= 1;
+        if self.saved_datagrams.save(epoch, d, datagram_id, now) {
+            qlog::packet_buffered(&mut self.qlog, datagram_id, packet_len, now);
+            self.stats.borrow_mut().saved_datagrams += 1;
+            // We already counted the datagram as received in [`input_path`]. We
+            // will do so again when we (re-)process it, so reduce the count now.
+            self.stats.borrow_mut().packets_rx -= 1;
+        }
     }
 
     /// Perform version negotiation.
@@ -1793,6 +1798,24 @@ impl Connection {
         received: Instant,
         now: Instant,
     ) {
+        let datagram_id = self.qlog.next_datagram_id();
+        qlog::datagram_io(
+            &mut self.qlog,
+            Direction::Rx,
+            datagram_id,
+            d.len(),
+            received,
+        );
+        self.input_with_id(d, datagram_id, received, now);
+    }
+
+    fn input_with_id(
+        &mut self,
+        d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        datagram_id: u32,
+        received: Instant,
+        now: Instant,
+    ) {
         // First determine the path.
         let path = self.paths.find_path(
             d.destination(),
@@ -1802,7 +1825,7 @@ impl Connection {
             &mut self.stats.borrow_mut(),
         );
         path.borrow_mut().add_received(d.len());
-        let res = self.input_path(&path, d, received);
+        let res = self.input_path(&path, d, datagram_id, received);
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
     }
 
@@ -1810,6 +1833,7 @@ impl Connection {
         &mut self,
         path: &PathRef,
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
+        datagram_id: u32,
         now: Instant,
     ) -> Res<()> {
         qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
@@ -1854,6 +1878,7 @@ impl Connection {
                     self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
+                        datagram_id,
                         now,
                     );
 
@@ -1899,8 +1924,7 @@ impl Connection {
                         Error::KeysPending(epoch) => {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
-                            let remaining = slc_len;
-                            self.save_datagram(epoch, d, remaining, now);
+                            self.save_datagram(epoch, d, slc_len, packet_len, datagram_id, now);
                             return Ok(());
                         }
                         // Exhausting read keys is fatal. So is a packet that
@@ -2770,6 +2794,7 @@ impl Connection {
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
+        let mut datagram_id = None; // Taken with the first packet, so none is wasted on nothing.
 
         // Determine how we are sending packets (PTO, etc..).
         let profile = self.loss_recovery.send_profile(&path.borrow(), now);
@@ -2860,6 +2885,7 @@ impl Connection {
                     packet_tos,
                     self.version,
                 ),
+                *datagram_id.get_or_insert_with(|| self.qlog.next_datagram_id()),
                 now,
             );
 
@@ -2940,7 +2966,16 @@ impl Connection {
                 }
                 self.loss_recovery.on_packet_sent(path, initial, now);
             }
-            path.borrow_mut().add_sent(encoder.len());
+            path.borrow_mut().add_sent(encoder.len()); // Only now is the size of the datagram final.
+            if let Some(datagram_id) = datagram_id {
+                qlog::datagram_io(
+                    &mut self.qlog,
+                    Direction::Tx,
+                    datagram_id,
+                    encoder.len(),
+                    now,
+                );
+            }
             Ok(SendOption::Yes)
         }
     }
@@ -4236,7 +4271,7 @@ impl Connection {
         self.paths.primary().unwrap().borrow().plpmtu()
     }
 
-    fn log_packet(&mut self, meta: packet::MetaData, now: Instant) {
+    fn log_packet(&mut self, meta: packet::MetaData, datagram_id: u32, now: Instant) {
         if log::log_enabled!(log::Level::Debug) {
             let mut s = String::new();
             let mut d = Decoder::from(meta.payload());
@@ -4253,7 +4288,7 @@ impl Connection {
             qdebug!("[{self}] {meta}{s}");
         }
 
-        qlog::packet_io(&mut self.qlog, meta, now);
+        qlog::packet_io(&mut self.qlog, meta, datagram_id, now);
     }
 }
 
