@@ -145,7 +145,7 @@ fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) 
     const MESSAGE: &[u8] = &[1, 2, 3];
 
     let mut client = default_client();
-    let mut server = new_server(ConnectionParameters::default().max_data(3));
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(MESSAGE.len())));
     connect(&mut client, &mut server);
 
     let token = exchange_ticket(&mut client, &mut server, now());
