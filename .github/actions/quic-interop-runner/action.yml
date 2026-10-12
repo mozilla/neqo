@@ -19,6 +19,12 @@ inputs:
     description: 'Modified "implementations.json" data'
     required: false
     default: ""
+  runner-ref:
+    description: "quic-interop-runner commit to check out"
+    required: true
+  linuxquic-ref:
+    description: "lxin/quic commit to check out"
+    required: true
 
 outputs:
   result:
@@ -32,6 +38,7 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: "quic-interop/quic-interop-runner"
+        ref: ${{ inputs.runner-ref }}
         path: "quic-interop-runner"
         persist-credentials: false
 
@@ -51,6 +58,7 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: "lxin/quic"
+        ref: ${{ inputs.linuxquic-ref }}
         path: "linuxquic"
         persist-credentials: false
 
