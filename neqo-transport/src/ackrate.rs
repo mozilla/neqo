@@ -221,25 +221,25 @@ mod tests {
 
     #[test]
     fn ack_delay_bounds() {
-        for (minimum_us, rtt_ms, expected_us) in [
+        for (minimum_us, rtt_us, expected_us) in [
             (1_000, 0, 1_000),
-            (1_000, 25, 25_000),
-            (1_000, 100, 50_000),
-            (50_000, 100, 50_000),
-            (50_001, 25, 50_001),
-            (60_000, 100, 60_000),
-            (16_383_000, 100, 16_383_000),
+            (1_000, 25_000, 25_000),
+            (1_000, 100_000, 50_000),
+            (50_000, 100_000, 50_000),
+            (50_001, 25_000, 50_001),
+            (60_000, 100_000, 60_000),
+            (16_383_000, 100_000, 16_383_000),
         ] {
             let rate = AckRate::new(
                 Duration::from_micros(minimum_us),
                 ConnectionParameters::ACK_RATIO_SCALE,
                 12_000,
                 1_200,
-                Duration::from_millis(rtt_ms),
+                Duration::from_micros(rtt_us),
             );
             assert_eq!(
                 rate.delay, expected_us,
-                "minimum={minimum_us}us, RTT={rtt_ms}ms"
+                "minimum={minimum_us}us, RTT={rtt_us}us"
             );
         }
     }
