@@ -14,7 +14,7 @@
     )
 )]
 
-use std::ops::RangeInclusive;
+use std::{num::NonZeroUsize, ops::RangeInclusive};
 
 use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
 use strum::FromRepr;
@@ -257,7 +257,11 @@ pub enum Frame<'a> {
     },
     Datagram {
         data: &'a [u8],
-        fill: bool,
+        /// Encoded size of the length field, `None` if the frame has none.
+        /// Needed to check the whole frame against our `max_datagram_frame_size`
+        /// (RFC 9221, Section 3); can't be derived from `data.len()`, as the
+        /// varint may be non-minimal.
+        len_field_len: Option<NonZeroUsize>,
     },
 }
 
@@ -298,9 +302,9 @@ impl<'a> Frame<'a> {
             },
             Self::HandshakeDone => FrameType::HandshakeDone,
             Self::AckFrequency { .. } => FrameType::AckFrequency,
-            Self::Datagram { fill, .. } => match fill {
-                false => FrameType::Datagram,
-                true => FrameType::DatagramWithLen,
+            Self::Datagram { len_field_len, .. } => match len_field_len {
+                Some(_) => FrameType::DatagramWithLen,
+                None => FrameType::Datagram,
             },
         }
     }
@@ -709,16 +713,22 @@ impl<'a> Frame<'a> {
                     ignore_order,
                 })
             }
-            FrameType::Datagram | FrameType::DatagramWithLen => {
-                let fill = t == FrameType::Datagram;
-                let data = if fill {
-                    qtrace!("DATAGRAM frame, extends to the end of the packet");
-                    dec.decode_remainder()
-                } else {
-                    qtrace!("DATAGRAM frame, with length");
-                    d(dec.decode_vvec())?
-                };
-                Ok(Self::Datagram { data, fill })
+            FrameType::Datagram => {
+                qtrace!("DATAGRAM frame, extends to the end of the packet");
+                Ok(Self::Datagram {
+                    data: dec.decode_remainder(),
+                    len_field_len: None,
+                })
+            }
+            FrameType::DatagramWithLen => {
+                qtrace!("DATAGRAM frame, with length");
+                let len_start = dec.offset();
+                let data = d(dec.decode_vvec())?;
+                let len_field_len = dec.offset() - len_start - data.len();
+                Ok(Self::Datagram {
+                    data,
+                    len_field_len: NonZeroUsize::new(len_field_len),
+                })
             }
         }
     }
@@ -764,6 +774,8 @@ impl<B: Buffer> FrameEncoder for Encoder<B> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use neqo_common::{Decoder, Encoder, MAX_VARINT};
 
     use crate::{
@@ -1203,7 +1215,7 @@ mod tests {
         // Without the length bit.
         let f = Frame::Datagram {
             data: &[1, 2, 3],
-            fill: true,
+            len_field_len: None,
         };
 
         just_dec(&f, "30010203");
@@ -1211,7 +1223,7 @@ mod tests {
         // With the length bit.
         let f = Frame::Datagram {
             data: &[1, 2, 3],
-            fill: false,
+            len_field_len: NonZeroUsize::new(1),
         };
         just_dec(&f, "3103010203");
     }
@@ -1233,7 +1245,7 @@ mod tests {
     fn invalid_frame_type_len() {
         let f = Frame::Datagram {
             data: &[1, 2, 3],
-            fill: true,
+            len_field_len: None,
         };
 
         just_dec(&f, "4030010203");
@@ -1293,7 +1305,7 @@ mod tests {
         assert_eq!(
             Frame::Datagram {
                 data: &[1, 2, 3],
-                fill: false
+                len_field_len: NonZeroUsize::new(1),
             }
             .dump(),
             "Datagram { len: 3 }"

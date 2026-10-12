@@ -24,6 +24,8 @@ use test_fixture::{
 const PING: &[u8] = b"ping";
 const PONG: &[u8] = b"pong";
 
+const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
+
 #[test]
 fn disabled_by_default() {
     let mut client = default_http3_client();
@@ -952,7 +954,7 @@ fn datagram_over_the_peers_limit_including_context_id_is_rejected() {
         + neqo_common::Encoder::varint_len(0);
     // The proxy's advertised `datagram_size`; see
     // `initiate_new_session_with_client_params`.
-    let limit = 1500;
+    let limit = 1500 - DATAGRAM_FRAME_TYPE_VARINT_LEN;
 
     assert!(
         client
