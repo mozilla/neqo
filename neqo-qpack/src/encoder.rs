@@ -112,8 +112,10 @@ impl Encoder {
             return Err(Error::EncoderStream);
         }
 
-        // RFC 9204, Section 4.5.1.1 uses the decoder's maximum, independent of the
-        // capacity selected by the encoder.
+        // The decoder's maximum capacity, not the capacity we select, determines
+        // when table indices roll over. See RFC 9204, Section 4.5.1.1.
+        // Track this separately for when the decoder accepts a table
+        // larger than we are willing to use.
         self.max_entries = cap / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE);
 
         if cap == self.table.capacity() {
@@ -1744,7 +1746,7 @@ mod tests {
                         .send_encoder_updates(&mut encoder.conn)
                         .unwrap();
                 }
-                let headers = [Header::new("x", insert_count.to_string())];
+                let headers = vec![Header::new("x", insert_count.to_string())];
                 encoder
                     .encoder
                     .send_and_insert(&mut encoder.conn, b"x", headers[0].value())
@@ -1759,11 +1761,12 @@ mod tests {
                 assert!(decoder.receive(&mut encoder.peer_conn).unwrap().is_empty());
                 assert_eq!(
                     decoder.decode_header_block(&buf, STREAM_1),
-                    Ok(Some(headers.to_vec())),
+                    Ok(Some(headers)),
                     "local_limit={local_limit}, reduce_capacity={reduce_capacity}, insert_count={insert_count}"
                 );
                 assert_eq!(buf.as_ref(), &[insert_count % 8 + 1, 0x00, 0x80]);
 
+                // Absorb the QPACK bookkeeping: acknowledgments and so forth.
                 decoder.send(&mut encoder.peer_conn).unwrap();
                 let out = encoder.peer_conn.process_output(now());
                 let out2 = encoder.conn.process(out.dgram(), now());
