@@ -11,7 +11,7 @@ use std::{
 };
 
 use neqo_common::Datagram;
-use test_fixture::{DEFAULT_ADDR_V4, fixture_init, now};
+use test_fixture::{DEFAULT_ADDR, DEFAULT_ADDR_V4, fixture_init, now};
 
 use super::Connection;
 use crate::{
@@ -20,7 +20,62 @@ use crate::{
         CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
         new_client, new_server, send_something,
     },
+    tparams::{TransportParameter, TransportParameterId},
 };
+
+#[test]
+fn peer_max_udp_payload_limits_datagrams() {
+    const PEER_MAX: usize = 1200;
+    fixture_init();
+    for addr in [DEFAULT_ADDR_V4, DEFAULT_ADDR] {
+        for pmtud in [false, true] {
+            let params = ConnectionParameters::default()
+                .pmtud(pmtud)
+                .pmtud_iface_mtu(false);
+            let mut client = Connection::new_client(
+                test_fixture::DEFAULT_SERVER_NAME,
+                test_fixture::DEFAULT_ALPN,
+                Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+                addr,
+                addr,
+                params.clone(),
+                now(),
+            )
+            .unwrap();
+            let mut server = new_server(params);
+            for conn in [&mut client, &mut server] {
+                conn.set_local_tparam(
+                    TransportParameterId::MaxUdpPayloadSize,
+                    TransportParameter::Integer(PEER_MAX.try_into().unwrap()),
+                )
+                .unwrap();
+            }
+            connect(&mut client, &mut server);
+
+            for server_sends in [false, true] {
+                let (sender, receiver) = if server_sends {
+                    (&mut server, &mut client)
+                } else {
+                    (&mut client, &mut server)
+                };
+                let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+                fill_stream(sender, stream_id);
+                let mut datagrams = sender
+                    .process_multiple_output(now(), 2.try_into().unwrap())
+                    .dgram()
+                    .unwrap();
+                assert_eq!(
+                    datagrams.datagram_size().get(),
+                    PEER_MAX,
+                    "{addr}, PMTUD enabled: {pmtud}",
+                );
+                receiver.process_multiple_input(datagrams.iter_mut(), now());
+                let mut buf = [0; PEER_MAX];
+                assert!(receiver.stream_recv(stream_id, &mut buf).unwrap().0 > 0);
+            }
+        }
+    }
+}
 
 /// Test that one can reach the maximum MTU with GSO enabled.
 #[test]
