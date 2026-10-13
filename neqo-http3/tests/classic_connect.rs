@@ -5,7 +5,11 @@
 // except according to those terms.
 
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
-use neqo_http3::{Error, Header, Http3ClientEvent, Http3ServerEvent, Priority};
+use neqo_http3::{
+    Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
+    Http3ServerEvent, Priority, webtransport::ClientSession as _,
+};
+use neqo_transport::StreamId;
 use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
 
 const AUTHORITY: &str = "something.com";
@@ -110,4 +114,129 @@ fn classic_connect_via_fetch_panics_in_debug() {
         Priority::default(),
     );
     assert_eq!(res, Err(Error::InvalidInput));
+}
+
+/// Connects a client and a server and establishes a classic CONNECT tunnel,
+/// i.e. the server has answered the CONNECT request with a 2xx response.
+fn establish_tunnel() -> (
+    Http3Client,
+    Http3Server,
+    StreamId,
+    Http3OrWebTransportStream,
+) {
+    let mut client = default_http3_client();
+    let mut server = default_http3_server();
+    let out = test_fixture::connect_peers(&mut client, &mut server);
+    assert_eq!(server.process(out, now()).dgram(), None);
+    drop(server.events());
+
+    let stream_id = client
+        .connect(now(), AUTHORITY, &[], Priority::default())
+        .expect("client should open a CONNECT tunnel");
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let stream = server
+        .events()
+        .find_map(|e| match e {
+            Http3ServerEvent::Headers { stream, .. } => Some(stream),
+            _ => None,
+        })
+        .expect("server should receive the CONNECT request");
+    assert_eq!(stream.stream_id(), stream_id);
+    stream
+        .send_headers(&[Header::new(":status", "200")])
+        .expect("server should accept the CONNECT request");
+    exchange_packets(&mut client, &mut server, false, None);
+
+    assert!(client.events().any(|e| matches!(
+        &e,
+        Http3ClientEvent::HeaderReady { stream_id: id, headers, .. }
+            if *id == stream_id
+                && headers.find_header(":status").map(Header::value) == Some(b"200".as_ref())
+    )));
+
+    (client, server, stream_id, stream)
+}
+
+/// Collects tunnel data received by the server until the client closes its
+/// sending side.
+fn server_read_until_fin(server: &Http3Server, stream_id: StreamId) -> Vec<u8> {
+    let mut received = Vec::new();
+    for event in server.events() {
+        if let Http3ServerEvent::Data { stream, data, fin } = event {
+            assert_eq!(stream.stream_id(), stream_id);
+            received.extend_from_slice(&data);
+            if fin {
+                return received;
+            }
+        }
+    }
+    panic!("server did not receive FIN on the tunnel stream");
+}
+
+/// Reads tunnel data on the client until the server closes its sending side.
+fn client_read_until_fin(client: &mut Http3Client, stream_id: StreamId) -> Vec<u8> {
+    let mut received = Vec::new();
+    let mut buf = [0; 64];
+    loop {
+        let (amount, fin) = client
+            .read_data(now(), stream_id, &mut buf)
+            .expect("client should be able to read from the tunnel");
+        received.extend_from_slice(&buf[..amount]);
+        if fin {
+            return received;
+        }
+        assert_ne!(amount, 0, "client did not receive FIN on the tunnel stream");
+    }
+}
+
+/// > TCP connections that remain half closed in a single direction are not
+/// > invalid
+///
+/// <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+///
+/// Closing the client's sending side of a tunnel must not tear down the
+/// receiving side.
+#[test]
+fn classic_connect_client_half_close() {
+    let (mut client, mut server, stream_id, stream) = establish_tunnel();
+
+    client.send_data(stream_id, b"ping", now()).unwrap();
+    client.stream_close_send(stream_id, now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(server_read_until_fin(&server, stream_id), b"ping");
+
+    // The server keeps sending after the client's half-close.
+    stream.send_data(b"pong", now()).unwrap();
+    stream.stream_close_send(now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(client_read_until_fin(&mut client, stream_id), b"pong");
+}
+
+/// The server closing its sending side of a tunnel must not tear down the
+/// client's sending side.
+#[test]
+fn classic_connect_server_half_close() {
+    let (mut client, mut server, stream_id, stream) = establish_tunnel();
+
+    stream.send_data(b"pong", now()).unwrap();
+    stream.stream_close_send(now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(client_read_until_fin(&mut client, stream_id), b"pong");
+
+    // The client keeps sending after the server's half-close.
+    assert_eq!(client.send_data(stream_id, b"ping", now()), Ok(4));
+    client.stream_close_send(stream_id, now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(server_read_until_fin(&server, stream_id), b"ping");
+}
+
+/// A classic CONNECT tunnel is not an extended CONNECT session.
+#[test]
+fn classic_connect_is_not_extended_connect_session() {
+    let (client, _server, stream_id, _stream) = establish_tunnel();
+    assert_eq!(
+        client.webtransport_session_protocol(stream_id),
+        Err(Error::InvalidStreamId)
+    );
 }

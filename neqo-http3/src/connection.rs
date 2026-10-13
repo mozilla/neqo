@@ -940,7 +940,10 @@ impl Http3Connection {
     {
         let final_headers = Self::create_request_headers(request)?;
 
-        let stream_type = if request.connect_type.is_some() {
+        // A classic CONNECT tunnel is a regular HTTP stream whose two directions
+        // can be closed independently. Only extended CONNECT streams are
+        // sessions whose send and receive sides are removed together.
+        let stream_type = if matches!(request.connect_type, Some(ConnectType::Extended(_))) {
             Http3StreamType::ExtendedConnect
         } else {
             Http3StreamType::Http
