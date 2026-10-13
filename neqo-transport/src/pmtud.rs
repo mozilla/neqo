@@ -135,7 +135,8 @@ impl Pmtud {
     }
 
     /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
-    /// sent. During probing, this may be larger than the actual path MTU.
+    /// sent in an ordinary datagram, capped by the peer's receive limit when known. PMTU probes
+    /// use [`Self::probe_size`] and are separately bounded by the peer's receive limit.
     #[must_use]
     pub const fn plpmtu(&self) -> usize {
         let plpmtu = self.mtu - self.header_size;
@@ -642,6 +643,10 @@ mod tests {
                 let mut stats = Stats::default();
                 for _ in 0..2 {
                     pmtud.start(now(), &mut stats);
+                    assert_eq!(pmtud.plpmtu(), peer_max.min(Pmtud::default_plpmtu(addr)),);
+                    assert!(!pmtud.needs_probe());
+
+                    pmtud.maybe_fire_raise_timer(now() + PMTU_RAISE_TIMER, &mut stats);
                     assert_eq!(pmtud.plpmtu(), peer_max.min(Pmtud::default_plpmtu(addr)),);
                     assert!(!pmtud.needs_probe());
                 }
