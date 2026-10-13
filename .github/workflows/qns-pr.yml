@@ -18,6 +18,10 @@ permissions:
 env:
   DELIM: "vs."
   TIMEOUT: 20
+  # renovate: depName=https://github.com/quic-interop/quic-interop-runner datasource=git-refs branch=master
+  RUNNER_REF: 740c05a10b61d65e8abd3ad38d60898004d335d9
+  # renovate: depName=https://github.com/lxin/quic datasource=git-refs branch=main
+  LINUXQUIC_REF: 863e714c9ee54b7b84bd7038847e3375e6dc4306
 
 jobs:
   docker-image:
@@ -131,7 +135,7 @@ jobs:
             }
           }
           EOF
-          curl -o runner.json https://raw.githubusercontent.com/quic-interop/quic-interop-runner/master/implementations_quic.json
+          curl -o runner.json "https://raw.githubusercontent.com/quic-interop/quic-interop-runner/$RUNNER_REF/implementations_quic.json"
           jq '. += input' runner.json additional.json > implementations_quic.json
           {
             echo "implementations<<EOF"
@@ -204,6 +208,8 @@ jobs:
           client: ${{ steps.depair.outputs.client }}
           server: ${{ steps.depair.outputs.server }}
           implementations: ${{ needs.implementations.outputs.implementations }}
+          runner-ref: ${{ env.RUNNER_REF }}
+          linuxquic-ref: ${{ env.LINUXQUIC_REF }}
 
       - if: always()
         env:
