@@ -31,7 +31,7 @@ use super::{
     zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator,
+    CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
     MIN_INITIAL_PACKET_SIZE,
     cid::ConnectionIdManager,
@@ -53,6 +53,97 @@ const SAMPLE_PREFERRED_ADDRESS: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01, 0xbb, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x03, 0x03,
     0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 ];
+
+struct ExhaustibleConnectionIdGenerator {
+    inner: CountingConnectionIdGenerator,
+    initial: bool,
+    attempts_left: usize,
+}
+
+impl ConnectionIdDecoder for ExhaustibleConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        self.inner.decode_cid(dec)
+    }
+}
+
+impl ConnectionIdGenerator for ExhaustibleConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        // Bound the test's runtime if an output call loops on None.
+        assert!(
+            self.attempts_left > 0,
+            "CID generation did not stop after exhaustion"
+        );
+        self.attempts_left -= 1;
+        if std::mem::take(&mut self.initial) {
+            self.inner.generate_cid()
+        } else {
+            None
+        }
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
+#[test]
+fn cid_generator_exhaustion_allows_connection_progress() {
+    fixture_init();
+    for exhausted_client in [false, true] {
+        let generator: Rc<RefCell<dyn ConnectionIdGenerator>> =
+            Rc::new(RefCell::new(ExhaustibleConnectionIdGenerator {
+                inner: CountingConnectionIdGenerator::default(),
+                initial: true,
+                attempts_left: 100,
+            }));
+        let (mut client, mut server) = if exhausted_client {
+            let client = Connection::new_client(
+                test_fixture::DEFAULT_SERVER_NAME,
+                test_fixture::DEFAULT_ALPN,
+                generator,
+                DEFAULT_ADDR,
+                DEFAULT_ADDR,
+                ConnectionParameters::default(),
+                now(),
+            )
+            .unwrap();
+            (client, default_server())
+        } else {
+            let server = Connection::new_server(
+                test_fixture::DEFAULT_KEYS,
+                test_fixture::DEFAULT_ALPN,
+                generator,
+                ConnectionParameters::default(),
+            )
+            .unwrap();
+            (default_client(), server)
+        };
+        connect(&mut client, &mut server);
+
+        for server_sends in [false, true] {
+            let (sender, receiver) = if server_sends {
+                (&mut server, &mut client)
+            } else {
+                (&mut client, &mut server)
+            };
+            let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+            assert_eq!(sender.stream_send(stream_id, b"hello").unwrap(), 5);
+            sender.stream_close_send(stream_id).unwrap();
+            let datagram = sender.process_output(now()).dgram().unwrap();
+            receiver.process_input(datagram, now());
+            let mut buf = [0; 5];
+            assert_eq!(
+                receiver.stream_recv(stream_id, &mut buf).unwrap(),
+                (5, true)
+            );
+            assert_eq!(&buf, b"hello");
+        }
+        assert_eq!(*client.state(), State::Confirmed);
+        assert_eq!(*server.state(), State::Confirmed);
+        let exhausted = if exhausted_client { &client } else { &server };
+        assert_eq!(exhausted.stats().frame_tx.new_connection_id, 0);
+    }
+}
 
 // These tests generally use two paths:
 // The connection is established on a path with the same IPv6 address on both ends.
