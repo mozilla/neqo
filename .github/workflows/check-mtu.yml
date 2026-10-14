@@ -8,9 +8,12 @@ on:
       - ".github/workflows/check-mtu.yml"
       - ".github/actions/check-vm/**"
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -19,23 +22,24 @@ permissions:
 env:
   LINUX_BINDGEN_ARGS: >-
     --allowlist-type rtattr|rtmsg|ifinfomsg|nlmsghdr
-    --generate-cstr --explicit-padding --with-derive-default
+    --generate-cstr --explicit-padding --with-derive-default --disable-header-comment
   # Shared across macOS (generate-bindings) and FreeBSD/NetBSD/OpenBSD/Solaris (check-vm).
   BSD_BINDGEN_ARGS: >-
     --allowlist-type rt_msghdr|rt_metrics|if_data
     --allowlist-item RTAX_MAX|RTM_GET|RTM_VERSION|RTA_DST|RTA_IFP
-    --generate-cstr --explicit-padding --with-derive-default
+    --generate-cstr --explicit-padding --with-derive-default --disable-header-comment
 
 jobs:
   check-netns:
     name: Network namespace tests
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           nss: "false"
 
@@ -44,6 +48,7 @@ jobs:
 
   generate-bindings:
     name: Generate ${{ matrix.os }} bindings
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       fail-fast: false
       matrix:
@@ -68,13 +73,14 @@ jobs:
           HEADER: ${{ matrix.header }}
         run: echo "$ARGS" | xargs bindgen "mtu/src/bindings/$HEADER" > "$OS.rs"
       - name: Upload bindings
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bindings-${{ matrix.os }}
           path: ${{ matrix.os }}.rs
 
   check-android:
     name: Check Android
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -88,7 +94,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-android
+      - uses: $/.github/actions/check-android
         with:
           target: ${{ matrix.target }}
           working-directory: mtu
@@ -96,6 +102,7 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
@@ -107,7 +114,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: ./.github/actions/check-vm
+      - uses: $/.github/actions/check-vm
         with:
           working-directory: mtu
           platform: ${{ matrix.os }}
@@ -118,7 +125,7 @@ jobs:
   check-bindings:
     name: Check bindings
     needs: [generate-bindings, check-vm]
-    if: always() && !cancelled()
+    if: ${{ always() && !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
     runs-on: ubuntu-24.04
     permissions:
       pull-requests: write # to create PRs for binding updates
@@ -129,7 +136,7 @@ jobs:
           persist-credentials: true # zizmor: ignore[artipacked] We need to push branches.
 
       - name: Download all binding artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
           pattern: bindings-*

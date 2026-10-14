@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#[cfg(test)]
+use std::num::NonZeroUsize;
 use std::{
     cell::RefCell,
     fmt::{self, Debug, Display, Formatter},
@@ -17,7 +19,8 @@ use neqo_common::{
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
+    StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -380,10 +383,10 @@ impl Http3Connection {
         qdebug!("[{self}] create_qpack_streams");
         self.qpack_encoder
             .borrow_mut()
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?)?;
         self.qpack_decoder
             .borrow_mut()
-            .add_send_stream(conn.stream_create(StreamType::UniDi)?);
+            .add_send_stream(conn.stream_create(StreamType::UniDi)?)?;
         Ok(())
     }
 
@@ -655,6 +658,10 @@ impl Http3Connection {
             self.settings_state = Http3RemoteSettingsState::NotReceived;
             self.streams_with_pending_data.clear();
             // TODO: investigate whether this code can automatically retry failed transactions.
+            // No extended-CONNECT session can be among these, so there is no
+            // per-session datagram queue on the `Connection` to drop: neither
+            // feature is negotiated in 0-RTT (`set_0rtt_settings` never enables
+            // them), and creating a session fails with `Unavailable` until one is.
             self.send_streams.clear();
             self.recv_streams.clear();
             Ok(())
@@ -723,7 +730,7 @@ impl Http3Connection {
                     Box::new(DecoderRecvStream::new(
                         stream_id,
                         Rc::clone(&self.qpack_decoder),
-                    )),
+                    )?),
                 );
             }
             NewStreamType::Encoder => {
@@ -734,7 +741,7 @@ impl Http3Connection {
                     Box::new(EncoderRecvStream::new(
                         stream_id,
                         Rc::clone(&self.qpack_encoder),
-                    )),
+                    )?),
                 );
             }
             NewStreamType::Http(_) => {
@@ -778,7 +785,7 @@ impl Http3Connection {
         qdebug!("[{self}] Close connection error {error:?}");
         self.state = Http3State::Closing(CloseReason::Application(error));
         if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
-            qwarn!("close(0) called when streams still active");
+            qdebug!("close(0) called when streams still active");
         }
         self.send_streams.clear();
         self.recv_streams.clear();
@@ -914,9 +921,7 @@ impl Http3Connection {
             _ => {}
         }
 
-        let id = conn
-            .stream_create(StreamType::BiDi)
-            .map_err(|e| Error::map_stream_create_errors(&e))?;
+        let id = conn.stream_create(StreamType::BiDi)?;
         conn.stream_keep_alive(id, true)?;
         Ok(id)
     }
@@ -1526,9 +1531,7 @@ impl Http3Connection {
             return Err(Error::InvalidState);
         }
 
-        let stream_id = conn
-            .stream_create(stream_type)
-            .map_err(|e| Error::map_stream_create_errors(&e))?;
+        let stream_id = conn.stream_create(stream_type)?;
         // Set outgoing WebTransport streams to be fair (share bandwidth)
         conn.stream_fairness(stream_id, true)?;
         // Register the stream with its send group in the transport scheduler so that
@@ -1540,7 +1543,6 @@ impl Http3Connection {
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
-            session_id,
             (send_events, recv_events),
             true,
             send_group,
@@ -1562,7 +1564,6 @@ impl Http3Connection {
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
-            session_id,
             (send_events, recv_events),
             false,
             None,
@@ -1574,7 +1575,6 @@ impl Http3Connection {
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
-        session_id: StreamId,
         events: (Box<dyn SendStreamEvents>, Box<dyn RecvStreamEvents>),
         local: bool,
         send_group: Option<SendGroupId>,
@@ -1590,7 +1590,6 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportSendStream::new(
                         stream_id,
-                        session_id,
                         send_events,
                         webtransport_session,
                         true,
@@ -1602,7 +1601,6 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportRecvStream::new(
                         stream_id,
-                        session_id,
                         recv_events,
                         webtransport_session,
                     )),
@@ -1613,7 +1611,6 @@ impl Http3Connection {
                 stream_id,
                 Box::new(WebTransportSendStream::new(
                     stream_id,
-                    session_id,
                     send_events,
                     Rc::clone(&webtransport_session),
                     local,
@@ -1621,7 +1618,6 @@ impl Http3Connection {
                 )),
                 Box::new(WebTransportRecvStream::new(
                     stream_id,
-                    session_id,
                     recv_events,
                     webtransport_session,
                 )),
@@ -1630,6 +1626,10 @@ impl Http3Connection {
         Ok(())
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors send_datagram's own params plus session_id/conn"
+    )]
     pub(crate) fn extended_connect_send_datagram<I: Into<DatagramTracking>>(
         &self,
         session_id: StreamId,
@@ -1637,10 +1637,44 @@ impl Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now)
+            .send_datagram(conn, buf, id, now, send_group_id, send_order)
+    }
+
+    /// Test-only: not yet exposed to a production caller.
+    #[cfg(test)]
+    pub(crate) fn extended_connect_set_max_buffered_datagrams(
+        &self,
+        session_id: StreamId,
+        conn: &mut Connection,
+        mark: Option<NonZeroUsize>,
+    ) -> Res<()> {
+        self.validate_extended_connect_session(session_id)?
+            .borrow()
+            .set_max_buffered_datagrams(conn, mark);
+        Ok(())
+    }
+
+    /// Expire stale outgoing datagrams on every active extended-CONNECT
+    /// session's queue and count them per session. Called once per
+    /// `process_http3` tick. The transport counts expiries on the queue
+    /// itself, whether its own timer sweep or this one sheds them, so this
+    /// sweep picks up the right number regardless of whether it runs before
+    /// or after `Connection::process_output` within a tick.
+    ///
+    /// Returns the total number of datagrams expired, for the caller to fold
+    /// into a stats counter.
+    pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> u64 {
+        self.recv_streams
+            .values()
+            .filter_map(|s| s.extended_connect_session())
+            .filter(|s| s.borrow().is_active())
+            .map(|s| s.borrow_mut().expire_datagrams(conn, now))
+            .sum()
     }
 
     /// Frames whose handling is specific to the client and server (`Goaway`,
@@ -1699,6 +1733,7 @@ impl Http3Connection {
                     HSettingType::MaxHeaderListSize,
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
+                    HSettingType::EnableConnect,
                     // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
                     // requires a client that stored SETTINGS_H3_DATAGRAM with its
                     // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR

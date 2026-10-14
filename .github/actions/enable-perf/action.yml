@@ -1,6 +1,7 @@
 name: Enable perf
 description: >
-  Relax the kernel restrictions that perf recording and samply symbolication need.
+  Relax the kernel restrictions that perf recording and samply symbolication
+  need, and install libc debug symbols for samply.
 
 runs:
   using: composite
@@ -9,3 +10,7 @@ runs:
       run: |
         sudo sysctl -w kernel.perf_event_paranoid=-1
         sudo sysctl -w kernel.kptr_restrict=0
+    - shell: bash
+      run: |
+        [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+        sudo apt-get install -y --no-install-recommends libc6-dbg

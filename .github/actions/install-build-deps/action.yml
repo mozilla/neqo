@@ -51,7 +51,7 @@ runs:
   using: composite
   steps:
     - id: rust
-      uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      uses: mozilla/actions/rust@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
       with:
         version: ${{ inputs.version }}
         components: ${{ inputs.components }}
@@ -65,7 +65,7 @@ runs:
         token: ${{ inputs.token || github.token }}
 
     - if: ${{ inputs.nss == 'true' }}
-      uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
+      uses: mozilla/nss-rs/install-nss@dae19d45530acd2703fbba5f89a373a63ed7609a # 0.16.2
       with:
         working-directory: ${{ inputs.working-directory }}
         target: ${{ inputs.target }}

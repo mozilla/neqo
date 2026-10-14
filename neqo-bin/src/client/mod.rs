@@ -4,8 +4,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![expect(clippy::unwrap_used, reason = "This is example code.")]
-
 use std::{
     collections::VecDeque,
     fmt::Display,
@@ -48,7 +46,7 @@ use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
 
-use crate::{SharedArgs, now};
+use crate::{SharedArgs, now, report_stats};
 
 mod http09;
 mod http3;
@@ -157,10 +155,6 @@ pub struct Args {
     #[arg(name = "upload-size", long, default_value = "100")]
     upload_size: usize,
 
-    /// Print connection stats after close.
-    #[arg(name = "stats", long)]
-    stats: bool,
-
     /// The length of the local connection ID.
     #[arg(name = "cid-length", short = 'l', long, default_value = "0",
           value_parser = clap::value_parser!(u8).range(..=20))]
@@ -170,7 +164,11 @@ pub struct Args {
 impl Args {
     #[must_use]
     #[cfg(any(test, feature = "bench"))]
-    #[expect(clippy::missing_panics_doc, reason = "This is example code.")]
+    #[expect(
+        clippy::missing_panics_doc,
+        clippy::unwrap_used,
+        reason = "This is example code."
+    )]
     pub fn new(
         server_addr: Option<SocketAddr>,
         num_requests: usize,
@@ -207,7 +205,6 @@ impl Args {
             ipv6_only: false,
             test: None,
             upload_size,
-            stats: false,
             cid_len: 0,
         }
     }
@@ -400,7 +397,6 @@ trait Client {
 }
 
 struct Runner<'a, H: Handler> {
-    local_addr: SocketAddr,
     socket: &'a mut crate::udp::Socket,
     client: H::Client,
     handler: H,
@@ -411,14 +407,12 @@ struct Runner<'a, H: Handler> {
 
 impl<'a, H: Handler> Runner<'a, H> {
     fn new(
-        local_addr: SocketAddr,
         socket: &'a mut crate::udp::Socket,
         client: H::Client,
         handler: H,
         args: &'a Args,
     ) -> Self {
         Self {
-            local_addr,
             socket,
             client,
             handler,
@@ -429,6 +423,15 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn run(mut self) -> Res<Option<ResumptionToken>> {
+        let res = self.transfer().await;
+        if self.args.shared.stats_enabled() {
+            report_stats(&self.client.stats(), self.args.shared.stats_file.as_deref());
+        }
+        res?;
+        Ok(self.handler.take_token())
+    }
+
+    async fn transfer(&mut self) -> Res<()> {
         loop {
             let handler_done = self.handler.handle(&mut self.client)?;
             self.process_output().await?;
@@ -439,10 +442,12 @@ impl<'a, H: Handler> Runner<'a, H> {
             match (handler_done, self.client.is_closed()?) {
                 // more work; or no more work, already closing connection
                 (true, CloseState::Closing) | (false, _) => {}
-                // no more work, closing connection
+                // no more work, close and stop
                 (true, CloseState::NotClosing) => {
                     self.client.close(now(), 0, "kthxbye!");
-                    continue;
+                    // Skip the closing period (RFC 9000 Section 10.2) after flushing.
+                    self.process_output().await?;
+                    break;
                 }
                 // no more work, connection closed, terminating
                 (true, CloseState::Closed) => break,
@@ -456,11 +461,7 @@ impl<'a, H: Handler> Runner<'a, H> {
             }
         }
 
-        if self.args.stats {
-            qinfo!("{:?}", self.client.stats());
-        }
-
-        Ok(self.handler.take_token())
+        Ok(())
     }
 
     async fn process_output(&mut self) -> Result<(), io::Error> {
@@ -511,7 +512,7 @@ impl<'a, H: Handler> Runner<'a, H> {
     }
 
     async fn process_multiple_input(&mut self) -> Res<()> {
-        while let Some(dgrams) = self.socket.recv(self.local_addr, &mut self.recv_buf)? {
+        while let Some(dgrams) = self.socket.recv(&mut self.recv_buf)? {
             self.client.process_multiple_input(dgrams, now());
             self.process_output().await?;
         }
@@ -606,7 +607,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             qinfo!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
             args.shared.quic_parameters.no_pmtud = true;
         }
-        let real_local = socket.local_addr().unwrap();
+        let real_local = socket.local_addr();
         qinfo!(
             "{} Client connecting: {real_local:?} -> {remote_addr:?}",
             args.shared.alpn
@@ -640,14 +641,14 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 let handler = http3::Handler::new(to_request, args.clone());
 
-                Box::pin(Runner::new(real_local, &mut socket, client, handler, &args).run()).await?
+                Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
             } else {
                 let client = http09::create_client(&args, real_local, remote_addr, &host, token)
                     .expect("failed to create client");
 
                 let handler = http09::Handler::new(to_request, &args);
 
-                Box::pin(Runner::new(real_local, &mut socket, client, handler, &args).run()).await?
+                Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
             };
         }
 

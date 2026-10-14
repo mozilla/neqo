@@ -46,8 +46,8 @@ runs:
           case "$PLATFORM" in
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
-            openbsd)    # TODO: Is there a way to not pin the version of llvm? -z to pkg_add does not work.
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm-21.1.8p4 nss # rustup does not support OpenBSD at all
+            openbsd)    # renovate: depName=llvm datasource=custom.openbsd-packages registryUrl=https://cdn.openbsd.org/pub/OpenBSD/7.9/packages/amd64/
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm%21 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
@@ -146,8 +146,9 @@ runs:
         echo "envs=CARGO_TERM_COLOR RUST_BACKTRACE RUST_LOG RUST_TEST_TIME_UNIT RUST_TEST_TIME_INTEGRATION RUST_TEST_TIME_DOCTEST WD" >> "$GITHUB_OUTPUT"
 
     - if: ${{ inputs.platform == 'freebsd' }}
-      uses: vmactions/freebsd-vm@83b151f58c6047089f4c80eb5ba2039d158ce093 # v1.5.3
+      uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
       with:
+        release: "15.1"
         usesh: true
         disable-cache: true
         copyback: true
@@ -156,8 +157,9 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@e6c68b637a12e83519688d115d57d5b0b53923cd # v1.4.6
+      uses: vmactions/openbsd-vm@5f7b2c933b8846a138361d6843c52af4bef5d945 # v1.4.8
       with:
+        release: "7.9"
         usesh: true
         disable-cache: true
         copyback: true
@@ -166,8 +168,9 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'netbsd' }}
-      uses: vmactions/netbsd-vm@00081e82b14bc40114eb97f32b4455306828516b # v1.4.6
+      uses: vmactions/netbsd-vm@c8a0d7ddb84619a7a8cc4e652efa7950b3fd9f92 # v1.5.2
       with:
+        release: "11.0"
         usesh: true
         disable-cache: true
         copyback: true
@@ -176,7 +179,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@315163f088b66e55bbcc45928bd224d4973b2312 # v1.3.8
+      uses: vmactions/solaris-vm@87d3c436511cef802cd1637f86f73b1a97715c8c # v1.4.1
       with:
         release: "11.4-gcc"
         usesh: true
@@ -201,7 +204,7 @@ runs:
       run: test -f "$WORKING_DIR/codecov.json" && echo "exists=true" >> "$GITHUB_OUTPUT" || true
 
     - if: ${{ steps.check-coverage.outputs.exists == 'true' }}
-      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
       with:
         files: codecov.json
         working-directory: ${{ inputs.working-directory }}
@@ -211,7 +214,7 @@ runs:
         flags: ${{ inputs.platform }}
 
     - if: ${{ always() && inputs.bindgen-args != '' }}
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: bindings-${{ inputs.platform }}
         path: ${{ inputs.working-directory }}/${{ inputs.platform }}.rs

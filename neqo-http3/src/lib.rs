@@ -265,11 +265,7 @@ pub enum Error {
     #[error("Stream limit reached")]
     StreamLimit,
     #[error("Transport error: {0}")]
-    Transport(
-        #[from]
-        #[source]
-        TransportError,
-    ),
+    Transport(#[source] TransportError),
     #[error("Transport stream does not exist")]
     TransportStreamDoesNotExist,
     #[error("Operation unavailable")]
@@ -330,38 +326,6 @@ impl Error {
         matches!(self, Self::HttpGeneralProtocolStream | Self::InvalidHeader)
     }
 
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_send_errors(err: &Self) -> Self {
-        match err {
-            Self::Transport(TransportError::InvalidStreamId | TransportError::FinalSize) => {
-                Self::TransportStreamDoesNotExist
-            }
-            Self::Transport(TransportError::InvalidInput) => Self::InvalidInput,
-            _ => {
-                debug_assert!(false, "Unexpected error");
-                Self::TransportStreamDoesNotExist
-            }
-        }
-    }
-
-    /// # Panics
-    ///
-    /// On unexpected errors, in debug mode.
-    #[must_use]
-    pub fn map_stream_create_errors(err: &TransportError) -> Self {
-        match err {
-            TransportError::ConnectionState => Self::Unavailable,
-            TransportError::StreamLimit => Self::StreamLimit,
-            _ => {
-                debug_assert!(false, "Unexpected error");
-                Self::TransportStreamDoesNotExist
-            }
-        }
-    }
-
     /// # Errors
     ///
     /// Any error is mapped to the indicated type.
@@ -383,6 +347,20 @@ impl From<QpackError> for Error {
         match err {
             QpackError::ClosedCriticalStream => Self::HttpClosedCriticalStream,
             e => Self::Qpack(e),
+        }
+    }
+}
+
+impl From<TransportError> for Error {
+    fn from(err: TransportError) -> Self {
+        match err {
+            TransportError::InvalidStreamId | TransportError::FinalSize => {
+                Self::TransportStreamDoesNotExist
+            }
+            TransportError::InvalidInput => Self::InvalidInput,
+            TransportError::ConnectionState => Self::Unavailable,
+            TransportError::StreamLimit => Self::StreamLimit,
+            other => Self::Transport(other),
         }
     }
 }
@@ -533,6 +511,10 @@ impl Http3StreamInfo {
         } else {
             None
         }
+    }
+
+    pub(crate) const fn stream_type(&self) -> Http3StreamType {
+        self.stream_type
     }
 
     #[must_use]
@@ -735,30 +717,17 @@ mod tests {
 
     #[test]
     fn error_mapping() {
-        use Error::{
-            InvalidInput, StreamLimit, Transport, TransportStreamDoesNotExist, Unavailable,
-        };
         use neqo_transport::Error as Te;
 
-        assert!(matches!(
-            Error::map_stream_send_errors(&Transport(Te::InvalidStreamId)),
-            TransportStreamDoesNotExist
-        ));
-        assert!(matches!(
-            Error::map_stream_send_errors(&Transport(Te::FinalSize)),
-            TransportStreamDoesNotExist
-        ));
-        assert!(matches!(
-            Error::map_stream_send_errors(&Transport(Te::InvalidInput)),
-            InvalidInput
-        ));
-        assert!(matches!(
-            Error::map_stream_create_errors(&Te::ConnectionState),
-            Unavailable
-        ));
-        assert!(matches!(
-            Error::map_stream_create_errors(&Te::StreamLimit),
-            StreamLimit
-        ));
+        for (input, expected) in [
+            (Te::InvalidStreamId, Error::TransportStreamDoesNotExist),
+            (Te::FinalSize, Error::TransportStreamDoesNotExist),
+            (Te::InvalidInput, Error::InvalidInput),
+            (Te::ConnectionState, Error::Unavailable),
+            (Te::StreamLimit, Error::StreamLimit),
+            (Te::NotConnected, Error::Transport(Te::NotConnected)),
+        ] {
+            assert_eq!(Error::from(input), expected);
+        }
     }
 }

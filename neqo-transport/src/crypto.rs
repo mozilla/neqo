@@ -44,8 +44,7 @@ use crate::{
     ConnectionParameters, Error, Res,
     cid::ConnectionIdRef,
     frame::{FrameEncoder as _, FrameType},
-    packet::{self},
-    recovery,
+    packet, recovery,
     recv_stream::RxStreamOrderer,
     send_stream::TxBuffer,
     sni::find_sni,
@@ -150,6 +149,11 @@ impl Crypto {
         &self.protocols
     }
 
+    /// Whether the local role is that of a server.
+    const fn is_server(&self) -> bool {
+        matches!(self.tls, Agent::Server(_))
+    }
+
     pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
         &mut self,
         tphandler: TpHandler,
@@ -204,7 +208,7 @@ impl Crypto {
     ) -> Res<&HandshakeState> {
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
-            if space == PacketNumberSpace::Initial && matches!(self.tls, Agent::Server(_)) {
+            if space == PacketNumberSpace::Initial && self.is_server() {
                 neqo_common::write_item_to_fuzzing_corpus("find_sni", d);
             }
             let rec = Record {
@@ -212,6 +216,7 @@ impl Crypto {
                 epoch: space.into(),
                 data: d.to_vec(),
             };
+            #[cfg(feature = "log-payload")]
             qtrace!("Handshake record received {rec:?} ");
             rec
         });
@@ -233,22 +238,23 @@ impl Crypto {
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
-    pub fn enable_0rtt(&mut self, version: Version, role: Role) -> Res<bool> {
+    pub fn enable_0rtt(&mut self, version: Version) -> Res<bool> {
         let info = self.tls.preinfo()?;
         // `info.early_data()` returns false for a server,
         // so use `early_data_cipher()` to tell if 0-RTT is enabled.
         let Some(cipher) = info.early_data_cipher() else {
             return Ok(false);
         };
-        let (dir, secret) = match role {
-            Role::Client => (
-                CryptoDxDirection::Write,
-                self.tls.write_secret(Epoch::ZeroRtt),
-            ),
-            Role::Server => (
+        let (dir, secret) = if self.is_server() {
+            (
                 CryptoDxDirection::Read,
                 self.tls.read_secret(Epoch::ZeroRtt),
-            ),
+            )
+        } else {
+            (
+                CryptoDxDirection::Write,
+                self.tls.write_secret(Epoch::ZeroRtt),
+            )
         };
         let secret = secret.ok_or(Error::Internal)?;
         self.states.set_0rtt_keys(version, dir, &secret, cipher)?;
@@ -263,12 +269,12 @@ impl Crypto {
     }
 
     /// Returns true if new handshake keys were installed.
-    pub fn install_keys(&mut self, role: Role) -> Res<bool> {
+    pub fn install_keys(&mut self) -> Res<bool> {
         if self.tls.state().is_final() {
             Ok(false)
         } else {
             let installed_hs = self.install_handshake_keys()?;
-            if role == Role::Server {
+            if self.is_server() {
                 self.maybe_install_application_write_key(self.version)?;
             }
             Ok(installed_hs)
@@ -331,6 +337,7 @@ impl Crypto {
             if r.ct != TLS_CT_HANDSHAKE {
                 return Err(Error::ProtocolViolation);
             }
+            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Adding CRYPTO data {r:?}");
             self.streams.send(r.epoch.into(), &r.data)?;
         }
@@ -349,24 +356,22 @@ impl Crypto {
             .write_frame(space, sni_slicing, builder, tokens, stats);
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qdebug!(
-            "Acked crypto frame space={} offset={} length={}",
-            token.space,
+            "Acked crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.acked(token);
+        self.streams.acked(space, token);
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         qinfo!(
-            "Lost crypto frame space={} offset={} length={}",
-            token.space,
+            "Lost crypto frame space={space} offset={} length={}",
             token.offset,
             token.length
         );
-        self.streams.lost(token);
+        self.streams.lost(space, token);
     }
 
     /// Mark any outstanding frames in the indicated space as "lost" so
@@ -718,6 +723,7 @@ impl CryptoDxState {
         data: &mut [u8],
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
             Hex::new(data[hdr.clone()].as_ref()),
@@ -741,6 +747,7 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
+        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] encrypt ct={}", Hex::new(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
@@ -759,6 +766,7 @@ impl CryptoDxState {
         data: &mut [u8],
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
             Hex::new(data[hdr.clone()].as_ref()),
@@ -829,12 +837,13 @@ impl CryptoDxAppData {
         Ok(Self {
             dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher, 0)?,
             cipher,
-            next_secret: Self::update_secret(cipher, secret)?,
+            next_secret: Self::update_secret(version, cipher, secret)?,
         })
     }
 
-    fn update_secret(cipher: Cipher, secret: &SymKey) -> Res<SymKey> {
-        let next = hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], "quic ku")?;
+    fn update_secret(version: Version, cipher: Cipher, secret: &SymKey) -> Res<SymKey> {
+        let label = String::from(version.label_prefix()) + "ku";
+        let next = hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], &label)?;
         Ok(next)
     }
 
@@ -843,7 +852,7 @@ impl CryptoDxAppData {
             // Guard against too many key updates.
             return Err(Error::KeysExhausted);
         }
-        let next_secret = Self::update_secret(self.cipher, &self.next_secret)?;
+        let next_secret = Self::update_secret(self.dx.version, self.cipher, &self.next_secret)?;
         Ok(Self {
             dx: self.dx.next(&self.next_secret, self.cipher)?,
             cipher: self.cipher,
@@ -1576,15 +1585,15 @@ impl CryptoStreams {
             .read_to_end(buf))
     }
 
-    pub fn acked(&mut self, token: &CryptoRecoveryToken) {
-        if let Some(cs) = self.get_mut(token.space) {
+    pub fn acked(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_acked(token.offset, token.length);
         }
     }
 
-    pub fn lost(&mut self, token: &CryptoRecoveryToken) {
+    pub fn lost(&mut self, space: PacketNumberSpace, token: &CryptoRecoveryToken) {
         // See BZ 1624800, ignore lost packets in spaces we've dropped keys
-        if let Some(cs) = self.get_mut(token.space) {
+        if let Some(cs) = self.get_mut(space) {
             cs.tx.mark_as_lost(token.offset, token.length);
         }
     }
@@ -1688,7 +1697,6 @@ impl CryptoStreams {
             cs.tx.mark_as_sent(offset, len);
             qdebug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
-                space,
                 offset,
                 length: len,
             }));
@@ -1783,9 +1791,10 @@ impl Default for CryptoStreams {
     }
 }
 
+/// The packet number space is not recorded because it can be derived from the carrying packet's
+/// type.
 #[derive(Debug, Clone)]
 pub struct CryptoRecoveryToken {
-    space: PacketNumberSpace,
     offset: u64,
     length: usize,
 }
@@ -1793,9 +1802,57 @@ pub struct CryptoRecoveryToken {
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::hex::Hex;
+    use nss::{TLS_CHACHA20_POLY1305_SHA256, TLS_VERSION_1_3, hkdf};
     use test_fixture::fixture_init;
 
-    use super::CryptoDxState;
+    use super::{CryptoDxAppData, CryptoDxDirection, CryptoDxState};
+    use crate::Version;
+
+    #[test]
+    fn key_update_secrets() {
+        // The initial secret and first update are from RFC 9001, Appendix A.5,
+        // and RFC 9369, Appendix A.5. The second update applies HKDF-Expand-Label
+        // again with SHA-256 and the respective "quic ku" or "quicv2 ku" label.
+        const SECRET: &[u8] = &[
+            0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
+            0x00, 0xa1, 0x54, 0x43, 0xf1, 0x82, 0x03, 0xa0, 0x7d, 0x60, 0x60, 0xf6, 0x88, 0xf3,
+            0x0f, 0x21, 0x63, 0x2b,
+        ];
+        const V1_SECRETS: [&str; 2] = [
+            "1223504755036d556342ee9361d253421a826c9ecdf3c7148684b36b714881f9",
+            "ef172661d26526b8adddf9497f88649df5786fa7d2f49a2341da624e8d7f3f94",
+        ];
+        const V2_SECRETS: [&str; 2] = [
+            "c69374c49e3d2a9466fa689e49d476db5d0dfbc87d32ceeaa6343fd0ae4c7d88",
+            "7f81b8fa265dac8413d60045461c28d11a0b70300c479c44310d34284fd780bc",
+        ];
+
+        fixture_init();
+        let secret = hkdf::import_key(TLS_VERSION_1_3, SECRET).unwrap();
+        for version in Version::all() {
+            let expected = match version {
+                Version::Version2 => V2_SECRETS,
+                Version::Version1 => V1_SECRETS,
+                #[cfg(feature = "draft-29")]
+                Version::Draft29 => V1_SECRETS,
+            };
+            for direction in [CryptoDxDirection::Read, CryptoDxDirection::Write] {
+                let mut app =
+                    CryptoDxAppData::new(version, direction, &secret, TLS_CHACHA20_POLY1305_SHA256)
+                        .unwrap();
+                for expected_secret in expected {
+                    assert_eq!(
+                        Hex::new(app.next_secret.key_data().unwrap()).to_string(),
+                        expected_secret,
+                        "{version:?} {direction:?} epoch {}",
+                        app.epoch(),
+                    );
+                    app = app.next().unwrap();
+                }
+            }
+        }
+    }
 
     #[test]
     fn crypto_dx_state_display() {

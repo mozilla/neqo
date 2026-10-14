@@ -1,13 +1,16 @@
 name: Clippy
 on:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
   push:
     branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -16,6 +19,7 @@ permissions:
 jobs:
   toolchains:
     name: Determine toolchains
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -26,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+        uses: mozilla/actions/toolchains@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -52,7 +56,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/install-build-deps
+      - uses: $/.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy

@@ -71,13 +71,12 @@ pub struct RecvMessage {
     stream_type: Http3StreamType,
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
-    stream_id: StreamId,
     priority_handler: PriorityHandler,
 }
 
 impl Display for RecvMessage {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "RecvMessage {}", self.stream_id)
+        write!(f, "RecvMessage {}", self.stream_info.stream_id())
     }
 }
 
@@ -101,7 +100,6 @@ impl RecvMessage {
             stream_type: message_info.stream_type,
             qpack_decoder,
             conn_events,
-            stream_id: message_info.stream_id,
             priority_handler,
         }
     }
@@ -173,7 +171,7 @@ impl RecvMessage {
             && headers.find_header(":protocol").is_some();
         if is_extended_connect {
             self.conn_events
-                .extended_connect_new_session(self.stream_id, headers);
+                .extended_connect_new_session(self.stream_info.stream_id(), headers);
         } else {
             self.conn_events
                 .header_ready(&self.stream_info, headers, interim, fin);
@@ -239,7 +237,7 @@ impl RecvMessage {
                 | RecvMessageState::WaitingForData { frame_reader }
                 | RecvMessageState::WaitingForFinAfterTrailers { frame_reader } => {
                     match frame_reader.receive(
-                        &mut StreamReaderConnectionWrapper::new(conn, self.stream_id),
+                        &mut StreamReaderConnectionWrapper::new(conn, self.stream_info.stream_id()),
                         now,
                     )? {
                         (None, true) => {
@@ -286,7 +284,7 @@ impl RecvMessage {
                     let d_headers = self
                         .qpack_decoder
                         .borrow_mut()
-                        .decode_header_block(header_block, self.stream_id)?;
+                        .decode_header_block(header_block, self.stream_info.stream_id())?;
                     if let Some(headers) = d_headers {
                         self.add_headers(headers, done)?;
                         if matches!(
@@ -351,7 +349,7 @@ impl RecvStream for RecvMessage {
         if !self.closing() {
             self.qpack_decoder
                 .borrow_mut()
-                .cancel_stream(self.stream_id);
+                .cancel_stream(self.stream_info.stream_id());
         }
         self.conn_events.recv_closed(&self.stream_info, close_type);
         self.state = RecvMessageState::Closed;
@@ -364,6 +362,7 @@ impl RecvStream for RecvMessage {
         buf: &mut [u8],
         now: Instant,
     ) -> Res<(usize, bool)> {
+        let stream_id = self.stream_info.stream_id();
         let mut written = 0;
         loop {
             match self.state {
@@ -372,8 +371,8 @@ impl RecvStream for RecvMessage {
                 } => {
                     let to_read = min(*remaining_data_len, buf.len() - written);
                     let (amount, fin) =
-                        conn.stream_recv(self.stream_id, &mut buf[written..written + to_read])?;
-                    qlog::h3_data_moved_up(conn.qlog_mut(), self.stream_id, amount, now);
+                        conn.stream_recv(stream_id, &mut buf[written..written + to_read])?;
+                    qlog::h3_data_moved_up(conn.qlog_mut(), stream_id, amount, now);
 
                     debug_assert!(amount <= to_read);
                     *remaining_data_len -= amount;
@@ -422,7 +421,8 @@ impl HttpRecvStream for RecvMessage {
     }
 
     fn priority_update_frame(&mut self) -> Option<HFrame> {
-        self.priority_handler.maybe_encode_frame(self.stream_id)
+        self.priority_handler
+            .maybe_encode_frame(self.stream_info.stream_id())
     }
 
     fn priority_update_sent(&mut self) -> Res<()> {

@@ -30,10 +30,16 @@ use neqo_common::{
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State, Version, version,
+    ConnectionIdRef, ConnectionParameters, Output, State, Version,
+    server::{Server, ValidateAddress},
+    version,
 };
 use nss::{AllowZeroRtt, AntiReplay, AuthenticationStatus, random};
-use qlog::{events::EventImportance, streamer::QlogStreamer};
+use qlog::{
+    ReferenceTime,
+    events::EventImportance,
+    streamer::{EventTimePrecision, QlogStreamer},
+};
 
 pub mod assertions;
 pub mod header_protection;
@@ -301,6 +307,68 @@ pub fn connect() -> (Connection, Connection) {
     (client, server)
 }
 
+/// The part of a multi-connection server that [`handshake_with_server`] drives.
+pub trait ProcessServer {
+    fn set_validation(&self, v: ValidateAddress);
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+}
+
+impl ProcessServer for Server {
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+}
+
+impl ProcessServer for Http3Server {
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+}
+
+/// [`handshake`] for a server that holds more than one connection.
+///
+/// # Panics
+///
+/// When the handshake doesn't proceed as expected.
+pub fn handshake_with_server(client: &mut Connection, server: &mut dyn ProcessServer) {
+    server.set_validation(ValidateAddress::Never);
+
+    assert_eq!(*client.state(), State::Init);
+    let out = client.process_output(now()); // ClientHello
+    let out2 = client.process_output(now()); // ClientHello
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    _ = server.process(out.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
+    assert!(out.as_dgram_ref().is_some());
+
+    // Ingest the server Certificate.
+    let out = client.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
+
+    // Now mark the server as authenticated.
+    client.authenticated(AuthenticationStatus::Ok, now());
+    let out = client.process_output(now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(*client.state(), State::Connected);
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
+
+    // Have the client process the HANDSHAKE_DONE.
+    let out = client.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_none());
+    assert_eq!(*client.state(), State::Confirmed);
+}
+
 /// Create a http3 client with default configuration.
 ///
 /// # Panics
@@ -557,18 +625,17 @@ impl Display for SharedVec {
 pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     let buf = SharedVec::default();
     let mut trace = new_trace(Role::Client);
-    // Set reference time to 0.0 for testing.
-    trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+    // Set reference time to a deterministic value for testing.
+    trace.common_fields.as_mut().unwrap().reference_time = ReferenceTime::new_monotonic(None);
     let contents = buf.clone();
     let streamer = QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
-        None,
         None,
         None,
         #[expect(clippy::disallowed_methods, reason = "logging happens in real time")]
         Instant::now(),
         trace,
         EventImportance::Extra,
+        EventTimePrecision::MicroSeconds,
         Box::new(buf),
     );
     let log = Qlog::enabled(streamer, PathBuf::from(""));
@@ -577,7 +644,7 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
 
 pub const EXPECTED_LOG_HEADER: &str = concat!(
     "\u{1e}",
-    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"neqo-Client trace","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","trace":{"title":"neqo-Client trace","description":"neqo-Client trace","common_fields":{"protocol_types":["QUIC"],"reference_time":{"clock_type":"monotonic","epoch":"unknown"},"time_format":"relative_to_epoch"},"vantage_point":{"name":"neqo-Client","type":"client"},"event_schemas":["urn:ietf:params:qlog:events:quic-12"]}}"#,
     "\n"
 );
 

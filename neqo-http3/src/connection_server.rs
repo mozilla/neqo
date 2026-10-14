@@ -195,6 +195,7 @@ impl Http3ServerHandler {
             return;
         }
 
+        self.base_handler.expire_datagram_queues(conn, now);
         let res = self.check_connection_events(conn, now);
         if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn, now);
@@ -284,6 +285,9 @@ impl Http3ServerHandler {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => self.base_handler.handle_datagram(dgram),
+                ConnectionEvent::OutgoingDatagramSpaceAvailable => {
+                    self.events.datagram_space_available();
+                }
                 ConnectionEvent::AuthenticationNeeded
                 | ConnectionEvent::EchFallbackAuthenticationNeeded { .. }
                 | ConnectionEvent::ZeroRttRejected

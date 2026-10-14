@@ -1,7 +1,6 @@
 [package]
 name = "fuzz"
 authors.workspace = true
-homepage.workspace = true
 repository.workspace = true
 version.workspace = true
 edition.workspace = true
@@ -15,17 +14,14 @@ readme.workspace = true
 [package.metadata]
 cargo-fuzz = true
 
-[dependencies]
-# Not used in Firefox, so we can be liberal with dependency versions
+[target.'cfg(all(fuzzing, not(windows)))'.dependencies]
+libfuzzer-sys = { version = "0.4" } # default features are needed for fuzzer
 neqo-common = { path = "../neqo-common" }
 neqo-http3 = { path = "../neqo-http3" }
 neqo-qpack = { path = "../neqo-qpack" }
 neqo-transport = { path = "../neqo-transport" }
 nss = { workspace = true }
 test-fixture = { path = "../test-fixture" }
-
-[target.'cfg(not(windows))'.dependencies]
-libfuzzer-sys = { version = "0.4" } # default features are needed for fuzzer
 
 [lints]
 workspace = true

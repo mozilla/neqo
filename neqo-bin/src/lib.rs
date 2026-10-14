@@ -7,15 +7,18 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use std::{
+    fs::OpenOptions,
+    io::Write as _,
     net::{SocketAddr, ToSocketAddrs as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 use clap::{Parser, builder::TypedValueParser as _};
+use neqo_common::{qerror, qinfo};
 use neqo_transport::{
-    CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, StreamType, Version,
-    tparams::PreferredAddress,
+    CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, Stats, StreamType,
+    Version, tparams::PreferredAddress,
 };
 use strum::VariantNames as _;
 use thiserror::Error;
@@ -65,6 +68,14 @@ pub struct SharedArgs {
 
     #[command(flatten)]
     quic_parameters: QuicParameters,
+
+    /// Log connection stats as JSON when a connection closes.
+    #[arg(name = "stats", long)]
+    stats: bool,
+
+    /// Append connection stats to this file as JSON, one record per line. Implies `--stats`.
+    #[arg(name = "stats-file", long)]
+    stats_file: Option<PathBuf>,
 }
 
 #[cfg(any(test, feature = "bench"))]
@@ -80,6 +91,8 @@ impl Default for SharedArgs {
             ciphers: vec![],
             qns_test: None,
             quic_parameters: QuicParameters::default(),
+            stats: false,
+            stats_file: None,
         }
     }
 }
@@ -88,6 +101,11 @@ impl SharedArgs {
     #[must_use]
     pub fn get_alpn(&self) -> &str {
         &self.alpn
+    }
+
+    /// Whether to report connection stats; `--stats-file` implies `--stats`.
+    const fn stats_enabled(&self) -> bool {
+        self.stats || self.stats_file.is_some()
     }
 }
 
@@ -291,32 +309,67 @@ fn now() -> Instant {
     Instant::now()
 }
 
-#[cfg(not(target_os = "netbsd"))] // FIXME: Test fails on NetBSD.
+/// Report `stats` as JSON: a line appended to `path`, or indented into the log.
+pub(crate) fn report_stats(stats: &Stats, path: Option<&Path>) {
+    let json = if path.is_some() {
+        serde_json::to_string(stats)
+    } else {
+        serde_json::to_string_pretty(stats)
+    };
+    let mut json = match json {
+        Ok(json) => json,
+        Err(e) => {
+            qerror!("Failed to serialize stats: {e}");
+            return;
+        }
+    };
+    let Some(path) = path else {
+        qinfo!("{json}");
+        return;
+    };
+    json.push('\n'); // Append the record in one write.
+    if let Err(e) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .and_then(|mut f| f.write_all(json.as_bytes()))
+    {
+        qerror!("Failed to report stats to {}: {e}", path.display());
+    }
+}
+
+/// A directory that deletes itself.
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
-mod tests {
-    use std::{fs, path::PathBuf, time::SystemTime};
+pub(crate) mod temp_dir {
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::atomic::{AtomicUsize, Ordering},
+        time::SystemTime,
+    };
 
-    use crate::{client, server};
-
-    struct TempDir {
+    pub struct TempDir {
         path: PathBuf,
     }
 
     impl TempDir {
-        fn new() -> Self {
+        pub fn new() -> Self {
+            // The name has to be unique per instance and process.
+            static SEQ: AtomicUsize = AtomicUsize::new(0);
             let dir = std::env::temp_dir().join(format!(
-                "neqo-bin-test-{}",
+                "neqo-bin-test-{}-{}-{}",
+                std::process::id(),
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap()
-                    .as_secs()
+                    .as_millis(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir_all(&dir).unwrap();
             Self { path: dir }
         }
 
-        fn path(&self) -> PathBuf {
+        pub fn path(&self) -> PathBuf {
             self.path.clone()
         }
     }
@@ -328,8 +381,17 @@ mod tests {
             }
         }
     }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::fs;
+
+    use crate::{Stats, client, report_stats, server, temp_dir::TempDir};
 
     #[tokio::test]
+    #[cfg_attr(target_os = "netbsd", ignore = "FIXME: Test fails on NetBSD.")]
     async fn write_qlog_file() {
         test_fixture::fixture_init();
 
@@ -359,5 +421,29 @@ mod tests {
             assert!(metadata.is_file(), "expect a file, found something else");
             assert!(metadata.len() > 0, "expect file not be empty");
         }
+    }
+
+    #[test]
+    fn report_stats_appends_json_lines() {
+        let dir = TempDir::new();
+        let path = dir.path().join("stats.json");
+
+        report_stats(&Stats::default(), Some(&path));
+        let first = fs::read_to_string(&path).unwrap();
+        report_stats(&Stats::default(), Some(&path));
+        let second = fs::read_to_string(&path).unwrap();
+
+        assert!(second.starts_with(&first), "must append, not truncate");
+        let lines: Vec<_> = second.lines().collect();
+        assert_eq!(lines.len(), 2, "one record per call");
+        for line in lines {
+            serde_json::from_str::<serde_json::Value>(line).expect("each line is a JSON record");
+        }
+    }
+
+    #[test]
+    fn report_stats_to_unwritable_path_is_not_fatal() {
+        let dir = TempDir::new();
+        report_stats(&Stats::default(), Some(&dir.path()));
     }
 }
