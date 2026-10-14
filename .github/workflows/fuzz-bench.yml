@@ -38,7 +38,7 @@ jobs:
         if: ${{ matrix.check == 'fuzz' }}
         # cargo-fuzz must be compiled from source so it targets the native toolchain;
         # binstall provides prebuilt binaries that may target a different architecture.
-        run: cargo install cargo-fuzz
+        run: cargo install --locked cargo-fuzz@=0.13.2
 
       - if: ${{ matrix.check == 'fuzz' }}
         env:
