@@ -162,7 +162,9 @@ impl Pmtud {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_frame(FrameType::Ping, |_| {});
-        tokens.push(recovery::Token::PmtudProbe);
+        tokens.push(recovery::Token::PmtudProbe(
+            self.search_table[self.probe_index],
+        ));
         stats.frame_tx.ping += 1;
         stats.pmtud_tx += 1;
         self.probe_count += 1;
@@ -323,18 +325,6 @@ mod tests {
         recovery::{self, SendProfile, sent},
     };
 
-    /// Test helper to create a sent PMTUD probe packet.
-    fn make_pmtud_probe(pn: packet::Number, sent_time: Instant, len: usize) -> sent::Packet {
-        sent::Packet::new(
-            packet::Type::Short,
-            pn,
-            sent_time,
-            true,
-            vec![recovery::Token::PmtudProbe],
-            len,
-        )
-    }
-
     const V4: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     const V6: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
     const IFACE_MTUS: &[Option<usize>] = &[
@@ -383,14 +373,15 @@ mod tests {
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.enable_padding(true);
-        pmtud.send_probe(&mut builder, &mut Vec::new(), stats);
+        let mut tokens = recovery::Tokens::new();
+        pmtud.send_probe(&mut builder, &mut tokens, stats);
         builder.pad();
         let encoder = builder.build(prot).unwrap();
         assert_eq!(encoder.len(), pmtud.probe_size());
         assert!(!pmtud.needs_probe());
         assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
 
-        let packet = make_pmtud_probe(pn, now, encoder.len());
+        let packet = sent::Packet::new(packet::Type::Short, pn, now, true, tokens, encoder.len());
         if encoder.len() + Pmtud::header_size(addr) <= mtu {
             pmtud.on_packets_acked(&[packet], now, stats);
             assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
