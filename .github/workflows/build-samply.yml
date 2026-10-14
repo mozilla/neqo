@@ -6,7 +6,8 @@ permissions:
   contents: read
 
 env:
-  SAMPLY_REV: a2252a6ef2ec2c9c77337b71644be58c93c7c6a8 # 2026-08-27 TODO: Bump occasionally.
+  # renovate: depName=https://github.com/mstange/samply datasource=git-refs branch=main
+  SAMPLY_REV: a2252a6ef2ec2c9c77337b71644be58c93c7c6a8
 
 jobs:
   build-samply:
@@ -28,7 +29,7 @@ jobs:
       - name: Build samply
         if: steps.cache.outputs.cache-hit != 'true'
         run: cargo install --locked --git https://github.com/mstange/samply --rev "$SAMPLY_REV" --root samply samply
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: samply
           path: samply/bin/samply
