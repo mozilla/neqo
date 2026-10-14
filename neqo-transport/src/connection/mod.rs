@@ -17,11 +17,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::HexWithLen;
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
     expect_usize,
-    hex::{Hex, HexSnipMiddle, HexWithLen},
+    hex::{Hex, HexSnipMiddle},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
     qtrace, qwarn, to_u64,
@@ -1812,6 +1814,7 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
+        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
@@ -1844,6 +1847,7 @@ impl Connection {
                 PreprocessResult::End => return Ok(()),
             }
 
+            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
@@ -3283,6 +3287,7 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] Handshake space={space} data: {:?}",
             data.as_ref().map(HexWithLen::new),
