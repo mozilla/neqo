@@ -676,10 +676,8 @@ mod tests {
     fn cid_generator_exhaustion() {
         fixture_init();
         let generator = Rc::new(RefCell::new(ScriptedConnectionIdGenerator::default()));
-        let mut manager = ConnectionIdManager::new(
-            Rc::<RefCell<ScriptedConnectionIdGenerator>>::clone(&generator),
-            ConnectionId::from(&[0]),
-        );
+        let manager_generator = Rc::clone(&generator);
+        let mut manager = ConnectionIdManager::new(manager_generator, ConnectionId::from(&[0]));
         manager.set_limit(3);
         let enc = Encoder::with_capacity(1024);
         let mut builder = packet::Builder::short(enc, false, Some(&[]), 1024);

@@ -54,31 +54,28 @@ const SAMPLE_PREFERRED_ADDRESS: &[u8] = &[
     0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 ];
 
+/// Supplies only the initial CID, then returns `None`. Panics after a bounded number of calls
+/// so a regression that keeps requesting CIDs fails instead of hanging the test suite.
 struct ExhaustibleConnectionIdGenerator {
-    inner: CountingConnectionIdGenerator,
-    initial: bool,
+    inner: Option<CountingConnectionIdGenerator>,
     attempts_left: usize,
 }
 
 impl ConnectionIdDecoder for ExhaustibleConnectionIdGenerator {
     fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
-        self.inner.decode_cid(dec)
+        // Decoding is stateless and must still work after the generator has been consumed.
+        CountingConnectionIdGenerator::default().decode_cid(dec)
     }
 }
 
 impl ConnectionIdGenerator for ExhaustibleConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
-        // Bound the test's runtime if an output call loops on None.
         assert!(
             self.attempts_left > 0,
             "CID generation did not stop after exhaustion"
         );
         self.attempts_left -= 1;
-        if std::mem::take(&mut self.initial) {
-            self.inner.generate_cid()
-        } else {
-            None
-        }
+        self.inner.take()?.generate_cid()
     }
 
     fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
@@ -86,14 +83,35 @@ impl ConnectionIdGenerator for ExhaustibleConnectionIdGenerator {
     }
 }
 
+/// Exhausting either endpoint's generator after its initial CID must not block the handshake
+/// or subsequent stream output. Each case exhausts a different endpoint; both message directions
+/// use that same connection pair to check that it can still send and receive while exhausted.
 #[test]
 fn cid_generator_exhaustion_allows_connection_progress() {
+    fn transfer(sender: &mut Connection, receiver: &mut Connection) {
+        const MESSAGE: &[u8] = b"hello";
+
+        let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(
+            sender.stream_send(stream_id, MESSAGE).unwrap(),
+            MESSAGE.len()
+        );
+        sender.stream_close_send(stream_id).unwrap();
+        let datagram = sender.process_output(now()).dgram().unwrap();
+        receiver.process_input(datagram, now());
+        let mut buf = [0; MESSAGE.len()];
+        assert_eq!(
+            receiver.stream_recv(stream_id, &mut buf).unwrap(),
+            (MESSAGE.len(), true)
+        );
+        assert_eq!(buf, MESSAGE);
+    }
+
     fixture_init();
     for exhausted_client in [false, true] {
         let generator: Rc<RefCell<dyn ConnectionIdGenerator>> =
             Rc::new(RefCell::new(ExhaustibleConnectionIdGenerator {
-                inner: CountingConnectionIdGenerator::default(),
-                initial: true,
+                inner: Some(CountingConnectionIdGenerator::default()),
                 attempts_left: 100,
             }));
         let (mut client, mut server) = if exhausted_client {
@@ -120,24 +138,8 @@ fn cid_generator_exhaustion_allows_connection_progress() {
         };
         connect(&mut client, &mut server);
 
-        for server_sends in [false, true] {
-            let (sender, receiver) = if server_sends {
-                (&mut server, &mut client)
-            } else {
-                (&mut client, &mut server)
-            };
-            let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
-            assert_eq!(sender.stream_send(stream_id, b"hello").unwrap(), 5);
-            sender.stream_close_send(stream_id).unwrap();
-            let datagram = sender.process_output(now()).dgram().unwrap();
-            receiver.process_input(datagram, now());
-            let mut buf = [0; 5];
-            assert_eq!(
-                receiver.stream_recv(stream_id, &mut buf).unwrap(),
-                (5, true)
-            );
-            assert_eq!(&buf, b"hello");
-        }
+        transfer(&mut client, &mut server);
+        transfer(&mut server, &mut client);
         assert_eq!(*client.state(), State::Confirmed);
         assert_eq!(*server.state(), State::Confirmed);
         let exhausted = if exhausted_client { &client } else { &server };
