@@ -17,9 +17,7 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(feature = "disable-encryption"))]
-use neqo_common::Decoder;
-use neqo_common::{Datagram, event::Provider as _, qdebug, to_u64};
+use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, qdebug, to_u64};
 use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
@@ -40,7 +38,7 @@ use crate::{
     Version,
     connection::{
         AddressValidation,
-        tests::{exchange_ticket, new_client, new_server},
+        tests::{exchange_ticket, new_client, new_server, new_server_with_qlog},
     },
     events::ConnectionEvent,
     server::ValidateAddress,
@@ -2141,4 +2139,27 @@ fn client_initial_with_token() {
     let dropped = client.stats().dropped_rx;
     client.process_input(datagram(server_initial(&ci, &[0x01])), now());
     assert_eq!(client.stats().dropped_rx, dropped + 1);
+}
+
+#[test]
+fn received_packet_reports_its_own_cids() {
+    let mut client = default_client();
+    let (mut server, contents) = new_server_with_qlog(ConnectionParameters::default());
+    let ci = client.process_output(now()).dgram().expect("a datagram");
+    let mut dec = Decoder::from(&ci[5..]); // Skip past version.
+    let cids = ["dcid", "scid"]
+        .map(|name| format!(r#""{name}":"{}""#, Hex::new(dec.decode_vec(1).expect(name))));
+
+    server.process_input(ci, now());
+    drop(server);
+
+    // The client's random DCID, not the one the server chose for its path.
+    let trace = contents.to_string();
+    let packet = trace
+        .lines()
+        .find(|l| l.contains(r#""name":"quic:packet_received""#))
+        .expect("a packet_received event");
+    for cid in &cids {
+        assert!(packet.contains(cid), "{trace}");
+    }
 }

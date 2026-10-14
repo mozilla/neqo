@@ -20,6 +20,7 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
+mod datagram_queue;
 pub mod ecn;
 mod events;
 mod fc;
@@ -69,6 +70,7 @@ pub use self::{
             MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,
         },
     },
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,

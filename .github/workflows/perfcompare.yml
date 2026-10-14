@@ -2,6 +2,8 @@ name: Performance comparison
 on:
   workflow_call:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
 env:
   CARGO_PROFILE_RELEASE_DEBUG: true
@@ -21,7 +23,8 @@ env:
   BASE_REF: ${{ github.event.pull_request.base.ref || 'main' }}
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -30,6 +33,7 @@ permissions:
 jobs:
   build-neqo:
     name: Build neqo
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     defaults:
       run:
@@ -41,7 +45,6 @@ jobs:
         with:
           repository: mozilla/neqo
           path: neqo
-          submodules: "recursive"
           persist-credentials: false
 
       - uses: $/.github/actions/build-neqo
@@ -51,6 +54,7 @@ jobs:
 
   build-others:
     name: Build ${{ matrix.impl }}
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -67,10 +71,12 @@ jobs:
           artifact-name: build-${{ matrix.impl }} # perfcompare.py's commands start with this.
 
   build-samply:
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     uses: $/.github/workflows/build-samply.yml
 
   units:
     name: Determine comparison units
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       units: ${{ steps.units.outputs.units }}
@@ -110,18 +116,13 @@ jobs:
         uses: $/.github/actions/install-build-deps
         with:
           version: ${{ env.RUSTUP_TOOLCHAIN }}
-          tools: hyperfine, inferno
+          tools: hyperfine@^2, inferno@^0.12
           nss: "false" # Uses the NSS libraries bundled with the downloaded binaries.
           rust-cache: "false"
 
       - uses: $/.github/actions/install-samply
 
-      - name: Install SciPy # perfcompare.py's Mann-Whitney test needs it.
-        run: |
-          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
-          sudo apt-get install -y --no-install-recommends python3-scipy
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: build-* # Each unpacks into a directory named after it.
           path: .
@@ -170,12 +171,10 @@ jobs:
           reports: "true"
 
       - name: Upload unit results
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: perfcompare-${{ matrix.unit }}
           path: |
-            steps.md
-            results.txt
             *.samply.json.gz
             *.svg
             *.report.txt
@@ -186,7 +185,7 @@ jobs:
 
   results:
     name: Assemble comparison
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
     needs: perfcompare
     runs-on: ubuntu-24.04
     defaults:
@@ -204,10 +203,15 @@ jobs:
           cd neqo
           git fetch --no-tags --depth=1 origin "$BASE_REF"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: perfcompare-*
           path: units
+
+      - name: Install SciPy # perfcompare.py's Mann-Whitney test needs it.
+        run: |
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends python3-scipy
 
       - name: Merge unit results
         run: |
@@ -247,7 +251,7 @@ jobs:
 
       - name: Export profiler.firefox.com data
         id: export_samply
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-samply
           path: |
@@ -256,7 +260,7 @@ jobs:
 
       - name: Export performance data
         id: export_perf
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ github.event.repository.name }}-${{ github.event.pull_request.head.sha }}-perfcompare-perf
           path: |
