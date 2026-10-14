@@ -2240,6 +2240,7 @@ fn crypto_resent_only_for_initial() {
     let (handshake, _short) = split_datagram(&rest.expect("a coalesced Handshake packet"));
     assert_handshake(&handshake);
     assert_eq!(crypto_sent_for(&mut client, handshake, &mut now), 0);
+    assert!(!client.crypto.early_resend_used(), "allowance untouched");
 }
 
 /// A Retry restarts the connection process, so the allowance is available again for the new flight.

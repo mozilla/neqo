@@ -3375,6 +3375,7 @@ impl Connection {
             Frame::Ping => {
                 // If we get a PING and there are outstanding CRYPTO frames,
                 // prepare to resend them.
+                // A PING in Initial/Handshake is a PTO probe, so the peer likely lacks our CRYPTO.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
                 // Send an ACK immediately if we might not otherwise do so.

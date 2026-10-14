@@ -397,12 +397,12 @@ impl Crypto {
         }
     }
 
-    /// A Retry restarts the connection, so the allowance is available again (RFC9002, Section 6.3).
+    /// A Retry effectively restarts the connection (Section 6.3 of RFC 9002), so re-arm allowance.
     pub const fn reset_early_resend(&mut self) {
         self.early_resend_used = false;
     }
 
-    #[cfg(all(test, not(feature = "disable-encryption")))]
+    #[cfg(test)]
     pub const fn early_resend_used(&self) -> bool {
         self.early_resend_used
     }

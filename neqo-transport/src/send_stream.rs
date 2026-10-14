@@ -448,6 +448,7 @@ impl RangeTracker {
     /// On 32-bit machines where far too much is sent before calling this.
     /// That should not happen because this should only be called for handshakes,
     /// which never exceed that limit.
+    #[must_use]
     pub fn unmark_sent(&mut self) -> bool {
         self.unmark_range(0, expect_usize(self.highest_offset()))
     }
@@ -565,6 +566,7 @@ impl TxBuffer {
     }
 
     /// Forget about anything that was marked as sent. Returns whether there was any.
+    #[must_use]
     pub fn unmark_sent(&mut self) -> bool {
         self.ranges.unmark_sent()
     }
