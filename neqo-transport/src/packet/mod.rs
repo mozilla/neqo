@@ -493,6 +493,7 @@ impl<B: Buffer> Builder<B> {
             self.write_len(crypto.expansion());
         }
 
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
@@ -519,6 +520,7 @@ impl<B: Buffer> Builder<B> {
             self.encoder.as_mut()[j] ^= mask[i];
         }
 
+        #[cfg(feature = "log-payload")]
         qtrace!("Packet built {}", Hex::new(&self.encoder));
         Ok(self.encoder)
     }

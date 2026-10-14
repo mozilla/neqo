@@ -527,7 +527,7 @@ dependencies = [
 
 [[package]]
 name = "fuzz"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "libfuzzer-sys",
  "neqo-common",
@@ -535,7 +535,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "nss-rs",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
 ]
 
 [[package]]
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "neqo-bin"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "cfg_aliases",
  "clap",
@@ -777,14 +777,14 @@ dependencies = [
  "serde_json",
  "strum",
  "test-fixture 0.1.0",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
  "tokio",
 ]
 
 [[package]]
 name = "neqo-common"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -798,14 +798,14 @@ dependencies = [
  "sha1",
  "static_assertions",
  "strum",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
  "windows",
 ]
 
 [[package]]
 name = "neqo-http3"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enumset",
@@ -821,26 +821,26 @@ dependencies = [
  "sfv",
  "static_assertions",
  "strum",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-qpack"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "log",
  "neqo-common",
  "neqo-transport",
  "rustc-hash",
  "static_assertions",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-transport"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "codspeed-criterion-compat",
  "enum-map",
@@ -859,13 +859,13 @@ dependencies = [
  "smallvec",
  "static_assertions",
  "strum",
- "test-fixture 0.32.0",
+ "test-fixture 0.33.0",
  "thiserror",
 ]
 
 [[package]]
 name = "neqo-udp"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -978,9 +978,9 @@ dependencies = [
 
 [[package]]
 name = "quinn-udp"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca72c3f2792761ab5fa848490694cbc728c7f659669ed4320c4c79c12150966"
+checksum = "47091c86514c2e11452cb228dee77037334b99d92a23e4c69aa5982261f39247"
 dependencies = [
  "cfg_aliases",
  "libc",
@@ -1272,7 +1272,7 @@ dependencies = [
 
 [[package]]
 name = "test-fixture"
-version = "0.32.0"
+version = "0.33.0"
 dependencies = [
  "log",
  "neqo-common",
