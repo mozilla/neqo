@@ -1695,6 +1695,26 @@ mod tests {
         // change capacity to 2000.
         assert!(encoder.encoder.set_max_capacity(2000).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_1500);
+        assert_eq!(encoder.encoder.table.capacity(), 1500);
+
+        // MaxEntries comes from the decoder's advertised capacity (2000), not the
+        // locally clamped table capacity (1500). Advance past the smaller modulus
+        // to make the encoded Required Insert Count distinguish the two values.
+        for i in 0..100 {
+            let value = i.to_string();
+            encoder
+                .encoder
+                .table
+                .insert(b"x", value.as_bytes())
+                .unwrap();
+            encoder.encoder.table.increment_acked(1).unwrap();
+        }
+        let block = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("x", "99")],
+            STREAM_1,
+        );
+        assert_eq!(block.as_ref(), &[0x65, 0x00, 0x80]);
     }
 
     #[test]
