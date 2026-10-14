@@ -33,7 +33,7 @@ jobs:
       (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure')
     steps:
       # No checkout — eliminates .git/config overwrite attack surface.
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           run-id: ${{ github.event.workflow_run.id }}
           name: ${{ github.event.workflow_run.name }}
@@ -42,7 +42,17 @@ jobs:
 
       - id: pr-number
         shell: bash
-        run: echo "number=$(cat comment-data/pr-number)" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD: ${{ github.event.workflow_run.head_repository.full_name }}:${{ github.event.workflow_run.head_branch }}:${{ github.event.workflow_run.head_sha }}
+        run: |
+          # Artifact is untrusted and `workflow_run.pull_requests` is empty for forks, so verify the PR head.
+          number=$(cat comment-data/pr-number)
+          [[ "$number" =~ ^[0-9]+$ ]] || { echo "::error::Invalid PR number"; exit 1; }
+          pr_head=$(gh api "repos/$REPO/pulls/$number" --jq '"\(.head.repo.full_name):\(.head.ref):\(.head.sha)"')
+          [ "$pr_head" = "$HEAD" ] || { echo "::error::PR #$number head $pr_head does not match $HEAD"; exit 1; }
+          echo "number=$number" >> "$GITHUB_OUTPUT"
 
       - id: mode
         shell: bash

@@ -19,6 +19,12 @@ inputs:
     description: 'Modified "implementations.json" data'
     required: false
     default: ""
+  runner-ref:
+    description: "quic-interop-runner commit to check out"
+    required: true
+  linuxquic-ref:
+    description: "lxin/quic commit to check out"
+    required: true
 
 outputs:
   result:
@@ -32,6 +38,7 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: "quic-interop/quic-interop-runner"
+        ref: ${{ inputs.runner-ref }}
         path: "quic-interop-runner"
         persist-credentials: false
 
@@ -51,6 +58,7 @@ runs:
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         repository: "lxin/quic"
+        ref: ${{ inputs.linuxquic-ref }}
         path: "linuxquic"
         persist-credentials: false
 
@@ -127,7 +135,7 @@ runs:
         exit $FAILED
       shell: bash
 
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: ${{ always() }}
       id: upload-logs
       with:
@@ -144,7 +152,7 @@ runs:
         mv result.json.tmp result.json
       shell: bash
 
-    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+    - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       if: ${{ always() }}
       with:
         name: "${{ inputs.client }} vs. ${{ inputs.server }} results"
