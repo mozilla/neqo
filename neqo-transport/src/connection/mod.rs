@@ -2854,12 +2854,13 @@ impl Connection {
                 tokens.push(recovery::Token::EcnEct0);
             }
 
+            let lengths = builder.lengths(self.tx_mut(epoch)?);
             self.log_packet(
                 packet::MetaData::new_out(
                     path,
                     pt,
                     pn,
-                    builder.len() + aead_expansion,
+                    lengths,
                     &builder.as_ref()[payload_start..],
                     packet_tos,
                     self.version,
@@ -2873,12 +2874,7 @@ impl Connection {
             // contained in the coalesced packet. This is per Section 13.4.1 of
             // RFC 9000.
             self.stats.borrow_mut().ecn_tx[pt] += Ecn::from(packet_tos);
-            let tx = self
-                .crypto
-                .states_mut()
-                .tx_mut(self.version, epoch)
-                .ok_or(Error::Internal)?;
-            encoder = builder.build(tx)?;
+            encoder = builder.build(self.tx_mut(epoch)?)?;
             self.crypto.states_mut().auto_update()?;
 
             if ack_eliciting {
@@ -4239,6 +4235,13 @@ impl Connection {
     #[must_use]
     pub fn plpmtu(&self) -> usize {
         self.paths.primary().unwrap().borrow().plpmtu()
+    }
+
+    fn tx_mut(&mut self, epoch: Epoch) -> Res<&mut CryptoDxState> {
+        self.crypto
+            .states_mut()
+            .tx_mut(self.version, epoch)
+            .ok_or(Error::Internal)
     }
 
     fn log_packet(&mut self, meta: packet::MetaData, now: Instant) {
