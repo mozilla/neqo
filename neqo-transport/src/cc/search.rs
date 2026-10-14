@@ -7,10 +7,7 @@
 //! Slow start Exit At Right CHokepoint (SEARCH) implementation as per
 //! <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09>
 
-use std::{
-    fmt::Display,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use neqo_common::{qdebug, to_u64};
 
@@ -39,7 +36,8 @@ pub enum Outcome {
 /// near its bottleneck capacity.
 ///
 /// <https://datatracker.ietf.org/doc/html/draft-chung-ccwg-search-09>
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("SEARCH")]
 pub struct Search {
     /// The circular array used to track acked bytes per bin.
     acked_bins: [u64; Self::NUM_ACKED_BINS],
@@ -57,12 +55,6 @@ pub struct Search {
     sent_bytes: u64,
     /// The RTT used to initialize SEARCH (set in [`Self::initialize`]).
     initial_rtt: Option<Duration>,
-}
-
-impl Display for Search {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SEARCH")
-    }
 }
 
 impl Search {

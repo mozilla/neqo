@@ -4,11 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{
-    fmt::{self, Display, Formatter},
-    mem,
-    time::Instant,
-};
+use std::{mem, time::Instant};
 
 use neqo_common::{Bytes, Encoder, Header, Role, qtrace};
 use neqo_transport::{Connection, StreamId, streams::SendGroupId};
@@ -25,7 +21,8 @@ use crate::{
     frames::{FrameReader, StreamReaderRecvStreamWrapper, WebTransportFrame},
 };
 
-#[derive(Debug)]
+#[derive(Debug, displaydoc::Display)]
+#[displaydoc("WebTransportSession")]
 pub struct Session {
     frame_reader: FrameReader,
     id: StreamId,
@@ -41,12 +38,6 @@ pub struct Session {
     /// Send groups registered for this session.
     send_groups: HashSet<SendGroupId>,
     stats: SessionStats,
-}
-
-impl Display for Session {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "WebTransportSession")
-    }
 }
 
 impl Session {

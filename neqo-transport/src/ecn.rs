@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::ops::{AddAssign, Deref, DerefMut, Sub};
+use std::ops::{AddAssign, Sub};
 
 use enum_map::{Enum, EnumMap};
 use neqo_common::{Ecn, qdebug, qinfo};
@@ -72,26 +72,12 @@ impl ValidationState {
 /// [`Ecn::NotEct`], the [`Ecn::NotEct`] value will always be 0.
 ///
 /// See also <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.2>.
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default, derive_more::Deref, derive_more::DerefMut)]
 pub struct Count(EnumMap<Ecn, u64>);
 
 impl Serialize for Count {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         crate::stats::serialize_counts(self.0, serializer)
-    }
-}
-
-impl Deref for Count {
-    type Target = EnumMap<Ecn, u64>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Count {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
@@ -134,26 +120,12 @@ impl AddAssign<Ecn> for Count {
     }
 }
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy, Default, derive_more::Deref, derive_more::DerefMut)]
 pub struct ValidationCount(EnumMap<ValidationOutcome, u64>);
 
 impl Serialize for ValidationCount {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         crate::stats::serialize_counts(self.0, serializer)
-    }
-}
-
-impl Deref for ValidationCount {
-    type Target = EnumMap<ValidationOutcome, u64>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ValidationCount {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
     }
 }
 
