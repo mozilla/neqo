@@ -202,8 +202,24 @@ impl Pmtud {
             return;
         }
 
-        // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         stats.pmtud_ack += acked;
+
+        // Only the ACK of a probe for the size we are currently searching for confirms that size.
+        // Other probes are stale, e.g., the original of a probe that was spuriously declared lost
+        // and then retried. They say nothing about the size we are searching for, which may not
+        // have been probed yet. Once the search has stopped, there is nothing left to confirm.
+        let probe_mtu = self.search_table[self.probe_index];
+        if self.probe_state == Probe::NotNeeded
+            || !acked_pkts
+                .iter()
+                .filter_map(sent::Packet::pmtud_probe_size)
+                .any(|mtu| mtu == probe_mtu)
+        {
+            qdebug!("Ignoring ACK of stale PMTUD probe");
+            return;
+        }
+
+        // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         let confirmed_idx = self.probe_index;
         qdebug!(
             "PMTUD probe of size {} succeeded",
@@ -324,6 +340,28 @@ mod tests {
         pmtud::{PMTU_RAISE_TIMER, Probe, SEARCH_TABLE_LEN},
         recovery::{self, SendProfile, sent},
     };
+
+    /// Test helper that sends a PMTUD probe and returns it as loss recovery would track it.
+    #[cfg(test)]
+    fn send_probe_packet(
+        pmtud: &mut Pmtud,
+        stats: &mut Stats,
+        prot: &mut CryptoDxState,
+        now: Instant,
+    ) -> sent::Packet {
+        assert!(pmtud.needs_probe());
+        let limit = pmtud.probe_size() - prot.expansion();
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
+        let pn = prot.next_pn();
+        builder.pn(pn, 4);
+        builder.enable_padding(true);
+        let mut tokens = recovery::Tokens::new();
+        pmtud.send_probe(&mut builder, &mut tokens, stats);
+        builder.pad();
+        let encoder = builder.build(prot).unwrap();
+        assert_eq!(encoder.len(), pmtud.probe_size());
+        sent::Packet::new(packet::Type::Short, pn, now, true, tokens, encoder.len())
+    }
 
     const V4: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
     const V6: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
@@ -693,5 +731,108 @@ mod tests {
 
         // No probe ACKs should have been recorded.
         assert_eq!(initial_ack, stats.pmtud_ack);
+    }
+
+    /// A probe that is spuriously declared lost gets retried. When both the original and the retry
+    /// are acknowledged, only the first ACK confirms the size under test. The second one is for a
+    /// probe of the same size, so it says nothing about the next size, which has not been probed.
+    #[test]
+    fn retried_probe_ack_does_not_confirm_next_size() {
+        fixture_init();
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default_write();
+        pmtud.next(now, &mut stats);
+        let first = pmtud.probe_size();
+
+        let original = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        assert!(pmtud.needs_probe());
+        let retry = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+
+        // The late ACK of the original confirms its size and moves on to the next one.
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first);
+        assert!(pmtud.needs_probe());
+        let second = pmtud.probe_size();
+        assert!(second > first);
+
+        // The ACK of the retry must not confirm the next size.
+        pmtud.on_packets_acked(&[retry], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first, "an untested size was confirmed");
+        assert!(pmtud.needs_probe());
+        assert_eq!(pmtud.probe_size(), second);
+        assert_eq!(stats.pmtud_ack, 2, "both ACKed probes must be counted");
+    }
+
+    /// The late ACK of a probe for an earlier size must neither confirm the size of the probe that
+    /// is currently in flight, nor make PMTUD discard that probe.
+    #[test]
+    fn stale_probe_ack_does_not_disturb_probe_in_flight() {
+        fixture_init();
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default_write();
+        pmtud.next(now, &mut stats);
+        let first = pmtud.probe_size();
+
+        let original = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        let retry = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+        pmtud.on_packets_acked(&[retry], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first);
+
+        // Probe for the next size is now in flight.
+        let second = pmtud.probe_size();
+        assert!(second > first);
+        let next = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+        assert_eq!(pmtud.probe_state, Probe::Sent);
+
+        // The original of the earlier size is ACKed very late. This changes nothing.
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first, "an untested size was confirmed");
+        assert_eq!(pmtud.probe_state, Probe::Sent, "probe in flight dropped");
+        assert_eq!(pmtud.probe_size(), second);
+
+        // Only the ACK of the probe in flight confirms the next size.
+        pmtud.on_packets_acked(&[next], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), second);
+    }
+
+    /// Once the search has stopped, the late ACK of a probe that is still outstanding must not
+    /// start it again before the raise timer fires.
+    #[test]
+    fn stale_probe_ack_after_search_stopped_ignored() {
+        fixture_init();
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        let mut prot = CryptoDxState::test_default_write();
+        pmtud.next(now, &mut stats);
+        let first = pmtud.search_table[1];
+
+        // Two probes of the first size are in flight. The ACK of one of them confirms the size.
+        let original = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        let retry = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(pmtud.mtu, first);
+
+        // All probes of the next size are lost, which stops the search at the first size.
+        while pmtud.needs_probe() {
+            let probe = send_probe_packet(&mut pmtud, &mut stats, &mut prot, now);
+            pmtud.on_packets_lost(&[probe], &mut stats, now);
+        }
+        assert_mtu(&pmtud, first);
+        let raise_timer = pmtud.raise_timer;
+        assert!(raise_timer.is_some());
+
+        // The late ACK of the retry has the size the search stopped at. It must not restart it.
+        pmtud.on_packets_acked(&[retry], now, &mut stats);
+        assert_mtu(&pmtud, first);
+        assert_eq!(pmtud.raise_timer, raise_timer);
+        assert!(!pmtud.needs_probe());
     }
 }
