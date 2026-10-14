@@ -29,10 +29,6 @@ use std::{
 };
 
 use clap::Parser;
-use futures::{
-    FutureExt as _,
-    future::{Either, select, select_all},
-};
 use neqo_common::{Datagram, hex::Hex, qdebug, qerror, qinfo, qwarn};
 use neqo_http3::Http3Server;
 use neqo_transport::{
@@ -45,9 +41,8 @@ use nss::{
     generate_ech_keys, init_db, random,
 };
 use thiserror::Error;
-use tokio::time::Sleep;
 
-use crate::{SharedArgs, now, report_stats, send_data::SendData};
+use crate::{SharedArgs, deadline, now, report_stats, send_data::SendData, sleep_until};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -345,7 +340,7 @@ pub trait HttpServer: Display {
 pub struct Runner<S> {
     now: Box<dyn Fn() -> Instant>,
     server: S,
-    timeout: Option<Pin<Box<Sleep>>>,
+    timeout: Option<tokio::time::Instant>,
     sockets: Vec<crate::udp::Socket>,
     recv_buf: RecvBuf,
 }
@@ -387,7 +382,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
     // `ServerRunner::recv_buf`.
     async fn process_inner(
         server: &mut S,
-        timeout: &mut Option<Pin<Box<Sleep>>>,
+        timeout: &mut Option<tokio::time::Instant>,
         sockets: &mut [crate::udp::Socket],
         now: &dyn Fn() -> Instant,
         mut input_dgrams: Option<DatagramIter<'_>>,
@@ -453,7 +448,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
                 }
                 OutputBatch::Callback(new_timeout) => {
                     qdebug!("Setting timeout of {new_timeout:?}");
-                    *timeout = Some(Box::pin(tokio::time::sleep(new_timeout)));
+                    *timeout = deadline(new_timeout);
                     break;
                 }
                 OutputBatch::None => break,
@@ -506,31 +501,27 @@ impl<S: HttpServer + Unpin> Runner<S> {
 
     // Wait for any of the sockets to be readable or the timeout to fire.
     async fn ready(&mut self) -> Result<Ready, io::Error> {
-        let sockets_ready = select_all(
-            self.sockets
-                .iter()
-                .map(|socket| Box::pin(socket.readable())),
-        )
-        .map(|(res, inx, _)| match res {
-            Ok(()) => Ok(Ready::Socket(inx)),
-            Err(e) => Err(e),
+        let Self {
+            sockets,
+            server,
+            timeout,
+            ..
+        } = self;
+        let sockets_ready = poll_fn(|cx| {
+            for (inx, socket) in sockets.iter().enumerate() {
+                if let Poll::Ready(res) = socket.poll_readable(cx) {
+                    return Poll::Ready(res.map(|()| Ready::Socket(inx)));
+                }
+            }
+            Poll::Pending
         });
-
-        let timeout_ready = self
-            .timeout
-            .as_mut()
-            .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)
-            .map(|()| Ok(Ready::Timeout));
-
-        let server_ready = poll_fn(|cx| HttpServer::poll(Pin::new(&mut self.server), cx))
-            .map(|()| Ok(Ready::Server));
-
-        select(
-            select(sockets_ready, timeout_ready).map(|either| either.factor_first().0),
-            server_ready,
-        )
-        .map(|either| either.factor_first().0)
-        .await
+        let server_ready = poll_fn(|cx| HttpServer::poll(Pin::new(&mut *server), cx));
+        tokio::select! {
+            biased;
+            res = sockets_ready => res,
+            () = sleep_until(*timeout) => Ok(Ready::Timeout),
+            () = server_ready => Ok(Ready::Server),
+        }
     }
 
     pub async fn run(mut self) -> Res<()> {
