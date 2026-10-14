@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   claude-review:
-    uses: mozilla/actions/.github/workflows/claude-review.yml@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
+    uses: mozilla/actions/.github/workflows/claude-review.yml@a2f86e00e93d54a5c56689e15633eeb3ef1bf671 # v3.1.0
     permissions:
       contents: read
       pull-requests: write # Required to post review comments.

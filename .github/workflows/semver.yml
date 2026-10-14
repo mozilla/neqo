@@ -19,6 +19,6 @@ jobs:
     if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     steps:
-      - uses: mozilla/actions/semver@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
+      - uses: mozilla/actions/semver@a2f86e00e93d54a5c56689e15633eeb3ef1bf671 # v3.1.0
         with:
           package: mtu
