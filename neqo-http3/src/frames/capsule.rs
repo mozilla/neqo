@@ -37,6 +37,15 @@ impl Capsule {
             }
         }
     }
+
+    /// Number of bytes [`Self::encode`] writes for this capsule.
+    #[must_use]
+    pub const fn encoded_len(&self) -> usize {
+        let Self::Datagram { payload } = self;
+        Encoder::varint_len(self.capsule_type())
+            + Encoder::varint_len(to_u64(payload.len()))
+            + payload.len()
+    }
 }
 
 impl FrameDecoder<Self> for Capsule {
@@ -100,6 +109,18 @@ mod tests {
         assert_eq!(encoded[0], 0x00);
         assert_eq!(encoded[1], 0x05);
         assert_eq!(&encoded[2..], &payload[..]);
+    }
+
+    #[test]
+    fn encoded_len_matches_encode() {
+        for len in [0, 1, 63, 64, 300, 16383, 16384] {
+            let capsule = Capsule::Datagram {
+                payload: Bytes::from(vec![0x2c; len]),
+            };
+            let mut enc = Encoder::default();
+            capsule.encode(&mut enc);
+            assert_eq!(enc.as_ref().len(), capsule.encoded_len());
+        }
     }
 
     #[test]

@@ -12,6 +12,7 @@ use std::{
 };
 
 use neqo_common::qlog::Qlog;
+use serde::Serialize;
 
 use crate::{Pmtud, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats};
 
@@ -34,7 +35,7 @@ pub use search::Outcome;
 pub use search::Search;
 
 /// How a congestion event was triggered.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize)]
 pub enum CongestionTrigger {
     /// Triggered by packet loss. Carries the number of lost packets.
     Loss(usize),

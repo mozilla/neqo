@@ -12,9 +12,9 @@
 //! is a Rust benchmark instead of a unit test due to its runtime (> 10s) even
 //! in Rust release mode.
 
-use std::time::Duration;
+use std::{env, time::Duration};
 
-use neqo_common::{log::init as init_log, qinfo};
+use neqo_common::log::init as init_log;
 use neqo_transport::{ConnectionParameters, State};
 use test_fixture::{
     boxed,
@@ -85,7 +85,8 @@ fn gbit_bandwidth(ecn: bool) {
     .run();
 
     let achieved_bandwidth = TRANSFER_AMOUNT as f64 * 8.0 / simulated_time.as_secs_f64();
-    qinfo!(
+    eprintln!(
+        // Not `qinfo!`: `--features bench` drops that level. Stderr keeps it out of `results.txt`.
         "{name} achieved {a} Mb/s bandwidth (link rate {t})",
         a = achieved_bandwidth / MBIT as f64,
         t = LINK_BANDWIDTH / MBIT
@@ -100,6 +101,10 @@ fn gbit_bandwidth(ecn: bool) {
 }
 
 fn main() {
+    // `harness = false`, so answer criterion's enumeration instead of running the simulations.
+    if env::args().any(|a| a == "--list") {
+        return;
+    }
     gbit_bandwidth(false);
     gbit_bandwidth(true);
 }

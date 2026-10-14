@@ -1,10 +1,13 @@
 name: Find PR mutants
 on:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -17,6 +20,7 @@ env:
 jobs:
   mutants:
     name: Find mutants
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -24,15 +28,10 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: $/.github/actions/install-build-deps
         with:
           version: nightly
           tools: cargo-mutants
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate diff
         env:
@@ -62,7 +61,7 @@ jobs:
             echo '```'
           } > "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: mutants.out

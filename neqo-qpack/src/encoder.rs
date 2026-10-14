@@ -11,7 +11,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Header, qdebug, qerror, qlog::Qlog, qtrace};
+use neqo_common::{Header, qdebug, qerror, qtrace, to_u64};
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 
@@ -20,7 +20,6 @@ use crate::{
     decoder_instructions::{DecoderInstruction, DecoderInstructionReader},
     encoder_instructions::EncoderInstruction,
     header_block::HeaderEncoder,
-    qlog,
     reader::ReceiverConnWrapper,
     stats::Stats,
     table::{ADDITIONAL_TABLE_ENTRY_SIZE, HeaderTable, LookupResult},
@@ -48,6 +47,7 @@ impl LocalStreamState {
 pub struct Encoder {
     table: HeaderTable,
     max_table_size: u64,
+    /// Maximum entry count derived from the decoder's advertised table capacity.
     max_entries: u64,
     instruction_reader: DecoderInstructionReader,
     local_stream: LocalStreamState,
@@ -64,6 +64,7 @@ pub struct Encoder {
     use_huffman: bool,
     next_capacity: Option<u64>,
     stats: Stats,
+    recv_stream_id: Option<StreamId>,
 }
 
 impl Encoder {
@@ -82,7 +83,21 @@ impl Encoder {
             use_huffman,
             next_capacity: None,
             stats: Stats::default(),
+            recv_stream_id: None,
         }
+    }
+
+    /// Decoder stream has been created. Add the stream id.
+    ///
+    /// # Errors
+    ///
+    /// If a stream has already been added.
+    pub const fn add_recv_stream(&mut self, stream_id: StreamId) -> Res<()> {
+        if self.recv_stream_id.is_some() {
+            return Err(Error::Internal);
+        }
+        self.recv_stream_id = Some(stream_id);
+        Ok(())
     }
 
     /// This function is use for setting encoders table max capacity. The value is received as
@@ -96,6 +111,12 @@ impl Encoder {
         if cap > (1 << 30) - 1 {
             return Err(Error::EncoderStream);
         }
+
+        // The decoder's maximum capacity, not the capacity we select, determines
+        // when table indices roll over. See RFC 9204, Section 4.5.1.1.
+        // Track this separately for when the decoder accepts a table
+        // larger than we are willing to use.
+        self.max_entries = cap / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE);
 
         if cap == self.table.capacity() {
             return Ok(());
@@ -130,22 +151,20 @@ impl Encoder {
     ///
     /// May return: `ClosedCriticalStream` if stream has been closed or `DecoderStream`
     /// in case of any other transport error.
-    pub fn receive(&mut self, conn: &mut Connection, stream_id: StreamId, now: Instant) -> Res<()> {
-        self.read_instructions(conn, stream_id, now)
-            .map_err(|e| map_error(&e))
+    pub fn receive(&mut self, conn: &mut Connection, _now: Instant) -> Res<()> {
+        self.read_instructions(conn).map_err(map_error)
     }
 
-    fn read_instructions(
-        &mut self,
-        conn: &mut Connection,
-        stream_id: StreamId,
-        now: Instant,
-    ) -> Res<()> {
+    fn read_instructions(&mut self, conn: &mut Connection) -> Res<()> {
         qdebug!("[{self}] read a new instruction");
+        let Some(stream_id) = self.recv_stream_id else {
+            debug_assert!(false, "receive() before add_recv_stream()");
+            return Err(Error::Internal);
+        };
         loop {
             let mut recv = ReceiverConnWrapper::new(conn, stream_id);
             match self.instruction_reader.read_instructions(&mut recv) {
-                Ok(instruction) => self.call_instruction(instruction, conn.qlog_mut(), now)?,
+                Ok(instruction) => self.call_instruction(instruction)?,
                 Err(Error::NeedMoreData) => break Ok(()),
                 Err(e) => break Err(e),
             }
@@ -233,12 +252,7 @@ impl Encoder {
         }
     }
 
-    fn call_instruction(
-        &mut self,
-        instruction: DecoderInstruction,
-        qlog: &mut Qlog,
-        now: Instant,
-    ) -> Res<()> {
+    fn call_instruction(&mut self, instruction: DecoderInstruction) -> Res<()> {
         qdebug!("[{self}] call instruction {instruction:?}");
         match instruction {
             DecoderInstruction::InsertCountIncrement { increment } => {
@@ -248,12 +262,6 @@ impl Encoder {
                 if increment == 0 {
                     return Err(Error::DecoderStream);
                 }
-                qlog::qpack_read_insert_count_increment_instruction(
-                    qlog,
-                    increment,
-                    &increment.to_be_bytes(),
-                    now,
-                );
 
                 self.insert_count_instruction(increment)
             }
@@ -347,7 +355,6 @@ impl Encoder {
                 );
                 return Err(Error::Internal);
             }
-            self.max_entries = cap / 32;
             self.next_capacity = None;
         }
         Ok(())
@@ -525,15 +532,15 @@ impl Encoder {
 
     /// Encoder stream has been created. Add the stream id.
     ///
-    /// # Panics
+    /// # Errors
     ///
     /// If a stream has already been added.
-    pub fn add_send_stream(&mut self, stream_id: StreamId) {
-        if self.local_stream == LocalStreamState::NoStream {
-            self.local_stream = LocalStreamState::Uninitialized(stream_id);
-        } else {
-            panic!("Adding multiple local streams");
+    pub const fn add_send_stream(&mut self, stream_id: StreamId) -> Res<()> {
+        if !matches!(self.local_stream, LocalStreamState::NoStream) {
+            return Err(Error::Internal);
         }
+        self.local_stream = LocalStreamState::Uninitialized(stream_id);
+        Ok(())
     }
 
     #[must_use]
@@ -558,11 +565,10 @@ impl Display for Encoder {
     }
 }
 
-fn map_error(err: &Error) -> Error {
-    if *err == Error::ClosedCriticalStream {
-        Error::ClosedCriticalStream
-    } else {
-        Error::DecoderStream
+fn map_error(err: Error) -> Error {
+    match err {
+        Error::ClosedCriticalStream | Error::Internal => err,
+        _ => Error::DecoderStream,
     }
 }
 
@@ -582,14 +588,14 @@ mod tests {
     use std::time::Instant;
 
     use neqo_common::expect_usize;
-    use neqo_transport::{ConnectionParameters, StreamId, StreamType};
+    use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamId, StreamType};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server, handshake,
         new_server, now,
     };
 
-    use super::{Connection, Encoder, Error, Header, Res};
-    use crate::Settings;
+    use super::{Connection, Encoder, Error, Header, Res, map_error};
+    use crate::{Decoder, Settings};
 
     struct TestEncoder {
         encoder: Encoder,
@@ -642,15 +648,15 @@ mod tests {
         }
     }
 
-    fn connect_generic(huffman: bool, max_data: Option<u64>) -> TestEncoder {
+    fn connect_generic(huffman: bool, max_data: Option<u64>, max_table_size: u64) -> TestEncoder {
         let mut conn = default_client();
         let mut peer_conn = max_data.map_or_else(default_server, |max| {
             new_server::<CountingConnectionIdGenerator, &str>(
                 DEFAULT_ALPN,
                 ConnectionParameters::default()
-                    .max_stream_data(StreamType::UniDi, true, max)
-                    .max_stream_data(StreamType::BiDi, true, max)
-                    .max_stream_data(StreamType::BiDi, false, max),
+                    .max_stream_data(StreamDataLimit::UniDi, max)
+                    .max_stream_data(StreamDataLimit::BiDiRemote, max)
+                    .max_stream_data(StreamDataLimit::BiDiLocal, max),
             )
         });
         handshake(&mut conn, &mut peer_conn);
@@ -662,14 +668,15 @@ mod tests {
         // create an encoder
         let mut encoder = Encoder::new(
             &Settings {
-                max_table_size_encoder: 1500,
+                max_table_size_encoder: max_table_size,
                 max_table_size_decoder: 0,
                 max_blocked_streams: 0,
                 max_tracked_streams: 4096,
             },
             huffman,
         );
-        encoder.add_send_stream(send_stream_id);
+        encoder.add_send_stream(send_stream_id).unwrap();
+        encoder.add_recv_stream(recv_stream_id).unwrap();
 
         TestEncoder {
             encoder,
@@ -681,11 +688,11 @@ mod tests {
     }
 
     fn connect(huffman: bool) -> TestEncoder {
-        connect_generic(huffman, None)
+        connect_generic(huffman, None, 1500)
     }
 
     fn connect_flow_control(max_data: u64) -> TestEncoder {
-        connect_generic(true, Some(max_data))
+        connect_generic(true, Some(max_data), 1500)
     }
 
     fn recv_instruction(encoder: &mut TestEncoder, decoder_instruction: &[u8], now: Instant) {
@@ -695,12 +702,7 @@ mod tests {
             .unwrap();
         let out = encoder.peer_conn.process_output(now);
         drop(encoder.conn.process(out.dgram(), now));
-        assert!(
-            encoder
-                .encoder
-                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now)
-                .is_ok()
-        );
+        assert!(encoder.encoder.read_instructions(&mut encoder.conn).is_ok());
     }
 
     const CAP_INSTRUCTION_200: &[u8] = &[0x02, 0x3f, 0xa9, 0x01];
@@ -1051,9 +1053,7 @@ mod tests {
         let out = encoder.peer_conn.process_output(now());
         encoder.conn.process_input(out.dgram().unwrap(), now());
         assert_eq!(
-            encoder
-                .encoder
-                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now()),
+            encoder.encoder.read_instructions(&mut encoder.conn),
             Err(Error::DecoderStream)
         );
     }
@@ -1073,9 +1073,7 @@ mod tests {
         let out = encoder.peer_conn.process_output(now());
         encoder.conn.process_input(out.dgram().unwrap(), now());
         assert_eq!(
-            encoder
-                .encoder
-                .read_instructions(&mut encoder.conn, encoder.recv_stream_id, now()),
+            encoder.encoder.read_instructions(&mut encoder.conn),
             Err(Error::DecoderStream)
         );
     }
@@ -1697,6 +1695,130 @@ mod tests {
         // change capacity to 2000.
         assert!(encoder.encoder.set_max_capacity(2000).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_1500);
+        assert_eq!(encoder.encoder.table.capacity(), 1500);
+
+        // MaxEntries comes from the decoder's advertised capacity (2000), not the
+        // locally clamped table capacity (1500). Advance past the smaller modulus
+        // to make the encoded Required Insert Count distinguish the two values.
+        for i in 0..100 {
+            let value = i.to_string();
+            encoder
+                .encoder
+                .table
+                .insert(b"x", value.as_bytes())
+                .unwrap();
+            encoder.encoder.table.increment_acked(1).unwrap();
+        }
+        let block = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("x", "99")],
+            STREAM_1,
+        );
+        assert_eq!(block.as_ref(), &[0x65, 0x00, 0x80]);
+    }
+
+    #[test]
+    fn required_insert_count_uses_decoder_max_capacity() {
+        // Cover a smaller local limit, equal limits, a smaller peer limit, and a capacity
+        // reduction that leaves the peer's advertised maximum unchanged.
+        for (local_limit, reduce_capacity) in [(60, false), (128, false), (256, false), (128, true)]
+        {
+            let mut encoder = connect_generic(false, None, local_limit);
+            encoder.encoder.set_max_capacity(128).unwrap();
+            encoder.encoder.set_max_blocked_streams(1).unwrap();
+            encoder
+                .encoder
+                .send_encoder_updates(&mut encoder.conn)
+                .unwrap();
+
+            let mut decoder = Decoder::new(&Settings::default().max_table_size_decoder(128));
+            decoder.add_recv_stream(encoder.send_stream_id).unwrap();
+            decoder.add_send_stream(encoder.recv_stream_id).unwrap();
+            decoder.send(&mut encoder.peer_conn).unwrap();
+
+            let out = encoder.conn.process_output(now());
+            let out2 = encoder.peer_conn.process(out.dgram(), now());
+            drop(encoder.conn.process(out2.dgram(), now()));
+
+            let mut stream_type = [0];
+            assert_eq!(
+                encoder
+                    .peer_conn
+                    .stream_recv(encoder.send_stream_id, &mut stream_type),
+                Ok((1, false))
+            );
+            assert_eq!(stream_type, [0x02]);
+            assert_eq!(
+                encoder
+                    .conn
+                    .stream_recv(encoder.recv_stream_id, &mut stream_type),
+                Ok((1, false))
+            );
+            assert_eq!(stream_type, [0x03]);
+            assert!(decoder.receive(&mut encoder.peer_conn).unwrap().is_empty());
+
+            // The peer's maximum gives MaxEntries = 4 and FullRange = 8. Exercise two wraps.
+            for insert_count in 1_u8..=17 {
+                if reduce_capacity && insert_count == 9 {
+                    encoder.encoder.change_capacity(60);
+                    encoder
+                        .encoder
+                        .send_encoder_updates(&mut encoder.conn)
+                        .unwrap();
+                }
+                let headers = vec![Header::new("x", insert_count.to_string())];
+                encoder
+                    .encoder
+                    .send_and_insert(&mut encoder.conn, b"x", headers[0].value())
+                    .unwrap();
+                let buf =
+                    encoder
+                        .encoder
+                        .encode_header_block(&mut encoder.conn, &headers, STREAM_1);
+                let out = encoder.conn.process_output(now());
+                let out2 = encoder.peer_conn.process(out.dgram(), now());
+                drop(encoder.conn.process(out2.dgram(), now()));
+                assert!(decoder.receive(&mut encoder.peer_conn).unwrap().is_empty());
+                assert_eq!(
+                    decoder.decode_header_block(&buf, STREAM_1),
+                    Ok(Some(headers)),
+                    "local_limit={local_limit}, reduce_capacity={reduce_capacity}, insert_count={insert_count}"
+                );
+                assert_eq!(buf.as_ref(), &[insert_count % 8 + 1, 0x00, 0x80]);
+
+                // Absorb the QPACK bookkeeping: acknowledgments and so forth.
+                decoder.send(&mut encoder.peer_conn).unwrap();
+                let out = encoder.peer_conn.process_output(now());
+                let out2 = encoder.conn.process(out.dgram(), now());
+                drop(encoder.peer_conn.process(out2.dgram(), now()));
+                encoder.encoder.receive(&mut encoder.conn, now()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn same_table_capacity_updates_required_insert_count_range() {
+        let mut encoder = connect_generic(false, None, 60);
+        encoder.encoder.set_max_capacity(128).unwrap();
+        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.send_instructions(CAP_INSTRUCTION_60);
+
+        // The new maximum equals the current capacity, but changes the wrapping range.
+        encoder.encoder.set_max_capacity(60).unwrap();
+        for expected_count in [0x02, 0x01] {
+            encoder.insert(
+                HEADER_CONTENT_LENGTH,
+                VALUE_1,
+                HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL,
+            );
+            encoder.encode_header_block(
+                STREAM_1,
+                &[Header::new("content-length", "1234")],
+                &[expected_count, 0x00, 0x80],
+                &[],
+            );
+            recv_instruction(&mut encoder, HEADER_ACK_STREAM_ID_1, now());
+        }
     }
 
     #[test]
@@ -1874,5 +1996,26 @@ mod tests {
         assert_is_index_to_dynamic_post(&buf);
         assert_eq!(encoder.encoder.unacked_header_blocks.len(), CAP);
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
+    }
+
+    #[test]
+    fn duplicate_recv_stream() {
+        let mut encoder = Encoder::new(&Settings::default(), true);
+        encoder.add_recv_stream(StreamId::new(3)).unwrap();
+        assert_eq!(
+            encoder.add_recv_stream(StreamId::new(7)),
+            Err(Error::Internal)
+        );
+    }
+
+    /// A missing registration must not be blamed on the peer as a stream error.
+    #[test]
+    fn map_error_covers_all_arms() {
+        assert_eq!(map_error(Error::Internal), Error::Internal);
+        assert_eq!(
+            map_error(Error::ClosedCriticalStream),
+            Error::ClosedCriticalStream
+        );
+        assert_eq!(map_error(Error::ChangeCapacity), Error::DecoderStream);
     }
 }

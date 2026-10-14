@@ -6,7 +6,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use neqo_common::qwarn;
+use neqo_common::qdebug;
 use nss::Error as CryptoError;
 use thiserror::Error;
 
@@ -19,6 +19,7 @@ mod cc;
 mod cid;
 mod connection;
 mod crypto;
+mod datagram_queue;
 pub mod ecn;
 mod events;
 mod fc;
@@ -65,9 +66,10 @@ pub use self::{
         Connection, Output, OutputBatch, State, ZeroRttState,
         params::{
             ConnectionParameters, INITIAL_LOCAL_MAX_DATA, INITIAL_LOCAL_MAX_STREAM_DATA,
-            MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA,
+            MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,
         },
     },
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
@@ -240,7 +242,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qwarn!("Crypto operation failed {err:?}");
+        qdebug!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::Crypto(err),

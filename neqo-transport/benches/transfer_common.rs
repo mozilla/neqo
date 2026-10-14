@@ -69,7 +69,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
     group.throughput(Throughput::Bytes(to_u64(TRANSFER_AMOUNT)));
     for (label, seed) in configs {
         for pacing in [false, true] {
-            group.bench_function(&format!("{name_prefix}/pacing-{pacing}/{label}"), |b| {
+            group.bench_function(format!("{name_prefix}/pacing-{pacing}/{label}"), |b| {
                 b.iter_batched(
                     || setup(label, seed, pacing),
                     |sim| black_box(sim.run()),

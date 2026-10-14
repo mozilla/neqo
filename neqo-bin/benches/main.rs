@@ -10,7 +10,7 @@
     reason = "Inherent in codspeed criterion_group! macro."
 )]
 
-use std::{env, hint::black_box, net::SocketAddr, time::Duration};
+use std::{env, net::SocketAddr, time::Duration};
 
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use neqo_bin::{client, server};
@@ -89,7 +89,7 @@ fn transfer(c: &mut Criterion) {
                         (server_handle, client)
                     },
                     |(server_handle, client)| async move {
-                        black_box(client.await.unwrap());
+                        client.await.unwrap();
                         // Tell server to shut down.
                         server_handle.send(()).unwrap();
                     },

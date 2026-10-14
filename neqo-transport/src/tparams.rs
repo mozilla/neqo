@@ -905,6 +905,7 @@ impl ExtensionHandler for TransportParametersHandler {
     }
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "Handling transport parameters, msg={msg:?} value={}",
             Hex::new(d),
@@ -995,6 +996,7 @@ mod tests {
         Role::{Client, Server},
         qdebug, to_u64,
     };
+    use test_fixture::fixture_init;
 
     use super::PreferredAddress;
     use crate::{
@@ -1596,6 +1598,7 @@ mod tests {
 
     #[test]
     fn server_rejects_server_only_tparams() {
+        fixture_init();
         for tp in [
             OriginalDestinationConnectionId,
             RetrySourceConnectionId,

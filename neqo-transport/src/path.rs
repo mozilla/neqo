@@ -436,13 +436,13 @@ impl Paths {
         self.to_retire.retain(|&seqno| seqno != acked);
     }
 
-    pub fn lost_ack_frequency(&self, lost: &AckRate) {
+    pub fn lost_ack_frequency(&self, lost: AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().lost_ack_frequency(lost);
         }
     }
 
-    pub fn acked_ack_frequency(&self, acked: &AckRate) {
+    pub fn acked_ack_frequency(&self, acked: AckRate) {
         if let Some(path) = self.primary() {
             path.borrow_mut().acked_ack_frequency(acked);
         }
@@ -914,7 +914,7 @@ impl Path {
         self.rtt.write_frames(builder, tokens, stats);
     }
 
-    pub const fn lost_ack_frequency(&mut self, lost: &AckRate) {
+    pub const fn lost_ack_frequency(&mut self, lost: AckRate) {
         self.rtt.frame_lost(lost);
     }
 
@@ -930,7 +930,7 @@ impl Path {
         self.ecn_info.start(stats);
     }
 
-    pub fn acked_ack_frequency(&mut self, acked: &AckRate) {
+    pub const fn acked_ack_frequency(&mut self, acked: AckRate) {
         self.rtt.frame_acked(acked);
     }
 

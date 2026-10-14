@@ -30,10 +30,16 @@ use neqo_common::{
 use neqo_http3::{Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3State};
 use neqo_transport::{
     Connection, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
-    ConnectionIdRef, ConnectionParameters, State, Version, version,
+    ConnectionIdRef, ConnectionParameters, Output, State, Version,
+    server::{Server, ValidateAddress},
+    version,
 };
 use nss::{AllowZeroRtt, AntiReplay, AuthenticationStatus, random};
-use qlog::{events::EventImportance, streamer::QlogStreamer};
+use qlog::{
+    ReferenceTime,
+    events::EventImportance,
+    streamer::{EventTimePrecision, QlogStreamer},
+};
 
 pub mod assertions;
 pub mod header_protection;
@@ -152,6 +158,30 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
     }
 }
 
+/// The qlog to attach to a fixture connection: none when benchmarking, because
+/// it distorts measurements; file-backed when `QLOGDIR` is set; in-memory
+/// otherwise.  `name` is only evaluated for the file-backed case.
+fn fixture_qlog<F: FnOnce() -> String>(role: Role, name: F) -> Option<Qlog> {
+    if cfg!(feature = "bench") {
+        return None;
+    }
+    Some(std::env::var("QLOGDIR").map_or_else(
+        |_| new_neqo_qlog().0,
+        |dir| {
+            let label = format!("Neqo {role} qlog");
+            Qlog::enabled_with_file(
+                dir.parse().unwrap(),
+                role,
+                Some(label.clone()),
+                Some(label),
+                name(),
+                now(),
+            )
+            .unwrap()
+        },
+    ))
+}
+
 /// Create a new client.
 ///
 /// # Panics
@@ -174,21 +204,9 @@ where
     )
     .expect("create a client");
 
-    if let Ok(dir) = std::env::var("QLOGDIR") {
-        let cid = client.odcid().unwrap();
-        client.set_qlog(
-            Qlog::enabled_with_file(
-                dir.parse().unwrap(),
-                Role::Client,
-                Some("Neqo client qlog".to_string()),
-                Some("Neqo client qlog".to_string()),
-                format!("client-{cid}"),
-                now(),
-            )
-            .unwrap(),
-        );
-    } else {
-        let (log, _contents) = new_neqo_qlog();
+    if let Some(log) = fixture_qlog(Role::Client, || {
+        format!("client-{}", client.odcid().unwrap())
+    }) {
         client.set_qlog(log);
     }
     client
@@ -233,22 +251,10 @@ where
         params,
     )
     .expect("create a server");
-    if let Ok(dir) = std::env::var("QLOGDIR") {
+    if let Some(log) = fixture_qlog(Role::Server, || {
         // Use random bytes to generate a unique name
-        let unique_name = format!("server-{}", Hex::new(random::<10>()));
-        c.set_qlog(
-            Qlog::enabled_with_file(
-                dir.parse().unwrap(),
-                Role::Server,
-                Some("Neqo server qlog".to_string()),
-                Some("Neqo server qlog".to_string()),
-                unique_name,
-                now(),
-            )
-            .unwrap(),
-        );
-    } else {
-        let (log, _contents) = new_neqo_qlog();
+        format!("server-{}", Hex::new(random::<10>()))
+    }) {
         c.set_qlog(log);
     }
     c.server_enable_0rtt(&anti_replay(), AllowZeroRtt {})
@@ -301,6 +307,68 @@ pub fn connect() -> (Connection, Connection) {
     (client, server)
 }
 
+/// The part of a multi-connection server that [`handshake_with_server`] drives.
+pub trait ProcessServer {
+    fn set_validation(&self, v: ValidateAddress);
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output;
+}
+
+impl ProcessServer for Server {
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+}
+
+impl ProcessServer for Http3Server {
+    fn set_validation(&self, v: ValidateAddress) {
+        self.set_validation(v);
+    }
+    fn process(&mut self, dgram: Option<Datagram>, now: Instant) -> Output {
+        self.process(dgram, now)
+    }
+}
+
+/// [`handshake`] for a server that holds more than one connection.
+///
+/// # Panics
+///
+/// When the handshake doesn't proceed as expected.
+pub fn handshake_with_server(client: &mut Connection, server: &mut dyn ProcessServer) {
+    server.set_validation(ValidateAddress::Never);
+
+    assert_eq!(*client.state(), State::Init);
+    let out = client.process_output(now()); // ClientHello
+    let out2 = client.process_output(now()); // ClientHello
+    assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
+    _ = server.process(out.dgram(), now()); // ACK
+    let out = server.process(out2.dgram(), now()); // ServerHello...
+    assert!(out.as_dgram_ref().is_some());
+
+    // Ingest the server Certificate.
+    let out = client.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some()); // This should just be an ACK.
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_none()); // So the server should have nothing to say.
+
+    // Now mark the server as authenticated.
+    client.authenticated(AuthenticationStatus::Ok, now());
+    let out = client.process_output(now());
+    assert!(out.as_dgram_ref().is_some());
+    assert_eq!(*client.state(), State::Connected);
+    let out = server.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_some()); // ACK + HANDSHAKE_DONE + NST
+
+    // Have the client process the HANDSHAKE_DONE.
+    let out = client.process(out.dgram(), now());
+    assert!(out.as_dgram_ref().is_none());
+    assert_eq!(*client.state(), State::Confirmed);
+}
+
 /// Create a http3 client with default configuration.
 ///
 /// # Panics
@@ -312,8 +380,7 @@ pub fn default_http3_client() -> Http3Client {
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
-            .max_blocked_streams(100)
-            .max_concurrent_push_streams(10),
+            .max_blocked_streams(100),
     )
 }
 
@@ -324,10 +391,23 @@ pub fn default_http3_client() -> Http3Client {
 /// When the client can't be created.
 #[must_use]
 pub fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
+    http3_client_with_cid_gen(CountingConnectionIdGenerator::default(), params)
+}
+
+/// Create a http3 client that uses the given connection ID generator.
+///
+/// # Panics
+///
+/// When the client can't be created.
+#[must_use]
+pub fn http3_client_with_cid_gen<G: ConnectionIdGenerator + 'static>(
+    cid_gen: G,
+    params: Http3Parameters,
+) -> Http3Client {
     fixture_init();
     Http3Client::new(
         DEFAULT_SERVER_NAME,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(cid_gen)),
         DEFAULT_ADDR,
         DEFAULT_ADDR,
         params,
@@ -347,8 +427,7 @@ pub fn default_http3_server() -> Http3Server {
         Http3Parameters::default()
             .max_table_size_encoder(100)
             .max_table_size_decoder(100)
-            .max_blocked_streams(100)
-            .max_concurrent_push_streams(10),
+            .max_blocked_streams(100),
     )
 }
 
@@ -359,13 +438,26 @@ pub fn default_http3_server() -> Http3Server {
 /// When the server can't be created.
 #[must_use]
 pub fn http3_server_with_params(params: Http3Parameters) -> Http3Server {
+    http3_server_with_cid_gen(CountingConnectionIdGenerator::default(), params)
+}
+
+/// Create a http3 server that uses the given connection ID generator.
+///
+/// # Panics
+///
+/// When the server can't be created.
+#[must_use]
+pub fn http3_server_with_cid_gen<G: ConnectionIdGenerator + 'static>(
+    cid_gen: G,
+    params: Http3Parameters,
+) -> Http3Server {
     fixture_init();
     Http3Server::new(
         now(),
         DEFAULT_KEYS,
         DEFAULT_ALPN_H3,
         anti_replay(),
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        Rc::new(RefCell::new(cid_gen)),
         params,
         None,
     )
@@ -532,24 +624,18 @@ impl Display for SharedVec {
 #[must_use]
 pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
     let buf = SharedVec::default();
-
-    if cfg!(feature = "bench") {
-        return (Qlog::disabled(), buf);
-    }
-
     let mut trace = new_trace(Role::Client);
-    // Set reference time to 0.0 for testing.
-    trace.common_fields.as_mut().unwrap().reference_time = Some(0.0);
+    // Set reference time to a deterministic value for testing.
+    trace.common_fields.as_mut().unwrap().reference_time = ReferenceTime::new_monotonic(None);
     let contents = buf.clone();
     let streamer = QlogStreamer::new(
-        qlog::QLOG_VERSION.to_string(),
-        None,
         None,
         None,
         #[expect(clippy::disallowed_methods, reason = "logging happens in real time")]
         Instant::now(),
         trace,
         EventImportance::Extra,
+        EventTimePrecision::MicroSeconds,
         Box::new(buf),
     );
     let log = Qlog::enabled(streamer, PathBuf::from(""));
@@ -558,7 +644,7 @@ pub fn new_neqo_qlog() -> (Qlog, SharedVec) {
 
 pub const EXPECTED_LOG_HEADER: &str = concat!(
     "\u{1e}",
-    r#"{"qlog_version":"0.3","qlog_format":"JSON-SEQ","trace":{"vantage_point":{"name":"neqo-Client","type":"client"},"title":"neqo-Client trace","description":"neqo-Client trace","configuration":{"time_offset":0.0},"common_fields":{"reference_time":0.0,"time_format":"relative"}}}"#,
+    r#"{"file_schema":"urn:ietf:params:qlog:file:sequential","serialization_format":"JSON-SEQ","trace":{"title":"neqo-Client trace","description":"neqo-Client trace","common_fields":{"protocol_types":["QUIC"],"reference_time":{"clock_type":"monotonic","epoch":"unknown"},"time_format":"relative_to_epoch"},"vantage_point":{"name":"neqo-Client","type":"client"},"event_schemas":["urn:ietf:params:qlog:events:quic-12"]}}"#,
     "\n"
 );
 

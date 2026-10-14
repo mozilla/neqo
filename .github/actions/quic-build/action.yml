@@ -5,9 +5,6 @@ inputs:
   impl:
     description: Implementation to build (google, quiche, s2n)
     required: true
-  token:
-    description: GitHub token for API access
-    required: true
   artifact-name:
     description: Artifact name (if set, uploads binaries as artifact)
     default: ""
@@ -30,18 +27,23 @@ runs:
       shell: bash
       run: |
         {
-          echo "CACHE_VERSION=v4"
+          echo "CACHE_VERSION=v5"
+          # renovate: depName=https://github.com/google/quiche datasource=git-refs branch=main
           echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
-          echo "CLOUDFLARE_QUICHE_VERSION=0.29.1"
-          echo "S2N_QUIC_VERSION=v1.82.0"
+          # renovate: depName=cloudflare/quiche datasource=github-tags
+          echo "CLOUDFLARE_QUICHE_VERSION=0.30.0"
+          echo "CLOUDFLARE_QUICHE_REF=be47c5011215b9f13bad06bd7627d3ae49888a19"
+          # renovate: depName=aws/s2n-quic datasource=github-tags
+          echo "S2N_QUIC_VERSION=v1.90.0"
+          echo "S2N_QUIC_REF=b0a09202be1c7e4676dfecf78390fbb23f3bdbd3"
         } >> "$GITHUB_ENV"
 
     - name: Install Rust
       if: inputs.impl == 'quiche' || inputs.impl == 's2n'
-      uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      uses: $/.github/actions/install-build-deps
       with:
         version: stable
-        token: ${{ inputs.token }}
+        nss: "false"
 
     - name: Determine cache key
       id: cache-key
@@ -54,19 +56,23 @@ runs:
         # Determine version based on implementation
         case "$IMPL" in
           google) VERSION="$GOOGLE_QUICHE_REF" ;;
-          quiche) VERSION="$CLOUDFLARE_QUICHE_VERSION" ;;
-          s2n)    VERSION="$S2N_QUIC_VERSION" ;;
+          quiche) VERSION="$CLOUDFLARE_QUICHE_REF" ;;
+          s2n)    VERSION="$S2N_QUIC_REF" ;;
         esac
+
+        FLAGS_HASH=$(printf '%s\0' "${RUSTFLAGS:-}" "${CFLAGS:-}" "${CXXFLAGS:-}" \
+          "${CARGO_PROFILE_RELEASE_DEBUG:-}" "${CARGO_PROFILE_RELEASE_LTO:-}" \
+          "${CARGO_PROFILE_RELEASE_CODEGEN_UNITS:-}" | sha256sum | cut -c1-16)
 
         # Get Rust version hash for Rust-based builds
         if [[ "$IMPL" == "quiche" || "$IMPL" == "s2n" ]]; then
           RUST_HASH=$(rustc --version 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "no-rust")
-          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-rust-$RUST_HASH" >> "$GITHUB_OUTPUT"
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-rust-$RUST_HASH-$FLAGS_HASH" >> "$GITHUB_OUTPUT"
         elif [[ "$IMPL" == "google" ]]; then
           BAZEL_VER=$(bazel --version 2>/dev/null | head -1 || echo "unknown")
-          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$BAZEL_VER" >> "$GITHUB_OUTPUT"
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$BAZEL_VER-$FLAGS_HASH" >> "$GITHUB_OUTPUT"
         else
-          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH" >> "$GITHUB_OUTPUT"
+          echo "key=$CACHE_VERSION-$IMPL-$VERSION-$RUNNER_OS-$RUNNER_ARCH-$FLAGS_HASH" >> "$GITHUB_OUTPUT"
         fi
 
     - name: Restore cache
@@ -85,19 +91,14 @@ runs:
         OUTPUT_PATH: .quic-build/${{ inputs.impl }}
         GOOGLE_QUICHE_REF: ${{ env.GOOGLE_QUICHE_REF }}
         CLOUDFLARE_QUICHE_VERSION: ${{ env.CLOUDFLARE_QUICHE_VERSION }}
+        CLOUDFLARE_QUICHE_REF: ${{ env.CLOUDFLARE_QUICHE_REF }}
         S2N_QUIC_VERSION: ${{ env.S2N_QUIC_VERSION }}
+        S2N_QUIC_REF: ${{ env.S2N_QUIC_REF }}
       run: |
         mkdir -p "$OUTPUT_PATH"
 
         case "$IMPL" in
           google)
-            # Install bazelisk if not present
-            if ! command -v bazel &> /dev/null; then
-              ARCH=$([[ "$(uname -m)" == "aarch64" ]] && echo "arm64" || echo "amd64")
-              sudo curl -fsSL -o /usr/local/bin/bazel \
-                "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.1/bazelisk-linux-$ARCH"
-              sudo chmod +x /usr/local/bin/bazel
-            fi
             git clone --depth 1 https://github.com/google/quiche google-quiche-src
             cd google-quiche-src
             git fetch --depth 1 origin "$GOOGLE_QUICHE_REF"
@@ -130,6 +131,7 @@ runs:
           quiche)
             git clone --depth 1 -b "$CLOUDFLARE_QUICHE_VERSION" https://github.com/cloudflare/quiche quiche-src
             cd quiche-src
+            [ "$(git rev-parse HEAD)" = "$CLOUDFLARE_QUICHE_REF" ]
             cargo build --release --bin quiche-client --bin quiche-server
             cp target/release/quiche-client target/release/quiche-server "../$OUTPUT_PATH/"
             cd ..
@@ -140,6 +142,7 @@ runs:
           s2n)
             git clone --depth 1 -b "$S2N_QUIC_VERSION" https://github.com/aws/s2n-quic s2n-quic-src
             cd s2n-quic-src
+            [ "$(git rev-parse HEAD)" = "$S2N_QUIC_REF" ]
             cargo build --release --bin s2n-quic-qns
             cp target/release/s2n-quic-qns "../$OUTPUT_PATH/"
             cd ..
@@ -175,7 +178,7 @@ runs:
 
     - name: Upload artifact
       if: inputs.artifact-name != ''
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
       with:
         name: ${{ inputs.artifact-name }}
         path: .quic-build/${{ inputs.impl }}

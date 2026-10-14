@@ -48,6 +48,25 @@ fn emits_reset_stream_at_on_wire() {
     assert_eq!(after.reset_stream, 0);
 }
 
+/// `peer_supports_reliable_stream_reset` reports whether the *peer* advertised `reset_stream_at`.
+#[test]
+fn check_peer_support() {
+    // Both endpoints advertise it by default.
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    assert!(client.peer_supports_reliable_stream_reset());
+    assert!(server.peer_supports_reliable_stream_reset());
+
+    // The server disables it: the client sees no peer support, but the server still sees the
+    // client's support.
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().reliable_stream_reset(false));
+    connect(&mut client, &mut server);
+    assert!(!client.peer_supports_reliable_stream_reset());
+    assert!(server.peer_supports_reliable_stream_reset());
+}
+
 /// Against a peer that did not advertise reliable resets, `stream_commit` is rejected,
 /// and a plain `RESET_STREAM` is the only option.
 #[test]

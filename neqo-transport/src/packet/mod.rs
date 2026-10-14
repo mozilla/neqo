@@ -493,6 +493,7 @@ impl<B: Buffer> Builder<B> {
             self.write_len(crypto.expansion());
         }
 
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
@@ -519,6 +520,7 @@ impl<B: Buffer> Builder<B> {
             self.encoder.as_mut()[j] ^= mask[i];
         }
 
+        #[cfg(feature = "log-payload")]
         qtrace!("Packet built {}", Hex::new(&self.encoder));
         Ok(self.encoder)
     }
@@ -534,6 +536,13 @@ impl<B: Buffer> Builder<B> {
     #[must_use]
     pub fn packet_empty(&self) -> bool {
         self.encoder.len() == self.header.end
+    }
+
+    /// Whether this packet is coalesced behind another one.
+    /// Under GSO, the buffer may already hold earlier datagrams.
+    #[must_use]
+    pub const fn is_coalesced(&self) -> bool {
+        self.header.start != 0
     }
 
     pub fn len(&self) -> usize {
@@ -990,7 +999,10 @@ impl<'a> Public<'a> {
         // If this is the first packet ever successfully decrypted
         // using `rx`, make sure to initiate a key update.
         if rx.needs_update() {
-            crypto.key_update_received(release_at).map_err(make_err)?;
+            let rx_epoch = rx.epoch();
+            crypto
+                .key_update_received(rx_epoch, release_at)
+                .map_err(make_err)?;
         }
         crypto.check_pn_overlap().map_err(make_err)?;
         Ok(Decrypted {

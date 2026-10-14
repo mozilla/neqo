@@ -11,6 +11,9 @@ inputs:
   size:
     description: Transfer size in bytes
     required: true
+  port:
+    description: Port the server listens on
+    default: "4433"
   cubic:
     description: Use cubic congestion control (neqo only)
     default: "true"
@@ -56,7 +59,7 @@ runs:
         CLIENT: ${{ inputs.client }}
         SERVER: ${{ inputs.server }}
         HOST: 127.0.0.1
-        PORT: 4433
+        PORT: ${{ inputs.port }}
         SIZE: ${{ inputs.size }}
         CUBIC: ${{ inputs.cubic }}
         PACING: ${{ inputs.pacing }}

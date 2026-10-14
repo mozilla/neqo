@@ -1,13 +1,16 @@
 name: Clippy
 on:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
   push:
     branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -16,6 +19,7 @@ permissions:
 jobs:
   toolchains:
     name: Determine toolchains
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -26,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+        uses: mozilla/actions/toolchains@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -52,23 +56,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: $/.github/actions/install-build-deps
         with:
           version: ${{ matrix.rust-toolchain }}
           components: clippy
           tools: cargo-hack
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      # Run clippy and tests across all meaningful feature combinations. Using
-      # --all-targets (not --no-dev-deps) ensures test code is also compiled
-      # and linted for each combination. Excluded features are either empty
-      # (ci, test-fixture, gecko), benchmarking-only (bench), or have their
-      # own dedicated workflow (build-fuzzing-corpus).
-      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci,bench,build-fuzzing-corpus,test-fixture --mutually-exclusive-features blapi,disable-encryption,default -- -D warnings
+      # Run clippy across all meaningful feature combinations.
+      - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci --mutually-exclusive-features bench,blapi,build-fuzzing-corpus,default,disable-encryption -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

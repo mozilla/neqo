@@ -6,10 +6,11 @@
 
 use std::{cmp::min, fmt::Debug, time::Instant};
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::HexWithLen;
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
-    hex::{HexSnipMiddle, HexWithLen},
-    qtrace,
+    hex::HexSnipMiddle, qtrace,
 };
 use neqo_transport::{Connection, Error as TransportError, StreamId};
 
@@ -179,7 +180,7 @@ impl FrameReader {
     /// # Errors
     ///
     /// May return [`Error::HttpFrame`] if a frame cannot be decoded.
-    /// Absorbs [`TransportError::NoMoreData`] and [`TransportError::InvalidStreamId`]
+    /// Absorbs [`TransportError::NoMoreData`] and [`Error::TransportStreamDoesNotExist`]
     /// into a zero-length read if the stream was reset and the stream closed.
     /// The reset is propagated through events.
     pub fn receive<T: FrameDecoder<T>>(
@@ -197,11 +198,14 @@ impl FrameReader {
                         (self.consume::<T>(amount)?, true, f)
                     }
                     // A `RESET_STREAM` could cause the transport to report `NoMoreData` or
-                    // `InvalidStreamId`. Don't treat that as an error here, let
+                    // that the stream no longer exists. Don't treat that as an error here, let
                     // the event handling deal with it.
-                    Err(Error::Transport(
-                        TransportError::NoMoreData | TransportError::InvalidStreamId,
-                    )) => break Ok((None, false)),
+                    Err(
+                        Error::Transport(TransportError::NoMoreData)
+                        | Error::TransportStreamDoesNotExist,
+                    ) => {
+                        break Ok((None, false));
+                    }
                     Err(e) => return Err(e),
                 };
 
@@ -246,6 +250,7 @@ impl FrameReader {
             }
             FrameReaderState::GetData { decoder } => {
                 if let Some(data) = decoder.consume(&mut input) {
+                    #[cfg(feature = "log-payload")]
                     qtrace!(
                         "received frame {:?}: {}",
                         self.frame_type,

@@ -2,10 +2,13 @@ name: Fuzz & Bench
 on:
   workflow_dispatch:
   pull_request:
+    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
+    types: [opened, synchronize, reopened, edited]
   merge_group:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Non-base edits skip all jobs, so they must not cancel the run in progress.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: true
 
 permissions:
@@ -14,6 +17,7 @@ permissions:
 jobs:
   fuzz-bench:
     name: Check that the fuzz and bench targets work
+    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       fail-fast: false
       matrix:
@@ -26,20 +30,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: mozilla/actions/rust@2152d1412122b04d838d6341aa3b4d6160b3de32 # v2.0.5
+      - uses: $/.github/actions/install-build-deps
         with:
           version: nightly
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install cargo-fuzz
         if: ${{ matrix.check == 'fuzz' }}
         # cargo-fuzz must be compiled from source so it targets the native toolchain;
         # binstall provides prebuilt binaries that may target a different architecture.
-        run: cargo install cargo-fuzz
-
-      - uses: mozilla/nss-rs/install-nss@63c63046208f587573f71bb3885f16d10e0bf4eb # 0.14.6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo install --locked cargo-fuzz@=0.13.2
 
       - if: ${{ matrix.check == 'fuzz' }}
         env:

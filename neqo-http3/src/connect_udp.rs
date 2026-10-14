@@ -7,12 +7,16 @@
 use std::{
     cell::RefCell,
     fmt::{self, Display, Formatter},
+    num::NonZeroUsize,
     rc::Rc,
     time::Instant,
 };
 
 use neqo_common::{Bytes, Header, qdebug, qinfo, qtrace};
-use neqo_transport::{Connection, DatagramTracking, StreamId, server::ConnectionRef};
+use neqo_transport::{
+    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, server::ConnectionRef,
+    streams::SendGroupId,
+};
 
 use crate::{
     Error, Http3Client, Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Res,
@@ -23,6 +27,14 @@ use crate::{
     request_target::RequestTarget,
     server_events::{Http3ServerEvents, StreamHandler},
 };
+
+/// Connect-udp has no API of its own to set an outgoing-datagram max-buffered
+/// limit (unlike `WebTransport`'s `outgoingMaxBufferedDatagrams`), so every
+/// connect-udp session, created or accepted, gets this one.  It matches the
+/// depth the legacy connection-wide datagram queue enforced for everyone
+/// before per-session queues replaced it, so connect-udp keeps the
+/// backpressure signal PR #3859 added.
+const MAX_BUFFERED_DATAGRAMS: NonZeroUsize = NonZeroUsize::new(10).expect("nonzero");
 
 pub trait ClientSession {
     /// Whether `CONNECT_UDP` is enabled on the connection.
@@ -62,18 +74,28 @@ pub trait ClientSession {
 
     /// Send a connect-udp datagram.
     ///
+    /// # Returns
+    ///
+    /// The queue's backpressure signal (see
+    /// [`DatagramQueueOutcome`]); the
+    /// sender should wait for an [`OutgoingDatagramSpaceAvailable`] event
+    /// before sending more once the outcome is no longer
+    /// [`DatagramQueueOutcome::Ok`].
+    ///
     /// # Errors
     ///
     /// It may return [`Error::InvalidStreamId`] if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ClientEvent::OutgoingDatagramSpaceAvailable
     fn connect_udp_send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         session_id: StreamId,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<DatagramQueueOutcome>;
 }
 
 impl ClientSession for Http3Client {
@@ -118,7 +140,7 @@ impl ClientSession for Http3Client {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<DatagramQueueOutcome> {
         qtrace!("connect_udp_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -160,7 +182,7 @@ trait Handler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<DatagramQueueOutcome>;
 }
 
 impl Handler for Http3Connection {
@@ -175,13 +197,15 @@ impl Handler for Http3Connection {
         if !self.connect_udp_enabled() {
             return Err(Error::Unavailable);
         }
-        self.extended_connect_create_session(
+        let id = self.extended_connect_create_session(
             conn,
             events,
             target,
             headers,
             extended_connect::ExtendedConnectType::ConnectUdp,
-        )
+        )?;
+        conn.set_max_buffered_datagrams(id, Some(MAX_BUFFERED_DATAGRAMS));
+        Ok(id)
     }
 
     fn connect_udp_session_accept(
@@ -203,7 +227,11 @@ impl Handler for Http3Connection {
             accept_res,
             extended_connect::ExtendedConnectType::ConnectUdp,
             now,
-        )
+        )?;
+        if !matches!(accept_res, SessionAcceptAction::Reject(_)) {
+            conn.set_max_buffered_datagrams(stream_id, Some(MAX_BUFFERED_DATAGRAMS));
+        }
+        Ok(())
     }
 
     fn connect_udp_close_session(
@@ -232,8 +260,10 @@ impl Handler for Http3Connection {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
-        self.extended_connect_send_datagram(session_id, conn, buf, id, now)
+    ) -> Res<DatagramQueueOutcome> {
+        // connect-udp has no sendGroup/sendOrder concept of its own: always
+        // ungrouped, default priority.
+        self.extended_connect_send_datagram(session_id, conn, buf, id, now, SendGroupId::new(0), 0)
     }
 }
 
@@ -263,7 +293,7 @@ pub(crate) trait ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()>;
+    ) -> Res<DatagramQueueOutcome>;
 }
 
 impl ServerHandler for Http3ServerHandler {
@@ -300,7 +330,7 @@ impl ServerHandler for Http3ServerHandler {
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<DatagramQueueOutcome> {
         self.mark_needs_processing();
         self.base_handler_mut()
             .connect_udp_send_datagram(conn, session_id, buf, id, now)
@@ -381,17 +411,26 @@ impl ServerSession {
 
     /// Send connect-udp datagram.
     ///
+    /// # Returns
+    ///
+    /// The queue's backpressure signal (see [`DatagramQueueOutcome`]); the
+    /// sender should wait for an [`OutgoingDatagramSpaceAvailable`] event
+    /// before sending more once the outcome is no longer
+    /// [`DatagramQueueOutcome::Ok`].
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     /// The function returns `TooMuchData` if the supply buffer is bigger than
     /// the allowed remote datagram size.
+    ///
+    /// [`OutgoingDatagramSpaceAvailable`]: crate::Http3ServerEvent::OutgoingDatagramSpaceAvailable
     pub fn send_datagram<I: Into<DatagramTracking>>(
         &self,
         buf: &[u8],
         id: I,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<DatagramQueueOutcome> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
             .handler
@@ -454,7 +493,7 @@ pub(crate) trait ServerEvents {
 
 impl ServerEvents for Http3ServerEvents {
     fn connect_udp_new_session(&self, session: ServerSession, headers: Vec<Header>) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::NewSession {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::NewSession {
             session,
             headers,
         }));
@@ -466,7 +505,7 @@ impl ServerEvents for Http3ServerEvents {
         reason: extended_connect::session::CloseReason,
         headers: Option<Vec<Header>>,
     ) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::SessionClosed {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::SessionClosed {
             session,
             reason,
             headers,
@@ -474,7 +513,7 @@ impl ServerEvents for Http3ServerEvents {
     }
 
     fn connect_udp_datagram(&self, session: ServerSession, datagram: Bytes) {
-        self.insert(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
+        self.push(Http3ServerEvent::ConnectUdp(ServerEvent::Datagram {
             session,
             datagram,
         }));

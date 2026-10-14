@@ -584,6 +584,9 @@ where
             self.slow_start.on_packet_sent(pkt.pn(), pkt.len());
         }
 
+        // Update bytes in flight first; a fully consumed congestion window is not app-limited.
+        self.bytes_in_flight += pkt.len();
+
         if !self.app_limited() {
             // Given the current non-app-limited condition, we're fully utilizing the congestion
             // window. Assume that all in-flight packets up to this one are NOT app-limited.
@@ -592,7 +595,6 @@ where
             self.first_app_limited = Some(pkt.pn() + 1);
         }
 
-        self.bytes_in_flight += pkt.len();
         qdebug!(
             "packet_sent this={self:p}, pn={}, ps={}",
             pkt.pn(),
@@ -979,7 +981,10 @@ mod tests {
     use neqo_common::{qinfo, to_u64};
     use test_fixture::{new_neqo_qlog, now};
 
-    use super::{ClassicCongestionController, PERSISTENT_CONG_THRESH, SlowStart, WindowAdjustment};
+    use super::{
+        ClassicCongestionController, PACING_BURST_SIZE, PERSISTENT_CONG_THRESH, SlowStart,
+        WindowAdjustment,
+    };
     use crate::{
         MIN_INITIAL_PACKET_SIZE, Pmtud,
         cc::{
@@ -1386,7 +1391,8 @@ mod tests {
 
     #[test]
     fn app_limited_slow_start() {
-        const BELOW_APP_LIMIT_PKTS: usize = 5;
+        // The threshold is half the window, so the largest app-limited burst is one short.
+        const BELOW_APP_LIMIT_PKTS: usize = CWND_INITIAL_PKTS / 2 - 1;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
         let mut cc = make_cc_newreno();
         let cwnd = cc.current.congestion_window;
@@ -1399,14 +1405,7 @@ mod tests {
             // always stay below app_limit during sent.
             let mut pkts = Vec::new();
             for _ in 0..packet_burst_size {
-                let p = sent::Packet::new(
-                    packet::Type::Short,
-                    next_pn,
-                    now,
-                    true,
-                    recovery::Tokens::new(),
-                    cc.max_datagram_size(),
-                );
+                let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
                 next_pn += 1;
                 cc.on_packet_sent(&p, now);
                 pkts.push(p);
@@ -1415,6 +1414,7 @@ mod tests {
                 cc.bytes_in_flight(),
                 packet_burst_size * cc.max_datagram_size()
             );
+            assert!(cc.app_limited(), "burst must stay below the threshold");
             now += RTT;
             cc.on_packets_acked(
                 &pkts,
@@ -1432,14 +1432,7 @@ mod tests {
         // have `bytes_in_flight` above the `app_limited` threshold.
         let mut pkts = Vec::new();
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
-            let p = sent::Packet::new(
-                packet::Type::Short,
-                next_pn,
-                now,
-                true,
-                recovery::Tokens::new(),
-                cc.max_datagram_size(),
-            );
+            let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
             next_pn += 1;
             cc.on_packet_sent(&p, now);
             pkts.push(p);
@@ -1448,6 +1441,7 @@ mod tests {
             cc.bytes_in_flight(),
             ABOVE_APP_LIMIT_PKTS * cc.max_datagram_size()
         );
+        assert!(!cc.app_limited(), "burst must fill `cwnd`");
         now += RTT;
         // Check if congestion window gets increased for all packets currently in flight
         for (i, pkt) in pkts.into_iter().enumerate() {
@@ -1476,14 +1470,35 @@ mod tests {
         }
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "A lot of multiline function calls due to formatting"
-    )]
+    /// Filling `cwnd` is congestion-limited, not app-limited, so `cwnd` must still grow.
+    #[test]
+    fn not_app_limited_when_one_packet_fills_cwnd() {
+        let mut cc = make_cc_newreno();
+        let cwnd = cc.cwnd();
+        let mut cc_stats = CongestionControlStats::default();
+        let now = now();
+
+        // Fill `cwnd` in a single send.
+        let p = sent::make_packet(0, now, cwnd);
+        cc.on_packet_sent(&p, now);
+        assert_eq!(cc.bytes_in_flight(), cwnd);
+
+        cc.on_packets_acked(
+            &[p],
+            &RttEstimate::new(crate::DEFAULT_INITIAL_RTT),
+            now + RTT,
+            &mut cc_stats,
+        );
+
+        assert_eq!(cc.bytes_in_flight(), 0);
+        assert_eq!(cc.cwnd(), 2 * cwnd, "cwnd must double when filled");
+    }
+
     #[test]
     fn app_limited_congestion_avoidance() {
         const CWND_PKTS_CA: usize = CWND_INITIAL_PKTS / 2;
-        const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - 2;
+        // The threshold adds a pacing burst, so the largest app-limited burst is one short.
+        const BELOW_APP_LIMIT_PKTS: usize = CWND_PKTS_CA - PACING_BURST_SIZE - 1;
         const ABOVE_APP_LIMIT_PKTS: usize = BELOW_APP_LIMIT_PKTS + 1;
 
         let mut cc = make_cc_newreno();
@@ -1492,27 +1507,13 @@ mod tests {
 
         // Change phase to congestion avoidance by introducing loss.
 
-        let p_lost = sent::Packet::new(
-            packet::Type::Short,
-            1,
-            now,
-            true,
-            recovery::Tokens::new(),
-            cc.max_datagram_size(),
-        );
+        let p_lost = sent::make_packet(1, now, cc.max_datagram_size());
         cc.on_packet_sent(&p_lost, now);
         cwnd_is_default(&cc);
         now += PTO;
         cc.on_packets_lost(Some(now), None, PTO, &[p_lost], now, &mut cc_stats);
         cwnd_is_halved(&cc);
-        let p_not_lost = sent::Packet::new(
-            packet::Type::Short,
-            2,
-            now,
-            true,
-            recovery::Tokens::new(),
-            cc.max_datagram_size(),
-        );
+        let p_not_lost = sent::make_packet(2, now, cc.max_datagram_size());
         cc.on_packet_sent(&p_not_lost, now);
         now += RTT;
         cc.on_packets_acked(
@@ -1533,14 +1534,7 @@ mod tests {
             // always stay below app_limit during sent.
             let mut pkts = Vec::new();
             for _ in 0..packet_burst_size {
-                let p = sent::Packet::new(
-                    packet::Type::Short,
-                    next_pn,
-                    now,
-                    true,
-                    recovery::Tokens::new(),
-                    cc.max_datagram_size(),
-                );
+                let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
                 next_pn += 1;
                 cc.on_packet_sent(&p, now);
                 pkts.push(p);
@@ -1549,6 +1543,7 @@ mod tests {
                 cc.bytes_in_flight(),
                 packet_burst_size * cc.max_datagram_size()
             );
+            assert!(cc.app_limited(), "burst must stay below the threshold");
             now += RTT;
             for (i, pkt) in pkts.into_iter().enumerate() {
                 cc.on_packets_acked(
@@ -1571,14 +1566,7 @@ mod tests {
         // have `bytes_in_flight` above the `app_limited` threshold.
         let mut pkts = Vec::new();
         for _ in 0..ABOVE_APP_LIMIT_PKTS {
-            let p = sent::Packet::new(
-                packet::Type::Short,
-                next_pn,
-                now,
-                true,
-                recovery::Tokens::new(),
-                cc.max_datagram_size(),
-            );
+            let p = sent::make_packet(next_pn, now, cc.max_datagram_size());
             next_pn += 1;
             cc.on_packet_sent(&p, now);
             pkts.push(p);
@@ -1587,6 +1575,7 @@ mod tests {
             cc.bytes_in_flight(),
             ABOVE_APP_LIMIT_PKTS * cc.max_datagram_size()
         );
+        assert!(!cc.app_limited(), "burst must fill `cwnd`");
         now += RTT;
         let mut last_acked_bytes = 0;
         // Check if congestion window gets increased for all packets currently in flight

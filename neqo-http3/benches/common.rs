@@ -31,8 +31,8 @@ const BENCHMARK_PARAMS: [(usize, usize); 3] = [(1, 1_000), (1_000, 1), (1_000, 1
 /// Data sizes meet or exceed the 1 MB per-stream and 2 MB connection-level flow-control
 /// windows, so streams regularly block waiting for `MAX_STREAM_DATA` grants.
 const FC_BENCHMARK_PARAMS: [(usize, usize); 2] = [
-    (1, 4 * 1024 * 1024),  // 4× per-stream window
-    (10, 1 * 1024 * 1024), // each stream hits per-stream window; 5× connection-level window
+    (1, 4 * 1024 * 1024), // 4× per-stream window
+    (10, 1024 * 1024),    // each stream hits per-stream window; 5× connection-level window
 ];
 
 fn setup_with_link(
@@ -74,8 +74,11 @@ fn setup_flow_controlled(streams: usize, data_size: usize) -> ReadySimulator {
 
 type SetupFn = fn(usize, usize) -> ReadySimulator;
 
-/// All benchmark configurations: `(criterion group, setup fn, params)`.
-const CONFIGS: [(&str, SetupFn, &[(usize, usize)]); 2] = [
+/// A benchmark configuration: `(criterion group, setup fn, params)`.
+type Config = (&'static str, SetupFn, &'static [(usize, usize)]);
+
+/// All benchmark configurations.
+const CONFIGS: [Config; 2] = [
     ("streams", setup, &BENCHMARK_PARAMS),
     (
         "streams-flow-controlled",
@@ -94,7 +97,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
         for &(streams, data_size) in params {
             group.throughput(Throughput::Bytes(to_u64(streams * data_size)));
             group.bench_function(
-                &format!("{name_prefix}/{streams}-streams/each-{data_size}-bytes"),
+                format!("{name_prefix}/{streams}-streams/each-{data_size}-bytes"),
                 |b| {
                     b.iter_batched(
                         || setup_fn(streams, data_size),

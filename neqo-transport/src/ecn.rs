@@ -8,6 +8,7 @@ use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
 use neqo_common::{Ecn, qdebug, qinfo};
+use serde::{Serialize, Serializer};
 
 use crate::{Stats, packet, recovery::sent};
 
@@ -74,6 +75,12 @@ impl ValidationState {
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
 pub struct Count(EnumMap<Ecn, u64>);
 
+impl Serialize for Count {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::stats::serialize_counts(self.0, serializer)
+    }
+}
+
 impl Deref for Count {
     type Target = EnumMap<Ecn, u64>;
 
@@ -129,6 +136,12 @@ impl AddAssign<Ecn> for Count {
 
 #[derive(PartialEq, Eq, Debug, Clone, Copy, Default)]
 pub struct ValidationCount(EnumMap<ValidationOutcome, u64>);
+
+impl Serialize for ValidationCount {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::stats::serialize_counts(self.0, serializer)
+    }
+}
 
 impl Deref for ValidationCount {
     type Target = EnumMap<ValidationOutcome, u64>;
