@@ -45,10 +45,23 @@ fn frame_decode(c: &mut Criterion, n: usize) {
     });
 }
 
+/// Decode a single PADDING frame spanning `n` bytes, as in a padded packet or a PMTUD probe.
+fn padding_decode(c: &mut Criterion, n: usize) {
+    let buf = vec![0; n];
+    c.bench_function(&format!("Frame::decode PADDING {n} bytes"), |b| {
+        b.iter(|| {
+            let mut dec = Decoder::new(&buf);
+            black_box(Frame::decode(&mut dec).expect("decode frame"));
+        });
+    });
+}
+
 fn benchmark(c: &mut Criterion) {
     frame_decode(c, 10);
     frame_decode(c, 100);
     frame_decode(c, 1_000);
+    padding_decode(c, 1_500);
+    padding_decode(c, 16_383);
 }
 
 criterion_group! {
