@@ -131,6 +131,8 @@ impl Streams {
 
     pub fn zero_rtt_rejected(&mut self) {
         self.clear_streams();
+        // Rejected data does not count against the new 1-RTT flow-control limit.
+        *self.sender_fc.borrow_mut() = SenderFlowControl::new((), 0);
         debug_assert_eq!(
             self.remote_stream_limits[StreamType::BiDi].max_active(),
             self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)

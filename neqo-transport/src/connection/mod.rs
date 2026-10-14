@@ -17,11 +17,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::HexWithLen;
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
     expect_usize,
-    hex::{Hex, HexSnipMiddle, HexWithLen},
+    hex::{Hex, HexSnipMiddle},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
     qtrace, qwarn, to_u64,
@@ -1812,6 +1814,7 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
+        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
@@ -1844,6 +1847,7 @@ impl Connection {
                 PreprocessResult::End => return Ok(()),
             }
 
+            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
@@ -3283,6 +3287,7 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] Handshake space={space} data: {:?}",
             data.as_ref().map(HexWithLen::new),
@@ -3556,9 +3561,13 @@ impl Connection {
                 self.acks
                     .ack_freq(seqno, tolerance - 1, delay, ignore_order);
             }
-            Frame::Datagram { data, .. } => {
+            Frame::Datagram {
+                data,
+                len_field_len,
+                ..
+            } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams.handle_datagram(data)?;
+                self.quic_datagrams.handle_datagram(data, len_field_len)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }
@@ -4066,8 +4075,8 @@ impl Connection {
     /// # Panics
     /// Basically never, because that unwrap won't fail.
     pub fn max_datagram_size(&self) -> Res<u64> {
-        let max_dgram_size = self.quic_datagrams.remote_datagram_size();
-        if max_dgram_size == 0 {
+        let max_dgram_frame_size = self.quic_datagrams.remote_datagram_size();
+        if max_dgram_frame_size == 0 {
             return Err(Error::NotAvailable);
         }
         let version = self.version();
@@ -4099,7 +4108,10 @@ impl Connection {
         let data_len_possible = to_u64(
             mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
         );
-        Ok(min(data_len_possible, max_dgram_size))
+        Ok(min(
+            data_len_possible,
+            max_dgram_frame_size.saturating_sub(to_u64(DATAGRAM_FRAME_TYPE_VARINT_LEN)),
+        ))
     }
 
     /// The primary path's minimum RTT estimate, from which `QuicDatagrams`
@@ -4122,17 +4134,10 @@ impl Connection {
     ///
     /// # Errors
     ///
-    /// Returns `TooMuchData` if `data` is longer than
-    /// [`Self::remote_datagram_size`], which includes any non-empty datagram
-    /// while that is `0` (the peer sent no `max_datagram_frame_size` and so
-    /// does not support DATAGRAM frames at all). "Longer than" compares the
-    /// payload, as [`Self::max_datagram_size`] always has; RFC 9221 defines
-    /// the limit for the whole frame, type and length included, so a payload
-    /// of exactly the limit is over by the frame type plus any length. In
-    /// practice that is 1 to 3 bytes: a datagram that fits a real path MTU is
-    /// under 16384 bytes, so its length takes at most 2. That reading
-    /// predates this queue and is tracked separately, since fixing it means
-    /// changing `max_datagram_size` too.
+    /// Returns `TooMuchData` if the DATAGRAM frame containing `data` would
+    /// exceed [`Self::remote_datagram_size`], including any datagram while
+    /// that is `0` (the peer sent no `max_datagram_frame_size` and so does
+    /// not support DATAGRAM frames at all).
     pub fn enqueue_datagram(
         &mut self,
         session: StreamId,

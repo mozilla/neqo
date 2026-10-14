@@ -43,7 +43,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+        uses: mozilla/actions/toolchains@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -149,7 +149,7 @@ jobs:
           mkdir -p C:/msys64/home/runneradmin/
           touch C:/msys64/home/runneradmin/.gitconfig
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
         with:
           name: lcov-coverage
@@ -169,7 +169,7 @@ jobs:
 
       - name: Save simulation seeds artifact
         if: ${{ always() && github.event_name != 'push' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: simulation-seeds-${{ matrix.os }}-${{ matrix.rust-toolchain }}-${{ matrix.type }}
           path: simulation-seeds
@@ -188,11 +188,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@32d84c77ea1bb513afbd253f94f67ae138b7d8be # v2.0.10
+      - uses: mozilla/actions/crap@f9ca3441d43840be4835898c4be6392508ac0bf4 # v3.0.0
         with:
           lcov-path: lcov.info
           threshold: "30"
@@ -200,7 +200,7 @@ jobs:
 
       - # merge_group's ref is often gone by upload time: github/codeql-action#1572
         if: ${{ github.event_name != 'merge_group' }}
-        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: crap.sarif
           category: cargo-crap
