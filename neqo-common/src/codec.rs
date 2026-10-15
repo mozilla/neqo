@@ -75,7 +75,8 @@ impl<'a> Decoder<'a> {
     /// skipped.
     pub fn skip_while(&mut self, predicate: u8) -> usize {
         let buf = self.as_ref(); // remaining bytes
-        // Compare whole chunks first, which compiles to SIMD compares.
+        // Compare whole 16-byte chunks first, which compiles to wide (unaligned) loads and
+        // compares instead of a byte-at-a-time loop.
         let (chunks, _) = buf.as_chunks::<16>();
         let start = chunks
             .iter()
