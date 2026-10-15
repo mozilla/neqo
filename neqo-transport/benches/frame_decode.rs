@@ -48,12 +48,7 @@ fn frame_decode(c: &mut Criterion, n: usize) {
 /// Number of distinct start offsets for a PADDING frame within a 16-byte chunk.
 const PADDING_ALIGNMENTS: usize = 16;
 
-/// Decode a single PADDING frame spanning `n` bytes, as in a padded packet or a PMTUD probe.
-///
-/// In a real packet, PADDING follows the packet header and any other frames, so it can start at
-/// any offset relative to the (aligned) buffer. Decode the frame once from each offset in
-/// `0..PADDING_ALIGNMENTS`, so the measurement covers every alignment rather than only the one
-/// that the allocator happens to provide.
+/// Decode an `n`-byte PADDING frame at every alignment, as real PADDING can start anywhere.
 fn padding_decode(c: &mut Criterion, n: usize) {
     let buf = vec![0; n + PADDING_ALIGNMENTS - 1];
     c.bench_function(&format!("Frame::decode PADDING {n} bytes"), |b| {
