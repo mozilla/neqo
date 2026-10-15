@@ -75,14 +75,22 @@ impl<'a> Decoder<'a> {
     /// skipped.
     pub fn skip_while(&mut self, predicate: u8) -> usize {
         let buf = self.as_ref(); // remaining bytes
-        // Compare whole 16-byte chunks first, which compiles to wide (unaligned) loads and
-        // compares instead of a byte-at-a-time loop.
-        let (chunks, _) = buf.as_chunks::<16>();
-        let start = chunks
-            .iter()
-            .position(|c| *c != [predicate; 16])
-            .unwrap_or(chunks.len())
-            * 16;
+        // Check bytes one at a time until the read position is 16-byte aligned, so that the
+        // chunked loop below never does a load that is split across cache lines.
+        let head = buf.as_ptr().align_offset(16).min(buf.len());
+        if let Some(i) = buf[..head].iter().position(|v| *v != predicate) {
+            self.skip(i);
+            return i;
+        }
+        // Then compare whole 16-byte chunks, which compiles to wide loads and compares instead
+        // of a byte-at-a-time loop.
+        let (chunks, _) = buf[head..].as_chunks::<16>();
+        let start = head
+            + chunks
+                .iter()
+                .position(|c| *c != [predicate; 16])
+                .unwrap_or(chunks.len())
+                * 16;
         let until = buf[start..]
             .iter()
             .position(|v| *v != predicate)
