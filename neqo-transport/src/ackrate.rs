@@ -6,7 +6,10 @@
 
 // Management of the peer's ack rate.
 
-use std::{cmp::max, time::Duration};
+use std::{
+    cmp::{max, min},
+    time::Duration,
+};
 
 use neqo_common::{Buffer, qtrace};
 
@@ -40,7 +43,9 @@ impl AckRate {
         let packets = cwnd * PACKET_RATIO / mtu / usize::from(ratio);
         let packets = packets.clamp(MIN_PACKETS, MAX_PACKETS);
         let delay = rtt * RTT_RATIO / u32::from(ratio);
-        let delay = delay.clamp(minimum, MAX_DELAY);
+        // `minimum` can exceed `MAX_DELAY`, and asking for less than it is invalid:
+        // <https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-14#section-4>
+        let delay = max(min(delay, MAX_DELAY), minimum);
         qtrace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
         Self {
             packets: u16::try_from(packets).expect("clamped to MAX_PACKETS"),
@@ -211,5 +216,27 @@ impl PeerAckDelay {
 impl Default for PeerAckDelay {
     fn default() -> Self {
         Self::fixed(DEFAULT_REMOTE_ACK_DELAY)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::AckRate;
+    use crate::rtt::GRANULARITY;
+
+    #[test]
+    fn min_ack_delay_above_cap() {
+        const MINIMUM: Duration = Duration::from_millis(60);
+        let rate = AckRate::new(MINIMUM, 4, 10_000, 1500, Duration::from_millis(10));
+        assert_eq!(rate.delay, AckRate::delay_us(MINIMUM));
+    }
+
+    #[test]
+    fn delay_capped() {
+        const CAP: Duration = Duration::from_millis(50);
+        let rate = AckRate::new(GRANULARITY, 4, 10_000, 1500, Duration::from_secs(1));
+        assert_eq!(rate.delay, AckRate::delay_us(CAP));
     }
 }
