@@ -6,7 +6,10 @@
 
 // Management of the peer's ack rate.
 
-use std::{cmp::max, time::Duration};
+use std::{
+    cmp::{max, min},
+    time::Duration,
+};
 
 use neqo_common::{Buffer, qtrace};
 
@@ -42,7 +45,7 @@ impl AckRate {
         let delay = rtt * RTT_RATIO / u32::from(ratio);
         // `minimum` can exceed `MAX_DELAY`, and asking for less than it is invalid:
         // <https://datatracker.ietf.org/doc/html/draft-ietf-quic-ack-frequency-14#section-4>
-        let delay = delay.min(MAX_DELAY).max(minimum);
+        let delay = max(min(delay, MAX_DELAY), minimum);
         qtrace!("AckRate inputs: {cwnd}/{mtu}/{ratio}, {rtt:?}");
         Self {
             packets: u16::try_from(packets).expect("clamped to MAX_PACKETS"),
