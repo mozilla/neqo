@@ -226,6 +226,6 @@ mod tests {
     fn min_ack_delay_above_cap() {
         const MINIMUM: Duration = Duration::from_millis(60);
         let rate = AckRate::new(MINIMUM, 4, 10_000, 1500, Duration::from_millis(10));
-        assert_eq!(rate.delay, MINIMUM);
+        assert_eq!(rate.delay, AckRate::delay_us(MINIMUM));
     }
 }
