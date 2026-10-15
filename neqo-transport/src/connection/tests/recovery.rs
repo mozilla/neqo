@@ -12,7 +12,7 @@ use test_fixture::{
     assertions::{
         assert_contains_handshake, assert_handshake, assert_initial, is_handshake, is_initial,
     },
-    now, split_datagram,
+    new_neqo_qlog, now, split_datagram,
 };
 
 use super::{
@@ -1269,4 +1269,69 @@ fn split_api_loss_timer_type() {
         log.contains(r#""timer_type":"ack""#),
         "Expected loss_timer_expired with timer_type ack in qlog: {log}"
     );
+}
+
+/// The `ack_delay` the server logs for a delayed ACK it sends, and the one the
+/// client logs on receiving it, along with how many microseconds the server held it.
+fn logged_ack_delays(server_exponent: Option<u64>) -> (f64, f64, u32) {
+    let (mut client, client_log) = new_client_with_qlog(ConnectionParameters::default());
+    let mut server = default_server();
+    let (log, server_log) = new_neqo_qlog();
+    server.set_qlog(log);
+    if let Some(e) = server_exponent {
+        server
+            .set_local_tparam(AckDelayExponent, TransportParameter::Integer(e))
+            .unwrap();
+    }
+    let mut t = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // After an idle period the first packet is acknowledged at once, so send two.
+    server.process_input(send_something(&mut client, t), t);
+    client.process_input(server.process_output(t).dgram().expect("an ACK"), t);
+    server.process_input(send_something(&mut client, t), t);
+    let delay = server.process_output(t).callback();
+    assert!(delay > Duration::ZERO);
+    t += delay;
+    let ack = server.process_output(t).dgram().expect("a delayed ACK");
+    client.process_input(ack, t);
+    drop((client, server));
+
+    let last_ack_delay = |trace: &str, name: &str| {
+        trace
+            .split('\u{1e}')
+            .filter_map(|r| serde_json::from_str::<serde_json::Value>(r).ok())
+            .filter(|e| e["name"] == name)
+            .flat_map(|e| e["data"]["frames"].as_array().cloned().unwrap_or_default())
+            .filter_map(|f| f["ack_delay"].as_f64())
+            .next_back()
+            .expect("an ACK")
+    };
+    (
+        last_ack_delay(&server_log.to_string(), "quic:packet_sent"),
+        last_ack_delay(&client_log.to_string(), "quic:packet_received"),
+        u32::try_from(delay.as_micros()).unwrap(),
+    )
+}
+
+#[test]
+#[allow(clippy::allow_attributes, // Only the MSRV's clippy flags `float_cmp` here.
+        clippy::float_cmp, reason = "The values are exact.")]
+fn ack_delay_is_logged_in_milliseconds() {
+    let (sent, received, delay) = logged_ack_delays(None);
+    // Encoded in units of 8 microseconds.
+    let expected = f64::from(delay / 8 * 8) / 1000.0;
+    assert_eq!(sent, expected);
+    assert_eq!(received, expected);
+}
+
+#[test]
+#[allow(clippy::allow_attributes, // Only the MSRV's clippy flags `float_cmp` here.
+        clippy::float_cmp, reason = "The values are exact.")]
+fn ack_delay_is_logged_with_the_senders_exponent() {
+    let (sent, received, delay) = logged_ack_delays(Some(5));
+    // The server still encodes in units of 8 microseconds, but has told the client
+    // that the unit is 32, which is what both sides have to log.
+    let expected = f64::from(delay / 8 * 32) / 1000.0;
+    assert_eq!(sent, expected);
+    assert_eq!(received, expected);
 }
