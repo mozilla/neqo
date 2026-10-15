@@ -9,9 +9,9 @@ use std::time::Duration;
 use test_fixture::{DEFAULT_ADDR_V4, assertions, now};
 
 use super::{
-    super::ConnectionParameters, DEFAULT_RTT, ack_bytes, connect, connect_rtt_idle, default_client,
-    default_server, fill_cwnd, increase_cwnd, induce_persistent_congestion, new_client, new_server,
-    send_something, send_with_extra,
+    super::ConnectionParameters, Connection, DEFAULT_RTT, ack_bytes, connect, connect_rtt_idle,
+    default_client, default_server, fill_cwnd, increase_cwnd, induce_persistent_congestion,
+    new_client, new_server, send_something, send_with_extra,
 };
 use crate::{
     CloseReason, Error,
@@ -228,29 +228,28 @@ impl crate::connection::test_internal::FrameWriter for AckFrequencyWriter {
     }
 }
 
+/// Delivers an `ACK_FREQUENCY` frame requesting `delay` µs to a connected client.
+fn recv_ack_frequency(delay: u64) -> Connection {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let dgram = send_with_extra(&mut server, AckFrequencyWriter { delay }, now());
+    client.process_input(dgram, now());
+    client
+}
+
+/// We advertise `GRANULARITY` as our `min_ack_delay`, so less than that is invalid.
 #[test]
 fn ack_frequency_below_min_ack_delay() {
-    // We advertise `GRANULARITY` as our `min_ack_delay`.
     let smallest = u64::try_from(GRANULARITY.as_micros()).unwrap();
-
-    let mut client = default_client();
-    let mut server = default_server();
-    connect(&mut client, &mut server);
-    let dgram = send_with_extra(
-        &mut server,
-        AckFrequencyWriter {
-            delay: smallest - 1,
-        },
-        now(),
-    );
-    client.process_input(dgram, now());
+    let client = recv_ack_frequency(smallest - 1);
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
 
-    let mut client = default_client();
-    let mut server = default_server();
-    connect(&mut client, &mut server);
-    let dgram = send_with_extra(&mut server, AckFrequencyWriter { delay: smallest }, now());
-    client.process_input(dgram, now());
+#[test]
+fn ack_frequency_at_min_ack_delay() {
+    let smallest = u64::try_from(GRANULARITY.as_micros()).unwrap();
+    let client = recv_ack_frequency(smallest);
     assert_eq!(client.state().error(), None);
     assert!(client.state().connected());
 }
@@ -259,6 +258,7 @@ fn ack_frequency_below_min_ack_delay() {
 #[test]
 fn large_min_ack_delay() {
     let mut server = default_server();
+    // `MinAckDelay` (µs) has to exceed our 50ms cap, but not `MaxAckDelay` (ms), so raise both.
     server
         .set_local_tparam(MaxAckDelay, TransportParameter::Integer(100))
         .unwrap();
@@ -274,6 +274,8 @@ fn large_min_ack_delay() {
         server.stats().frame_rx.ack_frequency,
         client.stats().frame_tx.ack_frequency
     );
+    assert_eq!(client.state().error(), None);
     assert_eq!(server.state().error(), None);
     assert!(client.state().connected());
+    assert!(server.state().connected());
 }

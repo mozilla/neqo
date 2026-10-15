@@ -224,11 +224,19 @@ mod tests {
     use std::time::Duration;
 
     use super::AckRate;
+    use crate::rtt::GRANULARITY;
 
     #[test]
     fn min_ack_delay_above_cap() {
         const MINIMUM: Duration = Duration::from_millis(60);
         let rate = AckRate::new(MINIMUM, 4, 10_000, 1500, Duration::from_millis(10));
         assert_eq!(rate.delay, AckRate::delay_us(MINIMUM));
+    }
+
+    #[test]
+    fn delay_capped() {
+        const CAP: Duration = Duration::from_millis(50);
+        let rate = AckRate::new(GRANULARITY, 4, 10_000, 1500, Duration::from_secs(1));
+        assert_eq!(rate.delay, AckRate::delay_us(CAP));
     }
 }
