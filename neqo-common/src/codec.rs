@@ -74,23 +74,27 @@ impl<'a> Decoder<'a> {
     /// Skip while the current byte is `predicate`. Returns the number of bytes
     /// skipped.
     pub fn skip_while(&mut self, predicate: u8) -> usize {
+        /// Width in bytes of the chunks compared at once. 16 bytes matches the width of a
+        /// SIMD register (SSE2/NEON), so a chunk compare is a single wide load and compare.
+        const CHUNK: usize = 16;
+
         let buf = self.as_ref(); // remaining bytes
-        // Check bytes one at a time until the read position is 16-byte aligned, so that the
+        // Check bytes one at a time until the read position is `CHUNK`-byte aligned, so that the
         // chunked loop below never does a load that is split across cache lines.
-        let head = buf.as_ptr().align_offset(16).min(buf.len());
+        let head = buf.as_ptr().align_offset(CHUNK).min(buf.len());
         if let Some(i) = buf[..head].iter().position(|v| *v != predicate) {
             self.skip(i);
             return i;
         }
-        // Then compare whole 16-byte chunks, which compiles to wide loads and compares instead
-        // of a byte-at-a-time loop.
-        let (chunks, _) = buf[head..].as_chunks::<16>();
+        // Then compare whole `CHUNK`-byte chunks, which compiles to wide loads and compares
+        // instead of a byte-at-a-time loop.
+        let (chunks, _) = buf[head..].as_chunks::<CHUNK>();
         let start = head
             + chunks
                 .iter()
-                .position(|c| *c != [predicate; 16])
+                .position(|c| *c != [predicate; CHUNK])
                 .unwrap_or(chunks.len())
-                * 16;
+                * CHUNK;
         let until = buf[start..]
             .iter()
             .position(|v| *v != predicate)
