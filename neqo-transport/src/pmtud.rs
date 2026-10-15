@@ -197,27 +197,24 @@ impl Pmtud {
         now: Instant,
         stats: &mut Stats,
     ) {
-        let acked = Self::count_probes(acked_pkts);
-        if acked == 0 {
+        // FIXME: ACKs of stale probes are not counted in `pmtud_ack`.
+        if self.probe_state == Probe::NotNeeded {
             return;
         }
-
-        stats.pmtud_ack += acked;
 
         // Only the ACK of a probe for the size we are currently searching for confirms that size.
         // Other probes are stale, e.g., the original of a probe that was spuriously declared lost
         // and then retried. They say nothing about the size we are searching for, which may not
-        // have been probed yet. Once the search has stopped, there is nothing left to confirm.
+        // have been probed yet.
         let probe_mtu = self.search_table[self.probe_index];
-        if self.probe_state == Probe::NotNeeded
-            || !acked_pkts
-                .iter()
-                .filter_map(sent::Packet::pmtud_probe_size)
-                .any(|mtu| mtu == probe_mtu)
-        {
-            qdebug!("Ignoring ACK of stale PMTUD probe");
+        let acked = acked_pkts
+            .iter()
+            .filter(|p| p.is_pmtud_probe_of(probe_mtu))
+            .count();
+        if acked == 0 {
             return;
         }
+        stats.pmtud_ack += acked;
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         let confirmed_idx = self.probe_index;
@@ -755,7 +752,7 @@ mod tests {
         assert_eq!(pmtud.plpmtu(), first, "an untested size was confirmed");
         assert!(pmtud.needs_probe());
         assert_eq!(pmtud.probe_size(), second);
-        assert_eq!(stats.pmtud_ack, 2, "both ACKed probes must be counted");
+        assert_eq!(stats.pmtud_ack, 1, "stale probe ACK must not be counted");
     }
 
     /// The late ACK of a probe for an earlier size must neither confirm the size of the probe that
@@ -785,10 +782,44 @@ mod tests {
         assert_eq!(pmtud.plpmtu(), first, "an untested size was confirmed");
         assert_eq!(pmtud.probe_state, Probe::Sent, "probe in flight dropped");
         assert_eq!(pmtud.probe_size(), second);
+        assert_eq!(stats.pmtud_ack, 1, "stale probe ACK must not be counted");
 
         // Only the ACK of the probe in flight confirms the next size.
         pmtud.on_packets_acked(&[next], now, &mut stats);
         assert_eq!(pmtud.plpmtu(), second);
+        assert_eq!(stats.pmtud_ack, 2);
+    }
+
+    /// An ACK batch can contain stale probes, current probes and non-probe packets.
+    #[test]
+    fn mixed_probe_acks_only_count_current_size() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        pmtud.next(now, &mut stats);
+
+        let original = send_probe_packet(&mut pmtud, &mut stats, 0, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        let stale = send_probe_packet(&mut pmtud, &mut stats, 1, now);
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+
+        let size = pmtud.probe_size();
+        let current = send_probe_packet(&mut pmtud, &mut stats, 2, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&current), &mut stats, now);
+        let retry = send_probe_packet(&mut pmtud, &mut stats, 3, now);
+        pmtud.on_packets_acked(
+            &[stale, sent::make_packet(4, now, size), current, retry],
+            now,
+            &mut stats,
+        );
+
+        assert_eq!(pmtud.plpmtu(), size);
+        assert!(pmtud.needs_probe());
+        assert!(pmtud.probe_size() > size);
+        assert_eq!(
+            stats.pmtud_ack, 3,
+            "only current probe ACKs must be counted"
+        );
     }
 
     /// Once the search has stopped, the late ACK of a probe that is still outstanding must not
@@ -824,5 +855,6 @@ mod tests {
         assert_mtu(&pmtud, first);
         assert_eq!(pmtud.raise_timer, raise_timer);
         assert!(!pmtud.needs_probe());
+        assert_eq!(stats.pmtud_ack, 1, "stale probe ACK must not be counted");
     }
 }

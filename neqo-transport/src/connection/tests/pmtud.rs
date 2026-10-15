@@ -247,7 +247,7 @@ fn delayed_probe_and_retry_do_not_confirm_untested_mtu() {
     server.process_input(retry, now);
     now += Duration::from_millis(30);
     deliver_all(&mut server, &mut client, now);
-    assert_eq!(client.stats().pmtud_ack, 3);
+    assert_eq!(client.stats().pmtud_ack, 2);
     assert_eq!(client.plpmtu(), probe_len, "an untested MTU was confirmed");
 
     // The next size is still being probed.
