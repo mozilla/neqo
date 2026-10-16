@@ -3607,7 +3607,7 @@ impl Connection {
                     }
                     recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
                     // PMTUD probe loss is handled by the PMTUD state machine.
-                    recovery::Token::PmtudProbe => (),
+                    recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3679,7 +3679,7 @@ impl Connection {
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     recovery::Token::EcnEct0 => self.paths.acked_ecn(),
                     // We don't care about these being ACK'ed
-                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe => (),
+                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }

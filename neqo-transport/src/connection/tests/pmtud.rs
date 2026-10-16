@@ -8,6 +8,7 @@ use std::{
     cell::RefCell,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
+    time::Duration,
 };
 
 use neqo_common::Datagram;
@@ -190,4 +191,67 @@ fn vpn_migration_triggers_pmtud() {
     let expected_vpn_mtu = 1380 - header_size;
     assert_eq!(server.plpmtu(), expected_vpn_mtu);
     assert_eq!(client.plpmtu(), expected_vpn_mtu);
+}
+
+/// Delivers all datagrams `from` has ready at `now` to `to`.
+fn deliver_all(from: &mut Connection, to: &mut Connection, now: std::time::Instant) {
+    while let Some(d) = from.process_output(now).dgram() {
+        to.process_input(d, now);
+    }
+}
+
+/// A PMTUD probe that is merely delayed is declared lost and retried. When the delayed probe and
+/// then its retry are acknowledged, the second ACK must not make the sender believe that the *next*
+/// probe size works, since it has never been sent.
+#[test]
+fn delayed_probe_and_retry_do_not_confirm_untested_mtu() {
+    fixture_init();
+    let mut now = now();
+    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // The ACK for the first probe, which was sent during the handshake, is still at the server.
+    deliver_all(&mut server, &mut client, now);
+    let confirmed = client.plpmtu();
+    assert_eq!(client.stats().pmtud_ack, 1);
+
+    // The next probe is delayed by the network.
+    let delayed = client.process_output(now).dgram().unwrap();
+    let probe_len = delayed.len();
+    assert!(probe_len > confirmed);
+    assert_eq!(client.stats().pmtud_tx, 2);
+
+    // Later packets get through and are acknowledged. That makes the delayed probe look lost.
+    for _ in 0..4 {
+        let d = send_something(&mut client, now);
+        server.process_input(d, now);
+    }
+    now += Duration::from_millis(30);
+    deliver_all(&mut server, &mut client, now);
+    assert_eq!(client.stats().pmtud_lost, 1);
+
+    // The probe is retried.
+    let retry = client.process_output(now).dgram().unwrap();
+    assert_eq!(retry.len(), probe_len);
+    assert_eq!(client.stats().pmtud_tx, 3);
+
+    // The delayed probe is finally delivered, which confirms its size.
+    server.process_input(delayed, now);
+    now += Duration::from_millis(30);
+    deliver_all(&mut server, &mut client, now);
+    assert_eq!(client.stats().pmtud_ack, 2);
+    assert_eq!(client.plpmtu(), probe_len);
+
+    // The retry is delivered, too. It is for the same size, so it must not confirm a larger one.
+    server.process_input(retry, now);
+    now += Duration::from_millis(30);
+    deliver_all(&mut server, &mut client, now);
+    assert_eq!(client.stats().pmtud_ack, 2);
+    assert_eq!(client.plpmtu(), probe_len, "an untested MTU was confirmed");
+
+    // The next size is still being probed.
+    let next = client.process_output(now).dgram().unwrap();
+    assert!(next.len() > probe_len);
+    assert_eq!(client.stats().pmtud_tx, 4);
 }
