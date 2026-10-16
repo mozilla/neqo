@@ -113,7 +113,8 @@ impl Pmtud {
         }
     }
 
-    /// Set the peer's `max_udp_payload_size` transport parameter as an upper bound for probing.
+    /// Set the peer's `max_udp_payload_size` transport parameter as an upper bound for datagrams
+    /// and probing.
     pub const fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize) {
         self.peer_max_udp_payload = Some(peer_max_udp_payload);
     }
@@ -134,10 +135,15 @@ impl Pmtud {
     }
 
     /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
-    /// sent. During probing, this may be larger than the actual path MTU.
+    /// sent in an ordinary datagram, capped by the peer's receive limit when known. PMTU probes
+    /// use [`Self::probe_size`] and are separately bounded by the peer's receive limit.
     #[must_use]
     pub const fn plpmtu(&self) -> usize {
-        self.mtu - self.header_size
+        let plpmtu = self.mtu - self.header_size;
+        match self.peer_max_udp_payload {
+            Some(peer_max) if peer_max < plpmtu => peer_max,
+            _ => plpmtu,
+        }
     }
 
     /// Returns true if a PMTUD probe should be sent.
@@ -623,6 +629,29 @@ mod tests {
 
         pmtud.set_peer_max_udp_payload(1452);
         assert_eq!(pmtud.peer_max_udp_payload(), Some(1452));
+    }
+
+    #[test]
+    fn peer_max_udp_payload_limits_default_plpmtu() {
+        for addr in [V4, V6] {
+            for peer_max in [1200, 1232, 1252, 1300] {
+                let mut pmtud = Pmtud::new(addr, None);
+                pmtud.set_peer_max_udp_payload(peer_max);
+                assert_eq!(pmtud.plpmtu(), peer_max.min(Pmtud::default_plpmtu(addr)),);
+
+                // Starting and restarting discovery must preserve the peer's limit.
+                let mut stats = Stats::default();
+                for _ in 0..2 {
+                    pmtud.start(now(), &mut stats);
+                    assert_eq!(pmtud.plpmtu(), peer_max.min(Pmtud::default_plpmtu(addr)),);
+                    assert!(!pmtud.needs_probe());
+
+                    pmtud.maybe_fire_raise_timer(now() + PMTU_RAISE_TIMER, &mut stats);
+                    assert_eq!(pmtud.plpmtu(), peer_max.min(Pmtud::default_plpmtu(addr)),);
+                    assert!(!pmtud.needs_probe());
+                }
+            }
+        }
     }
 
     /// `probe_count` is 0 before sending and 1 after the first probe.

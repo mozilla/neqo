@@ -129,6 +129,13 @@ impl PacketSender {
         self.cc.pmtud_mut()
     }
 
+    /// Apply the peer's UDP payload limit and synchronize the pacer's packet size.
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize) {
+        self.pmtud_mut()
+            .set_peer_max_udp_payload(peer_max_udp_payload);
+        self.maybe_update_pacer_mtu();
+    }
+
     #[must_use]
     pub fn cwnd(&self) -> usize {
         self.cc.cwnd()
@@ -248,7 +255,7 @@ impl PacketSender {
 #[cfg(test)]
 mod tests {
     use std::{
-        net::{IpAddr, Ipv4Addr},
+        net::{IpAddr, Ipv4Addr, Ipv6Addr},
         time::Duration,
     };
 
@@ -318,6 +325,42 @@ mod tests {
             Pmtud::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(1500)),
             now(),
         )
+    }
+
+    #[test]
+    fn peer_max_udp_payload_updates_congestion_control_and_pacing() {
+        const PEER_MAX: usize = 1200;
+        let now = now();
+        for addr in [
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        ] {
+            for cc in [CongestionControl::NewReno, CongestionControl::Cubic] {
+                for ss in [SlowStart::Classic, SlowStart::HyStart, SlowStart::Search] {
+                    let params = ConnectionParameters::default()
+                        .congestion_control(cc)
+                        .slow_start(ss);
+                    let mut sender = PacketSender::new(&params, Pmtud::new(addr, Some(1500)), now);
+                    // The sender already exists when the handshake supplies the peer's limit.
+                    sender.set_peer_max_udp_payload(PEER_MAX);
+                    assert_eq!(sender.pacer.mtu(), PEER_MAX);
+                    assert_eq!(sender.cwnd_min(), 2 * PEER_MAX);
+
+                    let packet = sent::make_packet(0, now, PEER_MAX);
+                    sender.on_packet_sent(&packet, RTT, now);
+                    assert_eq!(sender.bytes_in_flight(), PEER_MAX);
+                    sender.on_packets_acked(
+                        &[packet],
+                        &RttEstimate::new(RTT),
+                        now + RTT,
+                        &mut Stats::default(),
+                    );
+                    assert_eq!(sender.bytes_in_flight(), 0);
+                    assert_eq!(sender.pacer.mtu(), PEER_MAX);
+                    assert!(sender.cwnd() >= sender.cwnd_min());
+                }
+            }
+        }
     }
 
     /// Send `n` packets at once, ACK them one RTT later, return (`cwnd_before`, `cwnd_after`).

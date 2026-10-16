@@ -11,7 +11,7 @@ use std::{
 };
 
 use neqo_common::Datagram;
-use test_fixture::{DEFAULT_ADDR_V4, fixture_init, now};
+use test_fixture::{DEFAULT_ADDR, DEFAULT_ADDR_V4, fixture_init, now};
 
 use super::Connection;
 use crate::{
@@ -20,7 +20,142 @@ use crate::{
         CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
         new_client, new_server, send_something,
     },
+    tparams::{TransportParameter, TransportParameterId},
 };
+
+fn connect_with_udp_payload_limits(
+    addr: SocketAddr,
+    pmtud: bool,
+    limits: [Option<usize>; 2],
+) -> (Connection, Connection) {
+    fixture_init();
+    let params = ConnectionParameters::default()
+        .pmtud(pmtud)
+        .pmtud_iface_mtu(false);
+    let mut client = Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        addr,
+        addr,
+        params.clone(),
+        now(),
+    )
+    .unwrap();
+    let mut server = new_server(params);
+    for (conn, limit) in [&mut client, &mut server].into_iter().zip(limits) {
+        if let Some(limit) = limit {
+            conn.set_local_tparam(
+                TransportParameterId::MaxUdpPayloadSize,
+                TransportParameter::Integer(limit.try_into().unwrap()),
+            )
+            .unwrap();
+        }
+    }
+    connect(&mut client, &mut server);
+    (client, server)
+}
+
+#[test]
+fn peer_max_udp_payload_limits_datagrams() {
+    const PEER_MAX: usize = 1200;
+    for addr in [DEFAULT_ADDR_V4, DEFAULT_ADDR] {
+        for pmtud in [false, true] {
+            let (mut client, mut server) =
+                connect_with_udp_payload_limits(addr, pmtud, [Some(PEER_MAX); 2]);
+
+            for server_sends in [false, true] {
+                let (sender, receiver) = if server_sends {
+                    (&mut server, &mut client)
+                } else {
+                    (&mut client, &mut server)
+                };
+                let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+                fill_stream(sender, stream_id);
+                let mut datagrams = sender
+                    .process_multiple_output(now(), 2.try_into().unwrap())
+                    .dgram()
+                    .unwrap();
+                assert_eq!(
+                    datagrams.datagram_size().get(),
+                    PEER_MAX,
+                    "{addr}, PMTUD enabled: {pmtud}",
+                );
+                receiver.process_multiple_input(datagrams.iter_mut(), now());
+                let mut buf = [0; PEER_MAX];
+                assert!(receiver.stream_recv(stream_id, &mut buf).unwrap().0 > 0);
+            }
+        }
+    }
+}
+
+#[test]
+fn peer_max_udp_payload_limits_only_the_peer_direction() {
+    const PEER_MAX: usize = 1200;
+    for addr in [DEFAULT_ADDR_V4, DEFAULT_ADDR] {
+        for pmtud in [false, true] {
+            for limited_client in [false, true] {
+                let limits = if limited_client {
+                    [Some(PEER_MAX), None]
+                } else {
+                    [None, Some(PEER_MAX)]
+                };
+                let (mut client, mut server) = connect_with_udp_payload_limits(addr, pmtud, limits);
+                for server_sends in [false, true] {
+                    let receiver_is_limited = server_sends == limited_client;
+                    let (sender, receiver) = if server_sends {
+                        (&mut server, &mut client)
+                    } else {
+                        (&mut client, &mut server)
+                    };
+                    let expected_mtu = if receiver_is_limited {
+                        PEER_MAX
+                    } else {
+                        Pmtud::default_plpmtu(addr.ip())
+                    };
+                    assert_eq!(sender.plpmtu(), expected_mtu);
+                    let probe_size = {
+                        let path = sender.paths.primary().unwrap();
+                        let path = path.borrow();
+                        path.pmtud()
+                            .needs_probe()
+                            .then(|| path.pmtud().probe_size())
+                    };
+                    let probes_before = sender.stats().pmtud_tx;
+
+                    let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+                    fill_stream(sender, stream_id);
+                    let mut datagrams = sender
+                        .process_multiple_output(now(), 2.try_into().unwrap())
+                        .dgram()
+                        .unwrap();
+                    if receiver_is_limited {
+                        assert_eq!(datagrams.datagram_size().get(), PEER_MAX);
+                        assert_eq!(datagrams.num_datagrams(), 2);
+                        assert_eq!(sender.stats().pmtud_tx, 0);
+                        assert!(datagrams.iter().all(|d| d.len() <= PEER_MAX));
+                    } else {
+                        assert!(datagrams.datagram_size().get() > PEER_MAX);
+                        if let Some(probe_size) = probe_size {
+                            assert_eq!(sender.stats().pmtud_tx, probes_before + 1);
+                            assert_eq!(datagrams.datagram_size().get(), probe_size);
+                            // GSO permits a larger probe first, followed by a smaller last
+                            // datagram.
+                            let mut segments = datagrams.iter();
+                            assert_eq!(segments.next().unwrap().len(), probe_size);
+                            assert!(segments.all(|d| d.len() <= expected_mtu));
+                        } else {
+                            assert_eq!(datagrams.datagram_size().get(), expected_mtu);
+                        }
+                    }
+                    receiver.process_multiple_input(datagrams.iter_mut(), now());
+                    let mut buf = [0; PEER_MAX];
+                    assert!(receiver.stream_recv(stream_id, &mut buf).unwrap().0 > 0);
+                }
+            }
+        }
+    }
+}
 
 /// Test that one can reach the maximum MTU with GSO enabled.
 #[test]
