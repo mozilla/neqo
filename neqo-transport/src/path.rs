@@ -100,7 +100,7 @@ impl Paths {
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                     if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
-                        p.pmtud_mut().set_peer_max_udp_payload(peer_max);
+                        p.set_peer_max_udp_payload(peer_max);
                     }
                 }
                 Rc::new(RefCell::new(p))
@@ -986,6 +986,11 @@ impl Path {
     /// Mutably borrow the PMTUD discoverer for this path.
     pub fn pmtud_mut(&mut self) -> &mut Pmtud {
         self.sender.pmtud_mut()
+    }
+
+    /// Apply the peer's UDP payload limit to this path's sender.
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize) {
+        self.sender.set_peer_max_udp_payload(peer_max_udp_payload);
     }
 
     /// Read-only access to the owned sender.
