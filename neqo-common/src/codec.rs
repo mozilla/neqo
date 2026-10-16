@@ -74,11 +74,27 @@ impl<'a> Decoder<'a> {
     /// Skip while the current byte is `predicate`. Returns the number of bytes
     /// skipped.
     pub fn skip_while(&mut self, predicate: u8) -> usize {
-        let until = self
-            .as_ref() // remaining bytes
+        /// One SIMD register (SSE2/NEON), so each chunk is a single wide load and compare.
+        const CHUNK: usize = 16;
+
+        let buf = self.as_ref(); // remaining bytes
+        // Go bytewise until `CHUNK`-aligned, so chunk loads never straddle cache lines.
+        let head = buf.as_ptr().align_offset(CHUNK).min(buf.len());
+        if let Some(i) = buf[..head].iter().position(|v| *v != predicate) {
+            self.skip(i);
+            return i;
+        }
+        let (chunks, _) = buf[head..].as_chunks::<CHUNK>();
+        let start = head
+            + chunks
+                .iter()
+                .position(|c| *c != [predicate; CHUNK])
+                .unwrap_or(chunks.len())
+                * CHUNK;
+        let until = buf[start..]
             .iter()
             .position(|v| *v != predicate)
-            .unwrap_or_else(|| self.remaining());
+            .map_or(buf.len(), |i| start + i);
         self.skip(until);
         until
     }

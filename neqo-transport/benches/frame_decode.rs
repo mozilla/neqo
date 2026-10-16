@@ -45,10 +45,28 @@ fn frame_decode(c: &mut Criterion, n: usize) {
     });
 }
 
+/// Number of distinct start offsets for a PADDING frame within a 16-byte chunk.
+const PADDING_ALIGNMENTS: usize = 16;
+
+/// Decode an `n`-byte PADDING frame at every alignment, as real PADDING can start anywhere.
+fn padding_decode(c: &mut Criterion, n: usize) {
+    let buf = vec![0; n + PADDING_ALIGNMENTS - 1];
+    c.bench_function(&format!("Frame::decode PADDING {n} bytes"), |b| {
+        b.iter(|| {
+            for offset in 0..PADDING_ALIGNMENTS {
+                let mut dec = Decoder::new(&buf[offset..offset + n]);
+                black_box(Frame::decode(&mut dec).expect("decode frame"));
+            }
+        });
+    });
+}
+
 fn benchmark(c: &mut Criterion) {
     frame_decode(c, 10);
     frame_decode(c, 100);
     frame_decode(c, 1_000);
+    padding_decode(c, 1_500);
+    padding_decode(c, 16_383);
 }
 
 criterion_group! {
