@@ -797,21 +797,21 @@ mod tests {
         let mut pmtud = Pmtud::new(V4, None);
         let mut stats = Stats::default();
         pmtud.next(now, &mut stats);
+        let original_size = pmtud.probe_size();
 
         let original = send_probe_packet(&mut pmtud, &mut stats, 0, now);
         pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
         let stale = send_probe_packet(&mut pmtud, &mut stats, 1, now);
         pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(stats.pmtud_ack, 1);
 
         let size = pmtud.probe_size();
+        assert!(size > original_size);
         let current = send_probe_packet(&mut pmtud, &mut stats, 2, now);
         pmtud.on_packets_lost(std::slice::from_ref(&current), &mut stats, now);
         let retry = send_probe_packet(&mut pmtud, &mut stats, 3, now);
-        pmtud.on_packets_acked(
-            &[stale, sent::make_packet(4, now, size), current, retry],
-            now,
-            &mut stats,
-        );
+        let large_non_probe = sent::make_packet(4, now, size);
+        pmtud.on_packets_acked(&[stale, large_non_probe, current, retry], now, &mut stats);
 
         assert_eq!(pmtud.plpmtu(), size);
         assert!(pmtud.needs_probe());
