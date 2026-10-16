@@ -40,6 +40,7 @@ impl PacketSender {
     pub fn new(conn_params: &ConnectionParameters, pmtud: Pmtud, now: Instant) -> Self {
         let mtu = pmtud.plpmtu();
         let spurious_recovery = conn_params.spurious_recovery_enabled();
+        let abe = conn_params.abe_enabled();
         Self {
             cc: match (
                 conn_params.get_congestion_control(),
@@ -81,7 +82,7 @@ impl PacketSender {
                 (CongestionControl::Cubic, SlowStart::Classic) => {
                     CongestionControlImplementation::ClassicCubic(ClassicCongestionController::new(
                         ClassicSlowStart::default(),
-                        Cubic::default(),
+                        Cubic::default().abe(abe),
                         pmtud,
                         spurious_recovery,
                     ))
@@ -92,7 +93,7 @@ impl PacketSender {
                             conn_params.pacing_enabled(),
                             conn_params.get_hystart_css_baseline(),
                         ),
-                        Cubic::default(),
+                        Cubic::default().abe(abe),
                         pmtud,
                         spurious_recovery,
                     ))
@@ -100,7 +101,7 @@ impl PacketSender {
                 (CongestionControl::Cubic, SlowStart::Search) => {
                     CongestionControlImplementation::SearchCubic(ClassicCongestionController::new(
                         Search::new(),
-                        Cubic::default(),
+                        Cubic::default().abe(abe),
                         pmtud,
                         spurious_recovery,
                     ))

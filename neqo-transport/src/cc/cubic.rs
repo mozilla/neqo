@@ -99,13 +99,26 @@ impl Display for State {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Cubic {
     /// Current CUBIC parameters.
     current: State,
     /// CUBIC parameters that have been stored on a congestion event to restore later in case it
     /// turns out to have been spurious.
     stored: Option<State>,
+    /// Whether to apply the alternative backoff factor [`Self::BETA_USIZE_DIVIDEND_ECN`] on ECN-CE
+    /// congestion events (RFC 8511).
+    abe: bool,
+}
+
+impl Default for Cubic {
+    fn default() -> Self {
+        Self {
+            current: State::default(),
+            stored: None,
+            abe: true,
+        }
+    }
 }
 
 impl Display for Cubic {
@@ -185,6 +198,13 @@ impl Cubic {
     /// For implementation reasons neqo uses a dividend and divisor approach with `usize` typing to
     /// construct the beta value from `85/100`.
     pub const BETA_USIZE_DIVIDEND_ECN: usize = 85;
+
+    /// Enable or disable Alternative Backoff with ECN (RFC 8511). Enabled by default.
+    #[must_use]
+    pub const fn abe(mut self, abe: bool) -> Self {
+        self.abe = abe;
+        self
+    }
 
     /// This is the factor that is used by fast convergence to further reduce the next `W_max` when
     /// a congestion event occurs while `cwnd < W_max`. This speeds up the bandwidth release for
@@ -458,7 +478,7 @@ impl WindowAdjustment for Cubic {
 
         // Reducing the congestion window and resetting time
         self.current.t_epoch = None;
-        let beta_dividend = if congestion_trigger == Ecn {
+        let beta_dividend = if self.abe && congestion_trigger == Ecn {
             Self::BETA_USIZE_DIVIDEND_ECN
         } else {
             Self::BETA_USIZE_DIVIDEND
