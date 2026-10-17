@@ -242,6 +242,11 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
     }
 }
 
+/// Bytes reserved in an [`Encoder`] and later filled by [`Encoder::overwrite`].
+#[must_use = "call Encoder::overwrite to fill the reserved bytes"]
+#[derive(Copy, Clone)]
+pub struct Reservation<const N: usize>(usize);
+
 /// Encoder is good for building data structures.
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
@@ -345,6 +350,65 @@ impl<B: Buffer> Encoder<B> {
             () if v < (1 << 62) => self.encode((v | (3 << 62)).to_be_bytes()),
             () => panic!("Varint value too large"),
         }
+    }
+
+    /// Overwrite the QUIC varint at `off` with `value`, keeping a width of `len` bytes.
+    ///
+    /// A value may use a longer-than-minimal varint. When [`Encoder::varint_len`] of
+    /// `value` is less than `len`, `value` is written in `len` bytes so the field does
+    /// not change size and the bytes after it stay in place.
+    ///
+    /// # Panics
+    ///
+    /// When `len` is not 1, 2, 4, or 8, when `value` does not fit in a `len`-byte
+    /// varint, when `value >= 1<<62`, or when `off + len` exceeds the encoder length.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "The fit check guarantees that `value` fits in the selected width."
+    )]
+    pub fn rewrite_varint<T: Into<u64>>(&mut self, off: usize, len: usize, value: T) -> &mut Self {
+        let value = value.into();
+        assert!(matches!(len, 1 | 2 | 4 | 8), "invalid varint length {len}");
+        assert!(
+            Encoder::<Vec<u8>>::varint_len(value) <= len,
+            "varint value does not fit in {len} bytes"
+        );
+        assert!(off + len <= self.len(), "varint extends past encoder");
+        let dest = &mut self.as_mut()[off..off + len];
+        match len {
+            1 => dest[0] = value as u8,
+            2 => dest.copy_from_slice(&(value as u16 | (1 << 14)).to_be_bytes()),
+            4 => dest.copy_from_slice(&(value as u32 | (2 << 30)).to_be_bytes()),
+            8 => dest.copy_from_slice(&(value | (3 << 62)).to_be_bytes()),
+            _ => unreachable!("len checked above"),
+        }
+        self
+    }
+
+    /// Reserve `N` bytes, filled with zero, for a later [`Self::overwrite`].
+    ///
+    /// # Panics
+    ///
+    /// When the underlying buffer cannot hold `N` more bytes.
+    pub fn reserve<const N: usize>(&mut self) -> Reservation<N> {
+        let pos = self.buf.position();
+        self.pad_to(self.len() + N, 0);
+        Reservation(pos)
+    }
+
+    /// Overwrite bytes previously returned by [`Self::reserve`].
+    ///
+    /// # Panics
+    ///
+    /// When `rsv` is not contained in the bytes written to this encoder.
+    pub fn overwrite<const N: usize>(&mut self, rsv: Reservation<N>, data: [u8; N]) -> &mut Self {
+        assert!(rsv.0 >= self.start, "reservation is outside the encoder");
+        let offset = rsv.0 - self.start;
+        let end = offset + N;
+        let len = self.len();
+        assert!(end <= len, "reservation extends past encoder");
+        self.as_mut()[offset..end].copy_from_slice(&data);
+        self
     }
 
     /// Encode a length or byte count as a QUIC varint, accepting either `usize` or `u64`.
@@ -739,7 +803,30 @@ mod tests {
         io::{Cursor, Write as _},
     };
 
-    use super::{Buffer, Decoder, Encoder, MAX_VARINT};
+    use super::{Buffer, Decoder, Encoder, MAX_VARINT, Reservation};
+
+    #[test]
+    fn reserve_then_overwrite() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0xaa);
+        let one: Reservation<1> = enc.reserve();
+        let two: Reservation<2> = enc.reserve();
+        enc.encode_byte(0xbb);
+        assert_eq!(enc, Encoder::from_hex("aa000000bb"));
+        enc.overwrite(one, [0x11]);
+        enc.overwrite(two, [0x22, 0x33]);
+        assert_eq!(enc, Encoder::from_hex("aa112233bb"));
+
+        // `start` is not zero: the reserved offset is absolute in the buffer.
+        let mut buf = vec![0xff];
+        {
+            let mut enc = Encoder::new_borrowed_vec(&mut buf);
+            let reserved = enc.reserve::<1>();
+            enc.encode_byte(0x22);
+            enc.overwrite(reserved, [0x11]);
+        }
+        assert_eq!(buf, [0xff, 0x11, 0x22]);
+    }
 
     #[test]
     fn decode() {
@@ -1055,6 +1142,44 @@ mod tests {
             assert_eq!(dec.remaining(), 0);
             assert_eq!(v, c.v);
         }
+    }
+
+    #[test]
+    fn rewrite_varint_non_optimal_preserves_tail() {
+        // 2-byte field, value that would fit in 1 byte, tail intact.
+        let mut enc = Encoder::default();
+        enc.encode_varint(127u64);
+        assert_eq!(enc.len(), 2);
+        enc.encode([0xaa, 0xbb]);
+        enc.rewrite_varint(0, 2, 0u64);
+        assert_eq!(enc, Encoder::from_hex("4000aabb"));
+        let mut dec = enc.as_decoder();
+        assert_eq!(dec.decode_varint(), Some(0));
+        assert_eq!(dec.decode_remainder(), &[0xaa, 0xbb]);
+
+        // Same-width rewrite that is not at offset 0.
+        let mut enc = Encoder::default();
+        enc.encode_byte(0x02);
+        enc.encode_varint(10u64);
+        enc.encode_byte(0xff);
+        enc.rewrite_varint(1, 1, 20u64);
+        assert_eq!(enc, Encoder::from_hex("0214ff"));
+
+        // 4-byte and 8-byte non-optimal encodings.
+        let mut enc = Encoder::default();
+        enc.encode_varint(1u64 << 14);
+        enc.rewrite_varint(0, 4, 5u64);
+        enc.encode_varint(1u64 << 30);
+        enc.rewrite_varint(4, 8, 7u64);
+        assert_eq!(enc, Encoder::from_hex("80000005c000000000000007"));
+    }
+
+    #[test]
+    #[should_panic(expected = "varint value does not fit")]
+    fn rewrite_varint_rejects_wider_value() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(0u64);
+        enc.rewrite_varint(0, 1, 64u64);
     }
 
     #[test]
