@@ -402,7 +402,7 @@ impl RecvdPackets {
     /// Worst case for one ACK Range: a gap and a length, each a maximum-width varint.
     const ASSUMED_ACK_RANGE_LEN: usize = 16;
     /// Largest ACK Range Count that fits in a one-byte varint.
-    const MAX_EXTRA_ACK_RANGES: usize = (1 << 6) - 1;
+    const MAX_EXTRA_ACK_RANGES: usize = 63;
 
     /// Largest, delay, a reserved range count, and the first range.
     fn encode_ack_fixed<B: Buffer>(
@@ -419,23 +419,24 @@ impl RecvdPackets {
 
     /// Additional ACK ranges that fit in `space`, then the reserved range count.
     ///
-    /// `ranges` is newest-first. Already-acknowledged ranges are skipped. The returned
-    /// list is the first range followed by each extra range that was written.
-    fn encode_ack_ranges<B: Buffer>(
-        ranges: &VecDeque<PacketRange>,
+    /// `pending` is the ack-needed ranges after `first`, newest-first. The returned
+    /// list is `first` followed by each extra range that was written.
+    fn encode_ack_ranges<'a, B, I>(
+        pending: I,
         encoder: &mut Encoder<B>,
-        first: &PacketRange,
+        first: PacketRange,
         reservation: Reservation<1>,
         space: usize,
-    ) -> Vec<PacketRange> {
-        let mut acked = vec![first.clone()];
+    ) -> Vec<PacketRange>
+    where
+        B: Buffer,
+        I: Iterator<Item = &'a PacketRange>,
+    {
+        let mut last = first.smallest;
+        let mut acked = vec![first];
         let start = encoder.len();
         let range_budget = min(Self::RANGE_FRAME_SPACE, space);
-        let mut last = first.smallest;
-        for range in ranges.iter().filter(|range| range.ack_needed()).skip(1) {
-            if acked.len() > Self::MAX_EXTRA_ACK_RANGES {
-                break;
-            }
+        for range in pending.take(Self::MAX_EXTRA_ACK_RANGES) {
             // Leave room for a full-sized gap plus range instead of measuring it.
             if encoder.len() + Self::ASSUMED_ACK_RANGE_LEN > start + range_budget {
                 break;
@@ -449,8 +450,7 @@ impl RecvdPackets {
             acked.push(range.clone());
         }
         debug_assert!(encoder.len() - start <= range_budget);
-        let extra = acked.len() - 1;
-        let count = u8::try_from(extra).expect("ACK range count fits in one byte");
+        let count = u8::try_from(acked.len() - 1).expect("ACK range count is one byte");
         encoder.overwrite(reservation, [count]);
         acked
     }
@@ -479,7 +479,8 @@ impl RecvdPackets {
             return;
         }
 
-        let Some(first) = self.ranges.iter().find(|range| range.ack_needed()).cloned() else {
+        let mut ack_needed = self.ranges.iter().filter(|range| range.ack_needed());
+        let Some(first) = ack_needed.next().cloned() else {
             return;
         };
         let Some(largest_pn_time) = self.largest_pn_time else {
@@ -500,18 +501,15 @@ impl RecvdPackets {
         } else {
             FrameType::Ack
         };
-        let ecn_len = ecn.map_or(0, |(ect0, ect1, ce)| {
-            Encoder::varint_len(ect0) + Encoder::varint_len(ect1) + Encoder::varint_len(ce)
-        });
         // Count is one reserved byte. ECN counts are written after the ranges.
         let fixed_len = Encoder::varint_len(u64::from(frame_type))
             + Encoder::varint_len(first.largest)
             + Encoder::varint_len(ack_delay)
-            + 1
+            + 1 // one byte for range count (see RANGE_FRAME_SPACE)
             + Encoder::varint_len(first.len() - 1)
-            + ecn_len;
-        // `remaining()` includes frames already in the packet. ACK is usually first,
-        // but that is not guaranteed. If the fixed part does not fit, write nothing.
+            + ecn.map_or(0, |(ect0, ect1, ce)| {
+                Encoder::varint_len(ect0) + Encoder::varint_len(ect1) + Encoder::varint_len(ce)
+            });
         let Some(space) = builder.remaining().checked_sub(fixed_len) else {
             return;
         };
@@ -519,20 +517,16 @@ impl RecvdPackets {
         stats.largest_acknowledged = first.largest;
         stats.ack += 1;
 
-        let acked = {
-            let ranges = &self.ranges;
-            let mut acked = Vec::new();
-            builder.encode_frame(frame_type, |encoder| {
-                let reservation = Self::encode_ack_fixed(encoder, &first, ack_delay);
-                acked = Self::encode_ack_ranges(ranges, encoder, &first, reservation, space);
-                if let Some((ect0, ect1, ce)) = ecn {
-                    encoder.encode_varint(ect0);
-                    encoder.encode_varint(ect1);
-                    encoder.encode_varint(ce);
-                }
-            });
-            acked
-        };
+        let mut acked = Vec::new();
+        builder.encode_frame(frame_type, |encoder| {
+            let reservation = Self::encode_ack_fixed(encoder, &first, ack_delay);
+            acked = Self::encode_ack_ranges(ack_needed, encoder, first, reservation, space);
+            if let Some((ect0, ect1, ce)) = ecn {
+                encoder.encode_varint(ect0);
+                encoder.encode_varint(ect1);
+                encoder.encode_varint(ce);
+            }
+        });
         debug_assert!(builder.len() <= builder.limit());
 
         // We've sent an ACK, reset the timer.

@@ -256,7 +256,7 @@ impl From<std::num::TryFromIntError> for Error {
 
 pub type AppError = u64;
 
-#[deprecated(note = "use `CloseReason` instead")]
+#[deprecated(since = "0.7.7", note = "use `CloseReason` instead")]
 pub type ConnectionError = CloseReason;
 
 /// Reason why a connection closed.
