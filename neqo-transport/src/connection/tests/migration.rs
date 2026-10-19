@@ -26,7 +26,7 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
+    CountingConnectionIdGenerator, DEFAULT_RTT, connect_fail, connect_force_idle, connect_rtt_idle,
     default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
     zero_len_cid_client,
 };
@@ -635,6 +635,48 @@ fn migrate_immediate_fail() {
     let fallback = client.process_output(now).dgram();
     assert_v6_path(&fallback.unwrap(), false);
     assert_eq!(client.stats().frame_tx.retire_connection_id, 1);
+}
+
+/// Losses on a failed path don't count toward the path failed over to (RFC 9000 §9.4).
+#[test]
+fn failover_ignores_failed_path_losses() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+    let old_path = client.paths.primary().unwrap();
+    let events = client.stats().cc.congestion_events;
+
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now)
+        .unwrap();
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream_id, &[0; 10_000]).unwrap();
+
+    // Drop everything on the new path until the client falls back.
+    let fallback = loop {
+        match client.process_output(now) {
+            Output::Datagram(d) if d.source() == DEFAULT_ADDR => break d,
+            Output::Datagram(_) => {}
+            Output::Callback(t) => now += t,
+            Output::None => panic!("the client should fall back"),
+        }
+    };
+    assert!(Rc::ptr_eq(&client.paths.primary().unwrap(), &old_path));
+
+    server.process_input(fallback, now);
+    for _ in 0..10 {
+        while let Some(d) = client.process_output(now).dgram() {
+            server.process_input(d, now);
+        }
+        while let Some(d) = server.process_output(now).dgram() {
+            client.process_input(d, now);
+        }
+        now += DEFAULT_RTT;
+    }
+
+    assert_eq!(client.stats().cc.congestion_events, events);
+    assert_eq!(old_path.borrow().sender().bytes_in_flight(), 0);
 }
 
 /// Migrating to the same path shouldn't do anything special,

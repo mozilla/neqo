@@ -1124,12 +1124,11 @@ impl Connection {
             self.create_resumption_token(now);
         }
 
-        if !self
+        let failed_over = self
             .paths
-            .process_timeout(now, pto, &mut self.stats.borrow_mut())
-        {
-            qinfo!("[{self}] last available path failed");
-            self.absorb_error::<Error>(now, Err(Error::NoAvailablePath));
+            .process_timeout(now, pto, &mut self.stats.borrow_mut());
+        if self.absorb_error(now, failed_over) == Some(true) {
+            self.loss_recovery.migrate(); // RFC 9000 §9.4
         }
     }
 
