@@ -429,18 +429,6 @@ impl QuicDatagrams {
             .map_or(0, DatagramQueue::take_expired_count)
     }
 
-    /// Whether any session has a count waiting to be picked up by
-    /// [`Self::expire_session_datagrams`] or
-    /// [`Self::take_session_expired_count`]. Only those, or
-    /// [`Self::drop_session_datagrams`], ever clear a queue's counts.
-    ///
-    /// Sent counts are not included yet: nothing drains them, so including
-    /// them would leave this `true` after the first send.
-    #[must_use]
-    pub fn has_pending_counts(&self) -> bool {
-        self.queues.values().any(DatagramQueue::has_expired)
-    }
-
     /// Expire `queue`'s stale entries and, if that unblocks it, fire the
     /// resume event. Shared by [`Self::expire_datagrams`] (every session),
     /// [`Self::expire_session_datagrams`] (a single one) and

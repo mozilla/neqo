@@ -948,18 +948,12 @@ fn timer_expiry_is_counted_by_the_next_session_sweep() {
 
     client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
     _ = client.enqueue_datagram(session, vec![1], Some(1), now, SendGroupId::new(0), 0);
-    assert!(!client.has_pending_datagram_counts());
 
     let later = now + Duration::from_millis(10);
     client.process_timer(later);
     assert_eq!(client.datagram_queue_capacity(session).queued_datagrams, 0);
-    assert!(
-        client.has_pending_datagram_counts(),
-        "the timer's expiry is waiting to be counted"
-    );
 
     assert_eq!(client.expire_session_datagrams(session, later), 1);
-    assert!(!client.has_pending_datagram_counts());
     assert_eq!(
         client.expire_session_datagrams(session, later),
         0,
