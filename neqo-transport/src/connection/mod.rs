@@ -2584,8 +2584,11 @@ impl Connection {
             }
         }
 
-        if profile.ack_only() {
-            // If we are CC limited we can only send ACKs!
+        let small_initial = self.role == Role::Server
+            && space == PacketNumberSpace::Initial
+            && profile.limit() < packet::MIN_INITIAL_PACKET_SIZE;
+        // Only ACKs if CC limited, or in a server Initial below the minimum size (RFC 9000, 14.1).
+        if profile.ack_only() || small_initial {
             return (tokens, false);
         }
 
