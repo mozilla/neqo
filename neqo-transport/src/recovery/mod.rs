@@ -1033,9 +1033,12 @@ impl Loss {
         qtrace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
+        // Probes count against the anti-amplification limit (RFC 9002, Section 6.2.2.1).
+        let pto_possible = path.pto_possible();
         if let Some(profile) = self
             .pto_state
             .as_mut()
+            .filter(|_| pto_possible)
             .and_then(|pto| pto.send_profile(mtu))
         {
             profile
@@ -1051,7 +1054,7 @@ impl Loss {
                 } else {
                     SendProfile::new_limited(mtu)
                 }
-            } else if sender.recovery_packet() {
+            } else if sender.recovery_packet() && pto_possible {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
