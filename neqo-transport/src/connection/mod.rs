@@ -2184,13 +2184,13 @@ impl Connection {
             .paths
             .migrate(&path, force, now, &mut self.stats.borrow_mut())
         {
-            self.loss_recovery.migrate();
             self.path_migrated(&path);
         }
         Ok(())
     }
 
-    fn path_migrated(&self, path: &PathRef) {
+    fn path_migrated(&mut self, path: &PathRef) {
+        self.loss_recovery.migrate();
         let p = path.borrow();
         self.events
             .path_migrated(p.local_address(), p.remote_address());
@@ -3546,12 +3546,11 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                if let Some(primary) =
-                    self.paths
-                        .path_response(data, now, &mut self.stats.borrow_mut())
-                {
+                let primary = self
+                    .paths
+                    .path_response(data, now, &mut self.stats.borrow_mut());
+                if let Some(primary) = primary {
                     self.path_migrated(&primary);
-                    self.loss_recovery.migrate();
                 }
             }
             Frame::ConnectionClose {
