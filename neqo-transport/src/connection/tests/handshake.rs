@@ -2309,7 +2309,8 @@ fn expand_datagram_that_ends_in_short_header() {
         "expanded for the Initial it carries"
     );
     let (_, rest) = split_datagram(&c3);
-    let (_, short) = split_datagram(&rest.expect("Handshake is coalesced"));
+    let rest = rest.expect("Handshake is coalesced");
+    let (_, short) = split_datagram(&rest);
     let short = short.expect("a 1-RTT packet is coalesced");
     assert_eq!(
         short[0] & 0x80,
@@ -2320,6 +2321,11 @@ fn expand_datagram_that_ends_in_short_header() {
         client.stats().frame_tx.padding,
         1,
         "expanded from inside it"
+    );
+    assert_eq!(
+        client.stats().cc.bytes_in_flight,
+        rest.len(),
+        "the Handshake and padded 1-RTT packets are in flight"
     );
 
     let dropped = server.stats().dropped_rx;

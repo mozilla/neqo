@@ -822,7 +822,7 @@ where
                 start = None;
             }
             last_pn = Some(p.pn());
-            if !p.cc_in_flight() {
+            if !p.ack_eliciting() || !p.on_primary_path() {
                 // Not interesting, keep looking.
                 continue;
             }
