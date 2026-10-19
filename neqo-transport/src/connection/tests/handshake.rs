@@ -2280,3 +2280,49 @@ fn crypto_resend_chance_survives_useless_duplicate() {
     let dup = make_dummy_crypto(&mut client, &mut now);
     assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
 }
+
+/// An Initial datagram that ends in a short header packet is expanded inside that packet.
+#[test]
+fn expand_datagram_that_ends_in_short_header() {
+    // No NEW_CONNECTION_ID frames, so the 1-RTT packet carries only an ACK.
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram().unwrap();
+
+    // Two 0.5-RTT packets, so the client acknowledges them immediately.
+    let s2 = send_something(&mut server, now());
+    let s3 = send_something(&mut server, now() + DEFAULT_RTT);
+    let t = now() + DEFAULT_RTT;
+    client.process_input(s1, t);
+    client.process_input(s2, t);
+    client.process_input(s3, t);
+    assert!(maybe_authenticate(&mut client));
+
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(
+        c3.len(),
+        client.plpmtu(),
+        "expanded for the Initial it carries"
+    );
+    let (_, rest) = split_datagram(&c3);
+    let (_, short) = split_datagram(&rest.expect("Handshake is coalesced"));
+    let short = short.expect("a 1-RTT packet is coalesced");
+    assert_eq!(
+        short[0] & 0x80,
+        0,
+        "the datagram ends in a short header packet"
+    );
+    assert_eq!(
+        client.stats().frame_tx.padding,
+        1,
+        "expanded from inside it"
+    );
+
+    let dropped = server.stats().dropped_rx;
+    server.process_input(c3, t);
+    assert_eq!(server.stats().dropped_rx, dropped, "every packet decrypts");
+}

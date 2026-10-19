@@ -2779,7 +2779,7 @@ impl Connection {
         mut encoder: Encoder<&mut Vec<u8>>,
         packet_tos: Tos,
     ) -> Res<SendOption> {
-        let mut initial_sent = None;
+        let mut initial_sent: Option<sent::Packet> = None;
         let mut needs_padding = false;
         let grease_quic_bit = self.can_grease_quic_bit();
         let version = self.version();
@@ -2860,6 +2860,16 @@ impl Connection {
                 encoder = builder.abort();
 
                 continue;
+            }
+
+            // Pad inside a short header packet; padding after it would join its ciphertext.
+            if !padded && let Some(initial) = initial_sent.as_mut() {
+                let before = builder.len();
+                padded = builder.pad();
+                if padded {
+                    initial.track_padding(builder.len() - before);
+                    self.stats.borrow_mut().frame_tx.padding += 1;
+                }
             }
 
             if packet_tos.is_ecn_marked() {
