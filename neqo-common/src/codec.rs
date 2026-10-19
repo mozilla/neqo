@@ -747,8 +747,8 @@ mod tests {
         let two: Reservation<2> = enc.reserve();
         enc.encode_byte(0xbb);
         assert_eq!(enc, Encoder::from_hex("aa000000bb"));
-        enc.overwrite(one, [0x11]);
         enc.overwrite(two, [0x22, 0x33]);
+        enc.overwrite(one, [0x11]);
         assert_eq!(enc, Encoder::from_hex("aa112233bb"));
 
         // `start` is not zero: the reserved offset is absolute in the buffer.
