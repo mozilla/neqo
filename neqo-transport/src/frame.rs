@@ -22,7 +22,7 @@ use strum::FromRepr;
 use crate::{
     AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
     stateless_reset::Token as Srt,
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
 };
 
 #[repr(u64)]
@@ -620,7 +620,7 @@ impl<'a> Frame<'a> {
             }),
             FrameType::MaxStreamsBiDi | FrameType::MaxStreamsUniDi => {
                 let m = dv(dec)?;
-                if m > (1 << 60) {
+                if m > MAX_STREAMS_LIMIT {
                     return Err(Error::StreamLimit);
                 }
                 Ok(Self::MaxStreams {
@@ -637,7 +637,7 @@ impl<'a> Frame<'a> {
             }),
             FrameType::StreamsBlockedBiDi | FrameType::StreamsBlockedUniDi => {
                 let m = dv(dec)?;
-                if m > (1 << 60) {
+                if m > MAX_STREAMS_LIMIT {
                     return Err(Error::StreamLimit);
                 }
                 Ok(Self::StreamsBlocked {
@@ -779,7 +779,7 @@ mod tests {
     use neqo_common::{Decoder, Encoder, MAX_VARINT};
 
     use crate::{
-        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
+        CloseError, ConnectionId, Error, MAX_STREAMS_LIMIT, StreamId, StreamType, Token as Srt,
         ecn::Count,
         frame::{AckRange, Frame, FrameType},
         packet,
@@ -1573,7 +1573,7 @@ mod tests {
     fn decode_max_streams_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x12); // MaxStreamsBiDi
-        enc.encode_varint((1u64 << 60) + 1);
+        enc.encode_varint(MAX_STREAMS_LIMIT + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
             Error::StreamLimit
@@ -1585,7 +1585,7 @@ mod tests {
     fn decode_streams_blocked_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x16); // StreamsBlockedBiDi
-        enc.encode_varint((1u64 << 60) + 1);
+        enc.encode_varint(MAX_STREAMS_LIMIT + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
             Error::StreamLimit

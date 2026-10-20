@@ -79,7 +79,7 @@ pub use self::{
     sni::find_sni,
     stateless_reset::Token,
     stats::{SlowStartExitReason, Stats},
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
     version::Version,
 };
 #[cfg(feature = "bench")]
