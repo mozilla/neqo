@@ -2551,7 +2551,7 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
-        make_pmtud_probe: bool,
+        pmtud_probe: bool,
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
         let mut tokens = recovery::Tokens::new();
@@ -2576,8 +2576,7 @@ impl Connection {
         let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
         // PMTUD must not record a success for a packet that was never probe-sized.
         debug_assert!(
-            !make_pmtud_probe
-                || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
+            !pmtud_probe || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
         );
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Path validation probes should only be padded if the full MTU is available.
@@ -2599,7 +2598,7 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if make_pmtud_probe {
+                if pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2801,7 +2800,7 @@ impl Connection {
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
             let coalesced = !encoder.is_empty(); // Whether this packet is coalesced behind another one.
-            let make_pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
+            let pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
 
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
@@ -2813,7 +2812,7 @@ impl Connection {
             let header_start = encoder.len();
 
             // Configure the limits and padding for this packet.
-            let limit = if make_pmtud_probe {
+            let limit = if pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
                 path.borrow().pmtud().probe_size()
@@ -2862,7 +2861,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, make_pmtud_probe, now);
+                    self.write_frames(path, space, &profile, &mut builder, pmtud_probe, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
