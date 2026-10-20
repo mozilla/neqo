@@ -132,18 +132,12 @@ fn zero_rtt_before_resumption_token() {
     assert!(client.stream_create(StreamType::BiDi).is_err());
 }
 
-#[test]
-fn zero_rtt_send_reject() {
-    for max_data in [2, 3, 6] {
-        for stream_type in [StreamType::UniDi, StreamType::BiDi] {
-            zero_rtt_send_reject_with_max_data(max_data, stream_type);
-        }
-    }
-}
-
-fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) {
+/// A resuming client and a server whose fresh anti-replay context makes it
+/// reject that client's 0-RTT. `max_data` sets the resumed server's
+/// flow-control limit; it has no bearing on the rejection itself, which the
+/// fresh anti-replay context forces regardless.
+fn resumed_pair_that_rejects_0rtt(max_data: usize) -> (Connection, Connection) {
     const MESSAGE: &[u8] = &[1, 2, 3];
-
     let mut client = default_client();
     let mut server = new_server(ConnectionParameters::default().max_data(to_u64(MESSAGE.len())));
     connect(&mut client, &mut server);
@@ -169,6 +163,22 @@ fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) 
     server
         .server_enable_0rtt(&ar, AllowZeroRtt {})
         .expect("enable 0-RTT");
+    (client, server)
+}
+
+#[test]
+fn zero_rtt_send_reject() {
+    for max_data in [2, 3, 6] {
+        for stream_type in [StreamType::UniDi, StreamType::BiDi] {
+            zero_rtt_send_reject_with_max_data(max_data, stream_type);
+        }
+    }
+}
+
+fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) {
+    const MESSAGE: &[u8] = &[1, 2, 3];
+
+    let (mut client, mut server) = resumed_pair_that_rejects_0rtt(max_data);
 
     // Exhaust the connection's remembered flow-control limit with 0-RTT data.
     let stream_id = client.stream_create(stream_type).unwrap();
@@ -243,6 +253,47 @@ fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) 
         (message.len(), false)
     );
     assert_eq!(received, message);
+}
+
+/// A limit raised before 0-RTT is rejected survives the rejection and is re-advertised in 1-RTT.
+#[test]
+fn zero_rtt_reject_after_set_remote_max_streams() {
+    let (mut client, mut server) = resumed_pair_that_rejects_0rtt(3);
+
+    client.set_remote_max_streams(StreamType::BiDi, 1000);
+    client.set_remote_max_streams(StreamType::UniDi, 1000);
+
+    let client_hs = client.process_output(now());
+    assert!(client_hs.as_dgram_ref().is_some());
+    let client_0rtt = client.process_output(now());
+    assert!(client_0rtt.as_dgram_ref().is_some());
+
+    let server_hs = server.process(client_hs.dgram(), now());
+    let server_hs2 = server.process(client_0rtt.dgram(), now());
+
+    _ = client.process(server_hs.dgram(), now());
+    let dgram = client.process(server_hs2.dgram(), now()).dgram();
+    let dgram = server.process(dgram, now()).dgram();
+
+    // `zero_rtt_rejected` runs here with the limits already raised.
+    let client_fin = client.process(dgram, now());
+    let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
+    assert!(client.events().any(recvd_0rtt_reject));
+
+    // The MAX_STREAMS frames went out in the rejected 0-RTT packet; they
+    // must be re-sent in 1-RTT so the server ends up with the raised limit.
+    let mut dgram = client_fin.dgram();
+    while let Some(d) = dgram {
+        dgram = server.process(Some(d), now()).dgram();
+        dgram = dgram.and_then(|d| client.process(Some(d), now()).dgram());
+    }
+    for st in [StreamType::BiDi, StreamType::UniDi] {
+        let opened = std::iter::repeat_with(|| server.stream_create(st))
+            .take_while(Result::is_ok)
+            .take(1001)
+            .count();
+        assert_eq!(opened, 1000, "{st:?}");
+    }
 }
 
 #[test]
