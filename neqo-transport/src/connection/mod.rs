@@ -2525,7 +2525,7 @@ impl Connection {
         probe
     }
 
-    /// Whether to make this packet a PMTUD probe.
+    /// Whether this packet should be a PMTUD probe.
     fn should_probe_pmtud(
         &self,
         path: &PathRef,
@@ -2799,7 +2799,7 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
-            let coalesced = !encoder.is_empty(); // Whether this packet is coalesced behind another one.
+            let coalesced = !encoder.is_empty();
             let pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
 
             // Ensure we have tx crypto state for this epoch, or skip it.

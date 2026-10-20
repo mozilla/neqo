@@ -1159,8 +1159,7 @@ impl Path {
         self.sender().cwnd_avail().min(self.amplification_limit())
     }
 
-    /// Whether a PMTUD probe is needed and fits in the budget. Probes consume the
-    /// congestion window like any other packet; see RFC 9000, Section 14.4.
+    /// Whether a PMTUD probe is needed and fits the send budget (RFC 9000, Section 14.4).
     pub fn can_probe_pmtud(&self) -> bool {
         self.pmtud().needs_probe() && self.send_budget() >= self.pmtud().probe_size()
     }
