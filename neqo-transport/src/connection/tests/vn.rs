@@ -6,24 +6,30 @@
 
 use std::time::Duration;
 
-use neqo_common::{Decoder, Dscp, Encoder, event::Provider as _};
+use neqo_common::{Decoder, Dscp, Encoder, Role, event::Provider as _};
+use nss::{
+    RecordProtectionOps as _,
+    constants::{TLS_CHACHA20_POLY1305_SHA256, TLS_GRP_EC_SECP384R1},
+    generate_ech_keys,
+};
 use test_fixture::{
     assertions::{self, assert_initial, assert_version},
-    datagram, now, split_datagram, strip_padding,
+    datagram,
+    header_protection::{self, decode_initial_header, initial_aead_and_hp},
+    now, split_datagram, strip_padding,
 };
 
-#[cfg(not(feature = "disable-encryption"))]
-use super::{super::Connection, assert_error, forged_server_initial};
 use super::{
-    super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
+    super::{CloseReason, Connection, ConnectionEvent, Output, State, ZeroRttState},
     CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
     new_client, new_server, send_something,
 };
 #[cfg(not(feature = "disable-encryption"))]
-use crate::frame::FrameType;
+use super::{assert_error, forged_server_initial};
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
     connection::tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
+    frame::FrameType,
     packet,
     tparams::{TransportParameter, TransportParameterId::*},
 };
@@ -360,6 +366,113 @@ fn version_negotiation_downgrade() {
     );
 }
 
+fn v2_server() -> Connection {
+    new_server(ConnectionParameters::default().versions(Version::Version2, Version::all()))
+}
+
+fn ech_server() -> Connection {
+    let mut server = v2_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(7, "public.example", &sk, &pk)
+        .unwrap();
+    server
+}
+
+/// Start the handshake and spoof a Version Negotiation packet that lists `version`.
+fn spoof_vn(client: &mut Connection, version: Version) {
+    let initial = client.process_output(now()).dgram().unwrap();
+    let vn = create_vn(&initial, &[version.wire_version()]);
+    client.process_input(datagram(vn), now());
+}
+
+fn connect_after_vn(client: &mut Connection, server: &mut Connection) {
+    spoof_vn(client, Version::Version2);
+    connect(client, server);
+    assert_eq!(client.version(), Version::Version2);
+}
+
+/// A Version Negotiation packet, which anyone can spoof, must not disable ECH.
+#[test]
+fn version_negotiation_keeps_ech() {
+    let mut server = ech_server();
+    let mut client = default_client();
+    client.client_enable_ech(server.ech_config()).unwrap();
+    connect_after_vn(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().ech_accepted());
+}
+
+/// An ECH configuration that was rejected is not applied after Version Negotiation.
+#[test]
+fn version_negotiation_invalid_ech() {
+    let mut server = ech_server();
+    let ech_config = server.ech_config();
+    let mut client = default_client();
+    client
+        .client_enable_ech(&ech_config[..ech_config.len() - 1])
+        .unwrap_err();
+    connect_after_vn(&mut client, &mut server);
+    assert!(!client.tls_info().unwrap().ech_accepted());
+}
+
+/// TLS configuration survives Version Negotiation.
+#[test]
+fn version_negotiation_keeps_tls_config() {
+    let mut server = v2_server();
+    server.set_alpn(&["other"]).unwrap();
+    let mut client = default_client();
+    client.set_alpn(&["other"]).unwrap();
+    client.set_ciphers(&[TLS_CHACHA20_POLY1305_SHA256]).unwrap();
+    client.set_groups(&[TLS_GRP_EC_SECP384R1]).unwrap();
+    client.send_additional_key_shares(0).unwrap();
+    connect_after_vn(&mut client, &mut server);
+    let info = client.tls_info().unwrap();
+    assert_eq!(info.alpn(), Some("other"));
+    assert_eq!(info.cipher_suite(), TLS_CHACHA20_POLY1305_SHA256);
+    assert_eq!(info.key_exchange(), TLS_GRP_EC_SECP384R1);
+}
+
+/// ECH GREASE survives Version Negotiation.
+#[test]
+fn version_negotiation_keeps_ech_grease() {
+    const ECH_EXTENSION: u16 = 0xfe0d;
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .versions(Version::Version2, Version::all())
+            .mlkem(false)
+            .sni_slicing(false),
+    );
+    client.client_enable_ech(b"").unwrap();
+    spoof_vn(&mut client, Version::Version1);
+
+    // Decrypt the QUIC v1 Initial and list the extensions of the ClientHello in its CRYPTO frame.
+    let initial = client.process_output(now()).dgram().unwrap();
+    let (protected_header, dcid, _, payload) =
+        decode_initial_header(&initial, Role::Client).unwrap();
+    let (_, aead, hp) = initial_aead_and_hp(dcid, Role::Client);
+    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
+    let pn_len = header.len() - protected_header.len();
+    let mut buf = vec![0; payload.len()];
+    let plaintext = aead
+        .decrypt(pn, &header, &payload[pn_len..], &mut buf)
+        .unwrap();
+    let mut dec = Decoder::from(plaintext);
+    assert_eq!(dec.decode_varint(), Some(FrameType::Crypto.into()));
+    assert_eq!(dec.decode_varint(), Some(0));
+    let mut ch = Decoder::from(dec.decode_vvec().unwrap());
+    ch.skip(4 + 2 + 32); // Header, version, random.
+    ch.skip_vec(1);
+    ch.skip_vec(2);
+    ch.skip_vec(1);
+    let mut extensions = Decoder::from(ch.decode_vec(2).unwrap());
+    let mut types = Vec::new();
+    while extensions.remaining() > 0 {
+        types.push(extensions.decode_uint::<u16>().unwrap());
+        extensions.skip_vec(2);
+    }
+    assert!(types.contains(&ECH_EXTENSION));
+}
+
 /// A server connection needs to be configured with the version that the client attempts.
 /// Otherwise, it will object to the client transport parameters and not do anything.
 #[test]
@@ -529,6 +642,32 @@ fn compatible_upgrade_0rtt_rejected() {
         matches!(e, ConnectionEvent::ZeroRttRejected)
     }));
     assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
+}
+
+/// Version Negotiation changes the version, so the session ticket can't be used and
+/// the application has to be told that its 0-RTT streams are gone.
+#[test]
+fn version_negotiation_0rtt_rejected() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Sending);
+
+    let other = Version::all()
+        .into_iter()
+        .find(|&v| v != client.version())
+        .unwrap();
+    spoof_vn(&mut client, other);
+    assert_eq!(client.version(), other);
+    assert!(
+        client
+            .events()
+            .any(|e| matches!(e, ConnectionEvent::ZeroRttRejected))
+    );
 }
 
 /// When the server confirms a new version the client will switch to using v2.

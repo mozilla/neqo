@@ -1168,7 +1168,8 @@ mod tests {
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
-        DEFAULT_SERVER_NAME, anti_replay, default_server_h3, fixture_init, new_server, now,
+        DEFAULT_SERVER_NAME, anti_replay, assertions::assert_vn, default_server_h3, fixture_init,
+        new_server, now,
     };
     use tracing::trace;
 
@@ -3969,6 +3970,58 @@ mod tests {
 
         // Check that we can send a request and that the stream_id starts again from 0.
         assert_eq!(make_request(&mut client, false, &[]), 0);
+    }
+
+    /// Version Negotiation discards 0-RTT, after which the client sets up HTTP/3 again.
+    #[test]
+    fn zero_rtt_version_negotiation() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+
+        // Unlike `default_http3_client()`, this client supports more than one version.
+        let mut client = Http3Client::new(
+            DEFAULT_SERVER_NAME,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            Http3Parameters::default()
+                .max_table_size_encoder(100)
+                .max_table_size_decoder(100)
+                .max_blocked_streams(100),
+            now(),
+        )
+        .unwrap();
+        client.enable_resumption(now(), &token).unwrap();
+        let initial = client.process_output(now()).dgram();
+        make_request(&mut client, false, &[]);
+
+        let mut v2_only = Http3Server::new(
+            now(),
+            DEFAULT_KEYS,
+            DEFAULT_ALPN_H3,
+            anti_replay(),
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            Http3Parameters::default().connection_parameters(
+                ConnectionParameters::default()
+                    .versions(Version::Version2, vec![Version::Version2]),
+            ),
+            None,
+        )
+        .unwrap();
+        let vn = v2_only.process(initial, now()).dgram().unwrap();
+        assert_vn(&vn);
+        client.process_input(vn, now());
+        assert!(
+            client
+                .events()
+                .any(|e| e == Http3ClientEvent::ZeroRttRejected)
+        );
+
+        let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, _>(
+            DEFAULT_ALPN_H3,
+            ConnectionParameters::default().versions(Version::Version2, Version::all()),
+        ));
+        connect_with(&mut client, &mut server);
     }
 
     // Connect to a server, get token and reconnect using 0-rtt. Server sends new Settings.
