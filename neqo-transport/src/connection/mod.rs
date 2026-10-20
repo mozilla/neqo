@@ -2590,7 +2590,7 @@ impl Connection {
             }
         }
 
-        // Only ACKs if CC limited, or in a server Initial below the minimum size (RFC 9000, 14.1).
+        // ACKs only if CC limited or a server Initial is too small (RFC 9000, Section 14.1).
         if profile.ack_only() || self.is_small_initial(space, profile) {
             return (tokens, false);
         }

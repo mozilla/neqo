@@ -1562,7 +1562,7 @@ fn server_initial_retransmits_identical() {
     );
 }
 
-/// PTOs count against the anti-amplification limit, and an Initial in what is left has only ACKs.
+/// PTOs count against the anti-amplification limit (RFC 9002, Section 6.2.2.1).
 #[test]
 fn server_pto_respects_amplification_limit() {
     let mut now = now();
@@ -1602,7 +1602,7 @@ fn server_pto_respects_amplification_limit() {
     }
     now += timer;
 
-    // The probe takes a full datagram, and the rest of the budget goes to a Handshake datagram.
+    // A full probe, then the rest of the budget as Handshake only.
     let (last, timer) = send(&mut server, now);
     let rest = budget - first.iter().map(Datagram::len).sum::<usize>() - 5 * mtu;
     assert_eq!(sizes(&last), vec![mtu, rest]);
