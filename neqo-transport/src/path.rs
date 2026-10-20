@@ -1161,7 +1161,7 @@ impl Path {
 
     /// Whether a PMTUD probe is needed and fits in the budget. Probes consume the
     /// congestion window like any other packet; see RFC 9000, Section 14.4.
-    pub fn can_send_pmtud_probe(&self) -> bool {
+    pub fn can_probe_pmtud(&self) -> bool {
         self.pmtud().needs_probe() && self.send_budget() >= self.pmtud().probe_size()
     }
 

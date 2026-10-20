@@ -2526,7 +2526,7 @@ impl Connection {
     }
 
     /// Whether to make this packet a PMTUD probe.
-    fn make_pmtud_probe(
+    fn should_probe_pmtud(
         &self,
         path: &PathRef,
         space: PacketNumberSpace,
@@ -2539,7 +2539,7 @@ impl Connection {
             && !coalesced // Only send PMTUD probes using non-coalesced packets.
             && path.is_primary()
             && !profile.ack_only() // We could only send ACKs.
-            && path.can_send_pmtud_probe()
+            && path.can_probe_pmtud()
     }
 
     /// Write frames to the provided builder.  Returns a list of tokens used for
@@ -2700,7 +2700,7 @@ impl Connection {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-            if path.borrow().can_send_pmtud_probe() && num_datagrams != 0 {
+            if path.borrow().can_probe_pmtud() && num_datagrams != 0 {
                 // Next datagram will be larger due to PMTUD probing.  GSO
                 // requires that all datagrams in a batch are of equal size.
                 // Only the last datagram can be smaller. Given that this would
@@ -2801,7 +2801,7 @@ impl Connection {
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
             let coalesced = !encoder.is_empty(); // Whether this packet is coalesced behind another one.
-            let make_pmtud_probe = self.make_pmtud_probe(path, space, &profile, coalesced);
+            let make_pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
 
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
