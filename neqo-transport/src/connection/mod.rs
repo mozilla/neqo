@@ -2564,7 +2564,7 @@ impl Connection {
 
         // Avoid sending path validation probes until the handshake completes,
         // but send them even when we don't have space.
-        let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
+        let full_mtu = profile.full_mtu();
         // PMTUD must not record a success for a packet that was never probe-sized.
         debug_assert!(
             !pmtud_probe || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
@@ -2834,7 +2834,6 @@ impl Connection {
 
             // Add frames to the packet.
             let payload_start = builder.len();
-            let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
             let (mut tokens, mut ack_eliciting) = (recovery::Tokens::new(), false);
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
@@ -2852,7 +2851,8 @@ impl Connection {
             // Pad only 1-RTT packets, so as not to prevent coalescing: ack-eliciting ones with a
             // full MTU, or any that end a datagram carrying an Initial, as padding after them
             // joins their ciphertext.
-            let padded = ((ack_eliciting && full_mtu) || initial_sent.is_some()) && builder.pad();
+            let padded =
+                ((ack_eliciting && profile.full_mtu()) || initial_sent.is_some()) && builder.pad();
             if padded {
                 self.stats.borrow_mut().frame_tx.padding += 1;
             }

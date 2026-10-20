@@ -55,11 +55,13 @@ pub struct SendProfile {
     probe: PacketNumberSpaceSet,
     /// Whether pacing is active.
     paced: bool,
+    /// Whether the limit is the full path MTU.
+    full_mtu: bool,
 }
 
 impl SendProfile {
     #[must_use]
-    pub fn new_limited(limit: usize) -> Self {
+    pub fn new_limited(limit: usize, mtu: usize) -> Self {
         // When the limit is too low, we only send ACK frames.
         // Set the limit to `ACK_ONLY_SIZE_LIMIT - 1` to ensure that
         // ACK-only packets are still limited in size.
@@ -67,6 +69,7 @@ impl SendProfile {
             limit: max(ACK_ONLY_SIZE_LIMIT - 1, limit),
             probe: PacketNumberSpaceSet::empty(),
             paced: false,
+            full_mtu: limit >= mtu,
         }
     }
 
@@ -77,6 +80,7 @@ impl SendProfile {
             limit: ACK_ONLY_SIZE_LIMIT - 1,
             probe: PacketNumberSpaceSet::empty(),
             paced: true,
+            full_mtu: false,
         }
     }
 
@@ -87,6 +91,7 @@ impl SendProfile {
             limit: mtu,
             probe,
             paced: false,
+            full_mtu: true,
         }
     }
 
@@ -117,8 +122,8 @@ impl SendProfile {
 
     /// Whether the next packet can be `plpmtu`-sized.
     #[must_use]
-    pub const fn permits_full_mtu(&self, plpmtu: usize) -> bool {
-        self.limit >= plpmtu
+    pub const fn full_mtu(&self) -> bool {
+        self.full_mtu
     }
 }
 
@@ -1049,7 +1054,7 @@ impl Loss {
                 {
                     SendProfile::new_paced()
                 } else {
-                    SendProfile::new_limited(mtu)
+                    SendProfile::new_limited(mtu, mtu)
                 }
             } else if sender.recovery_packet() {
                 // After entering recovery, allow a packet to be sent immediately.
@@ -1057,7 +1062,7 @@ impl Loss {
                 // result in a PING being sent in every active space.
                 SendProfile::new_pto(mtu, PacketNumberSpaceSet::all())
             } else {
-                SendProfile::new_limited(limit)
+                SendProfile::new_limited(limit, mtu)
             }
         }
     }
@@ -1951,14 +1956,17 @@ mod tests {
 
     #[test]
     fn send_profile_ack_only() {
-        let profile = SendProfile::new_limited(1200);
+        let profile = SendProfile::new_limited(1200, 1200);
         assert!(!profile.ack_only());
         assert_eq!(profile.limit(), 1200);
         assert!(!profile.paced());
+        assert!(profile.full_mtu());
+        assert!(!SendProfile::new_limited(1199, 1200).full_mtu());
 
         let paced = SendProfile::new_paced();
         assert!(paced.ack_only());
         assert!(paced.paced());
+        assert!(!paced.full_mtu());
 
         let pto = SendProfile::new_pto(
             1200,
@@ -1967,6 +1975,7 @@ mod tests {
         // All spaces can send data frames during PTO (not just ACKs).
         // This allows retransmission of lost CRYPTO in earlier spaces.
         assert!(!pto.ack_only());
+        assert!(pto.full_mtu());
         assert!(pto.should_probe(PacketNumberSpace::Handshake));
         assert!(!pto.should_probe(PacketNumberSpace::Initial));
     }
@@ -2099,10 +2108,10 @@ mod tests {
     /// `ack_only` is true only when `limit < ACK_ONLY_SIZE_LIMIT`, not at the limit itself.
     #[test]
     fn ack_only_boundary() {
-        assert!(SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT - 1).ack_only());
+        assert!(SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT - 1, 1200).ack_only());
         // At the limit itself: limit == ACK_ONLY_SIZE_LIMIT → NOT ack_only.
-        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT).ack_only());
-        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT + 1).ack_only());
+        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT, 1200).ack_only());
+        assert!(!SendProfile::new_limited(ACK_ONLY_SIZE_LIMIT + 1, 1200).ack_only());
     }
 
     /// `drop_0rtt` returns packets that were in-flight in the `ApplicationData` space.
