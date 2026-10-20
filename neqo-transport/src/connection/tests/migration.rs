@@ -20,20 +20,21 @@ use std::{
 use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
-    assertions::{assert_v4_path, assert_v6_path},
+    assertions::{assert_initial, assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now,
 };
 
 use super::{
     super::{Connection, Output, State, StreamType},
     CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    default_client, default_server, fill_stream, maybe_authenticate, new_client, new_server,
+    send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
     MIN_INITIAL_PACKET_SIZE,
+    addr_valid::{AddressValidation, ValidateAddress},
     cid::ConnectionIdManager,
     connection::tests::{
         assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
@@ -1494,4 +1495,54 @@ fn error_on_new_path_with_no_connection_id() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::UnknownFrameType))
     ));
+}
+
+/// Ask the server to send a ticket and check that it doesn't provide a `NEW_TOKEN` token
+/// for the address of its primary path, which has not been validated.
+fn assert_no_new_token(server: &mut Connection) {
+    assert!(!server.paths.primary().unwrap().borrow().is_valid());
+    let validation = AddressValidation::new(now(), ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(&validation);
+    server.send_ticket(now(), &[]).unwrap();
+    while server.process_output(now()).dgram().is_some() {}
+    assert_eq!(server.stats().frame_tx.new_token, 0);
+}
+
+/// A server follows the client to a new address before it validates that address,
+/// so it cannot issue a token for that address in the meantime.
+#[test]
+fn no_new_token_for_unvalidated_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // Send a full datagram so that the amplification limit doesn't stop the server.
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream);
+    let dgram = client.process_output(now()).dgram().unwrap();
+    server.process_input(change_source_address_and_port(&dgram, 1), now());
+    assert_no_new_token(&mut server);
+}
+
+/// Handshake packets, or Initial packets with the server's connection ID,
+/// validate the handshake path, not the address they come from.
+#[test]
+fn no_new_token_for_handshake_from_new_address() {
+    let mut client = default_client();
+    let mut server = default_server();
+    while let Some(dgram) = client.process_output(now()).dgram() {
+        server.process_input(dgram, now());
+    }
+    while let Some(dgram) = server.process_output(now()).dgram() {
+        client.process_input(dgram, now());
+    }
+    assert!(maybe_authenticate(&mut client));
+
+    // The Initial packet in front of the Finished uses the server's connection ID.
+    let dgram = client.process_output(now()).dgram().unwrap();
+    assert_initial(&dgram, false);
+    server.process_input(change_source_address_and_port(&dgram, 1), now());
+    assert_eq!(*server.state(), State::Confirmed);
+    assert_no_new_token(&mut server);
 }
