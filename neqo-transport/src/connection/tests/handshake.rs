@@ -1592,25 +1592,22 @@ fn server_pto_respects_amplification_limit() {
     let mtu = server.plpmtu();
     let pto = 3 * DEFAULT_INITIAL_RTT; // RTT plus four times its initial variance, half the RTT.
 
-    let (first, timer) = send(&mut server, now);
+    let (first, mut timer) = send(&mut server, now);
     assert_eq!((first.len(), timer), (2, pto));
-    now += pto;
-    let (dgrams, timer) = send(&mut server, now);
-    assert_eq!((sizes(&dgrams), timer), (vec![mtu, mtu], 2 * pto));
-    now += 2 * pto;
-    let (dgrams, timer) = send(&mut server, now);
-    assert_eq!((sizes(&dgrams), timer), (vec![mtu, mtu], 4 * pto));
-    now += 4 * pto;
+    for _ in 0..2 {
+        now += timer;
+        let (dgrams, next) = send(&mut server, now);
+        assert_eq!((sizes(&dgrams), next), (vec![mtu, mtu], 2 * timer));
+        timer = next;
+    }
+    now += timer;
 
     // The probe takes a full datagram, and the rest of the budget goes to another.
     let (last, timer) = send(&mut server, now);
-    let rest = budget - sizes(&first).iter().sum::<usize>() - 5 * mtu;
+    let rest = budget - first.iter().map(Datagram::len).sum::<usize>() - 5 * mtu;
     assert_eq!(sizes(&last), vec![mtu, rest]);
     // Amplification-limited, so only the idle timer is left.
-    assert_eq!(
-        Some(timer),
-        server.conn_params.get_idle_timeout().checked_sub(7 * pto)
-    );
+    assert_eq!(timer + 7 * pto, server.conn_params.get_idle_timeout());
 }
 
 #[test]
