@@ -2848,14 +2848,9 @@ impl Connection {
                 continue;
             }
 
-            // Pad only 1-RTT packets, so as not to prevent coalescing: ack-eliciting ones with a
-            // full MTU, or any that end a datagram carrying an Initial, as padding after them
-            // joins their ciphertext.
+            // Pad inside a 1-RTT packet after an Initial: padding after it joins its ciphertext.
             let padded =
                 ((ack_eliciting && profile.full_mtu()) || initial_sent.is_some()) && builder.pad();
-            if padded {
-                self.stats.borrow_mut().frame_tx.padding += 1;
-            }
 
             if packet_tos.is_ecn_marked() {
                 tokens.push(recovery::Token::EcnEct0);
@@ -2901,6 +2896,7 @@ impl Connection {
             )
             .with_padding(padded);
             if padded {
+                self.stats.borrow_mut().frame_tx.padding += 1;
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
             } else if pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting) {

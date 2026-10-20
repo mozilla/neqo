@@ -73,7 +73,7 @@ impl Packet {
         }
     }
 
-    /// Whether the packet contains PADDING, which puts it in flight.
+    /// Mark the packet as containing PADDING, which puts it in flight.
     #[must_use]
     pub const fn with_padding(mut self, padded: bool) -> Self {
         self.padded = padded;
@@ -187,7 +187,7 @@ impl Packet {
     /// Whether the packet should be tracked as in-flight.
     #[must_use]
     pub const fn cc_in_flight(&self) -> bool {
-        (self.ack_eliciting || self.padded) && self.on_primary_path()
+        (self.ack_eliciting() || self.padded) && self.on_primary_path()
     }
 
     /// Declare the packet as lost with the given trigger.  Returns `true` if
