@@ -3544,7 +3544,11 @@ impl Connection {
             }
             Frame::HandshakeDone => {
                 self.stats.borrow_mut().frame_rx.handshake_done += 1;
-                if self.role == Role::Server || !self.state.connected() {
+                if self.role == Role::Server
+                    || !self.state.connected()
+                    // The server lacks our Finished until we have sent it.
+                    || !self.crypto.streams().sent_all(PacketNumberSpace::Handshake)
+                {
                     return Err(Error::ProtocolViolation);
                 }
                 if self.confirmed() {

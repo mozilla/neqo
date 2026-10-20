@@ -16,12 +16,14 @@ use super::{
         super::{CloseReason, ERROR_AEAD_LIMIT_REACHED},
         Connection, ConnectionParameters, Error, Output, State, StreamType,
     },
-    AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
-    send_and_receive, send_something,
+    AT_LEAST_PTO, assert_error, connect, connect_force_idle, default_client, default_server,
+    exchange_ticket, maybe_authenticate, resumed_server, send_and_receive, send_something,
 };
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
+    connection::test_internal::FrameWriter,
     crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
+    frame::FrameType,
     packet,
 };
 
@@ -467,4 +469,80 @@ fn initial_handshake_pto_padding() {
         }
     }
     assert!(found_coalesced);
+}
+
+/// Adds `HANDSHAKE_DONE` to the third packet: the 1-RTT packet after Initial and Handshake.
+#[derive(Default)]
+struct EarlyHandshakeDoneWriter {
+    packets: usize,
+}
+
+impl FrameWriter for EarlyHandshakeDoneWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        const LONG_HEADER_PACKETS: usize = 2; // Initial and Handshake.
+        self.packets += 1;
+        if self.packets == LONG_HEADER_PACKETS + 1 {
+            builder.encode_varint(FrameType::HandshakeDone);
+        }
+    }
+}
+
+/// Delivers the server's flight with `HANDSHAKE_DONE` before the client sends any Handshake
+/// packet.
+fn early_handshake_done(client: &mut Connection, server: &mut Connection) {
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram();
+    let s2 = server.test_write_frames(EarlyHandshakeDoneWriter::default(), now());
+    client.process_input(s1.unwrap(), now());
+    client.process_input(s2.dgram().unwrap(), now());
+}
+
+#[test]
+fn early_handshake_done_resumption() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+    early_handshake_done(&mut client, &mut server);
+    assert_eq!(client.stats().frame_rx.handshake_done, 1);
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+/// The 1-RTT packet is saved until the client authenticates the server.
+#[test]
+fn early_handshake_done_authenticated() {
+    let mut client = default_client();
+    let mut server = default_server();
+    early_handshake_done(&mut client, &mut server);
+    assert_eq!(client.stats().saved_datagrams, 1);
+    assert!(maybe_authenticate(&mut client));
+    assert_eq!(client.stats().frame_rx.handshake_done, 1);
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+/// An ACK-only Handshake packet sent while authentication is pending drops Initial,
+/// but the client has still not sent its Finished.
+#[test]
+fn early_handshake_done_after_handshake_ack() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram();
+    let s2 = server.test_write_frames(EarlyHandshakeDoneWriter::default(), now());
+    let (s2_hs, s2_short) = split_datagram(&s2.dgram().unwrap());
+    client.process_input(s1.unwrap(), now());
+    client.process_input(s2_hs, now());
+    assert!(client.process_output(now()).dgram().is_some());
+    client.process_input(s2_short.unwrap(), now());
+    assert!(maybe_authenticate(&mut client));
+    assert_eq!(client.stats().frame_rx.handshake_done, 1);
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
 }

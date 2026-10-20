@@ -1515,6 +1515,8 @@ impl Display for CryptoStates {
 pub struct CryptoStream {
     tx: TxBuffer,
     rx: RxStreamOrderer,
+    /// The end of the highest range ever sent; unlike `tx`, losses don't lower it.
+    sent: u64,
 }
 
 #[derive(Debug)]
@@ -1635,6 +1637,11 @@ impl CryptoStreams {
         self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
     }
 
+    /// Whether everything written to `space` has been sent at least once.
+    pub fn sent_all(&self, space: PacketNumberSpace) -> bool {
+        self.get(space).is_none_or(|cs| cs.sent >= cs.tx.used())
+    }
+
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
         let (initial, hs, app) = match self {
             Self::Initial {
@@ -1718,6 +1725,7 @@ impl CryptoStreams {
             stats: &mut FrameStats,
         ) {
             cs.tx.mark_as_sent(offset, len);
+            cs.sent = max(cs.sent, offset + to_u64(len));
             debug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
                 offset,
@@ -1888,10 +1896,10 @@ mod tests {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod buffer_limits {
-    use neqo_common::to_u64;
+    use neqo_common::{Encoder, to_u64};
 
     use super::{CryptoStreams, PacketNumberSpace, RxStreamOrderer};
-    use crate::Error;
+    use crate::{Error, packet, recovery, stats::FrameStats};
 
     /// How many one-byte ranges, each separated by a one-byte gap, to offer.
     const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
@@ -1930,5 +1938,27 @@ mod buffer_limits {
                 .err()
         });
         assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
+    }
+
+    /// Lost data still counts as sent.
+    #[test]
+    fn crypto_sent_all_after_loss() {
+        let hs = PacketNumberSpace::Handshake;
+        let mut cs = CryptoStreams::default();
+        cs.send(hs, &[0; 4]).unwrap();
+        assert!(!cs.sent_all(hs));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let (mut tokens, mut stats) = (Vec::new(), FrameStats::default());
+        cs.write_frame(hs, false, &mut builder, &mut tokens, &mut stats);
+        assert!(cs.sent_all(hs));
+
+        let Some(recovery::Token::Crypto(token)) = tokens.pop() else {
+            panic!("expected a CRYPTO token");
+        };
+        cs.lost(hs, &token);
+        assert!(!cs.is_empty(hs));
+        assert!(cs.sent_all(hs));
     }
 }
