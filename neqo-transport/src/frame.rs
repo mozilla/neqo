@@ -25,6 +25,10 @@ use crate::{
     stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
 };
 
+/// The length of the data carried by `PATH_CHALLENGE` and `PATH_RESPONSE` frames, see
+/// [RFC 9000, Section 19.17](https://www.rfc-editor.org/rfc/rfc9000.html#section-19.17).
+pub const PATH_CHALLENGE_LEN: usize = 8;
+
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
 pub enum FrameType {
@@ -230,10 +234,10 @@ pub enum Frame<'a> {
         sequence_number: u64,
     },
     PathChallenge {
-        data: [u8; 8],
+        data: [u8; PATH_CHALLENGE_LEN],
     },
     PathResponse {
-        data: [u8; 8],
+        data: [u8; PATH_CHALLENGE_LEN],
     },
     ConnectionClose {
         error_code: CloseError,
@@ -668,14 +672,14 @@ impl<'a> Frame<'a> {
                 sequence_number: dv(dec)?,
             }),
             FrameType::PathChallenge => {
-                let data = d(dec.decode(8))?;
-                let mut datav: [u8; 8] = [0; 8];
+                let data = d(dec.decode(PATH_CHALLENGE_LEN))?;
+                let mut datav = [0; PATH_CHALLENGE_LEN];
                 datav.copy_from_slice(data);
                 Ok(Self::PathChallenge { data: datav })
             }
             FrameType::PathResponse => {
-                let data = d(dec.decode(8))?;
-                let mut datav: [u8; 8] = [0; 8];
+                let data = d(dec.decode(PATH_CHALLENGE_LEN))?;
+                let mut datav = [0; PATH_CHALLENGE_LEN];
                 datav.copy_from_slice(data);
                 Ok(Self::PathResponse { data: datav })
             }
@@ -781,7 +785,7 @@ mod tests {
     use crate::{
         CloseError, ConnectionId, Error, MAX_STREAMS_LIMIT, StreamId, StreamType, Token as Srt,
         ecn::Count,
-        frame::{AckRange, Frame, FrameType},
+        frame::{AckRange, Frame, FrameType, PATH_CHALLENGE_LEN},
         packet,
     };
 
@@ -1111,14 +1115,18 @@ mod tests {
 
     #[test]
     fn path_challenge() {
-        let f = Frame::PathChallenge { data: [9; 8] };
+        let f = Frame::PathChallenge {
+            data: [9; PATH_CHALLENGE_LEN],
+        };
 
         just_dec(&f, "1a0909090909090909");
     }
 
     #[test]
     fn path_response() {
-        let f = Frame::PathResponse { data: [9; 8] };
+        let f = Frame::PathResponse {
+            data: [9; PATH_CHALLENGE_LEN],
+        };
 
         just_dec(&f, "1b0909090909090909");
     }
@@ -1399,11 +1407,17 @@ mod tests {
             "RetireConnectionId { sequence_number: 1 }"
         );
         assert_eq!(
-            Frame::PathChallenge { data: [1; 8] }.dump(),
+            Frame::PathChallenge {
+                data: [1; PATH_CHALLENGE_LEN]
+            }
+            .dump(),
             "PathChallenge { data: [1, 1, 1, 1, 1, 1, 1, 1] }"
         );
         assert_eq!(
-            Frame::PathResponse { data: [2; 8] }.dump(),
+            Frame::PathResponse {
+                data: [2; PATH_CHALLENGE_LEN]
+            }
+            .dump(),
             "PathResponse { data: [2, 2, 2, 2, 2, 2, 2, 2] }"
         );
         assert_eq!(
@@ -1475,7 +1489,9 @@ mod tests {
     /// 1-RTT packets (RFC 9000, Table 3).
     #[test]
     fn is_allowed_path_response_and_handshake_done() {
-        let path_response = Frame::PathResponse { data: [0; 8] };
+        let path_response = Frame::PathResponse {
+            data: [0; PATH_CHALLENGE_LEN],
+        };
         assert!(path_response.is_allowed(packet::Type::Short));
         assert!(!path_response.is_allowed(packet::Type::ZeroRtt));
 
@@ -1483,7 +1499,9 @@ mod tests {
         assert!(!Frame::HandshakeDone.is_allowed(packet::Type::ZeroRtt));
 
         // PATH_CHALLENGE, by contrast, is permitted in 0-RTT packets.
-        let path_challenge = Frame::PathChallenge { data: [0; 8] };
+        let path_challenge = Frame::PathChallenge {
+            data: [0; PATH_CHALLENGE_LEN],
+        };
         assert!(path_challenge.is_allowed(packet::Type::ZeroRtt));
     }
 
