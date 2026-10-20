@@ -114,6 +114,11 @@ impl SendProfile {
     pub const fn limit(&self) -> usize {
         self.limit
     }
+
+    /// Lower the limit, even below the one for ACK-only packets.
+    pub(crate) fn cap(&mut self, limit: usize) {
+        self.limit = min(self.limit, limit);
+    }
 }
 
 #[derive(Debug)]
