@@ -1091,6 +1091,14 @@ mod tests {
         persistent_congestion(&[lost(1, true, ZERO), lost(2, false, PC)], false);
     }
 
+    /// Padding doesn't make packets ack-eliciting.
+    #[test]
+    fn persistent_congestion_padded_non_ack_eliciting() {
+        let padded = |pn, t| lost(pn, false, t).with_padding(true);
+        persistent_congestion(&[padded(1, ZERO), lost(2, true, PC)], false);
+        persistent_congestion(&[lost(1, true, ZERO), padded(2, PC)], false);
+    }
+
     /// Packets in the middle, of any type, are OK.
     #[test]
     fn persistent_congestion_middle() {

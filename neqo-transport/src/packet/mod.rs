@@ -354,7 +354,7 @@ impl<B: Buffer> Builder<B> {
     ///
     /// Cannot happen.
     pub fn pad(&mut self) -> bool {
-        if self.padding && !self.is_long() {
+        if self.padding && !self.is_long() && self.remaining() > 0 {
             self.encoder.pad_to(self.limit, FrameType::Padding.into());
             true
         } else {
@@ -1556,6 +1556,22 @@ mod tests {
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);
+    }
+
+    #[test]
+    fn pad_full() {
+        let mut builder = Builder::short(
+            Encoder::default(),
+            true,
+            Some(ConnectionId::from(SERVER_CID)),
+            100,
+        );
+        builder.pn(0, 1);
+        builder.enable_padding(true);
+        builder.mark_full();
+        let len = builder.len();
+        assert!(!builder.pad());
+        assert_eq!(builder.len(), len);
     }
 
     /// Given an encoder that already contains some QUIC packet(s), i.e. is
