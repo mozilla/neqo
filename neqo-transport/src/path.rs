@@ -398,6 +398,19 @@ impl Paths {
         });
     }
 
+    /// Retire a connection ID that was used or retired already, unless a path uses it.
+    pub fn retire_old_cid(&mut self, seqno: u64) {
+        let in_use = self.paths.iter().any(|p| {
+            p.borrow()
+                .remote_cid
+                .as_ref()
+                .is_some_and(|cid| cid.sequence_number() == seqno)
+        });
+        if !in_use && !self.to_retire.contains(&seqno) {
+            self.to_retire.push(seqno);
+        }
+    }
+
     /// The number of connection IDs that have been retired locally but whose
     /// `RETIRE_CONNECTION_ID` frames have not yet been ACK'ed.
     pub(crate) const fn retire_queue_len(&self) -> usize {
