@@ -858,7 +858,7 @@ impl Http3Connection {
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
-                    Header::new(":path", request.target.path().into_owned()),
+                    Header::new(":path", request.target.request_path()),
                 ]
             }
             Some(ConnectType::Classic) => {
@@ -875,7 +875,7 @@ impl Http3Connection {
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
-                    Header::new(":path", request.target.path().into_owned()),
+                    Header::new(":path", request.target.request_path()),
                     Header::new(":protocol", protocol.to_string()),
                 ];
                 if protocol == ExtendedConnectType::ConnectUdp {

@@ -33,10 +33,12 @@ use crate::{STREAM_IO_BUFFER_SIZE, now};
 
 /// The HTTP/0.9 request line for `url`, including any query.
 fn request_line(url: &Url) -> String {
-    url.query().map_or_else(
-        || format!("GET {}\r\n", url.path()),
-        |query| format!("GET {}?{query}\r\n", url.path()),
-    )
+    // Unlike `PathAndQuery::as_str`, the `Display` implementation adds the
+    // leading `/` for targets like `https://example.com?q`.
+    let path = url
+        .path_and_query()
+        .map_or_else(String::new, ToString::to_string);
+    format!("GET {path}\r\n")
 }
 
 pub struct Handler<'a> {
