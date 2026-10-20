@@ -246,10 +246,7 @@ impl RxStreamOrderer {
     /// Whether every byte of `[offset, offset + len)` has already been received or read.
     /// Call this before [`Self::inbound_frame`], which wipes the ability to determine this.
     #[must_use]
-    pub(crate) fn covered(&self, offset: u64, len: usize) -> bool {
-        if len == 0 {
-            return true; // Vacuously covered, wherever it is.
-        }
+    pub(crate) fn already_received(&self, offset: u64, len: usize) -> bool {
         let end = offset + to_u64(len);
         if end > self.end {
             return false;
@@ -268,7 +265,7 @@ impl RxStreamOrderer {
             if start > covered {
                 return false;
             }
-            covered = max(covered, start + to_u64(data.len()));
+            covered = start + to_u64(data.len());
         }
         covered >= end
     }
@@ -1464,7 +1461,7 @@ mod tests {
     }
 
     #[test]
-    fn covered_spanning_adjacent_ranges() {
+    fn already_received_across_chunks() {
         const TARGET: u64 = to_u64(RxStreamOrderer::RANGE_TARGET);
         const LEN: usize = 2 * RxStreamOrderer::RANGE_TARGET + 10;
         let mut s = RxStreamOrderer::default();
@@ -1475,11 +1472,11 @@ mod tests {
         s.inbound_frame(2 * TARGET, &[2u8; 10]).unwrap();
         assert_eq!(s.data_ranges.len(), 3);
 
-        assert!(s.covered(0, LEN));
-        assert!(s.covered(TARGET - 6, 16), "spanning a range boundary");
-        assert!(!s.covered(0, LEN + 1), "one byte beyond what was received");
+        assert!(s.already_received(0, LEN));
+        assert!(s.already_received(TARGET - 6, 16), "spans chunks");
+        assert!(!s.already_received(0, LEN + 1), "one byte past the end");
 
-        // The same duplicate frame grows `received`, which is why `covered` exists.
+        // The same duplicate frame grows `received`, which is why `already_received` exists.
         let received = s.received();
         s.inbound_frame(0, &[0u8; LEN]).unwrap();
         assert!(s.received() > received);
@@ -1487,7 +1484,7 @@ mod tests {
 
     /// Many gapped ranges, the shape a peer can create with one-byte CRYPTO frames.
     #[test]
-    fn covered_many_gapped_ranges() {
+    fn already_received_fragmented() {
         const COUNT: u64 = 1000;
         let mut s = RxStreamOrderer::default();
         for i in 0..COUNT {
@@ -1496,26 +1493,26 @@ mod tests {
         assert_eq!(s.data_ranges.len(), usize::try_from(COUNT).unwrap());
 
         let last = (COUNT - 1) * 4;
-        assert!(s.covered(last, 1), "the last byte received");
-        assert!(s.covered(0, 1));
-        assert!(!s.covered(last + 1, 1), "beyond everything received");
-        assert!(!s.covered(0, 4), "spans a gap");
+        assert!(s.already_received(last, 1), "the last byte received");
+        assert!(s.already_received(0, 1));
+        assert!(!s.already_received(last + 1, 1), "past the end");
+        assert!(!s.already_received(0, 4), "spans a gap");
     }
 
-    /// Coverage is against what was received *or* read, and a gap is never covered.
+    /// Data already read still counts as received; a gap never does.
     #[test]
-    fn covered_retired_and_gaps() {
+    fn already_received_includes_read_data() {
         let mut s = RxStreamOrderer::default();
         s.inbound_frame(0, &[0u8; 10]).unwrap();
         s.inbound_frame(20, &[1u8; 10]).unwrap();
 
         let mut buf = [0u8; 10];
         assert_eq!(s.read(&mut buf), 10);
-        assert!(s.covered(0, 10), "already read");
-        assert!(s.covered(25, 5));
-        assert!(!s.covered(10, 10), "the gap");
-        assert!(!s.covered(5, 10), "spans into the gap");
-        assert!(s.covered(15, 0), "an empty range is covered");
+        assert!(s.already_received(0, 10), "already read");
+        assert!(s.already_received(25, 5));
+        assert!(!s.already_received(10, 10), "the gap");
+        assert!(!s.already_received(5, 10), "spans into the gap");
+        assert!(s.already_received(15, 0), "an empty range is covered");
     }
 
     /// A buffer of 4095 bytes IS extended when the next frame is contiguous.

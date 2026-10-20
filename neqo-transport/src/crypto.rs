@@ -1597,7 +1597,7 @@ impl CryptoStreams {
         if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
             return Err(Error::CryptoBufferExceeded);
         }
-        let duplicate = !data.is_empty() && rx.covered(offset, data.len());
+        let duplicate = !data.is_empty() && rx.already_received(offset, data.len());
         rx.inbound_frame(offset, data)
             .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
