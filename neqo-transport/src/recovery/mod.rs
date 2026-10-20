@@ -126,6 +126,11 @@ impl SendProfile {
     pub const fn full_mtu(&self) -> bool {
         self.full_mtu
     }
+
+    /// Lower the limit, even below the one for ACK-only packets.
+    pub(crate) fn cap(&mut self, limit: usize) {
+        self.limit = min(self.limit, limit);
+    }
 }
 
 #[derive(Debug)]

@@ -2076,7 +2076,6 @@ impl Connection {
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
     fn ensure_error_path(&mut self, path: &PathRef, packet: &packet::Decrypted, now: Instant) {
-        path.borrow_mut().set_valid(now);
         if self.paths.is_temporary(path) {
             // First try to fill in handshake details.
             if packet.packet_type() == packet::Type::Initial {
@@ -2780,7 +2779,12 @@ impl Connection {
         let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        let mut profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        if closing_frame.is_some() {
+            // CONNECTION_CLOSE counts against the anti-amplification limit (RFC 9000, Section 8.1).
+            // TODO: Also rate-limit packets in the closing state (RFC 9000, Section 10.2.1).
+            profile.cap(path.borrow().amplification_limit());
+        }
         debug!("[{self}] output_dgram_on_path send_profile {profile:?}");
 
         // Frames for different epochs must go in different packets, but then these
@@ -2799,13 +2803,13 @@ impl Connection {
             let header_start = encoder.len();
 
             // Configure the limits and padding for this packet.
-            let limit = if pmtud_probe {
+            let Some(limit) = (if pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size()
+                Some(path.borrow().pmtud().probe_size())
             } else {
-                profile.limit()
-                    - if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
+                profile.limit().checked_sub(
+                    if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
                         // Reserve some space for the SCONE indication in an Initial.
                         // This reduces the amount available for building the packet,
                         // but we'll pad to `profile.limit()` when padding.
@@ -2814,8 +2818,13 @@ impl Connection {
                         Self::SCONE_INDICATION.len()
                     } else {
                         0
-                    }
-            } - aead_expansion;
+                    },
+                )
+            })
+            .and_then(|limit| limit.checked_sub(aead_expansion)) else {
+                // Too small for any packet, including those in later spaces.
+                break;
+            };
 
             let (pt, mut builder, pn) = Self::build_packet_header(
                 &path.borrow(),
