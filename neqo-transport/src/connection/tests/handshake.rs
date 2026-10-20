@@ -31,7 +31,7 @@ use super::{
     super::{Connection, Output, State},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
     assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, resumed_server,
+    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
     send_something, zero_len_cid_client,
 };
 use crate::{
@@ -2175,13 +2175,7 @@ fn received_packet_reports_its_own_cids() {
 /// Produce a datagram with one byte of CRYPTO at offset 0, added to every packet in it. Whether
 /// that is a duplicate depends on what the receiver already holds. Waits out any pacing delay.
 fn make_dummy_crypto(c: &mut Connection, now: &mut Instant) -> Datagram {
-    loop {
-        match c.test_write_frames(CryptoWriter {}, *now) {
-            Output::Datagram(d) => return d,
-            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
-            o => panic!("no datagram to carry the dummy CRYPTO frame: {o:?}"),
-        }
-    }
+    next_dgram(now, |t| c.test_write_frames(CryptoWriter {}, t)).expect("a datagram")
 }
 
 /// Deliver `dgram` to `c` and return how many CRYPTO frames it sends in response.
@@ -2230,11 +2224,8 @@ fn crypto_resent_only_for_initial() {
     assert!(maybe_authenticate(&mut client));
     drop_flight(&mut client, &mut now);
 
-    // The server repeats CRYPTO the client already has. Deliver only the Handshake packet of that
-    // datagram: the coalesced Initial would be the very trigger under test, and in the coalesced
-    // 1-RTT packet the offset is one the client has *not* received, so that copy is not a
-    // duplicate at all. The client has nothing to learn from the Handshake packet and must not
-    // resend its Finished.
+    // Deliver only the Handshake copy, a pure duplicate: the Initial copy is the trigger under
+    // test and the 1-RTT copy is new data. The client must not resend its Finished.
     let dup = make_dummy_crypto(&mut server, &mut now);
     let (_initial, rest) = split_datagram(&dup);
     let (handshake, _short) = split_datagram(&rest.expect("a coalesced Handshake packet"));
@@ -2257,15 +2248,9 @@ fn retry_restores_resend_allowance() {
     assert!(!client.crypto.early_resend_used(), "and available again");
 
     // ...and the re-sent ClientHello is something to spend it on.
-    assert!(
-        client.process_output(now()).dgram().is_some(),
-        "a new Initial"
-    );
+    assert!(client.process_output(now()).dgram().is_some());
     client.crypto.resend_unacked_early();
-    assert!(
-        client.crypto.early_resend_used(),
-        "spendable on the new flight"
-    );
+    assert!(client.crypto.early_resend_used(), "spent again");
 }
 
 /// A duplicate that arrives while nothing is outstanding has nothing to resend, so it must not use

@@ -1927,11 +1927,7 @@ mod buffer_limits {
         let mut cs = CryptoStreams::default();
         assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(false));
         assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(true), "duplicate");
-        assert_eq!(
-            cs.inbound_frame(SPACE, 1, &[0; 2]),
-            Ok(false),
-            "one byte new"
-        );
+        assert_eq!(cs.inbound_frame(SPACE, 1, &[0; 2]), Ok(false), "partial");
     }
 
     #[test]

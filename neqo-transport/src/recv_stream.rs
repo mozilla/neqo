@@ -1462,13 +1462,12 @@ mod tests {
 
     #[test]
     fn already_received_across_chunks() {
-        const TARGET: u64 = to_u64(RxStreamOrderer::RANGE_TARGET);
-        const LEN: usize = 2 * RxStreamOrderer::RANGE_TARGET + 10;
+        const CHUNK: usize = RxStreamOrderer::RANGE_TARGET;
+        const TARGET: u64 = to_u64(CHUNK);
+        const LEN: usize = 2 * CHUNK + 10;
         let mut s = RxStreamOrderer::default();
-        s.inbound_frame(0, &[0u8; RxStreamOrderer::RANGE_TARGET])
-            .unwrap();
-        s.inbound_frame(TARGET, &[1u8; RxStreamOrderer::RANGE_TARGET])
-            .unwrap();
+        s.inbound_frame(0, &[0u8; CHUNK]).unwrap();
+        s.inbound_frame(TARGET, &[1u8; CHUNK]).unwrap();
         s.inbound_frame(2 * TARGET, &[2u8; 10]).unwrap();
         assert_eq!(s.data_ranges.len(), 3);
 

@@ -210,14 +210,21 @@ impl test_internal::FrameWriter for CryptoWriter {
     }
 }
 
+/// The next datagram from `send`, waiting out pacing delays.
+fn next_dgram(now: &mut Instant, mut send: impl FnMut(Instant) -> Output) -> Option<Datagram> {
+    loop {
+        match send(*now) {
+            Output::Datagram(d) => return Some(d),
+            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
+            _ => return None, // Too long to be pacing.
+        }
+    }
+}
+
 /// Drain everything `c` will send, following a paced sender by advancing `now` over short delays.
 fn drain(c: &mut Connection, now: &mut Instant, mut deliver: impl FnMut(Datagram, Instant)) {
-    loop {
-        match c.process_output(*now) {
-            Output::Datagram(d) => deliver(d, *now),
-            Output::Callback(t) if t < DEFAULT_RTT => *now += t,
-            _ => break, // Too long to be pacing.
-        }
+    while let Some(d) = next_dgram(now, |t| c.process_output(t)) {
+        deliver(d, *now);
     }
 }
 

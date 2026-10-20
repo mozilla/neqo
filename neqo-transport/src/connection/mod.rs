@@ -1645,11 +1645,8 @@ impl Connection {
                 return Ok(PreprocessResult::Next);
             }
             (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
-                // This packet can't be processed now, but it could be a sign
-                // that Initial packets were lost. Resend CRYPTO frames immediately
-                // just in case.  As we don't have an RTT estimate yet, this helps
-                // when there is a short RTT and losses. Also mark all 0-RTT
-                // data as lost. See Section 6.2.3 of RFC 9002 and `Crypto::resend_unacked_early`.
+                // Can't be processed yet, but hints that our Initial was lost: resend CRYPTO early
+                // (Section 6.2.3 of RFC 9002) and mark all 0-RTT data as lost.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
@@ -3373,9 +3370,7 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.padding += usize::from(length);
             }
             Frame::Ping => {
-                // If we get a PING and there are outstanding CRYPTO frames,
-                // prepare to resend them.
-                // A PING in Initial/Handshake is a PTO probe, so the peer likely lacks our CRYPTO.
+                // A PING is likely a PTO probe, so resend any CRYPTO the peer may lack.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
                 // Send an ACK immediately if we might not otherwise do so.
