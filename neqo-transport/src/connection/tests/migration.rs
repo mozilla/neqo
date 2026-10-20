@@ -12,6 +12,7 @@
 
 use std::{
     cell::RefCell,
+    cmp::min,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
     time::{Duration, Instant},
@@ -1022,6 +1023,66 @@ fn preferred_address_disabled_client() {
     let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
 
     expect_no_migration(&mut client, &mut server);
+}
+
+struct HandshakeDoneWriter {}
+
+impl test_internal::FrameWriter for HandshakeDoneWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::HandshakeDone);
+    }
+}
+
+/// Has the client probe the preferred address, then receive a second `HANDSHAKE_DONE`.
+/// Returns the client, the server and the probe.
+fn repeated_handshake_done() -> (Connection, Connection, Datagram) {
+    let mut client = default_client();
+    let spa = PreferredAddress::new_any(None, Some(new_port(DEFAULT_ADDR)));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+    let dgram = fast_handshake(&mut client, &mut server);
+    let probe = client.process(dgram, now()).dgram().unwrap();
+    let done = send_with_extra(&mut server, HandshakeDoneWriter {}, now());
+    client.process_input(done, now());
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(client.stats().frame_rx.handshake_done, 2);
+    (client, server, probe)
+}
+
+/// A repeated `HANDSHAKE_DONE` does not restart probing of the preferred address.
+#[test]
+fn preferred_address_repeated_handshake_done_no_probe() {
+    let (mut client, _server, _probe) = repeated_handshake_done();
+    while client.process_output(now()).dgram().is_some() {}
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+}
+
+/// After a repeated `HANDSHAKE_DONE`, the client migrates to the preferred address and accepts
+/// the connection ID that replaces the one it retires.
+#[test]
+fn preferred_address_repeated_handshake_done_migrate() {
+    let (mut client, mut server, probe) = repeated_handshake_done();
+    server.process_input(probe, now());
+
+    // Run until the client retires a connection ID and neither peer has anything to send.
+    let mut now = now();
+    loop {
+        let c = match client.process_output(now) {
+            Output::Datagram(d) => {
+                server.process_input(d, now);
+                continue;
+            }
+            c => c.callback(),
+        };
+        match server.process_output(now) {
+            Output::Datagram(d) => client.process_input(d, now),
+            s if client.stats().frame_tx.retire_connection_id == 0 => now += min(c, s.callback()),
+            _ => break,
+        }
+    }
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(client.stats().frame_tx.retire_connection_id, 1);
+    let new_cids = server.stats().frame_tx.new_connection_id;
+    assert_eq!(client.stats().frame_rx.new_connection_id, new_cids);
 }
 
 #[test]
