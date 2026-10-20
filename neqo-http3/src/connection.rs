@@ -17,11 +17,9 @@ use neqo_common::{
     Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    AppError, CloseReason, Connection, DatagramQueueOutcome, DatagramTracking, State, StreamId,
-    StreamType, ZeroRttState,
+    AppError, CloseReason, Connection, DatagramQueueCapacity, DatagramQueueOutcome,
+    DatagramTracking, State, StreamId, StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -1447,13 +1445,9 @@ impl Http3Connection {
         error: u32,
         message: &str,
         now: Instant,
-    ) -> Res<()> {
-        if self
-            .get_extended_connect_session(session_id)?
-            .borrow()
-            .connect_type()
-            != connect_type
-        {
+    ) -> Res<Rc<RefCell<extended_connect::session::Session>>> {
+        let session = self.get_extended_connect_session(session_id)?;
+        if session.borrow().connect_type() != connect_type {
             return Err(Error::InvalidStreamId);
         }
         let send_stream = self
@@ -1468,7 +1462,7 @@ impl Http3Connection {
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
         }
-        Ok(())
+        Ok(session)
     }
 
     fn get_extended_connect_session(
@@ -1671,33 +1665,34 @@ impl Http3Connection {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn extended_connect_datagram_queue_capacity(
+    /// See [`crate::webtransport::ClientSession::webtransport_datagram_queue_capacity`].
+    ///
+    /// # Errors
+    /// Returns `InvalidStreamId` if the session does not exist or is not a `WebTransport`
+    /// session.
+    pub(crate) fn webtransport_datagram_queue_capacity(
         &self,
-        session_id: StreamId,
         conn: &Connection,
+        session_id: StreamId,
     ) -> Res<DatagramQueueCapacity> {
         Ok(self
-            .validate_extended_connect_session(session_id)?
+            .webtransport_session(session_id)?
             .borrow()
             .datagram_queue_capacity(conn))
     }
 
-    /// Expire stale outgoing datagrams on every active extended-CONNECT
-    /// session's queue and count them per session. Called once per
-    /// `process_http3` tick. The transport counts expiries on the queue
-    /// itself, whether its own timer sweep or this one sheds them, so this
-    /// sweep picks up the right number regardless of whether it runs before
-    /// or after `Connection::process_output` within a tick.
-    ///
-    /// Returns the total number of datagrams expired, for the caller to fold
-    /// into a stats counter.
+    /// Record expired, sent and too-big datagram counts for each active
+    /// extended-CONNECT session.  Returns the number expired.
     pub(crate) fn expire_datagram_queues(&self, conn: &mut Connection, now: Instant) -> u64 {
         self.recv_streams
             .values()
             .filter_map(|s| s.extended_connect_session())
             .filter(|s| s.borrow().is_active())
-            .map(|s| s.borrow_mut().expire_datagrams(conn, now))
+            .map(|s| {
+                let mut s = s.borrow_mut();
+                s.report_sent_datagrams(conn);
+                s.expire_datagrams(conn, now)
+            })
             .sum()
     }
 
@@ -1884,7 +1879,7 @@ impl Http3Connection {
         wt: &Rc<RefCell<extended_connect::session::Session>>,
         conn: &mut Connection,
     ) {
-        wt.borrow().drop_queued_datagrams(conn);
+        wt.borrow_mut().drop_queued_datagrams(conn);
 
         let (recv, send) = wt.borrow_mut().take_sub_streams();
 

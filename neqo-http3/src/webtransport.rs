@@ -14,11 +14,9 @@ use std::{
 };
 
 use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
 use neqo_transport::{
-    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
-    send_stream, server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
+    StreamType, recv_stream, send_stream, server::ConnectionRef, streams::SendOrder,
 };
 
 use crate::{
@@ -78,6 +76,17 @@ pub trait ClientSession {
         session_id: StreamId,
         max_buffered_datagrams: Option<NonZeroUsize>,
     ) -> Res<()>;
+
+    /// A snapshot of this session's outgoing-datagram queue; see
+    /// [`DatagramQueueCapacity`].  The `outgoingMaxBufferedDatagrams` limit is not included.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity>;
 
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
     /// to the implementation-defined default with `None`.
@@ -267,6 +276,14 @@ impl ClientSession for Http3Client {
             session_id,
             max_buffered_datagrams,
         )
+    }
+
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity> {
+        self.handler()
+            .webtransport_datagram_queue_capacity(self.connection(), session_id)
     }
 
     fn webtransport_set_datagram_max_age(
@@ -552,18 +569,8 @@ impl Handler for Http3Connection {
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
         qtrace!("Close WebTransport session {session_id:?}");
-        // Collect expiries and snapshot the stats before tearing the session down,
-        // so the caller sees the final values.  This also rejects non-WebTransport
-        // sessions.
-        //
-        // `extended_connect_close_session` then checks the type again. That is
-        // deliberate: it is shared with connect-udp, which needs the check for its own
-        // close path, so it cannot rely on this one having happened.
-        self.webtransport_session(session_id)?
-            .borrow_mut()
-            .expire_datagrams(conn, now);
-        let stats = self.webtransport_session_stats(session_id)?;
-        self.extended_connect_close_session(
+        // Read the stats after closing, which counts the queue's expired and dropped datagrams.
+        let session = self.extended_connect_close_session(
             conn,
             session_id,
             extended_connect::ExtendedConnectType::WebTransport,
@@ -571,7 +578,8 @@ impl Handler for Http3Connection {
             message,
             now,
         )?;
-        Ok(stats)
+        let stats = session.borrow().stats();
+        stats.ok_or(Error::InvalidStreamId)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
@@ -938,7 +946,7 @@ impl ServerSession {
             )
     }
 
-    /// This session's statistics, e.g. `datagrams_expired_outgoing`.
+    /// This session's statistics, e.g. `outgoing_datagrams.expired`.
     #[cfg(test)]
     pub(crate) fn stats(&self) -> extended_connect::stats::SessionStats {
         let session_id = self.stream_handler.stream_id();
@@ -951,6 +959,9 @@ impl ServerSession {
     }
 
     /// Snapshot of the outgoing-datagram queue's current byte/count state.
+    ///
+    /// Production callers use
+    /// [`ClientSession::webtransport_datagram_queue_capacity`].
     #[cfg(test)]
     pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
         let session_id = self.stream_handler.stream_id();
@@ -958,15 +969,12 @@ impl ServerSession {
             .handler
             .borrow_mut()
             .base_handler_mut()
-            .extended_connect_datagram_queue_capacity(
-                session_id,
-                &self.stream_handler.conn.borrow(),
-            )
+            .webtransport_datagram_queue_capacity(&self.stream_handler.conn.borrow(), session_id)
             .expect("test session must exist")
     }
 
-    /// Test-only: what the transport still queues for this session, which
-    /// can outlive the session itself.
+    /// What the transport still queues for this session, which can outlive
+    /// the session itself.
     #[cfg(test)]
     pub(crate) fn transport_queued_datagrams(&self) -> usize {
         self.stream_handler

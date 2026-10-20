@@ -13,11 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
+use neqo_common::{Bytes, Encoder, Header, MessageType, Role, qdebug, qtrace, to_u64};
 use neqo_transport::{
-    AppError, Connection, DatagramQueueOutcome, DatagramTracking, StreamId,
+    AppError, Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::FxHashSet as HashSet;
@@ -477,8 +475,8 @@ impl Session {
                 self.datagram_capsule_blocked = true;
             }
             res?;
-            // This path never touches the queue, so it carries no
-            // backpressure signal.
+            // Bypasses the queue, so count it sent now.
+            self.protocol.record_sent_outgoing_datagrams(1);
             return Ok(DatagramQueueOutcome::Ok);
         }
 
@@ -515,7 +513,29 @@ impl Session {
             send_order,
         )?;
         qtrace!("[{self}] enqueued datagram: {outcome:?}");
+        match &outcome {
+            DatagramQueueOutcome::Ok | DatagramQueueOutcome::MaxBufferedReached => {}
+            DatagramQueueOutcome::Rejected => self.report_dropped(1),
+            DatagramQueueOutcome::Overflowed { dropped } => self.report_dropped(*dropped),
+        }
         Ok(outcome)
+    }
+
+    fn report_dropped(&mut self, count: usize) {
+        self.protocol
+            .record_dropped_outgoing_datagrams(to_u64(count));
+    }
+
+    /// Drop this session's queue, recording its remaining datagrams and counts.
+    pub(crate) fn drop_queued_datagrams(&mut self, conn: &mut Connection) {
+        let dropped = conn.drop_session_datagrams(self.id);
+        self.protocol.record_sent_outgoing_datagrams(dropped.sent);
+        self.protocol
+            .record_expired_outgoing_datagrams(dropped.expired);
+        self.protocol
+            .record_dropped_outgoing_datagrams(dropped.too_big);
+        self.protocol
+            .record_dropped_outgoing_datagrams(dropped.queued);
     }
 
     /// Set the outgoing-datagram queue's `outgoingMaxBufferedDatagrams`, or
@@ -552,7 +572,6 @@ impl Session {
             .record_expired_outgoing_datagrams(conn.take_session_expired_datagrams(self.id));
     }
 
-    #[cfg(test)]
     #[must_use]
     pub(crate) fn datagram_queue_capacity(&self, conn: &Connection) -> DatagramQueueCapacity {
         conn.datagram_queue_capacity(self.id)
@@ -572,10 +591,12 @@ impl Session {
         expired
     }
 
-    /// Drop this session's queue, which lives on `conn` and would otherwise
-    /// outlive the session.
-    pub(crate) fn drop_queued_datagrams(&self, conn: &mut Connection) {
-        _ = conn.drop_session_datagrams(self.id);
+    /// Record the sent and too-big counts since the last call.
+    pub(crate) fn report_sent_datagrams(&mut self, conn: &mut Connection) {
+        let sent = conn.take_session_sent_datagrams(self.id);
+        self.protocol.record_sent_outgoing_datagrams(sent);
+        let too_big = conn.take_session_too_big_datagrams(self.id);
+        self.protocol.record_dropped_outgoing_datagrams(too_big);
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
@@ -782,9 +803,17 @@ pub(crate) trait Protocol: Debug + Display {
         None
     }
 
+    /// Record that `count` outgoing datagrams were sent.
+    /// A no-op default for protocols that don't track [`SessionStats`].
+    fn record_sent_outgoing_datagrams(&mut self, _count: u64) {}
+
     /// Record that `count` outgoing datagrams expired before being sent.
     /// A no-op default for protocols that don't track [`SessionStats`].
     fn record_expired_outgoing_datagrams(&mut self, _count: u64) {}
+
+    /// Record that `count` outgoing datagrams were dropped unsent.
+    /// A no-op default for protocols that don't track [`SessionStats`].
+    fn record_dropped_outgoing_datagrams(&mut self, _count: u64) {}
 
     fn protocol(&self) -> Option<&str> {
         None
