@@ -1080,8 +1080,7 @@ mod tests {
                 .is_some()
         );
 
-        let mut builder =
-            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut builder = ack_builder(packet::LIMIT);
         // One byte short of the fixed ACK fields.
         builder.set_limit(fixed_len - 1);
 
@@ -1097,7 +1096,7 @@ mod tests {
         );
         assert_eq!(stats.ack, 0);
         assert!(tokens.is_empty());
-        assert_eq!(builder.len(), 1); // Only the short packet header has been added.
+        assert_eq!(builder.len(), 0);
         assert!(
             tracker
                 .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
@@ -1146,7 +1145,9 @@ mod tests {
     }
 
     fn ack_builder(limit: usize) -> packet::Builder<Vec<u8>> {
-        packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit)
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
+        builder.truncate(0);
+        builder
     }
 
     fn write_initial_ack_frame(
@@ -1180,11 +1181,10 @@ mod tests {
 
     fn decode_ack_from_builder(builder: &packet::Builder<Vec<u8>>) -> Frame<'_> {
         let mut dec = builder.as_decoder();
-        dec.skip(1); // Skip the short header.
         Frame::decode(&mut dec).unwrap()
     }
 
-    /// `start` is the index into [`tracker_with_initial_ranges`] of the oldest kept range.
+    /// `start` is the index into [`tracker_with_initial_ranges`] of the oldest encoded range.
     fn assert_initial_ack_ranges(builder: &packet::Builder<Vec<u8>>, start: usize, count: usize) {
         let frame = decode_ack_from_builder(builder);
         let Frame::Ack {
@@ -1234,10 +1234,10 @@ mod tests {
         let mut builder = ack_builder(packet::LIMIT);
         builder.set_limit(full_len - 1);
         let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
-        let kept = ack_token_range_count(&tokens);
-        assert!((1..RANGE_COUNT).contains(&kept), "{kept}");
+        let encoded = ack_token_range_count(&tokens);
+        assert!((1..RANGE_COUNT).contains(&encoded), "{encoded}");
         assert!(builder.len() <= builder.limit());
-        assert_initial_ack_ranges(&builder, RANGE_COUNT - kept, kept);
+        assert_initial_ack_ranges(&builder, RANGE_COUNT - encoded, encoded);
     }
 
     #[test]
@@ -1251,22 +1251,22 @@ mod tests {
         let mut tracker = tracker_with_initial_ranges(MAX_TRACKED_RANGES);
         let (builder, tokens) =
             write_initial_ack_frame(&mut tracker, ack_builder(recovery::ACK_ONLY_SIZE_LIMIT - 1));
-        let kept = ack_token_range_count(&tokens);
-        assert!(kept > 32, "{kept}");
+        let encoded = ack_token_range_count(&tokens);
+        assert!(encoded > 32, "{encoded}");
         assert!(builder.len() < recovery::ACK_ONLY_SIZE_LIMIT);
         assert!(builder.len() <= builder.limit());
-        assert_initial_ack_ranges(&builder, MAX_TRACKED_RANGES - kept, kept);
+        assert_initial_ack_ranges(&builder, MAX_TRACKED_RANGES - encoded, encoded);
     }
 
     #[test]
     fn one_byte_count_caps_extra_ranges() {
-        let kept = RecvdPackets::MAX_EXTRA_ACK_RANGES + 1;
-        assert!(kept > 32);
+        let encoded = RecvdPackets::MAX_EXTRA_ACK_RANGES + 1;
+        assert!(encoded > 32);
 
         let mut tracker = tracker_with_initial_ranges(MAX_TRACKED_RANGES);
         let (builder, tokens) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
-        assert_ack_token_range_count(&tokens, kept);
-        assert_initial_ack_ranges(&builder, MAX_TRACKED_RANGES - kept, kept);
+        assert_ack_token_range_count(&tokens, encoded);
+        assert_initial_ack_ranges(&builder, MAX_TRACKED_RANGES - encoded, encoded);
         assert!(builder.len() <= builder.limit());
     }
 
@@ -1287,8 +1287,8 @@ mod tests {
         builder.set_limit(used + (full_len - 1) - 1);
 
         let (builder, tokens) = write_initial_ack_frame(&mut tracker, builder);
-        let kept = ack_token_range_count(&tokens);
-        assert!((1..RANGE_COUNT).contains(&kept), "{kept}");
+        let encoded = ack_token_range_count(&tokens);
+        assert!((1..RANGE_COUNT).contains(&encoded), "{encoded}");
         assert!(builder.len() <= builder.limit());
 
         let mut dec = builder.as_decoder();
@@ -1297,7 +1297,7 @@ mod tests {
         let Frame::Ack { ack_ranges, .. } = frame else {
             panic!("not an ACK");
         };
-        assert_eq!(ack_ranges.len() + 1, kept);
+        assert_eq!(ack_ranges.len() + 1, encoded);
     }
 
     #[test]
@@ -1347,15 +1347,15 @@ mod tests {
         }
 
         let (builder, tokens) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
-        let kept = ack_token_range_count(&tokens);
-        assert!(kept > 32, "{kept}");
-        assert!(kept < RANGE_COUNT, "{kept}");
-        // The byte cap binds before the one-byte count does.
+        let encoded = ack_token_range_count(&tokens);
+        const {
+            assert!(RANGE_COUNT > RecvdPackets::MAX_EXTRA_ACK_RANGES);
+        };
         assert!(
-            kept <= RecvdPackets::MAX_EXTRA_ACK_RANGES,
-            "byte cap should bind first, kept {kept}"
+            (33..=RecvdPackets::MAX_EXTRA_ACK_RANGES).contains(&encoded),
+            "{encoded}"
         );
-        assert!(builder.len() <= 1 + WORST_FIXED + RecvdPackets::RANGE_FRAME_SPACE);
+        assert!(builder.len() <= WORST_FIXED + RecvdPackets::RANGE_FRAME_SPACE);
         assert!(builder.len() <= builder.limit());
 
         let Frame::Ack {
@@ -1367,7 +1367,7 @@ mod tests {
             panic!("not an ACK");
         };
         assert_eq!(largest_acknowledged, to_u64(RANGE_COUNT - 1) * SPACING);
-        assert_eq!(ack_ranges.len() + 1, kept);
+        assert_eq!(ack_ranges.len() + 1, encoded);
     }
 
     #[test]
