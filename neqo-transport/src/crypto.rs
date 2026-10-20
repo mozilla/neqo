@@ -24,7 +24,7 @@ use std::{
     time::Instant,
 };
 
-use enum_map::EnumMap;
+use enum_map::{Enum as _, EnumMap};
 use neqo_common::{
     Buffer, Encoder, Role,
     hex::{Hex, HexSnipMiddle},
@@ -1165,17 +1165,16 @@ impl CryptoStates {
 
     pub fn confirm_version(&mut self, orig: Version, confirmed: Version) -> Res<()> {
         if orig != confirmed {
-            // This part where the old data is removed and then re-added is to
-            // appease the borrow checker.
             // Note that on the server, we might not have initials for |orig| if it
             // was configured for |orig| and only |confirmed| Initial packets arrived.
-            if let Some(prev) = self.initials[orig].take() {
-                let next = self.initials[confirmed]
-                    .as_mut()
-                    .ok_or(Error::VersionNegotiation)?;
+            if let Ok([Some(prev), next]) = self
+                .initials
+                .as_mut_slice()
+                .get_disjoint_mut([orig.into_usize(), confirmed.into_usize()])
+            {
+                let next = next.as_mut().ok_or(Error::VersionNegotiation)?;
                 next.rx.continuation(&prev.rx)?;
                 next.tx.continuation(&prev.tx)?;
-                self.initials[orig] = Some(prev);
             }
         }
         Ok(())
