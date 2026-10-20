@@ -27,8 +27,8 @@ use test_fixture::{
 use super::{
     super::{Connection, Output, State, StreamType},
     CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, fill_stream, maybe_authenticate, new_client, new_server,
-    send_something, zero_len_cid_client,
+    default_client, default_server, exchange_ticket, fill_stream, maybe_authenticate, new_client,
+    new_server, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -36,8 +36,9 @@ use crate::{
     MIN_INITIAL_PACKET_SIZE,
     addr_valid::{AddressValidation, ValidateAddress},
     cid::ConnectionIdManager,
-    connection::tests::{
-        assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
+    connection::{
+        test_internal::FrameWriter,
+        tests::{assert_path_challenge_min_len, connect, send_something_paced, send_with_extra},
     },
     frame::FrameType,
     packet,
@@ -1217,7 +1218,7 @@ impl NewConnectionIds {
     }
 }
 
-impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
+impl FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         for i in 0..self.count {
             let seqno = Self::SEQNO + i;
@@ -1310,7 +1311,7 @@ fn retire_cid_queue_bounded() {
 /// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
 struct RetireUnissued(u64);
 
-impl crate::connection::test_internal::FrameWriter for RetireUnissued {
+impl FrameWriter for RetireUnissued {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::RetireConnectionId)
@@ -1448,7 +1449,7 @@ fn retire_prior_to_migration_success() {
 
 struct GarbageWriter {}
 
-impl crate::connection::test_internal::FrameWriter for GarbageWriter {
+impl FrameWriter for GarbageWriter {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);
@@ -1495,6 +1496,64 @@ fn error_on_new_path_with_no_connection_id() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::UnknownFrameType))
     ));
+}
+
+/// Writes a `PATH_CHALLENGE` into every packet but the first, which is an Initial.
+struct ZeroRttPathChallenge {
+    initial: bool,
+}
+
+impl FrameWriter for ZeroRttPathChallenge {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        if self.initial {
+            self.initial = false;
+        } else {
+            builder
+                .encode_varint(FrameType::PathChallenge)
+                .encode([7; 8]);
+        }
+    }
+}
+
+/// A 0-RTT `PATH_CHALLENGE` from a new address that uses the server's connection ID
+/// does not add a path, let alone a validated one, before the handshake completes.
+#[test]
+fn zero_rtt_path_challenge_on_new_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram();
+    let s2 = server.process_output(now()).dgram();
+
+    // The client learns the server's connection ID from its first packet.
+    let ack = client.process(s1, now()).dgram();
+    server.process_input(ack.unwrap(), now());
+
+    let challenge = send_with_extra(&mut client, ZeroRttPathChallenge { initial: true }, now());
+    let challenge = change_source_address_and_port(&challenge, 1);
+    server.process_input(challenge.clone(), now());
+    assert_eq!(server.stats().frame_rx.path_challenge, 1);
+    assert_eq!(*server.state(), State::Handshaking);
+
+    // The handshake completes on the original path and the challenge is not answered.
+    client.process_input(s2.unwrap(), now());
+    connect(&mut client, &mut server);
+    assert_eq!(server.stats().frame_tx.path_response, 0);
+
+    // If the client moves to the other address, the server validates it.
+    let c3 = change_source_address_and_port(&send_something(&mut client, now()), 1);
+    let before = server.stats().frame_tx;
+    let s3 = server.process(Some(c3), now()).dgram().unwrap();
+    assert_path_challenge(&server, &s3, &before, challenge.source(), false);
 }
 
 /// Ask the server to send a ticket and check that it doesn't provide a `NEW_TOKEN` token
