@@ -10,10 +10,11 @@ use test_fixture::{datagram, now};
 
 use super::{
     super::{Connection, Output, State},
-    connect, connect_force_idle, default_client, default_server, send_something,
+    connect, connect_force_idle, default_client, default_server, fill_cwnd, send_something,
 };
 use crate::{
-    AppError, CloseReason, ERROR_APPLICATION_CLOSE, Error,
+    AppError, CloseReason, ERROR_APPLICATION_CLOSE, Error, StreamType,
+    recovery::ACK_ONLY_SIZE_LIMIT,
     stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
 };
@@ -75,6 +76,22 @@ fn connection_close_with_long_reason_string() {
     assert_eq!(stats_after.ack, stats_before.ack + 1);
 
     server.process_input(out.dgram().unwrap(), now);
+    assert_draining(&server, &Error::PeerApplication(42));
+}
+
+#[test]
+fn connection_close_with_long_reason_string_cwnd_limited() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    let (_, now) = fill_cwnd(&mut client, stream, now());
+    client.close(now, 42, "a".repeat(2048));
+
+    let dgram = client.process_output(now).dgram().unwrap();
+    assert_eq!(dgram.len(), ACK_ONLY_SIZE_LIMIT - 1);
+    server.process_input(dgram, now);
     assert_draining(&server, &Error::PeerApplication(42));
 }
 
