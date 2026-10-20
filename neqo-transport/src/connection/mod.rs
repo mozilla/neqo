@@ -2200,10 +2200,7 @@ impl Connection {
         } else {
             self.tps.borrow_mut().remote().get_preferred_address()
         };
-        if let Some((addr, cid)) = spa {
-            // The connection ID isn't special, so just save it.
-            self.cids.add_remote(cid)?;
-
+        if let Some((addr, _)) = spa {
             // The preferred address doesn't dictate what the local address is, so this
             // has to use the existing address.  So only pay attention to a preferred
             // address from the same family as is currently in use. More thought will
@@ -3110,6 +3107,16 @@ impl Connection {
                 return Err(Error::TransportParameter);
             }
 
+            // The connection ID isn't special, so just save it.
+            if let Some((_, cid)) = remote.get_preferred_address()
+                && !matches!(
+                    self.conn_params.get_preferred_address(),
+                    PreferredAddressConfig::Disabled
+                )
+            {
+                self.cids.add_remote(cid, 0)?;
+            }
+
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             if let Some(token) = remote.get_bytes(StatelessResetToken) {
                 let reset_token = Srt::try_from(token).map_err(|_| Error::TransportParameter)?;
@@ -3460,13 +3467,17 @@ impl Connection {
                 retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
-                self.cids.add_remote(ConnectionIdEntry::new(
+                let entry = ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
                     stateless_reset_token,
-                ))?;
-                self.paths.retire_cids(retire_prior, &mut self.cids);
-                let too_many = if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
+                );
+                let added = self.cids.add_remote(entry.clone(), retire_prior)?;
+                self.paths.retire_cids(retire_prior, &mut self.cids)?;
+                if !added {
+                    self.paths.retire_old_cid(&entry)?;
+                }
+                let too_many = if self.cids.active_len() >= ConnectionIdManager::ACTIVE_LIMIT {
                     Some("received too many active connection IDs")
                 } else if self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE {
                     // `MAX_RETIRE_QUEUE` is the actual allowed maximum.  A single call to
