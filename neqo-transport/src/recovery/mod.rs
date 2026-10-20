@@ -114,6 +114,11 @@ impl SendProfile {
     pub const fn limit(&self) -> usize {
         self.limit
     }
+
+    /// Lower the limit, even below the one for ACK-only packets.
+    pub(crate) fn cap(&mut self, limit: usize) {
+        self.limit = min(self.limit, limit);
+    }
 }
 
 #[derive(Debug)]
@@ -920,6 +925,10 @@ impl Loss {
         lost: &mut Vec<sent::Packet>,
         has_handshake_keys: bool,
     ) {
+        // As in `next_timeout`, which does not arm the timer then (RFC 9002, Section 6.2.2.1).
+        if !primary_path.borrow().pto_possible() {
+            return;
+        }
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();

@@ -1598,6 +1598,27 @@ fn server_pto_respects_amplification_limit() {
     assert_eq!(timer + 7 * pto, server.conn_params.get_idle_timeout());
 }
 
+/// An overdue PTO does not fire while amplification-limited (RFC 9002, Section 6.2.2.1).
+#[test]
+fn server_overdue_pto_amplification_limited() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    // The server cannot complete its flight within the amplification limit.
+    let very_big =
+        TransportParameter::Bytes(vec![0; 10 * Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
+    server
+        .set_local_tparam(TestTransportParameter, very_big)
+        .unwrap();
+    let now = now();
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    while server.process_output(now).dgram().is_some() {}
+
+    let idle = server.conn_params.get_idle_timeout();
+    assert_eq!(server.process_output(now).callback(), idle);
+    assert_eq!(server.process_output(now + idle / 2).callback(), idle / 2);
+}
+
 #[test]
 fn grease_quic_bit_transport_parameter() {
     fn get_remote_tp(conn: &Connection) -> bool {
