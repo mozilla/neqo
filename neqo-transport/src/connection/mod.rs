@@ -3490,6 +3490,10 @@ impl Connection {
             }
             Frame::PathChallenge { data } => {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
+                // Only allow one path during setup.
+                if !self.state.connected() && !path.borrow().is_primary() {
+                    return Ok(());
+                }
                 // If we were challenged, try to make the path permanent.
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path, now)?;

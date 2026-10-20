@@ -28,8 +28,9 @@ use tracing::debug;
 use super::{
     super::{Connection, Output, State, StreamType},
     CountingConnectionIdGenerator, assert_error, connect_fail, connect_force_idle,
-    connect_rtt_idle, cwnd_avail, default_client, default_server, fill_stream, maybe_authenticate,
-    new_client, new_server, send_something, zero_len_cid_client,
+    connect_rtt_idle, cwnd_avail, default_client, default_server, exchange_ticket, fill_stream,
+    maybe_authenticate, new_client, new_server, resumed_server, send_something,
+    zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1584,6 +1585,64 @@ fn path_response_not_padded_when_cwnd_limited() {
     let after = client.stats().frame_tx;
     assert_eq!(after.path_response, before.path_response + 1);
     assert_eq!(after.padding, before.padding);
+}
+
+/// Writes a `PATH_CHALLENGE` into every packet but the first, which is an Initial.
+struct ZeroRttPathChallenge {
+    initial: bool,
+}
+
+impl test_internal::FrameWriter for ZeroRttPathChallenge {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        if self.initial {
+            self.initial = false;
+        } else {
+            builder
+                .encode_varint(FrameType::PathChallenge)
+                .encode([7; 8]);
+        }
+    }
+}
+
+/// A 0-RTT `PATH_CHALLENGE` from a new address that uses the server's connection ID
+/// does not add a path, let alone a validated one, before the handshake completes.
+#[test]
+fn zero_rtt_path_challenge_on_new_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram();
+    let s2 = server.process_output(now()).dgram();
+
+    // The client learns the server's connection ID from its first packet.
+    let ack = client.process(s1, now()).dgram();
+    server.process_input(ack.unwrap(), now());
+
+    let challenge = send_with_extra(&mut client, ZeroRttPathChallenge { initial: true }, now());
+    let challenge = change_source_address_and_port(&challenge, 1);
+    server.process_input(challenge.clone(), now());
+    assert_eq!(server.stats().frame_rx.path_challenge, 1);
+    assert_eq!(*server.state(), State::Handshaking);
+
+    // The handshake completes on the original path and the challenge is not answered.
+    client.process_input(s2.unwrap(), now());
+    connect(&mut client, &mut server);
+    assert_eq!(server.stats().frame_tx.path_response, 0);
+
+    // If the client moves to the other address, the server validates it.
+    let c3 = change_source_address_and_port(&send_something(&mut client, now()), 1);
+    let before = server.stats().frame_tx;
+    let s3 = server.process(Some(c3), now()).dgram().unwrap();
+    assert_path_challenge(&server, &s3, &before, challenge.source(), false);
 }
 
 /// Ask the server to send a ticket and check that it doesn't provide a `NEW_TOKEN` token
