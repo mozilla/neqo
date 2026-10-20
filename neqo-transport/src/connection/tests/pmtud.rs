@@ -65,13 +65,14 @@ fn gso_with_max_mtu() {
     }
 }
 
+/// Use an IPv6 address since the default test connection uses IPv6.
+const VPN_ADDR: SocketAddr = SocketAddr::new(
+    IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+    12345,
+);
+
 /// Simulates VPN by changing the source address of a datagram to an IPv6 VPN endpoint.
 fn via_vpn(d: &Datagram) -> Datagram {
-    // Use an IPv6 address since the default test connection uses IPv6.
-    const VPN_ADDR: SocketAddr = SocketAddr::new(
-        IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
-        12345,
-    );
     Datagram::new(VPN_ADDR, d.destination(), d.tos(), &d[..])
 }
 
@@ -254,4 +255,50 @@ fn delayed_probe_and_retry_do_not_confirm_untested_mtu() {
     let next = client.process_output(now).dgram().unwrap();
     assert!(next.len() > probe_len);
     assert_eq!(client.stats().pmtud_tx, 4);
+}
+
+/// Migrates the server to an unvalidated path with a `len`-byte client packet, checks that it sends
+/// no probe and stays within the amplification limit, and returns the PLPMTU and that limit.
+fn no_probe_on_unvalidated_path(len: usize) -> (usize, usize) {
+    fixture_init();
+    let now = now();
+    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let mut server = new_server(ConnectionParameters::default().pmtud(true));
+    connect(&mut client, &mut server);
+    let stream = server.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut server, stream); // The server will fill whatever limit it is given.
+
+    let c_stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(c_stream, &vec![0x42; len]).unwrap();
+    let small = client.process_output(now).dgram().unwrap();
+    server.process_input(via_vpn(&small), now);
+
+    let (plpmtu, limit) = {
+        let path = server.paths.primary().unwrap();
+        let path = path.borrow();
+        assert!(!path.is_valid() && path.pmtud().needs_probe());
+        assert!(path.amplification_limit() < path.pmtud().probe_size());
+        (path.plpmtu(), path.amplification_limit())
+    };
+
+    let pmtud_tx = server.stats().pmtud_tx;
+    let d = server.process_output(now).dgram().unwrap();
+    assert_eq!(d.destination(), VPN_ADDR);
+    assert_eq!(server.stats().pmtud_tx, pmtud_tx);
+    assert!(d.len() <= limit);
+    (plpmtu, limit)
+}
+
+/// A deferred probe must not enlarge the packets sent meanwhile.
+#[test]
+fn deferred_probe_respects_amplification_limit() {
+    let (plpmtu, limit) = no_probe_on_unvalidated_path(150);
+    assert!(limit < plpmtu);
+}
+
+/// A probe must wait for a budget covering the probe, not just the PLPMTU.
+#[test]
+fn probe_waits_for_budget_covering_probe_size() {
+    let (plpmtu, limit) = no_probe_on_unvalidated_path(400);
+    assert!(plpmtu < limit);
 }
