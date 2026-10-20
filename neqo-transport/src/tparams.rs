@@ -258,7 +258,7 @@ impl TransportParameter {
             d.decode(16).ok_or(Error::NoMoreData)?,
         )?);
         let v6port = d.decode_uint().ok_or(Error::NoMoreData)?;
-        if v6ip.is_unspecified() ^ (v6port == 0) {
+        if v6ip.to_canonical().is_unspecified() ^ (v6port == 0) {
             return Err(Error::TransportParameter);
         }
         let v6 = if v6port == 0 {
@@ -1179,6 +1179,11 @@ mod tests {
         }));
         assert_invalid_spa(&mutate_spa(|_, v6, _| {
             v6.as_mut().unwrap().set_ip(Ipv6Addr::from(0));
+        }));
+        assert_invalid_spa(&mutate_spa(|_, v6, _| {
+            v6.as_mut()
+                .unwrap()
+                .set_ip(Ipv4Addr::UNSPECIFIED.to_ipv6_mapped());
         }));
         // Either address being absent is OK.
         assert_valid_spa(&mutate_spa(|v4, _, _| {
