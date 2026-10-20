@@ -2303,30 +2303,14 @@ fn expand_datagram_that_ends_in_short_header() {
     assert!(maybe_authenticate(&mut client));
 
     let c3 = client.process_output(t).dgram().unwrap();
-    assert_eq!(
-        c3.len(),
-        client.plpmtu(),
-        "expanded for the Initial it carries"
-    );
+    assert_eq!(c3.len(), client.plpmtu()); // Expanded for the Initial it carries.
     let (_, rest) = split_datagram(&c3);
     let rest = rest.expect("Handshake is coalesced");
     let (_, short) = split_datagram(&rest);
     let short = short.expect("a 1-RTT packet is coalesced");
-    assert_eq!(
-        short[0] & 0x80,
-        0,
-        "the datagram ends in a short header packet"
-    );
-    assert_eq!(
-        client.stats().frame_tx.padding,
-        1,
-        "expanded from inside it"
-    );
-    assert_eq!(
-        client.stats().cc.bytes_in_flight,
-        rest.len(),
-        "the Handshake and padded 1-RTT packets are in flight"
-    );
+    assert_eq!(short[0] & 0x80, 0); // Ends in a short header packet.
+    assert_eq!(client.stats().frame_tx.padding, 1); // Expanded from inside it.
+    assert_eq!(client.stats().cc.bytes_in_flight, rest.len()); // Handshake and 1-RTT in flight.
 
     let dropped = server.stats().dropped_rx;
     server.process_input(c3, t);
