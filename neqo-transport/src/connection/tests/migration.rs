@@ -518,6 +518,36 @@ fn path_forwarding_attack() {
     assert_v6_path(&server_data4, false);
 }
 
+/// After a NAT rebinding whose old mapping still delivers, the server's `PATH_CHALLENGE`s on the
+/// new and the old path both reach the client on one path. Each needs a `PATH_RESPONSE`.
+#[test]
+fn path_challenges_on_one_path_each_get_a_response() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    let dgram = send_something(&mut client, now);
+    server.process_input(change_source_port(&dgram, 1), now);
+    let new_probe = server.process_output(now).dgram().unwrap();
+    let old_probe = server.process_output(now).dgram().unwrap();
+    assert_eq!(server.stats().frame_tx.path_challenge, 2);
+
+    // The NAT maps the new path back to the client's address.
+    let new_probe = Datagram::new(
+        new_probe.source(),
+        DEFAULT_ADDR,
+        new_probe.tos(),
+        &new_probe[..],
+    );
+    client.process_input(new_probe, now);
+    client.process_input(old_probe, now);
+    assert_eq!(client.stats().frame_rx.path_challenge, 2);
+
+    while client.process_output(now).dgram().is_some() {}
+    assert_eq!(client.stats().frame_tx.path_response, 2);
+}
+
 #[test]
 fn migrate_immediate() {
     let mut client = default_client();
