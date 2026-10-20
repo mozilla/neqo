@@ -2535,6 +2535,12 @@ impl Connection {
             && path.can_probe_pmtud()
     }
 
+    fn is_small_initial(&self, space: PacketNumberSpace, profile: &SendProfile) -> bool {
+        self.role == Role::Server
+            && space == PacketNumberSpace::Initial
+            && profile.limit() < packet::MIN_INITIAL_PACKET_SIZE
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
     fn write_frames(
@@ -2584,11 +2590,8 @@ impl Connection {
             }
         }
 
-        let small_initial = self.role == Role::Server
-            && space == PacketNumberSpace::Initial
-            && profile.limit() < packet::MIN_INITIAL_PACKET_SIZE;
         // Only ACKs if CC limited, or in a server Initial below the minimum size (RFC 9000, 14.1).
-        if profile.ack_only() || small_initial {
+        if profile.ack_only() || self.is_small_initial(space, profile) {
             return (tokens, false);
         }
 
