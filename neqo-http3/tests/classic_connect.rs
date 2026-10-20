@@ -7,24 +7,26 @@
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
-    Http3ServerEvent, Priority, webtransport::ClientSession as _,
+    Http3ServerEvent, Priority, StreamId, webtransport::ClientSession as _,
 };
-use neqo_transport::StreamId;
 use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
 
 const AUTHORITY: &str = "something.com";
 
-#[test]
-fn classic_connect() {
-    // Connect a client and a server.
+/// Connects a client and a server and discards the server events produced so
+/// far.
+fn connect() -> (Http3Client, Http3Server) {
     let mut client = default_http3_client();
     let mut server = default_http3_server();
     let out = test_fixture::connect_peers(&mut client, &mut server);
     assert_eq!(server.process(out, now()).dgram(), None);
-
-    // Ignore all events so far.
     drop(server.events());
-    client.events();
+    (client, server)
+}
+
+#[test]
+fn classic_connect() {
+    let (mut client, mut server) = connect();
 
     // Have client send a CONNECT request.
     let stream_id = client
@@ -101,10 +103,7 @@ fn classic_connect() {
 
 #[test]
 fn classic_connect_via_fetch_panics_in_debug() {
-    let mut client = default_http3_client();
-    let mut server = default_http3_server();
-    let out = test_fixture::connect_peers(&mut client, &mut server);
-    assert_eq!(server.process(out, now()).dgram(), None);
+    let (mut client, _server) = connect();
 
     let res = client.fetch(
         now(),
@@ -124,11 +123,7 @@ fn establish_tunnel() -> (
     StreamId,
     Http3OrWebTransportStream,
 ) {
-    let mut client = default_http3_client();
-    let mut server = default_http3_server();
-    let out = test_fixture::connect_peers(&mut client, &mut server);
-    assert_eq!(server.process(out, now()).dgram(), None);
-    drop(server.events());
+    let (mut client, mut server) = connect();
 
     let stream_id = client
         .connect(now(), AUTHORITY, &[], Priority::default())
@@ -163,12 +158,18 @@ fn establish_tunnel() -> (
 fn server_read_until_fin(server: &Http3Server, stream_id: StreamId) -> Vec<u8> {
     let mut received = Vec::new();
     for event in server.events() {
-        if let Http3ServerEvent::Data { stream, data, fin } = event {
-            assert_eq!(stream.stream_id(), stream_id);
-            received.extend_from_slice(&data);
-            if fin {
-                return received;
+        match event {
+            Http3ServerEvent::Data { stream, data, fin } => {
+                assert_eq!(stream.stream_id(), stream_id);
+                received.extend_from_slice(&data);
+                if fin {
+                    return received;
+                }
             }
+            Http3ServerEvent::StreamReset { .. } | Http3ServerEvent::StreamStopSending { .. } => {
+                panic!("unexpected event on the tunnel stream: {event:?}");
+            }
+            _ => {}
         }
     }
     panic!("server did not receive FIN on the tunnel stream");
@@ -188,6 +189,21 @@ fn client_read_until_fin(client: &mut Http3Client, stream_id: StreamId) -> Vec<u
         }
         assert_ne!(amount, 0, "client did not receive FIN on the tunnel stream");
     }
+}
+
+/// Drains the pending client events and returns those for the tunnel stream.
+fn client_tunnel_events(client: &mut Http3Client, stream_id: StreamId) -> Vec<Http3ClientEvent> {
+    client
+        .events()
+        .filter(|e| match e {
+            Http3ClientEvent::HeaderReady { stream_id: id, .. }
+            | Http3ClientEvent::DataWritable { stream_id: id }
+            | Http3ClientEvent::DataReadable { stream_id: id }
+            | Http3ClientEvent::Reset { stream_id: id, .. }
+            | Http3ClientEvent::StopSending { stream_id: id, .. } => *id == stream_id,
+            _ => false,
+        })
+        .collect()
 }
 
 /// > TCP connections that remain half closed in a single direction are not
@@ -210,6 +226,10 @@ fn classic_connect_client_half_close() {
     stream.send_data(b"pong", now()).unwrap();
     stream.stream_close_send(now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(
+        client_tunnel_events(&mut client, stream_id),
+        [Http3ClientEvent::DataReadable { stream_id }]
+    );
     assert_eq!(client_read_until_fin(&mut client, stream_id), b"pong");
 }
 
@@ -222,6 +242,10 @@ fn classic_connect_server_half_close() {
     stream.send_data(b"pong", now()).unwrap();
     stream.stream_close_send(now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(
+        client_tunnel_events(&mut client, stream_id),
+        [Http3ClientEvent::DataReadable { stream_id }]
+    );
     assert_eq!(client_read_until_fin(&mut client, stream_id), b"pong");
 
     // The client keeps sending after the server's half-close.
@@ -229,6 +253,77 @@ fn classic_connect_server_half_close() {
     client.stream_close_send(stream_id, now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
     assert_eq!(server_read_until_fin(&server, stream_id), b"ping");
+}
+
+/// The server aborting the client's sending side of a tunnel with
+/// `STOP_SENDING` must not tear down the client's receiving side.
+#[test]
+fn classic_connect_server_stop_sending() {
+    let (mut client, mut server, stream_id, stream) = establish_tunnel();
+
+    stream
+        .stream_stop_sending(Error::HttpConnect.code())
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(
+        client_tunnel_events(&mut client, stream_id),
+        [Http3ClientEvent::StopSending {
+            stream_id,
+            error: Error::HttpConnect.code()
+        }]
+    );
+    assert_eq!(
+        client.send_data(stream_id, b"ping", now()),
+        Err(Error::InvalidStreamId)
+    );
+
+    // The server keeps sending after aborting the client's sending side.
+    stream.send_data(b"pong", now()).unwrap();
+    stream.stream_close_send(now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(client_read_until_fin(&mut client, stream_id), b"pong");
+}
+
+/// The server resetting its sending side of a tunnel must not tear down the
+/// client's sending side.
+#[test]
+fn classic_connect_server_reset() {
+    let (mut client, mut server, stream_id, stream) = establish_tunnel();
+
+    stream.stream_reset_send(Error::HttpConnect.code()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    // A local reset makes the server report `StreamStopSending` for its own
+    // sending side; discard that event.
+    drop(server.events());
+    assert_eq!(
+        client_tunnel_events(&mut client, stream_id),
+        [Http3ClientEvent::Reset {
+            stream_id,
+            error: Error::HttpConnect.code(),
+            local: false
+        }]
+    );
+
+    // The client keeps sending after the server's reset.
+    assert_eq!(client.send_data(stream_id, b"ping", now()), Ok(4));
+    client.stream_close_send(stream_id, now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(server_read_until_fin(&server, stream_id), b"ping");
+}
+
+/// Reprioritizing a tunnel sends a `PRIORITY_UPDATE` for its request stream.
+#[test]
+fn classic_connect_priority_update() {
+    let (mut client, mut server, stream_id, _stream) = establish_tunnel();
+
+    let priority = Priority::new(3, true);
+    assert_eq!(client.priority_update(stream_id, priority), Ok(true));
+    exchange_packets(&mut client, &mut server, false, None);
+    assert!(server.events().any(|e| matches!(
+        e,
+        Http3ServerEvent::PriorityUpdate { stream_id: id, priority: p }
+            if id == stream_id && p == priority
+    )));
 }
 
 /// A classic CONNECT tunnel is not an extended CONNECT session.

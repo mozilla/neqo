@@ -938,20 +938,18 @@ impl Http3Connection {
     where
         T: RequestTarget,
     {
+        // Extended CONNECT sessions are set up by `extended_connect_create_session`.
+        // Every stream created here, including a classic CONNECT tunnel, is a
+        // regular HTTP stream whose two directions are closed independently.
+        debug_assert!(
+            !matches!(request.connect_type, Some(ConnectType::Extended(_))),
+            "extended CONNECT must use extended_connect_create_session"
+        );
         let final_headers = Self::create_request_headers(request)?;
-
-        // A classic CONNECT tunnel is a regular HTTP stream whose two directions
-        // can be closed independently. Only extended CONNECT streams are
-        // sessions whose send and receive sides are removed together.
-        let stream_type = if matches!(request.connect_type, Some(ConnectType::Extended(_))) {
-            Http3StreamType::ExtendedConnect
-        } else {
-            Http3StreamType::Http
-        };
 
         let mut send_message = SendMessage::new(
             MessageType::Request,
-            stream_type,
+            Http3StreamType::Http,
             stream_id,
             Rc::clone(&self.qpack_encoder),
             send_events,
@@ -968,7 +966,7 @@ impl Http3Connection {
             Box::new(RecvMessage::new(
                 &RecvMessageInfo {
                     message_type: MessageType::Response,
-                    stream_type,
+                    stream_type: Http3StreamType::Http,
                     stream_id,
                     first_frame_type: None,
                 },
