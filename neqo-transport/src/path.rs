@@ -119,6 +119,11 @@ impl Paths {
         path.borrow().is_temporary() || !self.paths.iter().any(|p| Rc::ptr_eq(p, path))
     }
 
+    /// Returns true if a permanent path uses the given remote address.
+    pub fn is_known_remote(&self, remote: SocketAddr) -> bool {
+        self.paths.iter().any(|p| p.borrow().remote == remote)
+    }
+
     fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
         if let Some(cid) = &retired.borrow().remote_cid {
             let seqno = cid.sequence_number();

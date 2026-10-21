@@ -1562,6 +1562,15 @@ impl Connection {
             return Ok(PreprocessResult::Next);
         }
 
+        // RFC 9000, Section 9: a client MUST discard packets from an unknown server address.
+        if self.role == Role::Client && !self.paths.is_known_remote(path.borrow().remote_address())
+        {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Packet from unknown server address");
+            return Ok(PreprocessResult::Next);
+        }
+
         if (packet.packet_type() == packet::Type::Initial
             || packet.packet_type() == packet::Type::Handshake)
             && self.role == Role::Client
