@@ -130,6 +130,8 @@ jobs:
             exit 1
           fi
 
+          UNUSED_PATCH='Unused patch in top-level Cargo.toml|has an override in .* that is not used'
+
           # Check if this is a vet-related failure
           if grep -qE "Vet error|Missing audit for" vendor.log; then
             # Extract all crate names from crate:version patterns in the log
@@ -144,6 +146,10 @@ jobs:
               fi
             done
             echo "::warning::Vet failures are unrelated to neqo, forcing"
+            ./mach vendor rust --ignore-modified --force
+          elif grep -qE "$UNUSED_PATCH" vendor.log &&
+               ! grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor.log | grep -qvE "$UNUSED_PATCH"; then
+            grep -E "$UNUSED_PATCH" vendor.log | sed 's/^.* E /::warning::/'
             ./mach vendor rust --ignore-modified --force
           else
             echo "::error::Vendoring failed for non-vet reasons:"
