@@ -3326,6 +3326,13 @@ impl Connection {
         // There is a chance that this could be called less often, but getting the
         // conditions right is a little tricky, so call whenever CRYPTO data is used.
         if try_update {
+            // TLS stops early data on rejection or HelloRetryRequest (RFC 9001, Section 4.6.2).
+            if self.zero_rtt_state == ZeroRttState::Sending
+                && !self.crypto.tls().preinfo()?.early_data()
+            {
+                self.client_0rtt_rejected(now);
+                self.zero_rtt_state = ZeroRttState::Rejected;
+            }
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote_handshake().is_some() {
                 self.set_initial_limits();
