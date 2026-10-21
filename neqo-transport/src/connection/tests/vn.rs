@@ -14,11 +14,11 @@ use test_fixture::{
 
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
-    CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
-    new_client, new_server, send_something,
+    CryptoWriter, connect, connect_fail, default_client, default_server, drain, exchange_ticket,
+    flush_to, handshake_packet, maybe_authenticate, new_client, new_server, send_something,
 };
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
+    Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, StreamType, Version,
     connection::tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
     packet,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -328,6 +328,31 @@ fn compatible_downgrade() {
     assert_eq!(server.version(), Version::Version1);
 }
 
+/// A Handshake packet that uses a version other than the negotiated one is dropped
+/// (RFC 9369, Section 4.1).
+#[test]
+fn compatible_upgrade_handshake_in_original_version() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+    flush_to(&mut client, &mut server, &mut now);
+    flush_to(&mut server, &mut client, &mut now);
+    maybe_authenticate(&mut client);
+    assert_eq!(client.version(), Version::Version2);
+
+    // The client keeps its version 2 Handshake keys, but labels its packets as version 1.
+    client.version = Version::Version1;
+    let mut flight = Vec::new();
+    drain(&mut client, &mut now, |d, _| flight.push(d));
+    let hs = handshake_packet(&flight);
+    assert_version(&hs, Version::Version1.wire_version());
+
+    let dropped = server.stats().dropped_rx;
+    server.process_input(hs, now);
+    assert_eq!(server.stats().dropped_rx, dropped + 1);
+    assert_eq!(*server.state(), State::Handshaking);
+}
+
 /// Inject a Version Negotiation packet, which the client detects when it validates the
 /// server `version_negotiation` transport parameter.
 #[test]
@@ -472,9 +497,8 @@ fn no_compatible_version() {
     );
 }
 
-/// When a compatible upgrade chooses a different version, 0-RTT is rejected.
-#[test]
-fn compatible_upgrade_0rtt_rejected() {
+/// A client that resumes a version 1 connection, and a server that prefers version 2.
+fn resumed_v1_client_and_v2_server() -> (Connection, Connection) {
     // This is the baseline configuration where v1 is attempted and v2 preferred.
     let prefer_v2 = ConnectionParameters::default().versions(
         Version::Version1,
@@ -492,8 +516,15 @@ fn compatible_upgrade_0rtt_rejected() {
 
     // Now upgrade the server to the preferred configuration.
     let mut client = new_client(prefer_v2.clone());
-    let mut server = new_server(prefer_v2);
+    let server = new_server(prefer_v2);
     client.enable_resumption(now(), token).unwrap();
+    (client, server)
+}
+
+/// When a compatible upgrade chooses a different version, 0-RTT is rejected.
+#[test]
+fn compatible_upgrade_0rtt_rejected() {
+    let (mut client, mut server) = resumed_v1_client_and_v2_server();
 
     // Create a packet with 0-RTT from the client.
     let initial = send_something(&mut client, now());
@@ -525,6 +556,27 @@ fn compatible_upgrade_0rtt_rejected() {
         matches!(e, ConnectionEvent::ZeroRttRejected)
     }));
     assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
+}
+
+/// After a compatible upgrade, the client sends 0-RTT packets only in the original version
+/// (RFC 9369, Section 4.1).
+#[test]
+fn compatible_upgrade_0rtt_in_original_version() {
+    let (mut client, mut server) = resumed_v1_client_and_v2_server();
+    let mut now = now();
+    flush_to(&mut client, &mut server, &mut now);
+
+    // Only the server Initial: the client upgrades, but doesn't learn that 0-RTT was rejected.
+    let (initial, _) = split_datagram(&server.process_output(now).dgram().unwrap());
+    client.process_input(initial, now);
+    assert_eq!(client.version(), Version::Version2);
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Sending);
+
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream, &[0]).unwrap();
+    let (initial, zero_rtt) = split_datagram(&client.process_output(now).dgram().unwrap());
+    assert_version(&initial, Version::Version2.wire_version());
+    assert_version(&zero_rtt.unwrap(), Version::Version1.wire_version());
 }
 
 /// When the server confirms a new version the client will switch to using v2.
