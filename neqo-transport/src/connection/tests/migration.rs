@@ -361,7 +361,7 @@ fn inc_addr(ip: IpAddr, i: usize) -> IpAddr {
     }
 }
 
-fn change_source_port(d: &Datagram, i: usize) -> Datagram {
+pub fn change_source_port(d: &Datagram, i: usize) -> Datagram {
     Datagram::new(
         SocketAddr::new(d.source().ip(), inc_port(d.source().port(), i)),
         d.destination(),

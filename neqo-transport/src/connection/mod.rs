@@ -1555,6 +1555,7 @@ impl Connection {
     fn preprocess_packet(
         &mut self,
         packet: &packet::Public,
+        path: &PathRef,
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
@@ -1692,7 +1693,13 @@ impl Connection {
                 // > incoming packet that it attributes to the connection.
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
-                self.state_signaling.send_close();
+                if self.cid_manager.is_valid(packet.dcid()) && !self.paths.is_temporary(path) {
+                    self.state_signaling.send_close();
+                } else {
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped("Unattributed packet while closing");
+                }
                 PreprocessResult::Next
             }
             State::Draining { .. } | State::Closed(..) => {
@@ -1831,7 +1838,7 @@ impl Connection {
                         break;
                     }
                 };
-            match self.preprocess_packet(&packet, dcid.as_ref(), now)? {
+            match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
                 PreprocessResult::End => return Ok(()),
