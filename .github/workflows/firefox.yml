@@ -144,9 +144,19 @@ jobs:
             echo "::warning::Vet failures are unrelated to neqo, forcing"
             ./mach vendor rust --ignore-modified --force
           elif grep -qE "$UNUSED_PATCH" vendor.log &&
-               ! grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor.log | grep -qvE "$UNUSED_PATCH"; then
+               ! grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor.log | grep -vE "$UNUSED_PATCH" > /dev/null; then
+            for crate in $NEQO_CRATES; do
+              if grep -qF "Unused patch in top-level Cargo.toml for $crate." vendor.log; then
+                echo "::error::Patch for neqo crate $crate was not used"
+                exit 1
+              fi
+            done
             grep -E "$UNUSED_PATCH" vendor.log | sed 's/^.* E /::warning::/'
-            ./mach vendor rust --ignore-modified --force
+            ./mach vendor rust --ignore-modified --force 2>&1 | tee vendor-force.log
+            if grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor-force.log | grep -vE "$UNUSED_PATCH" > /dev/null; then
+              echo "::error::Forced vendoring reported errors besides unused patches"
+              exit 1
+            fi
           else
             echo "::error::Vendoring failed for non-vet reasons:"
             cat vendor.log
