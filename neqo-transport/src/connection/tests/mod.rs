@@ -795,13 +795,9 @@ fn assert_default_stats(stats: &Stats) {
 }
 
 fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
-    let path = c.paths.find_path(
-        d.source(),
-        d.destination(),
-        &c.conn_params,
-        now,
-        &mut c.stats.borrow_mut(),
-    );
+    let path = c
+        .paths
+        .find_path(d.source(), d.destination(), &c.conn_params, now);
     if path.borrow().amplification_limit() < path.borrow().plpmtu() {
         // If the amplification limit is less than the PLPMTU, then the path
         // challenge will not have been padded.
