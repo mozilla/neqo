@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enum_map::EnumMap;
 use neqo_common::{const_max, const_min, qlog::Qlog};
 use rustc_hash::FxHashMap as HashMap;
 use tracing::{debug, info, trace};
@@ -25,6 +26,7 @@ use crate::{
     rtt::RttEstimate,
     sender::PACING_BURST_SIZE,
     stats::{CongestionControlStats, SlowStartExitReason, SlowStartExitStats},
+    tracking::PacketNumberSpace,
 };
 
 pub const CWND_INITIAL_PKTS: usize = 10;
@@ -155,15 +157,30 @@ struct MaybeLostPacket {
     time_sent: Instant,
 }
 
+/// The highest packet number sent in each packet number space.
+#[derive(Clone, Copy, Debug, Default)]
+struct SentPns(EnumMap<PacketNumberSpace, Option<packet::Number>>);
+
+impl SentPns {
+    fn record(&mut self, pkt: &sent::Packet) {
+        self.0[pkt.space()] = Some(pkt.pn());
+    }
+
+    /// Whether `pkt` was sent at or before this snapshot.
+    fn includes(&self, pkt: &sent::Packet) -> bool {
+        self.0[pkt.space()].is_some_and(|pn| pkt.pn() <= pn)
+    }
+}
+
 #[derive(Debug, Clone)]
 struct State {
     phase: Phase,
     congestion_window: usize,
     acked_bytes: usize,
     ssthresh: Option<usize>,
-    /// Packet number of the first packet that was sent after a congestion event. When this one is
-    /// acked we will exit [`Phase::Recovery`] and enter [`Phase::CongestionAvoidance`].
-    recovery_start: Option<packet::Number>,
+    /// Highest packet number sent in each space at the last congestion event. When a later packet
+    /// is acked we will exit [`Phase::Recovery`] and enter [`Phase::CongestionAvoidance`].
+    recovery_start: SentPns,
 }
 
 impl Display for State {
@@ -177,13 +194,13 @@ impl Display for State {
 }
 
 impl State {
-    pub const fn new(mtu: usize) -> Self {
+    pub fn new(mtu: usize) -> Self {
         Self {
             phase: Phase::SlowStart,
             congestion_window: cwnd_initial(mtu),
             acked_bytes: 0,
             ssthresh: None,
-            recovery_start: None,
+            recovery_start: SentPns::default(),
         }
     }
 }
@@ -198,14 +215,15 @@ pub struct ClassicCongestionController<S, T> {
     /// old packets in [`Self::cleanup_maybe_lost_packets`]. Needs a tuple of `(packet::Number,
     /// packet::Type)` to identify packets across packet number spaces.
     maybe_lost_packets: HashMap<(packet::Number, packet::Type), MaybeLostPacket>,
-    /// `first_app_limited` indicates the packet number after which the application might be
-    /// underutilizing the congestion window. When underutilizing the congestion window due to not
-    /// sending out enough data, we SHOULD NOT increase the congestion window.[1] Packets sent
-    /// before this point are deemed to fully utilize the congestion window and count towards
-    /// increasing the congestion window.
+    /// `last_not_app_limited` holds, per space, the last packet number sent while not app-limited,
+    /// after which the application might be underutilizing the congestion window. When
+    /// underutilizing the congestion window due to not sending out enough data, we SHOULD NOT
+    /// increase the congestion window.[1] Packets sent up to this point are deemed to fully
+    /// utilize the congestion window and count towards increasing the congestion window.
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc9002#section-7.8
-    first_app_limited: Option<packet::Number>,
+    last_not_app_limited: SentPns,
+    largest_sent: SentPns,
     pmtud: Pmtud,
     qlog: Qlog,
     /// Current congestion controller parameters.
@@ -317,7 +335,7 @@ where
             if !pkt.cc_outstanding() {
                 continue;
             }
-            if self.first_app_limited.is_some_and(|f| pkt.pn() < f) {
+            if self.last_not_app_limited.includes(pkt) {
                 is_app_limited = false;
             }
             // BIF is set to 0 on a path change, but in case that was because of a simple rebinding
@@ -567,10 +585,9 @@ where
     }
 
     fn on_packet_sent(&mut self, pkt: &sent::Packet, now: Instant) {
-        // Record the recovery time and exit any transient phase.
+        self.largest_sent.record(pkt);
+        // Exit any transient phase.
         if self.current.phase.transient() {
-            self.current.recovery_start = Some(pkt.pn());
-            debug!("set recovery_start to pn={}", pkt.pn());
             self.current.phase.update();
         }
 
@@ -589,9 +606,9 @@ where
         if !self.app_limited() {
             // Given the current non-app-limited condition, we're fully utilizing the congestion
             // window. Assume that all in-flight packets up to this one are NOT app-limited.
-            // However, subsequent packets might be app-limited. Set `first_app_limited` to the
-            // next packet number.
-            self.first_app_limited = Some(pkt.pn() + 1);
+            // However, subsequent packets might be app-limited. Set `last_not_app_limited` to
+            // the highest packet number sent in each space.
+            self.last_not_app_limited = self.largest_sent;
         }
 
         debug!(
@@ -634,7 +651,8 @@ where
             bytes_in_flight: 0,
             maybe_lost_packets: HashMap::default(),
             qlog: Qlog::disabled(),
-            first_app_limited: None,
+            last_not_app_limited: SentPns::default(),
+            largest_sent: SentPns::default(),
             pmtud,
             current: State::new(mtu),
             stored: None,
@@ -838,6 +856,7 @@ where
                     }
                     self.current.congestion_window = self.cwnd_min();
                     self.current.acked_bytes = 0;
+                    self.current.recovery_start = SentPns::default(); // RFC 9002 App. B.8.
                     self.set_phase(
                         Phase::PersistentCongestion,
                         Some(qlog::CongestionStateTrigger::PersistentCongestion),
@@ -875,14 +894,9 @@ where
         // At the start of the recovery period, the phase is transient and
         // all packets will have been sent before recovery. When sending out
         // the first packet we transition to the non-transient `Recovery`
-        // phase and update the variable `self.recovery_start`. Before the
-        // first recovery, all packets were sent after the recovery event,
-        // allowing to reduce the cwnd on congestion events.
-        !self.current.phase.transient()
-            && self
-                .current
-                .recovery_start
-                .is_none_or(|pn| packet.pn() >= pn)
+        // phase. Before the first recovery, all packets were sent after the
+        // recovery event, allowing to reduce the cwnd on congestion events.
+        !self.current.phase.transient() && !self.current.recovery_start.includes(packet)
     }
 
     /// Handle a congestion event.
@@ -899,9 +913,9 @@ where
         // after the start of the previous congestion recovery period.
         if !self.after_recovery_start(last_packet) {
             debug!(
-                "Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {}",
+                "Called on_congestion_event during recovery -> don't react; last_packet {}, recovery_start {:?}",
                 last_packet.pn(),
-                self.current.recovery_start.unwrap_or(0)
+                self.current.recovery_start.0[last_packet.space()]
             );
             return false;
         }
@@ -954,6 +968,7 @@ where
             .flatten(),
             now,
         );
+        self.current.recovery_start = self.largest_sent;
         let trigger = (congestion_trigger == Ecn).then_some(qlog::CongestionStateTrigger::Ecn);
         self.set_phase(Phase::RecoveryStart, trigger, now);
         true
@@ -1460,6 +1475,102 @@ mod tests {
         let mut cc = make_cc_newreno();
         let (_, cwnd) = persistent_congestion_in_recovery(&mut cc);
         assert_eq!(cc.ssthresh(), Some(cwnd));
+    }
+
+    /// Persistent congestion ends recovery, so a later loss of an older packet starts a new one.
+    #[test]
+    fn persistent_congestion_resets_recovery_start() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let pkts = make_lost(&[0, 1, PERSISTENT_CONG_THRESH + 2, PERSISTENT_CONG_THRESH + 3]);
+        for p in &pkts {
+            cc.on_packet_sent(p, now());
+        }
+        assert!(cc.on_packets_lost(Some(now()), None, PTO, &pkts[3..], now(), &mut cc_stats));
+        let recovery = sent::make_packet(4, by_pto(PERSISTENT_CONG_THRESH + 4), 1000);
+        cc.on_packet_sent(&recovery, now()); // Starts the recovery period.
+        assert!(cc.on_packets_lost(Some(now()), None, PTO, &pkts[1..3], now(), &mut cc_stats));
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
+        let next = sent::make_packet(5, by_pto(PERSISTENT_CONG_THRESH + 5), 1000);
+        cc.on_packet_sent(&next, now()); // Leaves the transient persistent congestion phase.
+        assert!(cc.on_packets_lost(Some(now()), None, PTO, &pkts[..1], now(), &mut cc_stats));
+        assert_eq!(cc.current.phase, Phase::RecoveryStart);
+    }
+
+    /// A packet of type `pt`, sent at `now() + t`.
+    fn packet_of_type(pt: packet::Type, pn: packet::Number, t: Duration) -> sent::Packet {
+        sent::Packet::new(pt, pn, now() + t, true, recovery::Tokens::new(), 1000)
+    }
+
+    /// Enter recovery on a lost packet of type `pt` and send the first packet in recovery.
+    fn enter_recovery(cc: &mut impl CongestionController, pt: packet::Type) {
+        let mut cc_stats = CongestionControlStats::default();
+        let lost = packet_of_type(pt, 0, ZERO);
+        cc.on_packet_sent(&lost, now());
+        assert!(cc.on_packets_lost(Some(now()), None, PTO, &[lost], now(), &mut cc_stats));
+        cc.on_packet_sent(&packet_of_type(pt, 1, EPSILON), now());
+    }
+
+    /// A loss in another packet number space, sent during recovery, starts a new recovery period.
+    #[test]
+    fn recovery_start_other_space_lost() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        enter_recovery(&mut cc, packet::Type::Short);
+        let cwnd = cc.cwnd();
+        let lost = packet_of_type(packet::Type::Handshake, 0, GAP);
+        cc.on_packet_sent(&lost, now());
+        assert!(cc.on_packets_lost(Some(now()), None, PTO, &[lost], now(), &mut cc_stats));
+        assert_eq!(cc.cwnd(), cwnd / 2);
+    }
+
+    /// An ack in another packet number space, for a packet sent during recovery, ends recovery.
+    #[test]
+    fn recovery_start_other_space_acked() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        enter_recovery(&mut cc, packet::Type::Handshake);
+        let acked = packet_of_type(packet::Type::Short, 0, GAP);
+        cc.on_packet_sent(&acked, now());
+        cc.on_packets_acked(&[acked], &RttEstimate::new(RTT), now(), &mut cc_stats);
+        assert_eq!(cc.current.phase, Phase::CongestionAvoidance);
+    }
+
+    /// An ack for the highest packet sent before recovery started doesn't end recovery.
+    #[test]
+    fn recovery_start_largest_sent_acked() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let lost = packet_of_type(packet::Type::Short, 0, ZERO);
+        let acked = packet_of_type(packet::Type::Short, 1, ZERO);
+        cc.on_packet_sent(&lost, now());
+        cc.on_packet_sent(&acked, now());
+        assert!(cc.on_packets_lost(Some(now()), None, PTO, &[lost], now(), &mut cc_stats));
+        let recovery = packet_of_type(packet::Type::Short, 2, EPSILON);
+        cc.on_packet_sent(&recovery, now()); // Starts the recovery period.
+        cc.on_packets_acked(&[acked], &RttEstimate::new(RTT), now(), &mut cc_stats);
+        assert_eq!(cc.current.phase, Phase::Recovery);
+    }
+
+    /// A packet in another packet number space, sent while app-limited, doesn't grow the window.
+    #[test]
+    fn last_not_app_limited_other_space() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let mut full = Vec::new();
+        while cc.bytes_in_flight() < cc.cwnd() {
+            let p = packet_of_type(packet::Type::Handshake, to_u64(full.len()), ZERO);
+            cc.on_packet_sent(&p, now());
+            full.push(p);
+        }
+        cc.on_packets_acked(&full, &RttEstimate::new(RTT), now(), &mut cc_stats);
+
+        let cwnd = cc.cwnd();
+        let limited = packet_of_type(packet::Type::Short, 0, GAP);
+        cc.on_packet_sent(&limited, now());
+        assert!(cc.app_limited());
+        cc.on_packets_acked(&[limited], &RttEstimate::new(RTT), now(), &mut cc_stats);
+        assert_eq!(cc.cwnd(), cwnd);
     }
 
     /// The code asserts on ordering errors.
