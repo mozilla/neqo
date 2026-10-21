@@ -3434,6 +3434,7 @@ impl Connection {
                     && self.crypto.streams_mut().read_to_end(space, &mut buf)? > 0
                 {
                     self.handshake(now, packet_version, space, Some(&buf))?;
+                    self.crypto.check_resumption_tokens()?;
                     self.create_resumption_token(now);
                 } else if duplicate && space == PacketNumberSpace::Initial {
                     self.crypto.resend_unacked_early(); // See Section 6.2.3 of RFC 9002.

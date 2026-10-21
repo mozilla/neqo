@@ -430,11 +430,27 @@ impl Crypto {
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
                 debug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
-                ResumptionToken::new(enc.into(), t.expiration_time())
+                ResumptionToken::new_with_early_data(
+                    enc.into(),
+                    t.expiration_time(),
+                    t.max_early_data_size(),
+                )
             })
         } else {
             unreachable!("It is a server");
         }
+    }
+
+    /// RFC 9001, Section 4.6.1: `max_early_data_size` must be 0xffffffff (NSS: 0 if absent).
+    pub fn check_resumption_tokens(&self) -> Res<()> {
+        if let Agent::Client(c) = &self.tls
+            && c.resumption_tokens()
+                .iter()
+                .any(|t| !matches!(t.max_early_data_size(), 0 | 0xffff_ffff))
+        {
+            return Err(Error::ProtocolViolation);
+        }
+        Ok(())
     }
 
     pub fn has_resumption_token(&self) -> bool {
