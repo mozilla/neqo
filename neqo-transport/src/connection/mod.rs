@@ -3725,7 +3725,7 @@ impl Connection {
             .crypto
             .tls()
             .info()
-            .map(SecretAgentInfo::alpn)
+            .and_then(SecretAgentInfo::alpn)
             .is_none()
         {
             warn!("[{self}] No ALPN, closing connection");
