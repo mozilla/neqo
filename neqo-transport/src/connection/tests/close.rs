@@ -4,8 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::time::Duration;
+use std::{net::SocketAddr, time::Duration};
 
+use neqo_common::Datagram;
 use test_fixture::{datagram, now};
 
 use super::{
@@ -204,6 +205,32 @@ fn closing_and_draining() {
         *server.state(),
         State::Closed(CloseReason::Transport(Error::PeerApplication(APP_ERROR)))
     );
+}
+
+/// A closing endpoint only answers packets that it attributes to the connection.
+#[test]
+fn closing_ignores_unattributed_packets() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    server.close(now(), 0, "");
+    assert!(server.process_output(now()).dgram().is_some());
+    let dropped = server.stats().dropped_rx;
+
+    let p = send_something(&mut client, now());
+    let mut junk = p.to_vec();
+    junk[2] ^= 0xff; // First connection ID byte after the length.
+    let junk = Datagram::new(p.source(), p.destination(), p.tos(), junk);
+    assert!(server.process(Some(junk), now()).dgram().is_none());
+    assert_eq!(server.stats().dropped_rx, dropped + 1);
+
+    let src = SocketAddr::new(p.source().ip(), p.source().port() + 1);
+    let moved = Datagram::new(src, p.destination(), p.tos(), &p[..]);
+    assert!(server.process(Some(moved), now()).dgram().is_none());
+    assert_eq!(server.stats().dropped_rx, dropped + 2);
+
+    assert!(server.process(Some(p), now()).dgram().is_some());
 }
 
 /// Test that a client can handle a stateless reset correctly.
