@@ -101,6 +101,10 @@ pub trait WindowAdjustment: Display + Debug {
     ) -> (usize, usize);
     /// Cubic needs this signal to reset its epoch.
     fn on_app_limited(&mut self);
+    /// Cubic needs this signal to reset its epoch and `w_max`.
+    fn on_persistent_congestion(&mut self);
+    /// The `ssthresh` to set on persistent congestion outside a fresh recovery period, if any.
+    fn persistent_congestion_ssthresh(&self, curr_cwnd: usize) -> Option<usize>;
     /// Store the current congestion controller state, to be recovered in the case of a spurious
     /// congestion event.
     fn save_undo_state(&mut self);
@@ -825,6 +829,13 @@ where
                     .expect("time is monotonic");
                 if elapsed > pc_period {
                     info!("[{self}] persistent congestion");
+                    if !self.current.phase.transient()
+                        && let Some(ssthresh) = self
+                            .congestion_control
+                            .persistent_congestion_ssthresh(self.current.congestion_window)
+                    {
+                        self.current.ssthresh = Some(max(ssthresh, self.cwnd_min()));
+                    }
                     self.current.congestion_window = self.cwnd_min();
                     self.current.acked_bytes = 0;
                     self.set_phase(
@@ -835,6 +846,7 @@ where
                     // We re-enter slow start after persistent congestion, so we need to reset any
                     // state leftover from initial slow start to have it perform correctly.
                     self.slow_start.reset();
+                    self.congestion_control.on_persistent_congestion();
 
                     qlog::metrics_updated(
                         &mut self.qlog,
@@ -983,7 +995,7 @@ mod tests {
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController,
             CongestionTrigger::{self, Ecn, Loss},
             classic_cc::Phase,
-            cubic::Cubic,
+            cubic::{Cubic, convert_to_f64},
             new_reno::NewReno,
             tests::{IP_ADDR, MTU, RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
         },
@@ -1366,6 +1378,88 @@ mod tests {
         let mut cc = make_cc_cubic();
         cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
         assert_eq!(cc.cwnd(), cc.cwnd_min());
+    }
+
+    /// Persistent congestion starts a fresh Cubic epoch at the minimum window.
+    #[test]
+    fn persistent_congestion_resets_cubic_epoch() {
+        fn ack_cwnd(cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>, extra: usize) {
+            let mut cc_stats = CongestionControlStats::default();
+            let p = sent::make_packet(0, now(), cc.cwnd() + extra);
+            cc.on_packet_sent(&p, now());
+            cc.on_packets_acked(&[p], &RttEstimate::new(RTT), now(), &mut cc_stats);
+        }
+
+        let mut cc = make_cc_cubic();
+        let stale = cc.cwnd_min() * (cc.max_datagram_size() + 1); // Zero increase at `cwnd_min`.
+        ack_cwnd(&mut cc, stale);
+        cc.set_ssthresh(cc.cwnd());
+        ack_cwnd(&mut cc, 0);
+
+        let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
+
+        cc.set_ssthresh(cc.cwnd()); // A slow start algorithm can exit at any window.
+        ack_cwnd(&mut cc, 0);
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
+        let cwnd_min = convert_to_f64(cc.cwnd_min());
+        assert_eq!(cc.congestion_control().w_max(), Some(cwnd_min));
+    }
+
+    /// Declare persistent congestion for packets sent before the current recovery period.
+    /// Returns the lost packets and the congestion window before persistent congestion.
+    fn persistent_congestion_in_recovery<T: WindowAdjustment>(
+        cc: &mut ClassicCongestionController<ClassicSlowStart, T>,
+    ) -> (Vec<sent::Packet>, usize) {
+        let mut cc_stats = CongestionControlStats::default();
+        let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
+        let pn = to_u64(lost.len());
+        let first = sent::make_packet(pn, by_pto(PERSISTENT_CONG_THRESH + 3), 1000);
+        let recovery = sent::make_packet(pn + 1, by_pto(PERSISTENT_CONG_THRESH + 4), 1000);
+        for p in lost.iter().chain([&first]) {
+            cc.on_packet_sent(p, now());
+        }
+        cc.on_packets_lost(Some(now()), None, PTO, &[first], now(), &mut cc_stats);
+        cc.on_packet_sent(&recovery, now()); // Starts the recovery period.
+        let cwnd = cc.cwnd();
+        assert!(cc.on_packets_lost(Some(by_pto(0)), None, PTO, &lost, now(), &mut cc_stats));
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
+        (lost, cwnd)
+    }
+
+    /// Persistent congestion sets `ssthresh` using `β_cubic`, also during recovery.
+    #[test]
+    fn persistent_congestion_in_recovery_cubic() {
+        let mut cc = make_cc_cubic();
+        let (lost, cwnd) = persistent_congestion_in_recovery(&mut cc);
+        let ssthresh = cwnd * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR;
+        assert_eq!(cc.ssthresh(), Some(ssthresh));
+
+        let p = sent::make_packet(to_u64(lost.len()) + 2, now(), 1000);
+        cc.on_packet_sent(&p, now()); // Leave the transient persistent congestion phase.
+        cc.detect_persistent_congestion(Some(by_pto(0)), None, PTO, lost.iter(), now());
+        assert_eq!(cc.ssthresh(), Some(cc.cwnd_min()));
+    }
+
+    /// Persistent congestion that starts a recovery period reduces `ssthresh` once.
+    #[test]
+    fn persistent_congestion_new_recovery_cubic() {
+        let mut cc = make_cc_cubic();
+        let mut cc_stats = CongestionControlStats::default();
+        let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
+        let ssthresh = cc.cwnd() * Cubic::BETA_USIZE_DIVIDEND / Cubic::BETA_USIZE_DIVISOR;
+        assert!(cc.on_packets_lost(Some(by_pto(0)), None, PTO, &lost, now(), &mut cc_stats));
+        assert_eq!(cc.cwnd(), cc.cwnd_min());
+        assert_eq!(cc.ssthresh(), Some(ssthresh));
+    }
+
+    /// Persistent congestion during recovery leaves `ssthresh` unchanged for `NewReno`.
+    #[test]
+    fn persistent_congestion_in_recovery_newreno() {
+        let mut cc = make_cc_newreno();
+        let (_, cwnd) = persistent_congestion_in_recovery(&mut cc);
+        assert_eq!(cc.ssthresh(), Some(cwnd));
     }
 
     /// The code asserts on ordering errors.
