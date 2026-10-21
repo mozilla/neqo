@@ -263,6 +263,10 @@ impl Crypto {
         Ok(true)
     }
 
+    pub const fn set_version(&mut self, version: Version) {
+        self.version = version;
+    }
+
     /// Lock in a compatible upgrade.
     pub fn confirm_version(&mut self, confirmed: Version) -> Res<()> {
         self.states.confirm_version(self.version, confirmed)?;
