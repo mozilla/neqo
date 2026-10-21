@@ -26,9 +26,9 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, connect_fail, connect_force_idle,
+    connect_rtt_idle, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -42,6 +42,7 @@ use crate::{
     packet,
     path::Path,
     pmtud::Pmtud,
+    recovery::PACKET_THRESHOLD,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
 };
@@ -1304,6 +1305,42 @@ fn retire_cid_queue_bounded() {
             ..
         }
     ));
+}
+
+/// A retired connection ID lost on PTO and again on loss detection is queued once.
+#[test]
+fn retire_cid_lost_twice() {
+    let mut client = default_client();
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+
+    let ncid = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
+    client.process_input(ncid, now());
+    drop(send_something(&mut client, now()));
+    let now = now() + AT_LEAST_PTO;
+    drop(client.process_output(now).dgram()); // The PTO probe repeats the frames.
+    assert_eq!(client.paths.retire_queue_len(), 0);
+
+    // Acknowledging this declares the dropped packets lost.
+    let mut last = client.process_output(now).dgram().unwrap();
+    for _ in 1..PACKET_THRESHOLD {
+        last = send_something(&mut client, now);
+    }
+    // `NewConnectionIds` bypasses the server's connection ID manager.
+    let cid = ConnectionId::from(get_cid(&last));
+    server.cid_manager.add_odcid(cid);
+    let ack = server.process(Some(last), now).dgram();
+    client.process_input(ack.unwrap(), now);
+    let retired = ConnectionIdManager::ACTIVE_LIMIT;
+    assert_eq!(client.paths.retire_queue_len(), retired);
 }
 
 /// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
