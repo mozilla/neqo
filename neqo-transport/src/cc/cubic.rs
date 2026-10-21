@@ -495,6 +495,16 @@ impl WindowAdjustment for Cubic {
         self.current.t_epoch = None;
     }
 
+    fn on_persistent_congestion(&mut self) {
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.8>
+        self.current.t_epoch = None;
+        self.current.w_max = None;
+    }
+
+    fn persistent_congestion_ssthresh(&self, curr_cwnd: usize) -> Option<usize> {
+        Some(curr_cwnd * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR)
+    }
+
     fn save_undo_state(&mut self) {
         self.stored = Some(self.current.clone());
     }
