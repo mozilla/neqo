@@ -366,8 +366,114 @@ fn version_negotiation_downgrade() {
     );
 }
 
+/// A client that starts with `original` acts on a spoofed Version Negotiation packet
+/// listing `spoofed`, then detects that from the versions of a server that uses `spoofed`.
+fn spoofed_vn_detected(original: Version, spoofed: Version, server_versions: Vec<Version>) {
+    let mut client = new_client(ConnectionParameters::default().versions(original, Version::all()));
+    let mut server = new_server(ConnectionParameters::default().versions(spoofed, server_versions));
+    spoof_vn(&mut client, spoofed);
+    assert_eq!(client.version(), spoofed);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// A server that supports the version the client first attempted doesn't send
+/// Version Negotiation, even if the client moves to a compatible version.
+#[test]
+fn version_negotiation_downgrade_compatible() {
+    let v1_v2 = vec![Version::Version1, Version::Version2];
+    spoofed_vn_detected(Version::Version2, Version::Version1, v1_v2.clone());
+    spoofed_vn_detected(Version::Version1, Version::Version2, v1_v2);
+}
+
+/// The client would not have picked version 1 if it knew the server supports version 2.
+#[test]
+fn version_negotiation_downgrade_not_preferred() {
+    let v1_v2 = vec![Version::Version1, Version::Version2];
+    spoofed_vn_detected(Version::Draft29, Version::Version1, v1_v2);
+}
+
+/// After Version Negotiation to version 1, `modify` changes the server's version information
+/// so that the client rejects it.
+fn vn_version_information_rejected(modify: impl FnOnce(&mut Connection)) {
+    let mut client =
+        new_client(ConnectionParameters::default().versions(Version::Version2, Version::all()));
+    let mut server = new_server(
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+    );
+    modify(&mut server);
+    spoof_vn(&mut client, Version::Version1);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// A client that acted on Version Negotiation needs the server's version information.
+#[test]
+fn version_negotiation_missing_version_information() {
+    vn_version_information_rejected(|server| {
+        server
+            .tps
+            .borrow_mut()
+            .local_mut()
+            .remove(VersionInformation);
+    });
+}
+
+/// A client using a version other than 1 needs the server's version information.
+#[test]
+fn missing_version_information_v2() {
+    let mut client =
+        new_client(ConnectionParameters::default().versions(Version::Version2, Version::all()));
+    let mut server = v2_server();
+    server
+        .tps
+        .borrow_mut()
+        .local_mut()
+        .remove(VersionInformation);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// A client that acted on Version Negotiation needs the server's available versions.
+#[test]
+fn version_negotiation_empty_available_versions() {
+    vn_version_information_rejected(|server| {
+        let current = Version::Version1.wire_version();
+        let versions = TransportParameter::Versions {
+            current,
+            other: vec![],
+        };
+        server
+            .set_local_tparam(VersionInformation, versions)
+            .unwrap();
+    });
+}
+
+/// A client only acts on the first Version Negotiation packet.
+#[test]
+fn version_negotiation_only_once() {
+    let mut client = default_client();
+    spoof_vn(&mut client, Version::Version2);
+    spoof_vn(&mut client, Version::Draft29);
+    assert_eq!(client.version(), Version::Version2);
+    assert_eq!(*client.state(), State::WaitInitial);
+    assert_eq!(client.stats().dropped_rx, 1);
+}
+
 fn v2_server() -> Connection {
-    new_server(ConnectionParameters::default().versions(Version::Version2, Version::all()))
+    new_server(ConnectionParameters::default().versions(Version::Version2, vec![Version::Version2]))
 }
 
 fn ech_server() -> Connection {
