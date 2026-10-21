@@ -35,7 +35,7 @@ use crate::{
 };
 
 /// The maximum number of paths that `Paths` will track.
-const MAX_PATHS: usize = 15;
+pub const MAX_PATHS: usize = 15;
 
 pub type PathRef = Rc<RefCell<Path>>;
 
@@ -116,6 +116,11 @@ impl Paths {
     pub fn is_temporary(&self, path: &PathRef) -> bool {
         // Ask the path first, which is simpler.
         path.borrow().is_temporary() || !self.paths.iter().any(|p| Rc::ptr_eq(p, path))
+    }
+
+    /// Returns true if a permanent path uses the given remote address.
+    pub fn is_known_remote(&self, remote: SocketAddr) -> bool {
+        self.paths.iter().any(|p| p.borrow().remote == remote)
     }
 
     fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
