@@ -16,7 +16,7 @@ use std::{
 use enum_map::Enum;
 use log::debug;
 use neqo_common::{
-    Buffer, Decoder, Encoder,
+    Buffer, Decoder, Encoder, MAX_VARINT,
     hex::{Hex, HexWithLen},
     qtrace, qwarn,
 };
@@ -865,9 +865,9 @@ impl<'a> Public<'a> {
     const fn decode_pn(expected: Number, pn: u64, w: usize) -> Number {
         let window = 1_u64 << (w * 8);
         let candidate = (expected & !(window - 1)) | pn;
-        if candidate + (window / 2) <= expected {
+        if candidate + (window / 2) <= expected && candidate + window <= MAX_VARINT {
             candidate + window
-        } else if candidate > expected + (window / 2) {
+        } else if candidate > expected + (window / 2) || candidate > MAX_VARINT {
             match candidate.checked_sub(window) {
                 Some(pn_sub) => pn_sub,
                 None => candidate,
@@ -1152,7 +1152,7 @@ pub const LIMIT: usize = 2048;
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Encoder;
+    use neqo_common::{Encoder, MAX_VARINT};
     use test_fixture::{fixture_init, now};
 
     use crate::{
@@ -1833,13 +1833,11 @@ mod tests {
         assert_eq!(Public::decode_pn(0x80, 0xff, 1), 0xff);
         assert_eq!(Public::decode_pn(0x7ff, 0xfe, 1), 0x7fe);
 
-        // This is invalid by spec, as we are expected to check for overflow around 2^62-1,
-        // but we don't need to worry about overflow
-        // and hitting this is basically impossible in practice.
-        assert_eq!(
-            Public::decode_pn(0x3fff_ffff_ffff_ffff, 2, 4),
-            0x4000_0000_0000_0002
-        );
+        // When the expected value is high, the value doesn't go past 2^62-1.
+        let top = MAX_VARINT & !0xffff_ffff; // Start of the highest 4-byte window.
+        assert_eq!(Public::decode_pn(MAX_VARINT, 0xffff_ffff, 4), MAX_VARINT);
+        assert_eq!(Public::decode_pn(MAX_VARINT, 2, 4), top | 2);
+        assert_eq!(Public::decode_pn(MAX_VARINT + 1, 0, 4), top);
     }
 
     #[test]
