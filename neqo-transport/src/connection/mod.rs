@@ -2268,6 +2268,15 @@ impl Connection {
         }
     }
 
+    /// A probe or closing datagram on a non-primary path is never batched.
+    fn batch_size(path: &PathRef, max_datagrams: NonZeroUsize) -> NonZeroUsize {
+        if path.borrow().is_primary() {
+            max_datagrams
+        } else {
+            NonZeroUsize::MIN
+        }
+    }
+
     fn output(&mut self, now: Instant, max_datagrams: NonZeroUsize) -> SendOptionBatch {
         trace!("[{self}] output {now:?}");
         let res = match &self.state {
@@ -2279,6 +2288,7 @@ impl Connection {
             | State::Confirmed => self.paths.select_path().map_or_else(
                 || Ok(SendOptionBatch::default()),
                 |path| {
+                    let max_datagrams = Self::batch_size(&path, max_datagrams);
                     let res = self.output_dgram_batch_on_path(&path, now, None, max_datagrams);
                     self.capture_error(Some(path), now, FrameType::Padding, res)
                 },
@@ -2300,7 +2310,7 @@ impl Connection {
                                 &path,
                                 now,
                                 Some(&details),
-                                max_datagrams,
+                                Self::batch_size(&path, max_datagrams),
                             )
                         };
                         self.capture_error(Some(path), now, FrameType::Padding, res)
@@ -2783,7 +2793,7 @@ impl Connection {
             // Other than closing frames, only path probes are sent on a non-primary path.
             if closing_frame.is_none()
                 && !path.borrow().is_primary()
-                && (space != PacketNumberSpace::ApplicationData || !path.borrow().has_probe())
+                && space != PacketNumberSpace::ApplicationData
             {
                 continue;
             }

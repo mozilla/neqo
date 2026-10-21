@@ -27,9 +27,9 @@ use tracing::debug;
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle, cwnd_avail,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, connect_fail, connect_force_idle,
+    connect_rtt_idle, cwnd_avail, default_client, default_server, fill_cwnd, maybe_authenticate,
+    new_client, new_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -44,6 +44,7 @@ use crate::{
     packet,
     path::Path,
     pmtud::Pmtud,
+    recovery::MAX_PTO_PACKET_COUNT,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
 };
@@ -983,15 +984,21 @@ fn preferred_address_loopback() {
     preferred_address(a, a, new_port(a));
 }
 
-/// A full-size probe does not end a batch, but nothing else goes on the probed path.
-#[test]
-fn preferred_address_batched_probe() {
+/// Returns a client, the server's preferred address and the packet containing `HANDSHAKE_DONE`.
+fn preferred_address_handshake() -> (Connection, SocketAddr, Option<Datagram>) {
     let preferred = new_port(DEFAULT_ADDR);
     let mut client = default_client();
     let spa = PreferredAddress::new_any(None, Some(preferred));
     let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
 
     let dgram = fast_handshake(&mut client, &mut server);
+    (client, preferred, dgram)
+}
+
+/// Only the path probe goes to the preferred address.
+#[test]
+fn probed_path_sends_only_probe() {
+    let (mut client, preferred, dgram) = preferred_address_handshake();
     client.process_input(dgram.unwrap(), now());
     let probe = client
         .process_multiple_output(now(), 2.try_into().unwrap())
@@ -1000,6 +1007,28 @@ fn preferred_address_batched_probe() {
     assert_eq!(probe.destination(), preferred);
     assert_eq!(probe.num_datagrams(), 1);
     assert_eq!(client.stats().frame_tx.path_challenge, 1);
+}
+
+/// A path probe doesn't use up the primary path's PTO packet.
+#[test]
+fn path_probe_keeps_pto_packet() {
+    let (mut client, preferred, dgram) = preferred_address_handshake();
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    let (_, now) = fill_cwnd(&mut client, stream, now());
+    client.process_input(dgram.unwrap(), now);
+
+    let now = now + AT_LEAST_PTO;
+    let probe = client
+        .process_multiple_output(now, 2.try_into().unwrap())
+        .dgram()
+        .unwrap();
+    assert_eq!(probe.destination(), preferred);
+    let stream_before = client.stats().frame_tx.stream;
+    while let Some(dgram) = client.process_output(now).dgram() {
+        assert_eq!(dgram.destination(), DEFAULT_ADDR);
+    }
+    let pto_stream = client.stats().frame_tx.stream - stream_before;
+    assert_eq!(pto_stream, MAX_PTO_PACKET_COUNT - 1);
 }
 
 fn expect_no_migration(client: &mut Connection, server: &mut Connection) {
@@ -1264,7 +1293,7 @@ impl test_internal::FrameWriter for NewConnectionIds {
 /// Writes a `NEW_CONNECTION_ID` frame and a padded `PATH_CHALLENGE` frame.
 struct PaddedPathChallengeWriter {}
 
-impl crate::connection::test_internal::FrameWriter for PaddedPathChallengeWriter {
+impl test_internal::FrameWriter for PaddedPathChallengeWriter {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::NewConnectionId)
