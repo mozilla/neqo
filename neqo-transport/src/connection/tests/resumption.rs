@@ -7,7 +7,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{Datagram, Decoder, Role};
-use nss::{AuthenticationStatus, RecordProtectionOps as _};
+use nss::{AuthenticationStatus, RecordProtectionOps as _, ResumptionToken};
 use test_fixture::{
     assertions,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
@@ -16,12 +16,14 @@ use test_fixture::{
 
 use super::{
     AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
-    get_tokens, new_client, resumed_server, send_something,
+    get_tokens, new_client, resumed_server, send_something, send_with_extra,
 };
 use crate::{
     ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State, Version,
     addr_valid::{AddressValidation, ValidateAddress},
+    connection::test_internal::FrameWriter,
     frame::FrameType,
+    packet,
 };
 
 #[test]
@@ -292,6 +294,38 @@ fn two_tickets_with_new_token() {
 
     can_resume(token1, true);
     can_resume(token2, true);
+}
+
+/// Writes a `NEW_TOKEN` frame with a token of the given length, or one that fills the packet.
+struct NewTokenWriter(Option<usize>);
+
+impl FrameWriter for NewTokenWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        let len = self.0.unwrap_or_else(|| builder.remaining() - 3); // Type and length.
+        builder
+            .encode_varint(FrameType::NewToken)
+            .encode_vvec(&vec![0; len]);
+    }
+}
+
+fn token_with_new_token(writer: NewTokenWriter) -> ResumptionToken {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    server.send_ticket(now(), &[]).unwrap();
+    client.process_input(server.process_output(now()).dgram().unwrap(), now());
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    get_tokens(&mut client).pop().unwrap()
+}
+
+/// A `NEW_TOKEN` token that doesn't fit in an Initial packet is not used.
+#[test]
+fn new_token_too_long() {
+    let max = packet::MAX_INITIAL_TOKEN_LEN;
+    can_resume(token_with_new_token(NewTokenWriter(Some(max))), true);
+    can_resume(token_with_new_token(NewTokenWriter(Some(max + 1))), false);
+    can_resume(token_with_new_token(NewTokenWriter(None)), false);
 }
 
 /// By disabling address validation, the server won't send `NEW_TOKEN`, but
