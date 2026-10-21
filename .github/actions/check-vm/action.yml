@@ -84,7 +84,9 @@ runs:
                         export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
                         export PATH="\$HOME/.cargo/bin:\$PATH"
                         ;;
-            *)          sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
+            *)          # rustup >= 1.29.2 is built with a std lacking File::lock on Solaris.
+                        [ "$PLATFORM" = "solaris" ] && export RUSTUP_VERSION=1.29.1
+                        sh rustup.sh --default-toolchain stable --profile minimal --component clippy,llvm-tools,rustfmt -y
                         . "\$HOME/.cargo/env"
                         ;;
           esac
