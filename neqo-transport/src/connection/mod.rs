@@ -3329,6 +3329,9 @@ impl Connection {
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote_handshake().is_some() {
                 self.set_initial_limits();
+            } else if self.role == Role::Server && self.crypto.tls().has_secret(Epoch::Handshake) {
+                qwarn!("[{self}] No transport parameters, closing connection");
+                return Err(Error::CryptoAlert(109)); // missing_extension
             }
             if self.crypto.tls().has_secret(Epoch::Handshake) {
                 self.compatible_upgrade(packet_version)?;
