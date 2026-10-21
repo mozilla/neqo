@@ -622,8 +622,15 @@ impl ConnectionIdManager {
     }
 
     pub fn lost(&mut self, entry: &ConnectionIdEntry<Srt>) {
-        self.lost_new_connection_id
-            .insert(entry.seqno, entry.clone());
+        if self
+            .connection_ids
+            .cids
+            .iter()
+            .any(|c| c.seqno == entry.seqno)
+        {
+            self.lost_new_connection_id
+                .insert(entry.seqno, entry.clone());
+        }
     }
 
     pub fn acked(&mut self, entry: &ConnectionIdEntry<Srt>) {
@@ -798,6 +805,15 @@ mod tests {
         let (mut manager, entry) = manager_with_sent_cid();
         manager.lost(&entry);
         manager.retire(entry.seqno).unwrap();
+        assert!(manager.lost_new_connection_id.is_empty());
+    }
+
+    /// A `NEW_CONNECTION_ID` declared lost after the peer retired it is not queued.
+    #[test]
+    fn retired_then_lost_not_queued() {
+        let (mut manager, entry) = manager_with_sent_cid();
+        manager.retire(entry.seqno).unwrap();
+        manager.lost(&entry);
         assert!(manager.lost_new_connection_id.is_empty());
     }
 
