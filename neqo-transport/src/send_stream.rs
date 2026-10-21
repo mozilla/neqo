@@ -1101,6 +1101,10 @@ impl SendStream {
                 return;
             }
 
+            if fill {
+                builder.pad_before(overhead + length);
+            }
+
             // Write the stream out.
             let frame_type = Frame::stream_type(fin, offset > 0, fill);
             builder.encode_frame(frame_type, |b| {

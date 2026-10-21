@@ -2577,7 +2577,8 @@ impl Connection {
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
                 now,
-            ) {
+            ) && full_mtu
+            {
                 builder.enable_padding(true);
             }
         }
@@ -2848,9 +2849,8 @@ impl Connection {
                 continue;
             }
 
-            // Pad inside a 1-RTT packet after an Initial: padding after it joins its ciphertext.
-            let padded =
-                ((ack_eliciting && profile.full_mtu()) || initial_sent.is_some()) && builder.pad();
+            // Padding is only enabled for full MTU packets or after an Initial.
+            let padded = (ack_eliciting || initial_sent.is_some()) && builder.pad();
 
             if packet_tos.is_ecn_marked() {
                 tokens.push(recovery::Token::EcnEct0);
@@ -2895,8 +2895,11 @@ impl Connection {
                 encoder.len() - header_start,
             )
             .with_padding(padded);
-            if padded {
-                self.stats.borrow_mut().frame_tx.padding += 1;
+            if !pt.is_long() {
+                if padded {
+                    self.stats.borrow_mut().frame_tx.padding += 1;
+                }
+                // Padding after a short header packet would join its ciphertext.
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
             } else if pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting) {

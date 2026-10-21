@@ -129,6 +129,7 @@ impl QuicDatagrams {
                 b.encode_vvec(data);
             });
         } else {
+            builder.pad_before(DATAGRAM_FRAME_TYPE_VARINT_LEN + data.len());
             builder.encode_frame(frame_type, |b| {
                 b.encode(data);
             });

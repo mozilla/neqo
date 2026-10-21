@@ -138,6 +138,8 @@ pub struct Builder<B> {
     limit: usize,
     /// Whether to pad the packet before construction.
     padding: bool,
+    /// Whether the packet contains padding.
+    padded: bool,
 }
 
 impl Builder<Vec<u8>> {
@@ -257,6 +259,7 @@ impl<B: Buffer> Builder<B> {
             },
             limit,
             padding: false,
+            padded: false,
         }
     }
 
@@ -303,6 +306,7 @@ impl<B: Buffer> Builder<B> {
             },
             limit,
             padding: false,
+            padded: false,
         }
     }
 
@@ -348,17 +352,23 @@ impl<B: Buffer> Builder<B> {
 
     /// Maybe pad with "PADDING" frames.
     /// Only does so if padding was needed and this is a short packet.
-    /// Returns true if padding was added.
+    /// Returns true if the packet contains padding.
     ///
     /// # Panics
     ///
     /// Cannot happen.
     pub fn pad(&mut self) -> bool {
-        if self.padding && !self.is_long() && self.remaining() > 0 {
-            self.encoder.pad_to(self.limit, FrameType::Padding.into());
-            true
-        } else {
-            false
+        self.pad_before(0);
+        self.padded
+    }
+
+    /// Maybe pad with "PADDING" frames, so that a final frame of `len` bytes ends at the limit.
+    /// Only does so if padding was needed and this is a short packet.
+    pub fn pad_before(&mut self, len: usize) {
+        if self.padding && !self.is_long() && len < self.remaining() {
+            self.encoder
+                .pad_to(self.limit - len, FrameType::Padding.into());
+            self.padded = true;
         }
     }
 
