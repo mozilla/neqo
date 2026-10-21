@@ -34,6 +34,8 @@ use super::{
     drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
     send_something, zero_len_cid_client,
 };
+#[cfg(not(feature = "disable-encryption"))]
+use crate::packet::MAX_INITIAL_TOKEN_LEN;
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
     Version,
@@ -2047,13 +2049,83 @@ fn initial_cids(initial: &[u8]) -> (Vec<u8>, Vec<u8>) {
 /// Build a Retry that the client which sent `initial` will accept.
 #[cfg(not(feature = "disable-encryption"))]
 fn retry_for(initial: &[u8]) -> Datagram {
+    retry_with_token(initial, &[0x01])
+}
+
+/// Build a Retry with `token` that the client which sent `initial` will accept.
+#[cfg(not(feature = "disable-encryption"))]
+fn retry_with_token(initial: &[u8], token: &[u8]) -> Datagram {
     let (dcid, scid) = initial_cids(initial);
-    let mut server_scid = dcid.clone();
+    let mut server_scid = dcid[..8].to_vec(); // Fixed length, so the client's Initial is too.
     server_scid[0] ^= 0xff;
     datagram(
-        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, token, &dcid)
             .expect("build retry"),
     )
+}
+
+/// The token of the Initial at the start of `dgram`.
+#[cfg(not(feature = "disable-encryption"))]
+fn initial_token(dgram: &[u8]) -> Option<&[u8]> {
+    let mut dec = Decoder::from(&dgram[5..]);
+    dec.skip_vec(1); // DCID
+    dec.skip_vec(1); // SCID
+    dec.decode_vvec()
+}
+
+/// RFC 9000, Section 8.1.3: a client closes when a Retry token can't fit in an Initial.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn retry_token_too_long() {
+    let mut client = default_client();
+    let initial = client_initial(&mut client);
+    let token = vec![0x01; client.plpmtu()];
+    client.process_input(retry_with_token(&initial, &token), now());
+    let closed = State::Closed(CloseReason::Transport(Error::InvalidRetry));
+    assert_eq!(*client.state(), closed);
+}
+
+/// A Retry token longer than `MAX_INITIAL_TOKEN_LEN` that fits in an Initial is used.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn retry_token_longer_than_new_token_max() {
+    let mut client = default_client();
+    let initial = client_initial(&mut client);
+    let token = vec![0x01; MAX_INITIAL_TOKEN_LEN + 1];
+    client.process_input(retry_with_token(&initial, &token), now());
+    assert_eq!(*client.state(), State::WaitInitial);
+
+    let initial = client.process_output(now()).dgram().expect("an Initial");
+    assert_eq!(initial_token(&initial), Some(&token[..]));
+}
+
+/// The longest Retry token that fits in an Initial is used, with or without SCONE.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn retry_token_longest() {
+    let retry = |scone, len| {
+        let mut client = new_client(ConnectionParameters::default().scone(scone));
+        let initial = client_initial(&mut client);
+        client.process_input(retry_with_token(&initial, &vec![0x01; len]), now());
+        client
+    };
+    let longest = |scone| {
+        let mtu = retry(scone, 1).plpmtu();
+        let len = (1..mtu)
+            .rev()
+            .find(|&len| *retry(scone, len).state() == State::WaitInitial)
+            .unwrap();
+        let closed = State::Closed(CloseReason::Transport(Error::InvalidRetry));
+        assert_eq!(*retry(scone, len + 1).state(), closed);
+        // There is no room for CRYPTO, so the first Initial is a PTO probe.
+        let initial = retry(scone, len)
+            .process_output(now() + AT_LEAST_PTO)
+            .dgram();
+        assert_eq!(initial_token(&initial.unwrap()).map(<[u8]>::len), Some(len));
+        len
+    };
+    let expected = longest(true) + Connection::SCONE_INDICATION.len();
+    assert_eq!(longest(false), expected);
 }
 
 /// RFC 9000, Section 17.2.5.2: a client MUST discard a Retry packet whose Source
