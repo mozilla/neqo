@@ -282,6 +282,8 @@ impl AddressValidationInfo {
 pub struct Connection {
     role: Role,
     version: Version,
+    /// The version a client picked from a Version Negotiation packet, if it acted on one.
+    vn_version: Option<Version>,
     state: State,
     tps: Rc<RefCell<TransportParametersHandler>>,
     /// What we are doing with 0-RTT.
@@ -450,6 +452,7 @@ impl Connection {
         let c = Self {
             role,
             version: conn_params.get_versions().initial(),
+            vn_version: None,
             state: State::Init,
             paths: Paths::new(conn_params.pmtud_enabled()),
             cid_manager,
@@ -1520,6 +1523,7 @@ impl Connection {
             c.conn_params
                 .get_versions_mut()
                 .set_initial(self.conn_params.get_versions().initial());
+            c.vn_version = Some(version);
             c.crypto.take_tls_settings(&mut self.crypto)?;
             c.set_qlog(self.qlog.clone());
             mem::swap(self, &mut c);
@@ -1626,10 +1630,12 @@ impl Connection {
                         || versions.contains(&0)
                         || &packet.scid() != self.odcid().ok_or(Error::Internal)?
                         || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+                        || self.vn_version.is_some()
                     {
                         // Ignore VersionNegotiation packets that contain the current version.
                         // Or don't have the right connection ID.
                         // Or are received after a Retry.
+                        // Or are received after acting on a VersionNegotiation packet.
                         self.stats.borrow_mut().pkt_dropped("Invalid VN");
                     } else {
                         self.version_negotiation(&versions, now)?;
@@ -3233,34 +3239,29 @@ impl Connection {
             } else if self.version().wire_version() != current {
                 qinfo!("[{self}] validate_versions: current version mismatch");
                 Err(Error::VersionNegotiation)
-            } else if self
-                .conn_params
-                .get_versions()
-                .initial()
-                .is_compatible(self.version)
-            {
-                // 2. The current version is compatible with what we attempted.
-                // That's a compatible upgrade and that's OK.
-                Ok(())
-            } else {
-                // 3. The initial version we attempted isn't compatible.  Check that
-                // the one we would have chosen is compatible with this one.
+            } else if let Some(vn_version) = self.vn_version {
+                // 2. We acted on a Version Negotiation packet.  Check that we would have
+                // chosen the same version from the versions the server supports.
+                let versions = self.conn_params.get_versions();
                 let mut all_versions = other.to_owned();
                 all_versions.push(current);
-                if self
-                    .conn_params
-                    .get_versions()
-                    .preferred(&all_versions)
-                    .ok_or(Error::VersionNegotiation)?
-                    .is_compatible(self.version)
+                if other.is_empty()
+                    || all_versions.contains(&versions.initial().wire_version())
+                    || versions.preferred(&all_versions) != Some(vn_version)
                 {
-                    Ok(())
-                } else {
                     qinfo!("[{self}] validate_versions: failed");
                     Err(Error::VersionNegotiation)
+                } else {
+                    Ok(())
                 }
+            } else {
+                // 3. The transport parameter handler checked that the current version
+                // is compatible with what we attempted.
+                Ok(())
             }
-        } else if self.version != Version::Version1 && !self.version.is_draft() {
+        } else if self.vn_version.is_some()
+            || (self.version != Version::Version1 && !self.version.is_draft())
+        {
             qinfo!("[{self}] validate_versions: missing extension");
             Err(Error::VersionNegotiation)
         } else {
