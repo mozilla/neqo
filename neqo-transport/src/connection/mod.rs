@@ -3114,12 +3114,11 @@ impl Connection {
                 return Err(Error::TransportParameter);
             }
 
-            let reset_token = remote.get_bytes(StatelessResetToken).map_or_else(
-                || Ok(Srt::random()),
-                |token| Srt::try_from(token).map_err(|_| Error::TransportParameter),
-            )?;
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
-            path.borrow_mut().set_reset_token(reset_token);
+            if let Some(token) = remote.get_bytes(StatelessResetToken) {
+                let reset_token = Srt::try_from(token).map_err(|_| Error::TransportParameter)?;
+                path.borrow_mut().set_reset_token(reset_token);
+            }
 
             // We cap this transport parameter to usize::MAX on decode, so this is safe.
             let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
