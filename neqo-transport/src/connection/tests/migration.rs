@@ -20,17 +20,17 @@ use std::{
 use neqo_common::{Datagram, Decoder, event::Provider as _, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
-    assertions::{assert_initial, assert_v4_path, assert_v6_path},
+    assertions::{assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now,
 };
 use tracing::debug;
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    AT_LEAST_PTO, CountingConnectionIdGenerator, assert_error, connect_fail, connect_force_idle,
-    connect_rtt_idle, cwnd_avail, default_client, default_server, exchange_ticket, fill_cwnd,
-    fill_stream, maybe_authenticate, new_client, new_server, resumed_server, send_something,
-    zero_len_cid_client, zero_len_cid_server,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, assert_error, connect_fail,
+    connect_force_idle, connect_rtt_idle, cwnd_avail, default_client, default_server,
+    exchange_ticket, fill_cwnd, fill_stream, handshake, maybe_authenticate, new_client, new_server,
+    resumed_server, send_something, zero_len_cid_client, zero_len_cid_server,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1282,41 +1282,54 @@ impl test_internal::FrameWriter for NewConnectionIds {
     }
 }
 
-/// Writes a `NEW_CONNECTION_ID` frame and a padded `PATH_CHALLENGE` frame.
-struct PaddedPathChallengeWriter {}
-
-impl test_internal::FrameWriter for PaddedPathChallengeWriter {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
-        builder
-            .encode_varint(FrameType::NewConnectionId)
-            .encode_varint(1_u64) // Sequence Number
-            .encode_varint(0_u64) // Retire Prior To
-            .encode_vec(1, &[0x5a; 8])
-            .encode([0xa5; 16]);
-        builder
-            .encode_varint(FrameType::PathChallenge)
-            .encode([1; 8]);
-        builder.enable_padding(true);
-    }
-}
-
-/// Before `HANDSHAKE_DONE`, a client answers `PATH_CHALLENGE` on a new path,
-/// but has nothing to send there with Handshake keys.
+/// Before sending with Handshake keys again, a server answers `PATH_CHALLENGE`
+/// on a new path, but has nothing to send there with Handshake keys.
 #[test]
-fn path_challenge_before_handshake_done() {
+fn path_challenge_before_handshake_keys_discarded() {
     let mut client = default_client();
     let mut server = default_server();
-    drop(fast_handshake(&mut client, &mut server)); // Lose HANDSHAKE_DONE.
-    assert_eq!(*client.state(), State::Connected);
+    while let Some(dgram) = client.process_output(now()).dgram() {
+        server.process_input(dgram, now());
+    }
+    while let Some(dgram) = server.process_output(now()).dgram() {
+        client.process_input(dgram, now());
+    }
+    assert!(maybe_authenticate(&mut client));
+    let finished = client.process_output(now()).dgram().unwrap();
+    let challenge = client
+        .test_write_frames(ZeroRttPathChallenge { initial: true }, now())
+        .dgram()
+        .unwrap();
+    let challenge = change_source_address_and_port(&challenge, 1);
 
-    let challenge = send_with_extra(&mut server, PaddedPathChallengeWriter {}, now());
-    let challenge = change_destination_port(&challenge);
-    client.process_input(challenge.clone(), now());
-    assert_eq!(*client.state(), State::Connected);
+    server.process_input(finished, now());
+    assert_eq!(*server.state(), State::Confirmed);
+    server.process_input(challenge.clone(), now());
+    assert_eq!(server.stats().frame_rx.path_challenge, 1);
 
-    let response = client.process_output(now()).dgram().unwrap();
-    assert_eq!(response.source(), challenge.destination());
-    assert_eq!(client.stats().frame_tx.path_response, 1);
+    let response = server.process_output(now()).dgram().unwrap();
+    assert_eq!(response.destination(), challenge.source());
+    assert_eq!(server.stats().frame_tx.path_response, 1);
+}
+
+/// A client drops a datagram from a new address before its handshake completes.
+#[test]
+fn client_discards_initial_from_new_address() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let client_hs = client.process_output(now()).dgram();
+    let client_hs2 = client.process_output(now()).dgram();
+    server.process_input(client_hs.unwrap(), now());
+    let server_hs = server.process(client_hs2, now()).dgram().unwrap();
+    let before = client.stats();
+    client.process_input(change_source_port(&server_hs, 1), now());
+    assert_eq!(*client.state(), State::WaitInitial);
+    assert_eq!(client.stats().packets_rx, before.packets_rx);
+    assert_eq!(client.stats().dropped_rx, before.dropped_rx + 1);
+
+    client.process_input(server_hs, now());
+    handshake(&mut client, &mut server, now(), DEFAULT_RTT);
+    assert_eq!(*client.state(), State::Confirmed);
 }
 
 /// Test that forcing retirement of connection IDs forces retirement of all active
@@ -1739,7 +1752,7 @@ fn path_response_not_padded_when_cwnd_limited() {
     assert_eq!(after.padding, before.padding);
 }
 
-/// Writes a `PATH_CHALLENGE` into every packet but the first, which is an Initial.
+/// Writes a padded `PATH_CHALLENGE` into every packet but the first, a long header packet.
 struct ZeroRttPathChallenge {
     initial: bool,
 }
@@ -1752,6 +1765,7 @@ impl test_internal::FrameWriter for ZeroRttPathChallenge {
             builder
                 .encode_varint(FrameType::PathChallenge)
                 .encode([7; 8]);
+            builder.enable_padding(true);
         }
     }
 }
@@ -1781,8 +1795,12 @@ fn zero_rtt_path_challenge_on_new_path() {
 
     let challenge = send_with_extra(&mut client, ZeroRttPathChallenge { initial: true }, now());
     let challenge = change_source_address_and_port(&challenge, 1);
+    let before = server.stats();
     server.process_input(challenge.clone(), now());
-    assert_eq!(server.stats().frame_rx.path_challenge, 1);
+    let after = server.stats();
+    assert_eq!(after.dropped_rx, before.dropped_rx + 1);
+    assert_eq!(after.packets_rx, before.packets_rx);
+    assert_eq!(after.frame_rx.path_challenge, 0);
     assert_eq!(*server.state(), State::Handshaking);
 
     // The handshake completes on the original path and the challenge is not answered.
@@ -1825,10 +1843,9 @@ fn no_new_token_for_unvalidated_path() {
     assert_no_new_token(&mut server);
 }
 
-/// Handshake packets, or Initial packets with the server's connection ID,
-/// validate the handshake path, not the address they come from.
+/// A server drops a datagram with the client's Finished from a new address.
 #[test]
-fn no_new_token_for_handshake_from_new_address() {
+fn server_discards_handshake_from_new_address() {
     let mut client = default_client();
     let mut server = default_server();
     while let Some(dgram) = client.process_output(now()).dgram() {
@@ -1839,12 +1856,14 @@ fn no_new_token_for_handshake_from_new_address() {
     }
     assert!(maybe_authenticate(&mut client));
 
-    // The Initial packet in front of the Finished uses the server's connection ID.
     let dgram = client.process_output(now()).dgram().unwrap();
-    assert_initial(&dgram, false);
+    let before = server.stats();
     server.process_input(change_source_address_and_port(&dgram, 1), now());
+    assert_eq!(*server.state(), State::Handshaking);
+    assert_eq!(server.stats().dropped_rx, before.dropped_rx + 1);
+
+    server.process_input(dgram, now());
     assert_eq!(*server.state(), State::Confirmed);
-    assert_no_new_token(&mut server);
 }
 
 /// An unknown frame type closes the connection with `FRAME_ENCODING_ERROR`.
