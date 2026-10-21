@@ -361,6 +361,10 @@ fn change_source_port(d: &Datagram, i: usize) -> Datagram {
     )
 }
 
+fn change_destination_port(d: &Datagram) -> Datagram {
+    Datagram::new(d.source(), new_port(d.destination()), d.tos(), &d[..])
+}
+
 fn change_source_address_and_port(d: &Datagram, i: usize) -> Datagram {
     Datagram::new(
         SocketAddr::new(inc_addr(d.source().ip(), i), inc_port(d.source().port(), i)),
@@ -979,6 +983,25 @@ fn preferred_address_loopback() {
     preferred_address(a, a, new_port(a));
 }
 
+/// A full-size probe does not end a batch, but nothing else goes on the probed path.
+#[test]
+fn preferred_address_batched_probe() {
+    let preferred = new_port(DEFAULT_ADDR);
+    let mut client = default_client();
+    let spa = PreferredAddress::new_any(None, Some(preferred));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+
+    let dgram = fast_handshake(&mut client, &mut server);
+    client.process_input(dgram.unwrap(), now());
+    let probe = client
+        .process_multiple_output(now(), 2.try_into().unwrap())
+        .dgram()
+        .unwrap();
+    assert_eq!(probe.destination(), preferred);
+    assert_eq!(probe.num_datagrams(), 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+}
+
 fn expect_no_migration(client: &mut Connection, server: &mut Connection) {
     let dgram = fast_handshake(client, server);
 
@@ -1236,6 +1259,43 @@ impl test_internal::FrameWriter for NewConnectionIds {
                 .encode(srt);
         }
     }
+}
+
+/// Writes a `NEW_CONNECTION_ID` frame and a padded `PATH_CHALLENGE` frame.
+struct PaddedPathChallengeWriter {}
+
+impl crate::connection::test_internal::FrameWriter for PaddedPathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder
+            .encode_varint(FrameType::NewConnectionId)
+            .encode_varint(1_u64) // Sequence Number
+            .encode_varint(0_u64) // Retire Prior To
+            .encode_vec(1, &[0x5a; 8])
+            .encode([0xa5; 16]);
+        builder
+            .encode_varint(FrameType::PathChallenge)
+            .encode([1; 8]);
+        builder.enable_padding(true);
+    }
+}
+
+/// Before `HANDSHAKE_DONE`, a client answers `PATH_CHALLENGE` on a new path,
+/// but has nothing to send there with Handshake keys.
+#[test]
+fn path_challenge_before_handshake_done() {
+    let mut client = default_client();
+    let mut server = default_server();
+    drop(fast_handshake(&mut client, &mut server)); // Lose HANDSHAKE_DONE.
+    assert_eq!(*client.state(), State::Connected);
+
+    let challenge = send_with_extra(&mut server, PaddedPathChallengeWriter {}, now());
+    let challenge = change_destination_port(&challenge);
+    client.process_input(challenge.clone(), now());
+    assert_eq!(*client.state(), State::Connected);
+
+    let response = client.process_output(now()).dgram().unwrap();
+    assert_eq!(response.source(), challenge.destination());
+    assert_eq!(client.stats().frame_tx.path_response, 1);
 }
 
 /// Test that forcing retirement of connection IDs forces retirement of all active
@@ -1532,4 +1592,20 @@ fn path_response_not_padded_when_cwnd_limited() {
     let after = client.stats().frame_tx;
     assert_eq!(after.path_response, before.path_response + 1);
     assert_eq!(after.padding, before.padding);
+}
+
+/// An invalid frame from a new path closes the connection on that path.
+#[test]
+fn close_on_new_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let garbage = send_with_extra(&mut server, GarbageWriter {}, now());
+    let garbage = change_destination_port(&garbage);
+    client.process_input(garbage.clone(), now());
+
+    let close = client.process_output(now()).dgram().unwrap();
+    assert_eq!(close.source(), garbage.destination());
+    assert_eq!(client.stats().frame_tx.connection_close, 1);
 }

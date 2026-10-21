@@ -2780,6 +2780,13 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
+            // Other than closing frames, only path probes are sent on a non-primary path.
+            if closing_frame.is_none()
+                && !path.borrow().is_primary()
+                && (space != PacketNumberSpace::ApplicationData || !path.borrow().has_probe())
+            {
+                continue;
+            }
             let coalesced = !encoder.is_empty();
             let pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
 
