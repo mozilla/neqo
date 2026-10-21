@@ -25,7 +25,7 @@ use crate::{
     packet,
     recovery::{self, StreamRecoveryToken},
     stats::FrameStats,
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
 };
 
 /// Fraction of a flow control window after which a receiver sends a window
@@ -594,7 +594,8 @@ impl ReceiverFlowControl<StreamType> {
         if !self.frame_needed() {
             return;
         }
-        let max_streams = self.next_limit();
+        // RFC 9000, Section 19.11: a stream count above 2^60 is a frame encoding error.
+        let max_streams = min(self.next_limit(), MAX_STREAMS_LIMIT);
         let frame = match self.subject {
             StreamType::BiDi => FrameType::MaxStreamsBiDi,
             StreamType::UniDi => FrameType::MaxStreamsUniDi,
@@ -771,7 +772,7 @@ mod test {
         fc::WINDOW_UPDATE_FRACTION,
         packet, recovery,
         stats::FrameStats,
-        stream_id::{StreamId, StreamType},
+        stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
     };
 
     #[test]
@@ -1533,6 +1534,18 @@ mod test {
         assert!(!fc.frame_needed());
         fc.add_retired(1); // count > 0: retired+max_active > max_allowed → triggers update.
         assert!(fc.frame_needed());
+    }
+
+    #[test]
+    fn max_streams_frame_capped_at_2_pow_60() {
+        let mut fc = ReceiverFlowControl::new(StreamType::UniDi, MAX_STREAMS_LIMIT);
+        fc.add_retired(1);
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let mut tokens = recovery::Tokens::new();
+        fc.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(fc.max_allowed, MAX_STREAMS_LIMIT);
     }
 
     #[test]

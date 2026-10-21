@@ -74,11 +74,27 @@ impl<'a> Decoder<'a> {
     /// Skip while the current byte is `predicate`. Returns the number of bytes
     /// skipped.
     pub fn skip_while(&mut self, predicate: u8) -> usize {
-        let until = self
-            .as_ref() // remaining bytes
+        /// One SIMD register (SSE2/NEON), so each chunk is a single wide load and compare.
+        const CHUNK: usize = 16;
+
+        let buf = self.as_ref(); // remaining bytes
+        // Go bytewise until `CHUNK`-aligned, so chunk loads never straddle cache lines.
+        let head = buf.as_ptr().align_offset(CHUNK).min(buf.len());
+        if let Some(i) = buf[..head].iter().position(|v| *v != predicate) {
+            self.skip(i);
+            return i;
+        }
+        let (chunks, _) = buf[head..].as_chunks::<CHUNK>();
+        let start = head
+            + chunks
+                .iter()
+                .position(|c| *c != [predicate; CHUNK])
+                .unwrap_or(chunks.len())
+                * CHUNK;
+        let until = buf[start..]
             .iter()
             .position(|v| *v != predicate)
-            .unwrap_or_else(|| self.remaining());
+            .map_or(buf.len(), |i| start + i);
         self.skip(until);
         until
     }
@@ -133,14 +149,31 @@ impl<'a> Decoder<'a> {
 
     /// Decodes a QUIC varint.
     pub fn decode_varint(&mut self) -> Option<u64> {
-        let b1 = self.decode_n(1)?;
-        match b1 >> 6 {
-            0 => Some(b1),
-            1 => Some(((b1 & 0x3f) << 8) | self.decode_n(1)?),
-            2 => Some(((b1 & 0x3f) << 24) | self.decode_n(3)?),
-            3 => Some(((b1 & 0x3f) << 56) | self.decode_n(7)?),
-            _ => unreachable!(),
+        let first = *self.buf.get(self.offset)?;
+        // The first byte's two most significant bits encode the length: 1, 2, 4 or 8 bytes.
+        // Range checks on that byte keep the common one-byte case a predictable branch, and
+        // each arm is a single fixed-width load with those bits masked off.
+        if first < 0x40 {
+            self.offset += 1;
+            return Some(u64::from(first));
         }
+        if first < 0x80 {
+            let v = u64::from(u16::from_be_bytes(
+                *self.buf.get(self.offset..)?.first_chunk()?,
+            )) & 0x3fff;
+            self.offset += 2;
+            return Some(v);
+        }
+        if first < 0xc0 {
+            let v = u64::from(u32::from_be_bytes(
+                *self.buf.get(self.offset..)?.first_chunk()?,
+            )) & 0x3fff_ffff;
+            self.offset += 4;
+            return Some(v);
+        }
+        let v = u64::from_be_bytes(*self.buf.get(self.offset..)?.first_chunk()?) & MAX_VARINT;
+        self.offset += 8;
+        Some(v)
     }
 
     /// Decodes the rest of the buffer.  Infallible.

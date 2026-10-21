@@ -114,6 +114,12 @@ impl SendProfile {
     pub const fn limit(&self) -> usize {
         self.limit
     }
+
+    /// Whether the next packet can be `plpmtu`-sized.
+    #[must_use]
+    pub const fn permits_full_mtu(&self, plpmtu: usize) -> bool {
+        self.limit >= plpmtu
+    }
 }
 
 #[derive(Debug)]
@@ -750,7 +756,7 @@ impl Loss {
             && pto < now
         {
             let probes = enum_set!(PacketNumberSpace::ApplicationData);
-            self.fire_pto(PacketNumberSpace::ApplicationData, probes, now);
+            self.fire_pto(PacketNumberSpace::ApplicationData, probes, rtt, now);
         }
     }
 
@@ -892,6 +898,7 @@ impl Loss {
         &mut self,
         pn_space: PacketNumberSpace,
         allow_probes: PacketNumberSpaceSet,
+        rtt: &RttEstimate,
         now: Instant,
     ) {
         if let Some(st) = &mut self.pto_state {
@@ -904,7 +911,8 @@ impl Loss {
             st.count_pto(&mut self.stats.borrow_mut());
             qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PtoCount(st.count())], now);
         }
-        qlog::loss_timer_set(&mut self.qlog, now);
+        let pto = self.pto_period(rtt);
+        qlog::loss_timer_set(&mut self.qlog, pn_space, pto, now);
     }
 
     /// This checks whether the PTO timer has fired and fires it if needed.
@@ -967,7 +975,7 @@ impl Loss {
         }
 
         qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
-        self.fire_pto(pn_space, allow_probes, now);
+        self.fire_pto(pn_space, allow_probes, primary_path.borrow().rtt(), now);
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {
@@ -1032,7 +1040,7 @@ impl Loss {
         {
             profile
         } else {
-            let limit = min(sender.cwnd_avail(), path.amplification_limit());
+            let limit = path.send_budget();
             if limit > mtu {
                 // More than an MTU available; we might need to pace.
                 if sender

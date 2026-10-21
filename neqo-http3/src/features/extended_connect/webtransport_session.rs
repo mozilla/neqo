@@ -247,6 +247,18 @@ impl Protocol for Session {
         Some(&self.stats)
     }
 
+    fn record_sent_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.outgoing_datagrams.sent += count;
+    }
+
+    fn record_expired_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.outgoing_datagrams.expired += count;
+    }
+
+    fn record_dropped_outgoing_datagrams(&mut self, count: u64) {
+        self.stats.outgoing_datagrams.dropped += count;
+    }
+
     fn register_send_group(&mut self, id: SendGroupId) -> Res<()> {
         Self::register_send_group(self, id)
     }
@@ -255,8 +267,9 @@ impl Protocol for Session {
         Self::validate_send_group(self, group_id)
     }
 
-    fn write_datagram_prefix(&self, _encoder: &mut Encoder) {
+    fn datagram_prefix(&self) -> Option<u64> {
         // WebTransport does not add prefix (i.e. context ID).
+        None
     }
 
     fn dgram_context_id(&self, datagram: Bytes) -> Result<Bytes, DgramContextIdError> {

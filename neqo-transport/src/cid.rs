@@ -613,6 +613,8 @@ impl ConnectionIdManager {
                 let entry = ConnectionIdEntry::new(seqno, cid, Srt::random());
                 entry.write(builder, stats);
                 tokens.push(recovery::Token::NewConnectionId(Box::new(entry)));
+            } else {
+                break;
             }
         }
     }
@@ -630,15 +632,111 @@ impl ConnectionIdManager {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Encoder;
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+
+    use neqo_common::{Decoder, Encoder};
     use test_fixture::fixture_init;
 
     use crate::{
         Token as Srt,
-        cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
-        packet,
+        cid::{
+            ConnectionId, ConnectionIdDecoder, ConnectionIdEntry, ConnectionIdGenerator,
+            ConnectionIdManager, ConnectionIdRef,
+        },
+        packet, recovery,
         stats::FrameStats,
     };
+
+    #[derive(Default)]
+    struct ScriptedConnectionIdGenerator {
+        cids: VecDeque<Option<ConnectionId>>,
+    }
+
+    impl ConnectionIdDecoder for ScriptedConnectionIdGenerator {
+        fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+            dec.decode(1).map(ConnectionIdRef::from)
+        }
+    }
+
+    impl ConnectionIdGenerator for ScriptedConnectionIdGenerator {
+        fn generate_cid(&mut self) -> Option<ConnectionId> {
+            // Fail promptly if a write retries after exhaustion instead of hanging the test.
+            let Some(cid) = self.cids.pop_front() else {
+                panic!("unexpected CID generation attempt");
+            };
+            cid
+        }
+
+        fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+            self
+        }
+    }
+
+    #[test]
+    fn cid_generator_exhaustion() {
+        fixture_init();
+        let generator = Rc::new(RefCell::new(ScriptedConnectionIdGenerator::default()));
+        let manager_generator = Rc::clone(&generator);
+        let mut manager = ConnectionIdManager::new(manager_generator, ConnectionId::from(&[0]));
+        manager.set_limit(3);
+        let enc = Encoder::with_capacity(1024);
+        let mut builder = packet::Builder::short(enc, false, Some(&[]), 1024);
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+
+        // Exhaustion must leave the packet and CID state unchanged, including on later writes.
+        for _ in 0..2 {
+            generator.borrow_mut().cids.push_back(None);
+            let remaining = builder.remaining();
+            manager.write_frames(&mut builder, &mut tokens, &mut stats);
+            assert_eq!(builder.remaining(), remaining);
+            assert!(tokens.is_empty());
+            assert_eq!(stats.new_connection_id, 0);
+            assert_eq!(manager.connection_ids.len(), 1);
+            assert_eq!(manager.next_seqno, 1);
+        }
+
+        // A generator can provide more IDs on a later write, then run out partway through.
+        generator
+            .borrow_mut()
+            .cids
+            .extend([Some(ConnectionId::from(&[1])), None]);
+        manager.write_frames(&mut builder, &mut tokens, &mut stats);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(stats.new_connection_id, 1);
+        assert_eq!(manager.connection_ids.len(), 2);
+        assert_eq!(manager.next_seqno, 2);
+        assert!(manager.is_valid(ConnectionIdRef::from(&[1])));
+
+        // Previously issued IDs can still be retransmitted while generation is exhausted.
+        let recovery::Token::NewConnectionId(entry) = tokens.pop().unwrap() else {
+            panic!("expected a NEW_CONNECTION_ID recovery token");
+        };
+        manager.lost(&entry);
+        generator.borrow_mut().cids.push_back(None);
+        manager.write_frames(&mut builder, &mut tokens, &mut stats);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(stats.new_connection_id, 2);
+        assert_eq!(manager.connection_ids.len(), 2);
+        assert_eq!(manager.next_seqno, 2);
+        assert!(manager.lost_new_connection_id.is_empty());
+        let recovery::Token::NewConnectionId(retransmitted) = tokens.pop().unwrap() else {
+            panic!("expected a NEW_CONNECTION_ID recovery token");
+        };
+        assert_eq!(retransmitted, entry);
+
+        generator
+            .borrow_mut()
+            .cids
+            .push_back(Some(ConnectionId::from(&[2])));
+        manager.write_frames(&mut builder, &mut tokens, &mut stats);
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(stats.new_connection_id, 3);
+        assert_eq!(manager.connection_ids.len(), 3);
+        assert_eq!(manager.next_seqno, 3);
+        assert!(manager.is_valid(ConnectionIdRef::from(&[2])));
+        assert!(generator.borrow().cids.is_empty());
+    }
 
     #[test]
     fn generate_initial_cid() {
@@ -703,7 +801,7 @@ mod tests {
     #[test]
     fn connection_id_ref_debug_format() {
         let bytes = [0xde, 0xad];
-        let cid_ref = crate::cid::ConnectionIdRef::from(&bytes[..]);
+        let cid_ref = ConnectionIdRef::from(&bytes[..]);
         assert_eq!(format!("{cid_ref:?}"), "CID [2]: dead");
     }
 

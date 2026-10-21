@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qtrace, qwarn};
+use neqo_common::{Buffer, Role, qdebug, qtrace};
 
 use crate::{
     AppError, ConnectionEvents, Error, Res,
@@ -23,7 +23,7 @@ use crate::{
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::{FrameStats, Stats},
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
     tparams::{
         TransportParameterId::{
             InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
@@ -39,12 +39,12 @@ pub type SendOrder = i64;
 ///
 /// A newtype around `u64` rather than a bare alias, so a raw integer (or a `SendOrder`)
 /// cannot be passed where a send-group id is expected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SendGroupId(u64);
 
 impl SendGroupId {
     /// Creates a new `SendGroupId`. Note: `0` is reserved as a sentinel
-    /// by the transport scheduler (`NULL_GROUP_ID`) and will be rejected
+    /// (`NULL_GROUP_ID`) and will be rejected
     /// by [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
     #[must_use]
     pub const fn new(id: u64) -> Self {
@@ -57,6 +57,13 @@ impl SendGroupId {
         self.0
     }
 }
+
+/// Sentinel for the null sendGroup: ungrouped fair streams in
+/// [`SendStreams`], datagrams with no group assigned in `DatagramQueue`.
+/// Real `SendGroupId` values start at 1 (see `neqo-http3`'s `send_group.rs`),
+/// so 0 is safe as a shared sentinel. Rejected by
+/// [`SendStreams::set_sendgroup`](crate::send_stream::SendStreams::set_sendgroup).
+pub(crate) const NULL_GROUP_ID: SendGroupId = SendGroupId::new(0);
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct StreamOrder {
@@ -122,13 +129,17 @@ impl Streams {
 
     pub fn zero_rtt_rejected(&mut self) {
         self.clear_streams();
-        debug_assert_eq!(
-            self.remote_stream_limits[StreamType::BiDi].max_active(),
-            self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
+        // Rejected data does not count against the new 1-RTT flow-control limit.
+        *self.sender_fc.borrow_mut() = SenderFlowControl::new((), 0);
+        // `set_remote_max_streams` may have raised these above the configured transport
+        // parameter; they are never reduced.
+        debug_assert!(
+            self.remote_stream_limits[StreamType::BiDi].max_active()
+                >= self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
         );
-        debug_assert_eq!(
-            self.remote_stream_limits[StreamType::UniDi].max_active(),
-            self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
+        debug_assert!(
+            self.remote_stream_limits[StreamType::UniDi].max_active()
+                >= self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -245,8 +256,7 @@ impl Streams {
                 self.handle_max_streams(*stream_type, *maximum_streams);
             }
             Frame::DataBlocked { data_limit } => {
-                // Should never happen since we set data limit to max
-                qwarn!("Received DataBlocked with data limit {data_limit}");
+                qdebug!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
@@ -565,6 +575,14 @@ impl Streams {
                 }
                 Ok(new_id)
             }
+        }
+    }
+
+    /// See `Connection::set_remote_max_streams`.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        let max = max.min(MAX_STREAMS_LIMIT);
+        if max > self.remote_stream_limits[stream_type].max_active() {
+            self.remote_stream_limits[stream_type].set_max_active(max);
         }
     }
 

@@ -93,12 +93,20 @@ impl Packet {
             .any(|t| matches!(t, recovery::Token::EcnEct0))
     }
 
+    /// Returns `true` if this packet is a PMTUD probe for the given IP MTU.
+    #[must_use]
+    pub fn is_pmtud_probe_of(&self, mtu: usize) -> bool {
+        self.tokens
+            .iter()
+            .any(|t| matches!(t, recovery::Token::PmtudProbe(probe_mtu) if *probe_mtu == mtu))
+    }
+
     /// Returns `true` if this packet is a PMTUD probe.
     #[must_use]
     pub fn is_pmtud_probe(&self) -> bool {
         self.tokens
             .iter()
-            .any(|t| matches!(t, recovery::Token::PmtudProbe))
+            .any(|t| matches!(t, recovery::Token::PmtudProbe(_)))
     }
 
     /// The time that this packet was sent.

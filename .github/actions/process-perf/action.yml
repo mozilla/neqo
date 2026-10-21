@@ -20,27 +20,34 @@ runs:
         PERF_FILES: ${{ inputs.path }}
         REPORTS: ${{ inputs.reports }}
       run: |
-        fail=
-        # shellcheck disable=SC2086
-        for f in $PERF_FILES; do
-          [ -e "$f" ] || continue
+        process() {
+          local f="$1"
           sudo chown "$(id -u)" "$f" # perf runs under sudo, so it writes these as root.
           if [ -z "$(perf script -i "$f" | head -n1)" ]; then
             case "$f" in
-              *-base.*|*-baseline/*) echo "::warning::perf recorded no samples for $f" ;;
-              *) echo "::error::perf recorded no samples for $f"; fail=1 ;;
+              *-base.*|*-baseline/*) echo "::warning::perf recorded no samples for $f"; return 0 ;;
+              *) echo "::error::perf recorded no samples for $f"; return 1 ;;
             esac
-            continue
           fi
           echo "Processing $f..."
           # Convert for profiler.firefox.com
           samply import "$f" -o "${f%.perf}.samply.json.gz" --save-only --presymbolicate ||
-            { echo "::error::samply import failed for $f"; fail=1; }
-          [ "$REPORTS" == "true" ] || continue
+            { echo "::error::samply import failed for $f"; return 1; }
+          [ "$REPORTS" == "true" ] || return 0
           # Generate flamegraphs from the cycles event (perf.data has multiple events)
           perf script -i "$f" | inferno-collapse-perf --event-filter cycles | inferno-flamegraph --colors rust > "${f%.perf}.svg"
           # Per-symbol IPC: divide the `instructions` section by `cycles:u`, both self cost.
           perf report -i "$f" --stdio --no-children -g none \
             -F overhead,period,symbol,dso > "${f%.perf}.report.txt"
+        }
+        # The files are independent, and this runs on the measuring runner's clock.
+        pids=()
+        # shellcheck disable=SC2086
+        for f in $PERF_FILES; do
+          [ -e "$f" ] || continue
+          process "$f" &
+          pids+=("$!")
         done
+        fail=
+        for p in "${pids[@]}"; do wait "$p" || fail=1; done
         [ -z "$fail" ]

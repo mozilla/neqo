@@ -14,7 +14,7 @@ use neqo_http3::{
     Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
-use neqo_transport::{ConnectionParameters, StreamId, StreamType};
+use neqo_transport::{ConnectionParameters, StreamId, StreamType, streams::SendGroupId};
 use nss::AuthenticationStatus;
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
@@ -463,7 +463,9 @@ fn wt_session_ok_and_wt_datagram_in_same_udp_datagram() {
     wt_server_session
         .response(&SessionAcceptAction::Accept, now)
         .unwrap();
-    wt_server_session.send_datagram(b"PING", None, now).unwrap();
+    _ = wt_server_session
+        .send_datagram(b"PING", None, now, SendGroupId::new(0), 0)
+        .unwrap();
     let accept_and_wt_datagram = server
         .process_output(now)
         .dgram()
@@ -709,10 +711,8 @@ fn wt_export_keying_material_transport_error() {
 /// Covers the snapshot-before-teardown plumbing: `webtransport_close_session` must
 /// return the stats as they were before the session was dismantled.
 ///
-/// The only counter in `SessionStats` so far is `datagrams_expired_outgoing`, and
-/// nothing expires datagrams yet, so both snapshots are currently the default. The
-/// datagram send below is scaffolding: once outgoing expiry is wired up it gives the
-/// comparison something non-zero to catch.
+/// The datagram sent below is counted in `outgoing_datagrams.sent`, so the
+/// comparison has something non-zero to catch.
 #[test]
 fn wt_stats_at_session_close() {
     const DATAGRAM_DATA: &[u8] = &[1, 2, 3, 4, 5];
@@ -721,8 +721,15 @@ fn wt_stats_at_session_close() {
     let wt_session = create_wt_session(&mut client, &mut server);
     let session_id = wt_session.stream_id();
 
-    client
-        .webtransport_send_datagram(session_id, DATAGRAM_DATA, None, now())
+    _ = client
+        .webtransport_send_datagram(
+            session_id,
+            DATAGRAM_DATA,
+            None,
+            now(),
+            SendGroupId::new(0),
+            0,
+        )
         .unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 

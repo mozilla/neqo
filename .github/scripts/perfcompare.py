@@ -80,7 +80,7 @@ def is_significant(s1: list[float], s2: list[float], pct: float) -> bool:
     pct is the caller's already-computed percent change between the two
     samples' medians.
     """
-    # Deferred, so that listing units and merging their results needs no SciPy.
+    # Deferred, so that listing units and running one needs no SciPy.
     from scipy.stats import mannwhitneyu
 
     if not s1 or not s2 or abs(pct) < NOISE_FLOOR_PCT:
@@ -273,8 +273,8 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         shutil.which("hyperfine") or "hyperfine",
         "--command-name",
         name,
-        "--time-unit",
-        "millisecond",
+        "--metrics",
+        "time_wall_clock:ms",
         "--export-json",
         str(out_dir / f"{name}.json"),
         "--output",
@@ -307,11 +307,8 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, md=False):
         "".join(f"{key} {delta}\n" for key, delta in deltas.items() if delta),
         encoding="utf-8",
     )
-    # Surface hyperfine's own outlier warnings in the PR summary, not just the raw log.
     if result.stderr:
         print(result.stderr, end="")
-        if "outlier" in result.stderr.lower():
-            (out_dir / f"{name}.outliers").write_text(result.stderr, encoding="utf-8")
 
 
 def perf(cfg, scmd, ccmd, name):
@@ -357,13 +354,13 @@ def _load_result(path):
     if not path.exists():
         return None
     res = json.loads(path.read_text(encoding="utf-8"))["results"][0]
-    res.setdefault("median", median(res["times"]))
-    return res
+    times = [m["time_wall_clock"]["value"] for m in res["measurements"]]
+    return {**res["summary"]["time_wall_clock"], "times": times}
 
 
-def process(cfg, name, bold):
-    """Process benchmark results into a table row."""
-    out_dir = cfg.workspace / "hyperfine"
+def process(cfg, name, bold, root):
+    """Process the benchmark results under `root` into a table row."""
+    out_dir = root / "hyperfine"
     res = _load_result(out_dir / f"{name}.json")
     if res is None:
         return None
@@ -372,7 +369,8 @@ def process(cfg, name, bold):
     md_dev = mad(times, med)
 
     outlier_flag = ""
-    if (out_dir / f"{name}.outliers").exists():
+    # hyperfine 1.x's outlier warning: a modified Z-score above 10.
+    if any(abs(t - med) > 10 * md_dev for t in times):
         outliers = [t for t in times if abs(t - med) > 3 * md_dev]
         if outliers:
             detail = (
@@ -389,7 +387,7 @@ def process(cfg, name, bold):
     mibs_err = (cfg.size / 1048576) * res["stddev"] / mean**2
     row += f"| {mibs:.1f} ± {mibs_err:.1f} "
 
-    if (base := _load_result(cfg.workspace / "hyperfine-baseline" / f"{name}.json")) is not None:
+    if (base := _load_result(root / "hyperfine-baseline" / f"{name}.json")) is not None:
         base_med = base["median"]
         diff = med - base_med
         delta = diff * 1000
@@ -449,7 +447,7 @@ def units() -> list[Unit]:
 
 
 def run_unit(cfg, tmp, unit):
-    """Run one unit's comparison and return its table row."""
+    """Run one unit's comparison; `merge` turns its results into a table row."""
 
     def fmt(t):
         return t.format(host=cfg.host, port=cfg.port, size=cfg.size, tmp=tmp)
@@ -474,37 +472,44 @@ def run_unit(cfg, tmp, unit):
     if not verify(cfg, tmp, unit.client, scmd, ccmd_d):
         raise RuntimeError(f"Transfer failed: {unit.client} vs. {unit.server}")
 
+    base = None
     if unit.client == "neqo" or unit.server == "neqo":
-        hyperfine(
-            cfg,
+        base = (
             scmd.replace("/neqo/", "/neqo-baseline/"),
             ccmd.replace("/neqo/", "/neqo-baseline/"),
+        )
+        hyperfine(
+            cfg,
+            *base,
             unit.name,
             cfg.workspace / "hyperfine-baseline",
         )
 
     hyperfine(cfg, scmd, ccmd, unit.name, cfg.workspace / "hyperfine", md=True)
+    # After the timed runs, so recording cannot drift them apart.
     perf(cfg, scmd, ccmd, unit.name)
-    return process(cfg, unit.name, unit.bold)
+    if base:
+        perf(cfg, *base, f"{unit.name}-base")
 
 
 def merge(cfg, artifacts):
-    """Assemble the rows and regressions the matrix jobs produced into one table."""
-
-    def gather(name, key=None):
-        files = artifacts.glob(f"*/{name}")
-        return "".join(sorted((f.read_text(encoding="utf-8") for f in files), key=key))
-
+    """Assemble one table from the per-unit artifacts, off the measuring runners."""
     header = (
         f"Transfer of {cfg.size} bytes over loopback, min. {cfg.runs} runs. "
         "All unit-less numbers are in milliseconds.\n\n"
         "| Client vs. server | Mean±σ | Min–Max | Median±MAD | MiB/s±σ | ΔMedian |\n"
         "|:---|---:|---:|---:|---:|---:|\n"
     )
+    (cfg.workspace / "results.txt").write_text("", encoding="utf-8")
+    rows = []
+    for unit in units():
+        res = next(artifacts.glob(f"*/hyperfine/{unit.name}.json"), None)
+        row = process(cfg, unit.name, unit.bold, res.parents[1]) if res else None
+        if row:
+            rows.append(row)
     # Sort rows as if unbolded, so the emphasized ones stay next to their own kind.
-    rows = gather("steps.md", key=lambda r: re.sub(r"^\| \*\*", "| ", r))
-    (cfg.workspace / "comparison.md").write_text(header + rows, encoding="utf-8")
-    (cfg.workspace / "results.txt").write_text(gather("results.txt"), encoding="utf-8")
+    rows.sort(key=lambda r: re.sub(r"^\| \*\*", "| ", r))
+    (cfg.workspace / "comparison.md").write_text(header + "".join(rows), encoding="utf-8")
 
 
 def main():
@@ -543,17 +548,14 @@ def main():
 
     for d in ("binaries", "hyperfine", "hyperfine-baseline"):
         (cfg.workspace / d).mkdir(exist_ok=True)
-    (cfg.workspace / "results.txt").touch()
 
     tmp = setup(cfg)
     try:
-        row = run_unit(cfg, tmp, unit)
+        run_unit(cfg, tmp, unit)
     finally:
         kill_servers()
         kill_port(cfg.port)
         shutil.rmtree(tmp, ignore_errors=True)
-
-    (cfg.workspace / "steps.md").write_text(row or "", encoding="utf-8")
     return 0
 
 

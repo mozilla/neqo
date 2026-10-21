@@ -148,6 +148,7 @@ impl Http3Server {
         self.process_http3(now);
         // Try again if input processing did not already produce a datagram.
         if let OutputBatch::DatagramBatch(d) = out {
+            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Send packet: {d:?}");
             OutputBatch::DatagramBatch(d)
         } else {

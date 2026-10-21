@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, num::NonZeroUsize, time::Duration};
+use std::{num::NonZeroUsize, time::Duration};
 
 use enum_map::{Enum, EnumMap};
 use neqo_common::to_u64;
@@ -14,7 +14,7 @@ use crate::{
     CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
-    stream_id::StreamType,
+    stream_id::{MAX_STREAMS_LIMIT, StreamType},
     tparams::{
         PreferredAddress, TransportParameter, TransportParameterId,
         TransportParameterId::{
@@ -89,7 +89,6 @@ pub const MAX_LOCAL_MAX_DATA: u64 = MAX_LOCAL_MAX_STREAM_DATA * CONNECTION_FACTO
 
 /// Maximum size of a QUIC DATAGRAM frame, as specified in <https://datatracker.ietf.org/doc/html/rfc9221#section-3-4>.
 pub const MAX_DATAGRAM_FRAME_SIZE: u64 = 65535;
-const MAX_QUEUED_DATAGRAMS_DEFAULT: usize = 10;
 
 /// What to do with preferred addresses.
 #[derive(Debug, Clone)]
@@ -156,7 +155,6 @@ pub struct ConnectionParameters {
     max_pto: Option<NonZeroUsize>,
     preferred_address: PreferredAddressConfig,
     datagram_size: u64,
-    outgoing_datagram_queue: usize,
     initial_rtt: Duration,
     fast_pto: u8,
     grease: bool,
@@ -180,6 +178,9 @@ pub struct ConnectionParameters {
     /// Whether to recover from spurious congestion events by restoring prior Congestion Controller
     /// state. Detection and metrics are always active regardless of this setting.
     spurious_recovery: bool,
+    /// Whether to use Alternative Backoff with ECN (RFC 8511), i.e. a smaller multiplicative
+    /// decrease on ECN-CE congestion events than on loss. Only affects CUBIC.
+    abe: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -198,7 +199,6 @@ impl Default for ConnectionParameters {
             max_pto: None,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: MAX_DATAGRAM_FRAME_SIZE,
-            outgoing_datagram_queue: MAX_QUEUED_DATAGRAMS_DEFAULT,
             initial_rtt: DEFAULT_INITIAL_RTT,
             fast_pto: FAST_PTO_SCALE,
             grease: true,
@@ -212,6 +212,7 @@ impl Default for ConnectionParameters {
             scone: false,
             reliable_stream_reset: true,
             spurious_recovery: true,
+            abe: true,
         }
     }
 }
@@ -298,7 +299,7 @@ impl ConnectionParameters {
     /// If v > 2^60 (the maximum allowed by the protocol).
     #[must_use]
     pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
-        assert!(v <= (1 << 60), "max_streams is too large");
+        assert!(v <= MAX_STREAMS_LIMIT, "max_streams is too large");
         self.max_streams[stream_type] = v;
         self
     }
@@ -398,18 +399,6 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn datagram_size(mut self, v: u64) -> Self {
         self.datagram_size = v;
-        self
-    }
-
-    #[must_use]
-    pub const fn get_outgoing_datagram_queue(&self) -> usize {
-        self.outgoing_datagram_queue
-    }
-
-    #[must_use]
-    pub fn outgoing_datagram_queue(mut self, v: usize) -> Self {
-        // The max queue length must be at least 1.
-        self.outgoing_datagram_queue = max(v, 1);
         self
     }
 
@@ -556,6 +545,17 @@ impl ConnectionParameters {
         self
     }
 
+    #[must_use]
+    pub const fn abe_enabled(&self) -> bool {
+        self.abe
+    }
+
+    #[must_use]
+    pub const fn abe(mut self, abe: bool) -> Self {
+        self.abe = abe;
+        self
+    }
+
     /// # Errors
     /// When a connection ID cannot be obtained.
     /// # Panics
@@ -682,6 +682,13 @@ mod tests {
                 .spurious_recovery(false)
                 .spurious_recovery_enabled()
         );
+    }
+
+    #[test]
+    fn abe_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().abe_enabled());
+        assert!(!ConnectionParameters::default().abe(false).abe_enabled());
     }
 
     #[test]

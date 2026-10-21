@@ -17,11 +17,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "log-payload")]
+use neqo_common::hex::HexWithLen;
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
     expect_usize,
-    hex::{Hex, HexSnipMiddle, HexWithLen},
+    hex::{Hex, HexSnipMiddle},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
     qtrace, qwarn, to_u64,
@@ -43,21 +45,22 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome, DroppedDatagrams},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
     packet,
     path::{Path, PathRef, Paths},
     qlog,
-    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, DatagramTracking, QuicDatagrams},
+    quic_datagrams::{DATAGRAM_FRAME_TYPE_VARINT_LEN, QuicDatagrams},
     recovery::{self, SendProfile, sent},
     recv_stream,
-    rtt::{GRANULARITY, RttEstimate},
+    rtt::{DEFAULT_INITIAL_RTT, GRANULARITY, RttEstimate},
     saved::SavedDatagrams,
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
-    stream_id::StreamType,
+    stream_id::{MAX_STREAMS_LIMIT, StreamType},
     streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
@@ -442,11 +445,7 @@ impl Connection {
 
         let stats = StatsCell::default();
         let events = ConnectionEvents::default();
-        let quic_datagrams = QuicDatagrams::new(
-            conn_params.get_datagram_size(),
-            conn_params.get_outgoing_datagram_queue(),
-            events.clone(),
-        );
+        let quic_datagrams = QuicDatagrams::new(conn_params.get_datagram_size(), events.clone());
 
         let c = Self {
             role,
@@ -1083,6 +1082,12 @@ impl Connection {
 
         self.streams.cleanup_closed_streams();
 
+        // Not gated on anything else needing to happen: expiry is not a
+        // send, so stale datagrams must not wait on some other timer to
+        // also be due.
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams.expire_datagrams(now, min_rtt);
+
         let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
 
@@ -1215,6 +1220,11 @@ impl Connection {
         if let Some(key_update_time) = self.crypto.states().update_time() {
             qtrace!("[{self}] Key update timer {key_update_time:?}");
             delays.push(key_update_time);
+        }
+
+        if let Some(dgram_time) = self.quic_datagrams.next_datagram_expiry(self.min_rtt()) {
+            qtrace!("[{self}] Datagram expiry timer {dgram_time:?}");
+            delays.push(dgram_time);
         }
 
         // `release_resumption_token_timer` is not considered here, because
@@ -1804,6 +1814,7 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
+        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
@@ -1836,6 +1847,7 @@ impl Connection {
                 PreprocessResult::End => return Ok(()),
             }
 
+            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
@@ -2377,6 +2389,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         tokens: &mut recovery::Tokens,
         now: Instant,
+        full_mtu: bool,
     ) {
         let rtt = self.paths.primary().map_or_else(
             || RttEstimate::new(self.conn_params.get_initial_rtt()).estimate(),
@@ -2434,7 +2447,8 @@ impl Connection {
         }
 
         // Datagrams are best-effort and unreliable.  Let streams starve them for now.
-        self.quic_datagrams.write_frames(builder, tokens, stats);
+        self.quic_datagrams
+            .write_frames(builder, tokens, stats, full_mtu);
         if builder.is_full() {
             return;
         }
@@ -2511,6 +2525,23 @@ impl Connection {
         probe
     }
 
+    /// Whether this packet should be a PMTUD probe.
+    fn should_probe_pmtud(
+        &self,
+        path: &PathRef,
+        space: PacketNumberSpace,
+        profile: &SendProfile,
+        coalesced: bool,
+    ) -> bool {
+        let path = path.borrow();
+        space == PacketNumberSpace::ApplicationData
+            && self.state.connected()
+            && !coalesced // Only send PMTUD probes using non-coalesced packets.
+            && path.is_primary()
+            && !profile.ack_only() // We could only send ACKs.
+            && path.can_probe_pmtud()
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
@@ -2520,9 +2551,9 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
+        pmtud_probe: bool,
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
-        let coalesced = builder.is_coalesced();
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2542,7 +2573,11 @@ impl Connection {
 
         // Avoid sending path validation probes until the handshake completes,
         // but send them even when we don't have space.
-        let full_mtu = profile.limit() == path.borrow().plpmtu();
+        let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
+        // PMTUD must not record a success for a packet that was never probe-sized.
+        debug_assert!(
+            !pmtud_probe || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
+        );
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Path validation probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
@@ -2563,11 +2598,7 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
-                    && path.borrow().pmtud().needs_probe()
-                    && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
+                if pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2575,7 +2606,7 @@ impl Connection {
                     );
                     ack_eliciting = true;
                 }
-                self.write_appdata_frames(builder, &mut tokens, now);
+                self.write_appdata_frames(builder, &mut tokens, now, full_mtu);
             } else {
                 let stats = &mut self.stats.borrow_mut().frame_tx;
                 self.crypto.write_frame(
@@ -2668,7 +2699,7 @@ impl Connection {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+            if path.borrow().can_probe_pmtud() && num_datagrams != 0 {
                 // Next datagram will be larger due to PMTUD probing.  GSO
                 // requires that all datagrams in a batch are of equal size.
                 // Only the last datagram can be smaller. Given that this would
@@ -2768,6 +2799,9 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
+            let coalesced = !encoder.is_empty();
+            let pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
+
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
             else {
@@ -2778,7 +2812,7 @@ impl Connection {
             let header_start = encoder.len();
 
             // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
+            let limit = if pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
                 path.borrow().pmtud().probe_size()
@@ -2827,7 +2861,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, now);
+                    self.write_frames(path, space, &profile, &mut builder, pmtud_probe, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -3273,6 +3307,7 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
+        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] Handshake space={space} data: {:?}",
             data.as_ref().map(HexWithLen::new),
@@ -3546,9 +3581,13 @@ impl Connection {
                 self.acks
                     .ack_freq(seqno, tolerance - 1, delay, ignore_order);
             }
-            Frame::Datagram { data, .. } => {
+            Frame::Datagram {
+                data,
+                len_field_len,
+                ..
+            } => {
                 self.stats.borrow_mut().frame_rx.datagram += 1;
-                self.quic_datagrams.handle_datagram(data)?;
+                self.quic_datagrams.handle_datagram(data, len_field_len)?;
             }
             _ => unreachable!("All other frames are for streams"),
         }
@@ -3588,7 +3627,7 @@ impl Connection {
                     }
                     recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
                     // PMTUD probe loss is handled by the PMTUD state machine.
-                    recovery::Token::PmtudProbe => (),
+                    recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3660,7 +3699,7 @@ impl Connection {
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     recovery::Token::EcnEct0 => self.paths.acked_ecn(),
                     // We don't care about these being ACK'ed
-                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe => (),
+                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3810,6 +3849,19 @@ impl Connection {
         }
 
         self.streams.stream_create(st)
+    }
+
+    /// Raise the maximum number of concurrent incoming streams of `stream_type`.
+    ///
+    /// This is a local receive window: the cumulative stream count advertised
+    /// in `MAX_STREAMS` (RFC 9000, Section 4.6) advances by it as the peer's
+    /// streams are retired.  Raise-only: a `max` not greater than the current
+    /// window has no effect.  Shrinking the window would also be legal, taking
+    /// effect as streams retire, but no caller needs it.  A `max` above
+    /// [`MAX_STREAMS_LIMIT`] is clamped to it.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        debug_assert!(max <= MAX_STREAMS_LIMIT, "max_streams is too large");
+        self.streams.set_remote_max_streams(stream_type, max);
     }
 
     /// Set the priority of a stream.
@@ -4056,8 +4108,8 @@ impl Connection {
     /// # Panics
     /// Basically never, because that unwrap won't fail.
     pub fn max_datagram_size(&self) -> Res<u64> {
-        let max_dgram_size = self.quic_datagrams.remote_datagram_size();
-        if max_dgram_size == 0 {
+        let max_dgram_frame_size = self.quic_datagrams.remote_datagram_size();
+        if max_dgram_frame_size == 0 {
             return Err(Error::NotAvailable);
         }
         let version = self.version();
@@ -4089,31 +4141,129 @@ impl Connection {
         let data_len_possible = to_u64(
             mtu.saturating_sub(tx.expansion() + builder.len() + DATAGRAM_FRAME_TYPE_VARINT_LEN),
         );
-        Ok(min(data_len_possible, max_dgram_size))
+        Ok(min(
+            data_len_possible,
+            max_dgram_frame_size.saturating_sub(to_u64(DATAGRAM_FRAME_TYPE_VARINT_LEN)),
+        ))
     }
 
-    /// Queue a datagram for sending.
+    /// The primary path's minimum RTT estimate, from which `QuicDatagrams`
+    /// derives the default outgoing-datagram max-age.
+    fn min_rtt(&self) -> Duration {
+        self.paths
+            .primary()
+            .map_or(DEFAULT_INITIAL_RTT, |p| p.borrow().rtt().minimum())
+    }
+
+    /// Enqueue a datagram on `session`'s outgoing queue: byte-budgeted,
+    /// max-buffered-tracked, and scheduled by `send_group_id`/
+    /// `send_order` and age. `session` is opaque to `Connection` — nothing
+    /// here requires it to be a real stream, only a stable per-caller tag
+    /// (in practice, an Extended CONNECT session's control-stream `StreamId`).
+    /// `send_group_id` of `SendGroupId::new(0)` means ungrouped.
     ///
-    /// The QUIC datagram is always queued. Returns `Ok(true)` if space remains
-    /// afterwards, or `Ok(false)` if the outgoing QUIC datagram queue is now
-    /// full. On `Ok(false)` the application should stop sending and wait for an
-    /// [`OutgoingDatagramSpaceAvailable`] event before sending again; nothing
-    /// already queued is dropped.
+    /// The *path* MTU is applied later, at packet-build time, exactly like
+    /// queued stream data.
     ///
     /// # Errors
     ///
-    /// The function returns `TooMuchData` if the supply buffer is bigger than
-    /// the allowed remote datagram size. The function does not check if the
-    /// datagram can fit into a packet (i.e. MTU limit). This is checked during
-    /// creation of an actual packet and the datagram will be dropped if it does
-    /// not fit into the packet. The app is encourage to use `max_datagram_size`
-    /// to check the estimated max datagram size and to use smaller datagrams.
-    /// `max_datagram_size` is just a current estimate and will change over
-    /// time depending on the encoded size of the packet number, ack frames, etc.
+    /// Returns `TooMuchData` if the DATAGRAM frame containing `data` would
+    /// exceed [`Self::remote_datagram_size`], including any datagram while
+    /// that is `0` (the peer sent no `max_datagram_frame_size` and so does
+    /// not support DATAGRAM frames at all).
+    pub fn enqueue_datagram(
+        &mut self,
+        session: StreamId,
+        data: Vec<u8>,
+        id: Option<DatagramId>,
+        now: Instant,
+        send_group_id: SendGroupId,
+        send_order: SendOrder,
+    ) -> Res<DatagramQueueOutcome> {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams.enqueue_datagram(
+            session,
+            data,
+            id,
+            now,
+            send_group_id,
+            send_order,
+            min_rtt,
+        )
+    }
+
+    /// See `DatagramQueue::set_max_buffered_datagrams`.
+    pub fn set_max_buffered_datagrams(&mut self, session: StreamId, mark: Option<NonZeroUsize>) {
+        self.quic_datagrams
+            .set_max_buffered_datagrams(session, mark);
+    }
+
+    /// See `DatagramQueue::set_max_age`. Unlike the inner engine's own
+    /// method, does not take a default max-age: this connection's own RTT
+    /// estimate supplies it.
+    pub fn set_datagram_max_age(
+        &mut self,
+        session: StreamId,
+        max_age: Option<Duration>,
+        now: Instant,
+    ) {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams
+            .set_datagram_max_age(session, max_age, now, min_rtt);
+    }
+
+    /// See `DatagramQueue::capacity`.
+    #[must_use]
+    pub fn datagram_queue_capacity(&self, session: StreamId) -> DatagramQueueCapacity {
+        self.quic_datagrams.datagram_queue_capacity(session)
+    }
+
+    /// Expire stale datagrams on a single session's queue and return how many
+    /// of its datagrams have expired since the last call, whichever sweep
+    /// shed them, for a caller that counts expiries per session.
     ///
-    /// [`OutgoingDatagramSpaceAvailable`]: crate::ConnectionEvent::OutgoingDatagramSpaceAvailable
-    pub fn send_datagram<I: Into<DatagramTracking>>(&mut self, buf: Vec<u8>, id: I) -> Res<bool> {
-        self.quic_datagrams.add_datagram(buf, id.into())
+    /// This is the second of two sweeps over the same queues. `process_timer`
+    /// runs the first on the connection's own schedule and never reports what
+    /// it shed; this one lets a caller attribute expiries to a session and
+    /// pick them up on its own tick, before or after `process_output`. The
+    /// count accumulates on the queue, so the order of the two within a tick
+    /// changes nothing: every expiry is reported exactly once, by whoever
+    /// drains it. Each call re-derives the RTT-based default max-age, which
+    /// is one `min_rtt` per session per tick.
+    pub fn expire_session_datagrams(&mut self, session: StreamId, now: Instant) -> u64 {
+        let min_rtt = self.min_rtt();
+        self.quic_datagrams
+            .expire_session_datagrams(session, now, min_rtt)
+    }
+
+    /// [`Self::expire_session_datagrams`] without the sweep: only return the
+    /// count accumulated so far.
+    pub fn take_session_expired_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_expired_count(session)
+    }
+
+    /// Remove `session`'s queue, e.g. because the session is closing. Returns
+    /// how many datagrams were still queued, and the sent, expiry and
+    /// too-big counts not yet taken.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> DroppedDatagrams {
+        self.quic_datagrams.drop_session_datagrams(session)
+    }
+
+    /// The number of `session`'s datagrams written into a QUIC packet since
+    /// the last call.  Not a delivery signal: the packet can still be lost,
+    /// and a DATAGRAM frame is never retransmitted.  Tracked datagrams get
+    /// their delivery outcome via [`ConnectionEvent::OutgoingDatagramOutcome`].
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramOutcome`]: crate::ConnectionEvent::OutgoingDatagramOutcome
+    pub fn take_session_sent_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_sent_count(session)
+    }
+
+    /// The number of `session`'s datagrams dropped at packet-build time since
+    /// the last call, for not fitting the path MTU.  Enqueueing only checks
+    /// the peer's `max_datagram_frame_size`, which can exceed the path MTU.
+    pub fn take_session_too_big_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_too_big_count(session)
     }
 
     /// Return the PLMTU of the primary path.

@@ -1,0 +1,2 @@
+# One-time NSS error stack allocation from NSS_NoDB_Init via nss_rs::init.
+leak:error_get_my_stack
