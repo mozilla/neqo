@@ -1699,6 +1699,8 @@ impl Connection {
                 // > incoming packet that it attributes to the connection.
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
+                //
+                // Deliberately not rate limited, despite the SHOULD in Section 10.2.1.
                 if self.cid_manager.is_valid(packet.dcid()) && !self.paths.is_temporary(path) {
                     self.state_signaling.send_close();
                 } else {
