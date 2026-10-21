@@ -850,6 +850,20 @@ impl Path {
         self.challenge.is_some() || self.state.probe_needed()
     }
 
+    /// Give up on probing frames that cannot be sent: drop any `PATH_RESPONSE`,
+    /// and treat a `PATH_CHALLENGE` as sent and lost.
+    pub fn skip_probe(&mut self, now: Instant) {
+        self.challenge = None;
+        if let ProbeState::ProbeNeeded { probe_count } = self.state {
+            self.state = ProbeState::Probing {
+                probe_count,
+                data: random::<8>(),
+                mtu: false,
+                sent: now,
+            };
+        }
+    }
+
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
@@ -1145,7 +1159,7 @@ impl Path {
                         // If we have received absolutely nothing thus far, then this endpoint
                         // is the one initiating communication on this path.  Allow enough space for
                         // probing.
-                        self.plpmtu() * 5
+                        self.plpmtu() * 2 * Self::MAX_PROBES
                     } else {
                         limit
                     };
