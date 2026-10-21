@@ -6,7 +6,7 @@
 
 use std::{
     cell::RefCell,
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     fmt::{self, Display},
     net::SocketAddr,
     num::NonZeroUsize,
@@ -59,7 +59,7 @@ pub struct Paths {
     migration_target: Option<PathRef>,
 
     /// Connection IDs that need to be retired.
-    to_retire: Vec<u64>,
+    to_retire: BTreeSet<u64>,
 
     /// `QLog` handler.
     qlog: Qlog,
@@ -75,7 +75,7 @@ impl Paths {
             paths: Vec::new(),
             primary: None,
             migration_target: None,
-            to_retire: Vec::new(),
+            to_retire: BTreeSet::new(),
             qlog: Qlog::disabled(),
             pmtud,
         }
@@ -118,13 +118,13 @@ impl Paths {
         path.borrow().is_temporary() || !self.paths.iter().any(|p| Rc::ptr_eq(p, path))
     }
 
-    fn retire(to_retire: &mut Vec<u64>, retired: &PathRef) {
+    fn retire(to_retire: &mut BTreeSet<u64>, retired: &PathRef) {
         if let Some(cid) = &retired.borrow().remote_cid {
             let seqno = cid.sequence_number();
             if cid.connection_id().is_empty() {
                 debug!("Connection ID {seqno} is zero-length, not retiring");
             } else {
-                to_retire.push(seqno);
+                to_retire.insert(seqno);
             }
         }
     }
@@ -364,8 +364,7 @@ impl Paths {
         let migration_target = &mut self.migration_target;
 
         // First, tell the store to release any connection IDs that are too old.
-        let mut retired = store.retire_prior_to(retire_prior);
-        to_retire.append(&mut retired);
+        to_retire.extend(store.retire_prior_to(retire_prior));
 
         self.paths.retain(|p| {
             let mut path = p.borrow_mut();
@@ -373,7 +372,7 @@ impl Paths {
                 return true;
             };
             if current.sequence_number() < retire_prior && !current.connection_id().is_empty() {
-                to_retire.push(current.sequence_number());
+                to_retire.insert(current.sequence_number());
                 let new_cid = store.next();
                 let has_replacement = new_cid.is_some();
                 // There must be a connection ID available for the primary path as we
@@ -399,7 +398,7 @@ impl Paths {
 
     /// The number of connection IDs that have been retired locally but whose
     /// `RETIRE_CONNECTION_ID` frames have not yet been ACK'ed.
-    pub(crate) const fn retire_queue_len(&self) -> usize {
+    pub(crate) fn retire_queue_len(&self) -> usize {
         self.to_retire.len()
     }
 
@@ -410,9 +409,9 @@ impl Paths {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        while let Some(seqno) = self.to_retire.pop() {
+        while let Some(seqno) = self.to_retire.pop_first() {
             if builder.remaining() < 1 + Encoder::varint_len(seqno) {
-                self.to_retire.push(seqno);
+                self.to_retire.insert(seqno);
                 break;
             }
             builder.encode_frame(FrameType::RetireConnectionId, |b| {
@@ -429,11 +428,11 @@ impl Paths {
     }
 
     pub fn lost_retire_cid(&mut self, lost: u64) {
-        self.to_retire.push(lost);
+        self.to_retire.insert(lost);
     }
 
     pub fn acked_retire_cid(&mut self, acked: u64) {
-        self.to_retire.retain(|&seqno| seqno != acked);
+        self.to_retire.remove(&acked);
     }
 
     pub fn lost_ack_frequency(&self, lost: AckRate) {
@@ -1216,12 +1215,19 @@ impl Display for Path {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::{Encoder, qlog::Qlog};
-    use test_fixture::{DEFAULT_ADDR, now};
+    use std::collections::BTreeSet;
 
-    use super::Path;
+    use neqo_common::{Encoder, qlog::Qlog};
+    use test_fixture::{DEFAULT_ADDR, fixture_init, now};
+
+    use super::{Path, Paths};
     use crate::{
-        ConnectionParameters, Stats, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
+        ConnectionParameters, Stats,
+        cid::{ConnectionId, ConnectionIdStore, RemoteConnectionIdEntry},
+        frame::PATH_CHALLENGE_LEN,
+        packet, recovery,
+        stateless_reset::Token as Srt,
+        stats::FrameStats,
     };
 
     fn path() -> Path {
@@ -1263,5 +1269,45 @@ mod tests {
         assert_eq!(stats.path_response, 2);
         assert_eq!(stats.path_challenge, 0);
         assert_eq!(path.challenges, [[2; PATH_CHALLENGE_LEN]]);
+    }
+
+    /// A connection ID that the peer sends again after it was retired is queued once.
+    #[test]
+    fn retire_cids_repeated_queued_once() {
+        fixture_init();
+        let mut paths = Paths::new(false);
+        let mut store = ConnectionIdStore::default();
+        let entry = RemoteConnectionIdEntry::new(1, ConnectionId::from(&[1]), Srt::random());
+        for _ in 0..2 {
+            store.add_remote(entry.clone()).unwrap();
+            paths.retire_cids(2, &mut store);
+        }
+        assert_eq!(paths.retire_queue_len(), 1);
+    }
+
+    /// A `RETIRE_CONNECTION_ID` that doesn't fit in the packet stays queued.
+    #[test]
+    fn retire_cid_not_written_stays_queued() {
+        let mut paths = Paths::new(false);
+        paths.lost_retire_cid(1);
+        let mut builder = packet::Builder::short(Encoder::default(), false, Some(&[]), 1024);
+        builder.set_limit(builder.len());
+        let len = builder.len();
+        let mut tokens = recovery::Tokens::new();
+        let mut stats = FrameStats::default();
+        paths.write_frames(&mut builder, &mut tokens, &mut stats);
+        assert_eq!(builder.len(), len);
+        assert!(tokens.is_empty());
+        assert_eq!(stats.retire_connection_id, 0);
+        assert_eq!(paths.to_retire, BTreeSet::from([1]));
+    }
+
+    /// An ACK of a `RETIRE_CONNECTION_ID` removes it from the queue.
+    #[test]
+    fn retire_cid_acked_dequeued() {
+        let mut paths = Paths::new(false);
+        paths.lost_retire_cid(1);
+        paths.acked_retire_cid(1);
+        assert_eq!(paths.retire_queue_len(), 0);
     }
 }
