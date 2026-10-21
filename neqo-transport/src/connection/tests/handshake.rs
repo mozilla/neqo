@@ -1101,6 +1101,33 @@ fn drop_handshake_packet_from_wrong_address() {
     assert!(out.as_dgram_ref().is_none());
 }
 
+/// A server keeps its Initial keys until it successfully processes a Handshake packet
+/// (RFC 9001, Section 4.9.1).
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn server_keeps_initial_keys_after_undecryptable_handshake() {
+    use super::{drain, handshake_packet};
+
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+    flush_to(&mut client, &mut server, &mut now);
+    let mut flight = Vec::new();
+    drain(&mut server, &mut now, |d, _| flight.push(d));
+
+    // Send the server's own Handshake packet back to it, with the connection IDs swapped.
+    let hs = handshake_packet(&flight);
+    let n = usize::from(hs[5]);
+    assert_eq!(usize::from(hs[6 + n]), n);
+    let mut forged = hs.to_vec();
+    forged[6..6 + n].copy_from_slice(&hs[7 + n..7 + 2 * n]);
+    forged[7 + n..7 + 2 * n].copy_from_slice(&hs[6..6 + n]);
+    server.process_input(datagram(forged), now);
+
+    now += server.process_output(now).callback();
+    assert_initial(&server.process_output(now).dgram().unwrap(), false);
+}
+
 #[test]
 fn ech() {
     let mut server = default_server();

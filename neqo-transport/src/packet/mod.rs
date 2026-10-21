@@ -974,6 +974,10 @@ impl<'a> Public<'a> {
         let Some(rx) = crypto.rx(version, epoch, key_phase) else {
             return Err((self, Error::Decrypt).into());
         };
+        // Handshake packets use the negotiated version (RFC 9369, Section 4.1).
+        if self.packet_type == Type::Handshake && self.version() != Some(rx.version()) {
+            return Err((self, Error::Decrypt).into());
+        }
         let version = rx.version(); // Version fixup; see above.
         let header_end = header.end;
         let payload_len = match rx.decrypt(pn, header, self.data) {
