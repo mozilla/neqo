@@ -2672,6 +2672,9 @@ impl Connection {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
+            if num_datagrams != 0 && !path.borrow().is_primary() {
+                break; // A probe or closing datagram on a non-primary path is never batched.
+            }
             if path.borrow().can_probe_pmtud() && num_datagrams != 0 {
                 // Next datagram will be larger due to PMTUD probing.  GSO
                 // requires that all datagrams in a batch are of equal size.
@@ -2775,7 +2778,7 @@ impl Connection {
             // Other than closing frames, only path probes are sent on a non-primary path.
             if closing_frame.is_none()
                 && !path.borrow().is_primary()
-                && (space != PacketNumberSpace::ApplicationData || !path.borrow().has_probe())
+                && space != PacketNumberSpace::ApplicationData
             {
                 continue;
             }
