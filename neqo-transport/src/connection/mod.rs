@@ -1180,7 +1180,10 @@ impl Connection {
         }
 
         let mut delays = SmallVec::<[_; 7]>::new();
-        if let Some(ack_time) = self.acks.ack_time(now) {
+        // The anti-amplification limit can hold back an ACK on an unvalidated path.
+        let ack_blocked =
+            |t: &Instant| *t <= now && self.paths.primary().is_some_and(|p| !p.borrow().is_valid());
+        if let Some(ack_time) = self.acks.ack_time(now).filter(|t| !ack_blocked(t)) {
             qtrace!("[{self}] Delayed ACK timer {ack_time:?}");
             delays.push(ack_time);
         }
@@ -2286,6 +2289,12 @@ impl Connection {
                 || Ok(SendOptionBatch::default()),
                 |path| {
                     let res = self.output_dgram_batch_on_path(&path, now, None, max_datagrams);
+                    if matches!(res, Ok(SendOptionBatch::No(false))) && !path.borrow().is_primary()
+                    {
+                        // The probe does not fit the anti-amplification limit; try another path.
+                        path.borrow_mut().skip_probe(now);
+                        return Ok(self.output(now, max_datagrams));
+                    }
                     self.capture_error(Some(path), now, FrameType::Padding, res)
                 },
             ),
@@ -2776,10 +2785,8 @@ impl Connection {
 
         // Determine how we are sending packets (PTO, etc..).
         let mut profile = self.loss_recovery.send_profile(&path.borrow(), now);
-        if closing_frame.is_some() {
-            // CONNECTION_CLOSE counts against the anti-amplification limit (RFC 9000, Section 8.1).
-            profile.cap(path.borrow().amplification_limit());
-        }
+        // Everything counts against the anti-amplification limit (RFC 9000, Section 8.1).
+        profile.cap(path.borrow().amplification_limit());
         qdebug!("[{self}] output_dgram_on_path send_profile {profile:?}");
 
         // Frames for different epochs must go in different packets, but then these
