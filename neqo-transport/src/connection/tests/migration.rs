@@ -25,10 +25,11 @@ use test_fixture::{
 };
 
 use super::{
-    super::{Connection, Output, State, StreamType},
-    AT_LEAST_PTO, CountingConnectionIdGenerator, connect_fail, connect_force_idle,
-    connect_rtt_idle, default_client, default_server, fill_cwnd, maybe_authenticate, new_client,
-    new_server, send_something, zero_len_cid_client,
+    super::{Connection, Output, State, StreamType, test_internal::FrameWriter},
+    AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, connect_fail, connect_force_idle,
+    connect_rtt_idle, default_client, default_server, exchange_ticket, fill_cwnd, handshake,
+    handshake_with_modifier, maybe_authenticate, new_client, new_server, resumed_server,
+    send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1268,7 +1269,7 @@ impl NewConnectionIds {
     }
 }
 
-impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
+impl FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         for i in 0..self.count {
             let seqno = Self::SEQNO + i;
@@ -1288,7 +1289,7 @@ impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
 /// Writes a `NEW_CONNECTION_ID` frame and a padded `PATH_CHALLENGE` frame.
 struct PaddedPathChallengeWriter {}
 
-impl crate::connection::test_internal::FrameWriter for PaddedPathChallengeWriter {
+impl FrameWriter for PaddedPathChallengeWriter {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::NewConnectionId)
@@ -1320,6 +1321,81 @@ fn path_challenge_before_handshake_done() {
     let response = client.process_output(now()).dgram().unwrap();
     assert_eq!(response.source(), challenge.destination());
     assert_eq!(client.stats().frame_tx.path_response, 1);
+}
+
+/// Writes a padded `PATH_CHALLENGE` frame into the second packet only.
+struct SecondPacketPathChallengeWriter {
+    packets: usize,
+}
+
+impl FrameWriter for SecondPacketPathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        self.packets += 1;
+        if self.packets == 2 {
+            builder
+                .encode_varint(FrameType::PathChallenge)
+                .encode([1; 8]);
+            let limit = builder.limit();
+            builder.pad_to(limit, FrameType::Padding.into());
+        }
+    }
+}
+
+/// A server drops a datagram from a new address before its handshake completes.
+#[test]
+fn path_challenge_in_0rtt() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+
+    let client_hs = client.process_output(now()).dgram();
+    let client_hs2 = client.process_output(now()).dgram();
+    let delay = client.process_output(now()).callback();
+    let writer = SecondPacketPathChallengeWriter { packets: 0 };
+    let challenge = client
+        .test_write_frames(writer, now() + delay)
+        .dgram()
+        .unwrap();
+    server.process_input(client_hs.unwrap(), now());
+    let server_hs = server.process(client_hs2, now()).dgram();
+    let before = server.stats();
+    server.process_input(change_source_port(&challenge, 1), now());
+    let after = server.stats();
+    let ack = client.process(server_hs, now()).dgram();
+    server.process_input(ack.unwrap(), now());
+    assert_eq!(*server.state(), State::Handshaking);
+
+    handshake_with_modifier(&mut server, &mut client, now(), DEFAULT_RTT, |d| {
+        assert_eq!(d.destination(), DEFAULT_ADDR);
+        Some(d)
+    });
+    assert_eq!(*server.state(), State::Confirmed);
+    assert_eq!(after.dropped_rx, before.dropped_rx + 1);
+    assert_eq!(after.packets_rx, before.packets_rx);
+    assert_eq!(server.stats().frame_rx.path_challenge, 0);
+}
+
+#[test]
+fn client_discards_initial_from_new_address() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let client_hs = client.process_output(now()).dgram();
+    let client_hs2 = client.process_output(now()).dgram();
+    server.process_input(client_hs.unwrap(), now());
+    let server_hs = server.process(client_hs2, now()).dgram().unwrap();
+    let before = client.stats();
+    client.process_input(change_source_port(&server_hs, 1), now());
+    assert_eq!(*client.state(), State::WaitInitial);
+    assert_eq!(client.stats().packets_rx, before.packets_rx + 1);
+    assert_eq!(client.stats().dropped_rx, before.dropped_rx);
+
+    client.process_input(server_hs, now());
+    handshake(&mut client, &mut server, now(), DEFAULT_RTT);
+    assert_eq!(*client.state(), State::Confirmed);
 }
 
 /// Test that forcing retirement of connection IDs forces retirement of all active
@@ -1398,7 +1474,7 @@ fn retire_cid_queue_bounded() {
 /// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
 struct RetireUnissued(u64);
 
-impl crate::connection::test_internal::FrameWriter for RetireUnissued {
+impl FrameWriter for RetireUnissued {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::RetireConnectionId)
@@ -1536,7 +1612,7 @@ fn retire_prior_to_migration_success() {
 
 struct GarbageWriter {}
 
-impl crate::connection::test_internal::FrameWriter for GarbageWriter {
+impl FrameWriter for GarbageWriter {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);

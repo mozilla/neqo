@@ -674,7 +674,7 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+    pub fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
         self.local == local && self.remote == remote
     }
 

@@ -1789,6 +1789,18 @@ impl Connection {
         received: Instant,
         now: Instant,
     ) {
+        if self.role == Role::Server
+            && self.state < State::Connected
+            && self
+                .paths
+                .primary()
+                .is_some_and(|p| !p.borrow().received_on(d.destination(), d.source()))
+        {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Address changed during handshake");
+            return;
+        }
         // First determine the path.
         let path = self.paths.find_path(
             d.destination(),
