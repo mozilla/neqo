@@ -832,6 +832,22 @@ mod tests {
         assert_closed(&hconn, &Error::HttpFrameUnexpected);
     }
 
+    // Server: QPACK settings larger than the encoder can use are accepted.
+    #[test]
+    fn server_receive_large_qpack_settings() {
+        let (mut hconn, mut neqo_trans_conn, _token) = connect_and_receive_settings();
+        let control_stream = neqo_trans_conn.stream_create(StreamType::UniDi).unwrap();
+        // SETTINGS with MaxTableCapacity = 2^30 and BlockedStreams = 2^16.
+        let settings = [
+            0x0, 0x4, 0xe, 0x1, 0xc0, 0x0, 0x0, 0x0, 0x40, 0x0, 0x0, 0x0, 0x7, 0x80, 0x1, 0x0, 0x0,
+        ];
+        let sent = neqo_trans_conn.stream_send(control_stream, &settings);
+        assert_eq!(sent, Ok(settings.len()));
+        let out = neqo_trans_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_not_closed(&hconn);
+    }
+
     fn priority_update_check_id(stream_id: StreamId, valid: bool) {
         let (mut hconn, mut peer_conn) = connect();
         // send a priority update
