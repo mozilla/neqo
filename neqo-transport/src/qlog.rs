@@ -12,6 +12,7 @@ use std::{
 };
 
 use neqo_common::{Decoder, Ecn, hex::Hex, qinfo, qlog::Qlog, to_u64};
+pub use qlog::events::quic::TransportInitiator;
 use qlog::events::{
     ApplicationError, EventData, RawInfo, TupleEndpointInfo,
     quic::{
@@ -21,7 +22,7 @@ use qlog::events::{
         PacketLostTrigger, PacketNumberSpace as QlogPacketNumberSpace, PacketReceived, PacketSent,
         PacketType, PacketsAcked, ParametersSet, PreferredAddress, QuicFrame,
         QuicVersionInformation, RecoveryMetricsUpdated, RecoveryParametersSet, StreamType,
-        TimerEventType, TimerType, TimerUpdated, TransportInitiator,
+        TimerEventType, TimerType, TimerUpdated,
     },
 };
 
@@ -53,40 +54,50 @@ fn to_hex<T: AsRef<[u8]>>(v: T) -> String {
     Hex::new(v).to_string()
 }
 
-pub fn connection_tparams_set(qlog: &mut Qlog, tph: &TransportParametersHandler, now: Instant) {
+/// Stateless reset tokens are secret, so only their presence is logged.
+fn redacted<T>(_token: T) -> String {
+    String::new()
+}
+
+pub fn tparams_set(
+    qlog: &mut Qlog,
+    tph: &TransportParametersHandler,
+    initiator: TransportInitiator,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
-            let remote = tph.remote();
+            let tp = match &initiator {
+                TransportInitiator::Local => tph.local(),
+                TransportInitiator::Remote => tph.remote(),
+            };
+            let int = |id| Some(tp.get_integer(id));
             let ev_data = EventData::QuicParametersSet(Box::new(ParametersSet {
-                initiator: Some(TransportInitiator::Remote),
-                original_destination_connection_id: remote
+                initiator: Some(initiator),
+                original_destination_connection_id: tp
                     .get_bytes(OriginalDestinationConnectionId)
                     .map(to_hex),
-                stateless_reset_token: remote.get_bytes(StatelessResetToken).map(to_hex),
-                disable_active_migration: remote.get_empty(DisableMigration).then_some(true),
-                max_idle_timeout: Some(remote.get_integer(TransportParameterId::IdleTimeout)),
-                max_udp_payload_size: Some(remote.get_integer(MaxUdpPayloadSize)),
-                ack_delay_exponent: Some(remote.get_integer(AckDelayExponent)),
-                max_ack_delay: Some(remote.get_integer(MaxAckDelay)),
-                active_connection_id_limit: Some(remote.get_integer(ActiveConnectionIdLimit)),
-                initial_max_data: Some(remote.get_integer(InitialMaxData)),
-                initial_max_stream_data_bidi_local: Some(
-                    remote.get_integer(InitialMaxStreamDataBidiLocal),
-                ),
-                initial_max_stream_data_bidi_remote: Some(
-                    remote.get_integer(InitialMaxStreamDataBidiRemote),
-                ),
-                initial_max_stream_data_uni: Some(remote.get_integer(InitialMaxStreamDataUni)),
-                initial_max_streams_bidi: Some(remote.get_integer(InitialMaxStreamsBidi)),
-                initial_max_streams_uni: Some(remote.get_integer(InitialMaxStreamsUni)),
-                preferred_address: remote.get_preferred_address().and_then(|(paddr, cid)| {
+                stateless_reset_token: tp.get_bytes(StatelessResetToken).map(redacted),
+                disable_active_migration: tp.get_empty(DisableMigration).then_some(true),
+                max_idle_timeout: int(TransportParameterId::IdleTimeout),
+                max_udp_payload_size: int(MaxUdpPayloadSize),
+                ack_delay_exponent: int(AckDelayExponent),
+                max_ack_delay: int(MaxAckDelay),
+                active_connection_id_limit: int(ActiveConnectionIdLimit),
+                initial_max_data: int(InitialMaxData),
+                initial_max_stream_data_bidi_local: int(InitialMaxStreamDataBidiLocal),
+                initial_max_stream_data_bidi_remote: int(InitialMaxStreamDataBidiRemote),
+                initial_max_stream_data_uni: int(InitialMaxStreamDataUni),
+                initial_max_streams_bidi: int(InitialMaxStreamsBidi),
+                initial_max_streams_uni: int(InitialMaxStreamsUni),
+                preferred_address: tp.get_preferred_address().and_then(|(paddr, cid)| {
                     Some(PreferredAddress {
                         ip_v4: paddr.ipv4()?.ip().to_string(),
                         ip_v6: paddr.ipv6()?.ip().to_string(),
                         port_v4: paddr.ipv4()?.port(),
                         port_v6: paddr.ipv6()?.port(),
                         connection_id: cid.connection_id().to_string(),
-                        stateless_reset_token: to_hex(cid.reset_token()),
+                        stateless_reset_token: redacted(cid.reset_token()),
                     })
                 }),
                 ..Default::default()
@@ -743,7 +754,7 @@ impl From<Frame<'_>> for QuicFrame {
                 retire_prior_to: retire_prior,
                 connection_id_length: Some(connection_id.len() as u8),
                 connection_id: to_hex(connection_id),
-                stateless_reset_token: Some(to_hex(stateless_reset_token)),
+                stateless_reset_token: Some(redacted(stateless_reset_token)),
                 raw: None,
             },
             Frame::RetireConnectionId { sequence_number } => Self::RetireConnectionId {
