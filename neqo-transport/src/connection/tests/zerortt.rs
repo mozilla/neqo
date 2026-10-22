@@ -75,8 +75,9 @@ fn zero_rtt_send_recv() {
     let ack_frames = server.stats().frame_tx.ack;
     let server_process_0rtt = server.process(client_0rtt.dgram(), now());
     assert!(server_process_0rtt.dgram().is_some());
-    assert_eq!(server.stats().frame_tx.all(), all_frames + 3);
+    assert_eq!(server.stats().frame_tx.all(), all_frames + 4);
     assert_eq!(server.stats().frame_tx.ack, ack_frames + 1);
+    assert_eq!(server.stats().frame_tx.padding, 1); // In the 1-RTT packet.
 
     let server_stream_id = server
         .events()

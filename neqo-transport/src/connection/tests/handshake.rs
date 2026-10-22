@@ -28,22 +28,27 @@ use test_fixture::{
 };
 
 use super::{
-    super::{Connection, Output, State},
+    super::{Connection, Output, State, test_internal},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
     assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
     drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
     send_something, zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
-    Version,
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamId,
+    StreamType, Version,
     connection::{
         AddressValidation,
         tests::{exchange_ticket, new_client, new_server, new_server_with_qlog},
     },
+    datagram_queue::DatagramQueueOutcome,
     events::ConnectionEvent,
+    frame::FrameType,
+    packet,
+    quic_datagrams::DATAGRAM_FRAME_TYPE_VARINT_LEN,
     server::ValidateAddress,
     stats::FrameStats,
+    streams::SendGroupId,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
@@ -2051,7 +2056,7 @@ fn retry_for(initial: &[u8]) -> Datagram {
     let mut server_scid = dcid.clone();
     server_scid[0] ^= 0xff;
     datagram(
-        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+        packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
             .expect("build retry"),
     )
 }
@@ -2067,7 +2072,7 @@ fn retry_scid_matching_initial_dcid() {
     let mut client = default_client();
     let initial = client_initial(&mut client);
     let (dcid, scid) = initial_cids(&initial);
-    let retry = crate::packet::Builder::retry(
+    let retry = packet::Builder::retry(
         Version::default(),
         &scid,   // Destination CID: copied from the client as required
         &dcid,   // Source CID: copied from client (bad!)
@@ -2110,13 +2115,13 @@ fn client_initial_with_token() {
         let mut write =
             CryptoDxState::new_initial(version, CryptoDxDirection::Write, "server in", &seed, 0)
                 .expect("initial keys");
-        let mut builder = crate::packet::Builder::long(
+        let mut builder = packet::Builder::long(
             Encoder::default(),
-            crate::packet::Type::Initial,
+            packet::Type::Initial,
             version,
             Some(dcid.as_slice()),
             Some(b"fakescid"),
-            crate::packet::LIMIT,
+            packet::LIMIT,
         );
         builder.initial_token(token);
         builder.pn(0, 1);
@@ -2279,4 +2284,124 @@ fn crypto_resend_chance_survives_useless_duplicate() {
     now += DEFAULT_RTT;
     let dup = make_dummy_crypto(&mut client, &mut now);
     assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
+}
+
+/// Returns a client whose next datagram carries Initial, Handshake, and 1-RTT packets, and its
+/// server.
+fn client_coalescing_1rtt(
+    server_params: ConnectionParameters,
+) -> (Connection, Connection, Instant) {
+    // No NEW_CONNECTION_ID frames, so the 1-RTT packet carries only an ACK.
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = new_server(server_params);
+
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram().unwrap();
+
+    // Two 0.5-RTT packets, so the client acknowledges them immediately.
+    let s2 = send_something(&mut server, now());
+    let s3 = send_something(&mut server, now() + DEFAULT_RTT);
+    let t = now() + DEFAULT_RTT;
+    client.process_input(s1, t);
+    client.process_input(s2, t);
+    client.process_input(s3, t);
+    assert!(maybe_authenticate(&mut client));
+    (client, server, t)
+}
+
+/// Asserts that `server` decrypts every packet in `dgram`.
+fn assert_decrypts(server: &mut Connection, dgram: Datagram, now: Instant) {
+    let dropped = server.stats().dropped_rx;
+    server.process_input(dgram, now);
+    assert_eq!(server.stats().dropped_rx, dropped);
+}
+
+/// An Initial datagram that ends in a short header packet is expanded inside that packet.
+#[test]
+fn expand_datagram_that_ends_in_short_header() {
+    let (mut client, mut server, t) = client_coalescing_1rtt(ConnectionParameters::default());
+
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(c3.len(), client.plpmtu()); // Padded for the Initial.
+    let (_, rest) = split_datagram(&c3);
+    let rest = rest.expect("Handshake is coalesced");
+    let (_, short) = split_datagram(&rest);
+    let short = short.expect("a 1-RTT packet is coalesced");
+    assert_eq!(short[0] & 0x80, 0); // Ends in a short header packet.
+    assert_eq!(client.stats().frame_tx.padding, 1); // Inside the 1-RTT packet.
+    assert_eq!(client.stats().cc.bytes_in_flight, rest.len()); // Handshake and 1-RTT in flight.
+    assert_decrypts(&mut server, c3, t);
+}
+
+/// Fills the third packet it writes to, short of its limit, and marks it full.
+struct FillShortWriter(usize);
+
+impl test_internal::FrameWriter for FillShortWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        self.0 += 1;
+        if self.0 == 3 {
+            while builder.remaining() > 2 {
+                builder.encode_varint(FrameType::Ping);
+            }
+            builder.mark_full();
+        }
+    }
+}
+
+/// Nothing is added after a short header packet that is full short of its limit.
+#[test]
+fn no_padding_after_full_short_header() {
+    let (mut client, mut server, t) = client_coalescing_1rtt(ConnectionParameters::default());
+    client.test_frame_writer = Some(Box::new(FillShortWriter(0)));
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(c3.len(), client.plpmtu() - 2);
+    assert_decrypts(&mut server, c3, t);
+}
+
+/// A STREAM frame without a length that falls short of the end of the packet is padded before.
+#[test]
+fn expand_datagram_that_ends_in_short_stream_frame() {
+    // A fixed first packet number keeps the size of the client's ACKs the same.
+    let params = ConnectionParameters::default().randomize_first_pn(false);
+
+    // Learn how much stream data fills the 1-RTT packet.
+    let (mut client, mut server, t) = client_coalescing_1rtt(params.clone());
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    let mut buf = [0; 2000];
+    client.stream_send(id, &buf).unwrap();
+    server.process_input(client.process_output(t).dgram().unwrap(), t);
+    let (fill, _) = server.stream_recv(id, &mut buf).unwrap();
+
+    // One byte less is still sent without a length, as there is no room for one.
+    let (mut client, mut server, t) = client_coalescing_1rtt(params);
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(id, &buf[..fill - 1]).unwrap();
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(c3.len(), client.plpmtu());
+    assert_decrypts(&mut server, c3, t);
+    assert_eq!(client.stats().frame_tx.padding, 1);
+    assert_eq!(server.stream_recv(id, &mut buf).unwrap(), (fill - 1, false));
+}
+
+/// A DATAGRAM frame without a length that falls short of the end of the packet is padded before.
+#[test]
+fn expand_datagram_that_ends_in_short_datagram_frame() {
+    const MAX_FRAME: usize = 100;
+    let (mut client, mut server, t) =
+        client_coalescing_1rtt(ConnectionParameters::default().datagram_size(to_u64(MAX_FRAME)));
+    // A length would make the frame exceed the peer's limit, so it has none.
+    let data = vec![0; MAX_FRAME - DATAGRAM_FRAME_TYPE_VARINT_LEN];
+    assert_eq!(
+        client.enqueue_datagram(StreamId::new(0), data, Some(1), t, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.datagram, 1);
+    assert_eq!(c3.len(), client.plpmtu());
+    let received = server.stats().frame_rx.datagram;
+    assert_decrypts(&mut server, c3, t);
+    assert_eq!(server.stats().frame_rx.datagram, received + 1);
+    assert_eq!(client.stats().frame_tx.padding, 1);
 }

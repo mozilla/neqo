@@ -1242,9 +1242,9 @@ mod tests {
 
     #[test]
     fn ack_only_packet_sends_more_than_32_ranges() {
-        assert!(recovery::SendProfile::new_limited(0).ack_only());
+        assert!(recovery::SendProfile::new_limited(0, 1200).ack_only());
         assert_eq!(
-            recovery::SendProfile::new_limited(0).limit(),
+            recovery::SendProfile::new_limited(0, 1200).limit(),
             recovery::ACK_ONLY_SIZE_LIMIT - 1
         );
 
