@@ -3133,7 +3133,7 @@ impl Connection {
             let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
             path.borrow_mut()
                 .pmtud_mut()
-                .set_peer_max_udp_payload(max_udp_payload);
+                .set_peer_max_udp_payload(max_udp_payload, now);
             self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
 
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
