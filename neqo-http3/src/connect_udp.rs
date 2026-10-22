@@ -455,10 +455,11 @@ impl ServerSession {
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
+    #[doc(hidden)]
     pub fn reset_send(&self) -> Res<()> {
         self.stream_handler.handler.borrow_mut().stream_reset_send(
             self.stream_id(),
-            0,
+            Error::HttpNone.code(),
             &mut self.stream_handler.conn.borrow_mut(),
         )
     }

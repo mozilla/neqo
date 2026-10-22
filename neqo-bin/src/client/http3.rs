@@ -127,6 +127,8 @@ impl TryFrom<Http3State> for CloseState {
 }
 
 impl super::Client for Http3Client {
+    const NO_ERROR: AppError = Error::HttpNone.code();
+
     fn is_closed(&self) -> Result<CloseState, CloseReason> {
         self.state().try_into()
     }
@@ -453,7 +455,14 @@ mod tests {
     use std::fs;
 
     use super::*;
-    use crate::temp_dir::TempDir;
+    use crate::{client::Client, temp_dir::TempDir};
+
+    /// RFC 9114, Section 8.1: HTTP/3 closes with `H3_NO_ERROR`; hq-interop keeps 0.
+    #[test]
+    fn no_error_codes() {
+        assert_eq!(<Http3Client as Client>::NO_ERROR, 0x100);
+        assert_eq!(<Connection as Client>::NO_ERROR, 0);
+    }
 
     /// A `fin` data event must make the download durable and release the handle immediately.
     #[test]
