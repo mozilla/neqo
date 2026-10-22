@@ -11,17 +11,90 @@ use std::{
     time::Duration,
 };
 
-use neqo_common::Datagram;
+use neqo_common::{Datagram, to_u64};
+use nss::constants::TLS_GRP_EC_X25519;
 use test_fixture::{DEFAULT_ADDR_V4, fixture_init, now};
 
 use super::Connection;
 use crate::{
     ConnectionParameters, Output, Pmtud, StreamType,
+    cc::CWND_INITIAL_PKTS,
     connection::tests::{
-        CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
-        new_client, new_server, send_something,
+        CountingConnectionIdGenerator, DEFAULT_RTT, connect, connect_force_idle, cwnd,
+        default_client, default_server, exchange_ticket, fill_stream, new_client, new_server,
+        send_something,
     },
+    tparams::{TransportParameter, TransportParameterId::MaxUdpPayloadSize},
 };
+
+/// The minimum `max_udp_payload_size`, which is below the default PLPMTU.
+const PEER_MAX_UDP_PAYLOAD: usize = 1200;
+
+/// Advertises [`PEER_MAX_UDP_PAYLOAD`] to the peer.
+fn limit_udp_payload(c: &Connection) {
+    c.set_local_tparam(
+        MaxUdpPayloadSize,
+        TransportParameter::Integer(to_u64(PEER_MAX_UDP_PAYLOAD)),
+    )
+    .unwrap();
+}
+
+/// Checks that `d` is limited by the peer and that `c` uses the matching initial window
+/// (RFC 9002 Section 7.2).
+fn assert_peer_limited(c: &Connection, d: &Datagram) {
+    assert_eq!(d.len(), PEER_MAX_UDP_PAYLOAD);
+    assert_eq!(cwnd(c), PEER_MAX_UDP_PAYLOAD * CWND_INITIAL_PKTS);
+}
+
+/// The server applies the client's limit as soon as it has its transport parameters.
+#[test]
+fn peer_max_udp_payload_limits_first_flight() {
+    for fragmented in [false, true] {
+        let mut client = default_client();
+        let mut server = default_server();
+        limit_udp_payload(&client);
+        if !fragmented {
+            client.set_groups(&[TLS_GRP_EC_X25519]).unwrap();
+        }
+        let c1 = client.process_output(now()).dgram().unwrap();
+        let c2 = client.process_output(now()).dgram();
+        assert_eq!(c2.is_some(), fragmented);
+        server.process_input(c1, now());
+        let s1 = server.process(c2, now()).dgram().unwrap();
+        assert_peer_limited(&server, &s1);
+    }
+}
+
+/// A resuming client applies the limit it remembers from the previous connection.
+#[test]
+fn peer_max_udp_payload_limits_resumption() {
+    let mut client = default_client();
+    let mut server = default_server();
+    limit_udp_payload(&server);
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let c1 = client.process_output(now()).dgram().unwrap();
+    assert_peer_limited(&client, &c1);
+}
+
+/// A path created after the handshake inherits the limit.
+#[test]
+fn peer_max_udp_payload_limits_new_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    limit_udp_payload(&server);
+    connect_force_idle(&mut client, &mut server);
+
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now())
+        .unwrap();
+    let c1 = send_something(&mut client, now());
+    assert_eq!(c1.source(), DEFAULT_ADDR_V4);
+    assert_peer_limited(&client, &c1);
+}
 
 /// Test that one can reach the maximum MTU with GSO enabled.
 #[test]

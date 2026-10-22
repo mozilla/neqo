@@ -390,6 +390,7 @@ impl Connection {
             local_addr,
             remote_addr,
             &c.conn_params,
+            None,
             Qlog::default(),
             now,
             &mut c.stats.borrow_mut(),
@@ -836,7 +837,7 @@ impl Connection {
             .borrow_mut()
             .rtt_mut()
             .set_initial(rtt);
-        self.set_initial_limits();
+        self.set_initial_limits(now);
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
         let res = self.client_start(now);
@@ -3080,7 +3081,7 @@ impl Connection {
         }
     }
 
-    fn set_initial_limits(&mut self) {
+    fn set_initial_limits(&mut self, now: Instant) {
         self.streams.set_initial_limits();
         let peer_timeout = self
             .tps
@@ -3094,6 +3095,12 @@ impl Connection {
 
         self.quic_datagrams
             .set_remote_datagram_size(self.tps.borrow().remote().get_integer(MaxDatagramFrameSize));
+
+        // We cap this transport parameter to usize::MAX on decode, so this is safe.
+        let max_udp_payload =
+            expect_usize(self.tps.borrow().remote().get_integer(MaxUdpPayloadSize));
+        self.paths.set_peer_max_udp_payload(max_udp_payload, now);
+        self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
     }
 
     #[must_use]
@@ -3129,12 +3136,6 @@ impl Connection {
             let path = self.paths.primary().ok_or(Error::NoAvailablePath)?;
             path.borrow_mut().set_reset_token(reset_token);
 
-            // We cap this transport parameter to usize::MAX on decode, so this is safe.
-            let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
-            path.borrow_mut()
-                .set_peer_max_udp_payload(max_udp_payload, now);
-            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
-
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
                 let min_ad = Duration::from_micros(remote.get_integer(MinAckDelay));
@@ -3151,7 +3152,7 @@ impl Connection {
             let max_active_cids = remote.get_integer(ActiveConnectionIdLimit);
             self.cid_manager.set_limit(max_active_cids);
         }
-        self.set_initial_limits();
+        self.set_initial_limits(now);
         qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
@@ -3341,7 +3342,7 @@ impl Connection {
         if try_update {
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote_handshake().is_some() {
-                self.set_initial_limits();
+                self.set_initial_limits(now);
             }
             if self.crypto.tls().has_secret(Epoch::Handshake) {
                 self.compatible_upgrade(packet_version)?;

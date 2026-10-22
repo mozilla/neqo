@@ -1167,6 +1167,7 @@ mod tests {
                 DEFAULT_ADDR,
                 DEFAULT_ADDR,
                 &ConnectionParameters::default(),
+                None,
                 Qlog::default(),
                 now(),
                 &mut stats.borrow_mut(),
