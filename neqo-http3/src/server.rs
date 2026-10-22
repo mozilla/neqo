@@ -450,7 +450,10 @@ mod tests {
     };
 
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
+    use crate::{
+        Error, HFrame, Header, Http3Parameters, Priority,
+        stream_type_reader::WEBTRANSPORT_UNI_STREAM,
+    };
 
     fn qpack_defaults() -> qpack::Settings {
         qpack::Settings::default()
@@ -952,6 +955,34 @@ mod tests {
         }
         assert!(stop_sending_event_found);
         assert_not_closed(&hconn);
+    }
+
+    /// RFC 9114, Section 6.2: a uni stream closed before its header is complete is tolerated.
+    fn server_received_uni_stream_fin_in_header(header: &[u8]) {
+        let (mut hconn, mut peer_conn) = connect();
+        let stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
+        if !header.is_empty() {
+            _ = peer_conn.stream_send(stream_id, header).unwrap();
+        }
+        peer_conn.stream_close_send(stream_id).unwrap();
+        let out = peer_conn.process_output(now());
+        drop(hconn.process(out.dgram(), now()));
+        assert_not_closed(&hconn);
+    }
+
+    #[test]
+    fn server_received_uni_stream_fin_before_type() {
+        server_received_uni_stream_fin_in_header(&[]);
+        server_received_uni_stream_fin_in_header(&[0x40]); // Half a 2-byte varint.
+    }
+
+    #[test]
+    fn server_received_wt_uni_stream_fin_before_session_id() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_UNI_STREAM);
+        server_received_uni_stream_fin_in_header(enc.as_ref());
+        enc.encode_byte(0x40); // Half a 2-byte session ID.
+        server_received_uni_stream_fin_in_header(enc.as_ref());
     }
 
     // Server: a push stream (unidirectional type 0x1) is H3_STREAM_CREATION_ERROR
