@@ -93,6 +93,7 @@ pub use self::{
 pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;
 const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError = 13;
+const ERROR_KEY_UPDATE: TransportError = 14;
 const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
@@ -131,6 +132,8 @@ pub enum Error {
     CryptoAlert(u8),
     #[error("ECH retry")]
     EchRetry(Vec<u8>),
+    #[error("key update error")]
+    KeyUpdate,
 
     // All internal errors from here.  Please keep these sorted.
     #[error("packet acknowledged but never sent")]
@@ -229,6 +232,7 @@ impl Error {
             Self::Application => ERROR_APPLICATION_CLOSE,
             Self::NoAvailablePath | Self::TooManyPtos => 16,
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
+            Self::KeyUpdate => ERROR_KEY_UPDATE,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
             // As we have a special error code for ECH fallbacks, we lose the alert.
             // Send the server "ech_required" directly.
@@ -301,6 +305,7 @@ mod tests {
             (Error::Application, 12),
             (Error::NoAvailablePath, 16),
             (Error::CryptoBufferExceeded, 13),
+            (Error::KeyUpdate, 14),
             (Error::CryptoAlert(0x2a), 0x12a),
             (Error::EchRetry(vec![]), 0x179),
             (Error::VersionNegotiation, 0x53f8),

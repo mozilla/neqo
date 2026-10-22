@@ -515,6 +515,8 @@ pub struct CryptoDxState {
     /// for verifying that packet numbers before a key update are strictly lower
     /// than packet numbers after a key update.
     used_pn: Range<packet::Number>,
+    /// The lowest packet number that has been seen.
+    lowest_pn: Option<packet::Number>,
     /// This is the minimum packet number that is allowed.
     min_pn: packet::Number,
     /// The total number of operations that are remaining before the keys
@@ -552,6 +554,7 @@ impl CryptoDxState {
             )?,
             hpkey: hp::Key::extract(TLS_VERSION_1_3, cipher, secret, &hplabel)?,
             used_pn: min_pn..min_pn,
+            lowest_pn: None,
             min_pn,
             invocations: Self::limit(direction, cipher),
             largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
@@ -645,6 +648,7 @@ impl CryptoDxState {
             )?,
             hpkey: self.hpkey.try_clone()?,
             used_pn: pn..pn,
+            lowest_pn: None,
             min_pn: pn,
             invocations,
             largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
@@ -704,6 +708,7 @@ impl CryptoDxState {
             self.used_pn.start = pn;
         }
         self.used_pn.end = max(pn + 1, self.used_pn.end);
+        self.lowest_pn = Some(self.lowest_pn.map_or(pn, |l| min(l, pn)));
         Ok(())
     }
 
@@ -1410,16 +1415,29 @@ impl CryptoStates {
         (to_epoch(&self.app_write), to_epoch(&self.app_read))
     }
 
-    /// While we are awaiting the completion of a key update, we might receive
-    /// valid packets that are protected with old keys. We need to ensure that
-    /// these don't carry packet numbers higher than those in packets protected
-    /// with the newer keys.  To ensure that, this is called after every decryption.
-    pub fn check_pn_overlap(&mut self) -> Res<()> {
+    /// Write keys for the next epoch, without installing them.
+    #[cfg(test)]
+    pub fn test_next_write(&self) -> CryptoDxState {
+        self.app_write.as_ref().unwrap().next().unwrap().dx
+    }
+
+    /// While we are awaiting the completion of a key update, packets protected with old and new
+    /// keys can both arrive. Packet numbers must not decrease across the key change in either
+    /// order. This is called after every successful decryption.
+    pub fn check_pn_overlap(&self, epoch: usize, pn: packet::Number) -> Res<()> {
         // We only need to do the check while we are waiting for read keys to be updated.
         if self.read_update_time.is_some() {
             qtrace!("[{self}] Checking for PN overlap");
-            let next_dx = &mut self.app_read_next.as_mut().ok_or(Error::Internal)?.dx;
-            next_dx.continuation(&self.app_read.as_ref().ok_or(Error::Internal)?.dx)?;
+            let read = &self.app_read.as_ref().ok_or(Error::Internal)?.dx;
+            let next = &self.app_read_next.as_ref().ok_or(Error::Internal)?.dx;
+            // RFC 9001, Section 6.4: old keys after newer keys with a lower packet number.
+            if epoch == read.epoch && next.lowest_pn.is_some_and(|l| pn > l) {
+                return Err(Error::KeyUpdate);
+            }
+            // RFC 9000, Section 11: also signal that violation when seen in reverse order.
+            if epoch == next.epoch && pn < read.next_pn() {
+                return Err(Error::KeyUpdate);
+            }
         }
         Ok(())
     }
@@ -1487,6 +1505,7 @@ impl CryptoStates {
                 )
                 .unwrap(),
                 used_pn: 0..645_971_972,
+                lowest_pn: None,
                 min_pn: 0,
                 invocations: 10,
                 largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
