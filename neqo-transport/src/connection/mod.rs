@@ -3132,7 +3132,6 @@ impl Connection {
             // We cap this transport parameter to usize::MAX on decode, so this is safe.
             let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
             path.borrow_mut()
-                .pmtud_mut()
                 .set_peer_max_udp_payload(max_udp_payload, now);
             self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
 
