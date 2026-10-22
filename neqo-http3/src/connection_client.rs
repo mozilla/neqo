@@ -1181,6 +1181,7 @@ mod tests {
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
+        stream_type_reader::WEBTRANSPORT_UNI_STREAM,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1966,6 +1967,38 @@ mod tests {
             }
         }
         assert!(stop_sending_event_found);
+        assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    /// A classic CONNECT tunnel is not an extended CONNECT session, so a
+    /// WebTransport stream that refers to it is rejected without closing the
+    /// connection.
+    #[test]
+    fn webtransport_stream_for_classic_connect_tunnel() {
+        let (mut client, mut server) = connect();
+        let tunnel_id = client
+            .connect(now(), "something.com", &[], Priority::default())
+            .unwrap();
+        let out = client.process_output(now());
+        drop(server.conn.process(out.dgram(), now()));
+
+        let new_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_UNI_STREAM);
+        enc.encode_varint(tunnel_id.as_u64());
+        _ = server
+            .conn
+            .stream_send(new_stream_id, enc.as_ref())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        let out = client.process(out.dgram(), now());
+        drop(server.conn.process(out.dgram(), now()));
+
+        assert!(server.conn.events().any(|e| e
+            == ConnectionEvent::SendStreamStopSending {
+                stream_id: new_stream_id,
+                app_error: Error::HttpStreamCreation.code(),
+            }));
         assert_eq!(client.state(), Http3State::Connected);
     }
 
