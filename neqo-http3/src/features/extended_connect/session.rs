@@ -396,6 +396,9 @@ impl Session {
     ///
     /// It may return an error if the frame is not correctly decoded.
     pub(crate) fn read_control_stream(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+        if self.state == State::Done {
+            return Ok(());
+        }
         qdebug!("[{self}]: read_control_stream");
         if let Some(new_state) = self.protocol.read_control_stream(
             conn,
