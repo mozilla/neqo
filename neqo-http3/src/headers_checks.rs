@@ -57,7 +57,7 @@ pub fn is_interim(headers: &[Header]) -> Res<bool> {
     let status = headers.iter().take(1).find_header(":status");
     match status.map(Header::value) {
         // https://datatracker.ietf.org/doc/html/rfc9114#section-4.5
-        Some(b"101") => Err(Error::InvalidHeader),
+        Some(b"101") => Err(Error::HttpGeneralProtocolStream),
         Some([d @ b'1'..=b'5', b'0'..=b'9', b'0'..=b'9']) => Ok(*d == b'1'),
         _ => Err(Error::InvalidHeader), // RFC 9110, Section 15.
     }
@@ -277,9 +277,9 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 if let Some(protocol) = protocol_value {
                     // For a webtransport CONNECT, the :scheme field must be set to https.
                     if protocol == b"webtransport" && scheme_value != Some(b"https".as_ref()) {
-                        return Err(Error::InvalidHeader);
+                        return Err(Error::HttpGeneralProtocolStream);
                     }
-                    // The CONNECT request for with :protocol included must have the scheme,
+                    // The CONNECT request with :protocol included must have the scheme,
                     // authority, and path set.
                     connect_mask | PseudoHeaderState::Scheme | PseudoHeaderState::Path
                 } else {
@@ -383,7 +383,10 @@ mod tests {
     fn invalid_scheme_webtransport_connect() {
         let mut headers = create_connect_headers();
         headers[2] = Header::new(":scheme", "http");
-        assert!(headers_valid(&headers, MessageType::Request).is_err());
+        assert_eq!(
+            headers_valid(&headers, MessageType::Request),
+            Err(Error::HttpGeneralProtocolStream)
+        );
     }
 
     #[test]

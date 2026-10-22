@@ -1131,7 +1131,7 @@ mod tests {
         let out = hconn.process(out.dgram(), now());
         drop(peer_conn.process(out.dgram(), now()));
 
-        let app_error = Error::InvalidHeader.code();
+        let app_error = Error::HttpMessage.code();
         let events = peer_conn.events().collect::<Vec<_>>();
         assert!(events.contains(&ConnectionEvent::SendStreamStopSending {
             stream_id,
