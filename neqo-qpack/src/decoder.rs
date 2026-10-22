@@ -157,8 +157,8 @@ impl Decoder {
     }
 
     pub fn cancel_stream(&mut self, stream_id: StreamId) {
-        if self.table.capacity() > 0 {
-            self.blocked_streams.retain(|(id, _)| *id != stream_id);
+        self.blocked_streams.retain(|(id, _)| *id != stream_id);
+        if self.max_table_size > 0 {
             DecoderInstruction::StreamCancellation { stream_id }.marshal(&mut self.send_buf);
         }
     }
@@ -304,6 +304,7 @@ mod tests {
     use crate::Settings;
 
     const STREAM_0: StreamId = StreamId::new(0);
+    const BLOCKING_HEADER_BLOCK: &[u8] = &[0x02, 0x80, 0x10];
 
     struct TestDecoder {
         decoder: Decoder,
@@ -314,6 +315,10 @@ mod tests {
     }
 
     fn connect() -> TestDecoder {
+        connect_param(300)
+    }
+
+    fn connect_param(max_table_size_decoder: u64) -> TestDecoder {
         let (mut conn, mut peer_conn) = test_fixture::connect();
 
         // create a stream
@@ -323,7 +328,7 @@ mod tests {
         // create a decoder
         let mut decoder = Decoder::new(&Settings {
             max_table_size_encoder: 0,
-            max_table_size_decoder: 300,
+            max_table_size_decoder,
             max_blocked_streams: 100,
             max_tracked_streams: 4096,
         });
@@ -848,8 +853,6 @@ mod tests {
         // Section 2.1.2 allows no more blocked streams than the advertised
         // SETTINGS_QPACK_BLOCKED_STREAMS value; exceeding it is a connection error
         // of type QPACK_DECOMPRESSION_FAILED (Error::Decompression here).
-        const BLOCKING_HEADER_BLOCK: &[u8] = &[0x02, 0x80, 0x10];
-
         let mut decoder = Decoder::new(&Settings {
             max_table_size_encoder: 0,
             max_table_size_decoder: 300,
@@ -882,6 +885,28 @@ mod tests {
                 .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(0))
                 .is_err()
         );
+    }
+
+    #[test]
+    fn cancel_blocked_stream_before_capacity() {
+        let mut decoder = connect();
+        assert!(
+            decoder
+                .decoder
+                .decode_header_block(BLOCKING_HEADER_BLOCK, STREAM_0)
+                .unwrap()
+                .is_none()
+        );
+        decoder.decoder.cancel_stream(STREAM_0);
+        assert!(decoder.decoder.blocked_streams.is_empty());
+        send_instructions_and_check(&mut decoder, &[0x03, 0x40]);
+    }
+
+    #[test]
+    fn cancel_stream_max_table_size_zero() {
+        let mut decoder = connect_param(0);
+        decoder.decoder.cancel_stream(STREAM_0);
+        send_instructions_and_check(&mut decoder, &[0x03]);
     }
 
     #[test]
