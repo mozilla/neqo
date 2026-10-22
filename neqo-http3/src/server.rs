@@ -270,7 +270,8 @@ impl Http3Server {
                         stream_id,
                         priority,
                     } => {
-                        self.events.priority_update(stream_id, priority);
+                        self.events
+                            .priority_update(conn.clone(), stream_id, priority);
                     }
                     Http3ServerConnEvent::WebTransport(WebTransportEvent::Session {
                         stream_id,
@@ -449,7 +450,7 @@ mod tests {
         fixture_init, now,
     };
 
-    use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
+    use super::{ConnectionRef, Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
     use crate::{Error, HFrame, Header, Http3Parameters, Priority};
 
     fn qpack_defaults() -> qpack::Settings {
@@ -877,6 +878,92 @@ mod tests {
     fn priority_update_invalid_large_id() {
         // Server-Initiated, Unidirectional (divisible by 4)
         priority_update_check_id(StreamId::new(1_000_000_000), false);
+    }
+
+    /// Connect a client to `server` and return it with the server's `ConnectionRef` for it.
+    fn connect_peer(server: &mut Http3Server) -> (PeerConnection, ConnectionRef) {
+        let known: Vec<_> = server.http3_handlers.keys().cloned().collect();
+        let (peer, _) = connect_to(server);
+        let new: Vec<_> = server
+            .http3_handlers
+            .keys()
+            .filter(|c| !known.contains(c))
+            .cloned()
+            .collect();
+        assert_eq!(new.len(), 1);
+        (peer, new[0].clone())
+    }
+
+    /// Send `updates` from `peer` in one packet.
+    fn send_priority_updates(
+        server: &mut Http3Server,
+        peer: &mut PeerConnection,
+        updates: &[(StreamId, Priority)],
+    ) {
+        let mut e = Encoder::default();
+        for &(stream_id, priority) in updates {
+            HFrame::PriorityUpdateRequest {
+                element_id: stream_id.as_u64(),
+                priority,
+            }
+            .encode(&mut e);
+        }
+        peer.control_send(e.as_ref());
+        let out = peer.process_output(now());
+        server.process(out.dgram(), now());
+    }
+
+    /// Take the queued `PriorityUpdate` events.
+    fn priority_update_events(server: &Http3Server) -> Vec<(ConnectionRef, StreamId, Priority)> {
+        server
+            .events()
+            .filter_map(|e| match e {
+                Http3ServerEvent::PriorityUpdate {
+                    conn,
+                    stream_id,
+                    priority,
+                } => Some((conn, stream_id, priority)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn priority_update_same_stream_coalesced() {
+        let mut server = default_server();
+        let (mut peer, conn) = connect_peer(&mut server);
+        let id = StreamId::new(0);
+        let updates: Vec<_> = (1..4).map(|u| (id, Priority::new(u, false))).collect();
+        send_priority_updates(&mut server, &mut peer, &updates);
+        assert_eq!(priority_update_events(&server), [(conn, id, updates[2].1)]);
+    }
+
+    #[test]
+    fn priority_update_two_streams() {
+        let mut server = default_server();
+        let (mut peer, conn) = connect_peer(&mut server);
+        let (a, b) = (StreamId::new(0), StreamId::new(4));
+        let (p1, p2, p3) = (
+            Priority::new(1, false),
+            Priority::new(2, true),
+            Priority::new(3, false),
+        );
+        send_priority_updates(&mut server, &mut peer, &[(a, p1), (b, p2), (a, p3)]);
+        let expected = [(conn.clone(), b, p2), (conn, a, p3)];
+        assert_eq!(priority_update_events(&server), expected);
+    }
+
+    #[test]
+    fn priority_update_same_stream_two_connections() {
+        let mut server = default_server();
+        let (mut peer_a, conn_a) = connect_peer(&mut server);
+        let (mut peer_b, conn_b) = connect_peer(&mut server);
+        let id = StreamId::new(0);
+        let (pa, pb) = (Priority::new(1, false), Priority::new(2, true));
+        send_priority_updates(&mut server, &mut peer_a, &[(id, pa)]);
+        send_priority_updates(&mut server, &mut peer_b, &[(id, pb)]);
+        let expected = [(conn_a, id, pa), (conn_b, id, pb)];
+        assert_eq!(priority_update_events(&server), expected);
     }
 
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
