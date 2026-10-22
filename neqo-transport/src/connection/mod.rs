@@ -3916,6 +3916,14 @@ impl Connection {
         Ok(stream.stats())
     }
 
+    /// The error code of the `RESET_STREAM` that ended the receive side of a stream, if any.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_reset_code(&mut self, stream_id: StreamId) -> Res<Option<AppError>> {
+        Ok(self.streams.get_recv_stream_mut(stream_id)?.reset_code())
+    }
+
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
