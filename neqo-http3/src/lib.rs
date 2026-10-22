@@ -282,7 +282,6 @@ impl Error {
             Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
                 0x101
             }
-            Self::HttpInternal(..) => 0x102,
             Self::HttpStreamCreation => 0x103,
             Self::HttpClosedCriticalStream => 0x104,
             Self::HttpFrameUnexpected => 0x105,
@@ -299,7 +298,24 @@ impl Error {
             Self::HttpVersionFallback => 0x110,
             Self::Qpack(e) => e.code(),
             // These are all internal errors.
-            _ => 3,
+            Self::HttpInternal(..)
+            | Self::AlreadyClosed
+            | Self::AlreadyInitialized
+            | Self::Fatal
+            | Self::FlowControlLimit
+            | Self::HttpGoaway
+            | Self::Internal
+            | Self::InvalidInput
+            | Self::InvalidRequestTarget
+            | Self::InvalidResumptionToken
+            | Self::InvalidState
+            | Self::InvalidStreamId
+            | Self::NotEnoughData
+            | Self::StreamLimit
+            | Self::Transport(_)
+            | Self::TransportStreamDoesNotExist
+            | Self::Unavailable
+            | Self::Unexpected => 0x102,
         }
     }
 
@@ -671,7 +687,7 @@ impl CloseType {
 mod tests {
     use neqo_transport::StreamId;
 
-    use super::{Error, Http3StreamInfo, Http3StreamType};
+    use super::{Error, Http3StreamInfo, Http3StreamType, QpackError, TransportError};
 
     #[test]
     fn stream_info_is_http() {
@@ -710,6 +726,24 @@ mod tests {
             (Error::HttpMessage, 0x10e),
             (Error::HttpConnect, 0x10f),
             (Error::HttpVersionFallback, 0x110),
+            (Error::Qpack(QpackError::Internal), 0x102),
+            (Error::AlreadyClosed, 0x102),
+            (Error::AlreadyInitialized, 0x102),
+            (Error::Fatal, 0x102),
+            (Error::FlowControlLimit, 0x102),
+            (Error::HttpGoaway, 0x102),
+            (Error::Internal, 0x102),
+            (Error::InvalidInput, 0x102),
+            (Error::InvalidRequestTarget, 0x102),
+            (Error::InvalidResumptionToken, 0x102),
+            (Error::InvalidState, 0x102),
+            (Error::InvalidStreamId, 0x102),
+            (Error::NotEnoughData, 0x102),
+            (Error::StreamLimit, 0x102),
+            (Error::Transport(TransportError::NoMoreData), 0x102),
+            (Error::TransportStreamDoesNotExist, 0x102),
+            (Error::Unavailable, 0x102),
+            (Error::Unexpected, 0x102),
         ] {
             assert_eq!(error.code(), expected);
         }
