@@ -513,17 +513,53 @@ fn wt_close_session_frame_broken_client() {
     // check that the webtransport session is closed.
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        &CloseReason::Error(Error::HttpGeneralProtocolStream.code()),
+        &CloseReason::Error(WT_SESSION_GONE), // The server's stop arrives before its reset.
         None,
     );
     wt.check_session_closed_event_server(
         &wt_session,
-        &CloseReason::Error(Error::HttpGeneralProtocolStream.code()),
+        &CloseReason::Error(Error::HttpMessage.code()),
     );
 
     // The Http3 session is still working.
     assert_eq!(wt.client.state(), Http3State::Connected);
     assert_eq!(wt_session.state(), Http3State::Connected);
+}
+
+#[test]
+fn wt_close_session_frame_too_long_client() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error: 5,
+        message: "a".repeat(1025),
+    }
+    .encode(&mut enc);
+    wt.client
+        .send_data(wt_session.stream_id(), enc.as_ref(), now())
+        .unwrap();
+    wt.exchange_packets();
+
+    let reason = CloseReason::Error(WT_SESSION_GONE); // The server's stop arrives before its reset.
+    wt.check_session_closed_event_client(wt_session.stream_id(), &reason, None);
+    let reason = CloseReason::Error(Error::HttpMessage.code());
+    wt.check_session_closed_event_server(&wt_session, &reason);
+    assert_eq!(wt.client.state(), Http3State::Connected);
+}
+
+/// A close message over 1024 bytes is truncated at a UTF-8 character boundary.
+#[test]
+fn wt_close_session_message_truncated() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    let message = "a".repeat(1023);
+    wt.session_close_frame_client(wt_session.stream_id(), 23, &format!("{message}\u{e9}"));
+    wt.exchange_packets();
+
+    wt.check_session_closed_event_server(&wt_session, &CloseReason::Clean { error: 23, message });
 }
 
 fn receive_request(server: &Http3Server) -> Option<Http3OrWebTransportStream> {
@@ -841,6 +877,12 @@ fn wt_close_capsule_without_fin_stops_connect_stream() {
 #[test]
 fn wt_data_after_close_capsule_stops_connect_stream() {
     assert_connect_stream_reset_and_stopped("", &[0; 5], Error::HttpMessage.code());
+}
+
+/// The recipient of an oversized close capsule stops the CONNECT stream.
+#[test]
+fn wt_close_capsule_too_long_stops_connect_stream() {
+    assert_connect_stream_reset_and_stopped(&"a".repeat(1025), &[], Error::HttpMessage.code());
 }
 
 /// Run one round trip from the server and return the stream stop and reset events that the server
