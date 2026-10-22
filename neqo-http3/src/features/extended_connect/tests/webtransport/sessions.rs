@@ -686,6 +686,59 @@ fn wt_stream_close_send_blocked_by_flow_control_cancels_streams() {
     assert_wt_streams_cancelled_client(&mut wt, unidi_client, &unidi_server);
 }
 
+/// Send a close capsule and `extra` as session data, without a FIN and without closing the session.
+fn send_close_capsule_without_fin(
+    wt: &mut WtTest,
+    wt_session: &ServerSession,
+    error: u32,
+    message: &str,
+    extra: &[u8],
+) {
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error,
+        message: message.to_string(),
+    }
+    .encode(&mut enc);
+    enc.encode(extra);
+    assert_eq!(wt_session.send_data(enc.as_ref(), now()), Ok(enc.len()));
+    wt.exchange_packets();
+}
+
+/// Streams the peer opens for a closing session are refused, not announced.
+#[test]
+fn wt_streams_for_closing_session_refused() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    send_close_capsule_without_fin(&mut wt, &wt_session, 0, "", &[]);
+    let reason = CloseReason::Clean {
+        error: 0,
+        message: String::new(),
+    };
+    wt.check_session_closed_event_client(session_id, &reason, None);
+
+    let unidi = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&unidi, &[0; 5]);
+    let bidi = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    wt.send_data_server(&bidi, &[0; 5]);
+
+    let ids = [unidi.stream_id(), bidi.stream_id()];
+    assert!(!wt.client.events().any(|e| matches!(
+        e,
+        Http3ClientEvent::DataReadable { stream_id }
+            | Http3ClientEvent::WebTransport(WebTransportEvent::NewStream { stream_id, .. })
+            if ids.contains(&stream_id)
+    )));
+    wt.check_events_after_closing_session_server(
+        &[bidi.stream_id()],
+        Some(WT_SESSION_GONE),
+        &ids,
+        Some(WT_SESSION_GONE),
+        None,
+    );
+}
+
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
 /// "a signal to applications to initiate shutdown for all WebTransport sessions":
 /// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
