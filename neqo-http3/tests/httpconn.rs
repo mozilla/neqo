@@ -210,6 +210,22 @@ fn fetch_invalid_uri() {
 }
 
 #[test]
+fn fetch_invalid_target() {
+    let (mut hconn_c, _hconn_s, _dgram) = connect();
+    for target in [
+        ("https", "something.com", "/x#y"),
+        ("https", ":443", "/"),
+        ("https", "something.com:65536", "/"),
+    ] {
+        let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
+        assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
+    }
+    let target = ("https", "something.com", "/s?a[]=1&q={x}|y");
+    let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
+    assert_eq!(res.unwrap(), 0);
+}
+
+#[test]
 fn fetch_invalid_header_value() {
     let (mut hconn_c, _hconn_s, _dgram) = connect();
     let headers = [Header::new("x", "a\rb")];

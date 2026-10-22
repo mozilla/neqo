@@ -8,7 +8,7 @@ use neqo_common::{event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{Error, Header, Http3ClientEvent, Http3ServerEvent, Priority};
 use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
 
-const AUTHORITY: &str = "something.com";
+const AUTHORITY: &str = "something.com:443";
 
 #[test]
 fn classic_connect() {
