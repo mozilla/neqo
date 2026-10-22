@@ -1840,7 +1840,8 @@ impl Http3Connection {
                     match st {
                         HSettingType::MaxTableCapacity => {
                             if zero_rtt_value != 0 {
-                                return Err(Error::Qpack(neqo_qpack::Error::DecoderStream));
+                                // RFC 9114, Section 7.2.4.2, not RFC 9204, Section 3.2.3.
+                                return Err(Error::HttpSettings);
                             }
                             qpack_changed = true;
                         }
