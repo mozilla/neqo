@@ -1157,7 +1157,7 @@ impl EventProvider for Http3Client {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Duration;
+    use std::{cmp::min, slice, time::Duration};
 
     use http::Uri;
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace, to_u64};
@@ -1178,7 +1178,7 @@ mod tests {
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
-        frames::{HFrame, HFrameType},
+        frames::{HFrame, HFrameType, hframe::MAX_HEADER_BYTES},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
     };
@@ -5316,6 +5316,111 @@ mod tests {
             (request_stream_id, false, headers200)
         );
         assert!(events.next().is_none());
+    }
+
+    #[test]
+    fn response_w_too_many_1xx() {
+        const BATCH: usize = 200; // Fits into one packet.
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        let mut d = Encoder::default();
+        let headers1xx = [Header::new(":status", "103")];
+        server.encode_headers(request_stream_id, &headers1xx, &mut d);
+        let size_1xx: usize = headers1xx
+            .iter()
+            .map(|h| h.name().len() + h.value().len() + 32) // RFC 9114, Section 4.2.2.
+            .sum();
+        let max_1xx = MAX_HEADER_BYTES / size_1xx;
+
+        for sent in (0..max_1xx).step_by(BATCH) {
+            let batch = d.as_ref().repeat(min(BATCH, max_1xx - sent));
+            server_send_response_and_exchange_packet(
+                &mut client,
+                &mut server,
+                request_stream_id,
+                batch,
+                false,
+            );
+        }
+        let interim =
+            |e: &Http3ClientEvent| matches!(e, Http3ClientEvent::HeaderReady { interim: true, .. });
+        assert_eq!(client.events().filter(interim).count(), max_1xx);
+        assert_eq!(client.state(), Http3State::Connected);
+
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+        assert_closed(&client, &Error::HttpExcessiveLoad);
+    }
+
+    fn field_section_size(headers: &[Header]) -> usize {
+        headers
+            .iter()
+            .map(|h| h.name().len() + h.value().len() + 32) // RFC 9114, Section 4.2.2.
+            .sum()
+    }
+
+    fn send_response_in_packets(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: StreamId,
+        response: &[u8],
+    ) {
+        for chunk in response.chunks(1000) {
+            server_send_response_and_exchange_packet(client, server, stream_id, chunk, false);
+        }
+    }
+
+    fn send_max_size_1xx_from_dynamic_table() -> (Http3Client, TestServer, StreamId, Encoder) {
+        let status = Header::new(":status", "103");
+        let field = Header::new("x", "x".repeat(48)); // 4854 references fill MAX_HEADER_BYTES.
+        let field_size = field_section_size(slice::from_ref(&field));
+        let refs = (MAX_HEADER_BYTES - field_section_size(slice::from_ref(&status))) / field_size;
+        let headers = [vec![status], vec![field; refs]].concat();
+        assert_eq!(field_section_size(&headers), MAX_HEADER_BYTES);
+
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &headers, &mut d);
+        assert_eq!(server.encoder.borrow().stats().dynamic_table_references, 1);
+        let encoder_insts = server.conn.process_output(now());
+        drop(client.process(encoder_insts.dgram(), now()));
+        send_response_in_packets(&mut client, &mut server, request_stream_id, d.as_ref());
+        let interim =
+            |e: &Http3ClientEvent| matches!(e, Http3ClientEvent::HeaderReady { interim: true, .. });
+        assert_eq!(client.events().filter(interim).count(), 1);
+        assert_eq!(client.state(), Http3State::Connected);
+        (client, server, request_stream_id, d)
+    }
+
+    #[test]
+    fn response_w_1xx_from_dynamic_table() {
+        let (mut client, mut server, request_stream_id, d) = send_max_size_1xx_from_dynamic_table();
+        send_response_in_packets(&mut client, &mut server, request_stream_id, d.as_ref());
+        assert_closed(&client, &Error::HttpExcessiveLoad);
+    }
+
+    #[test]
+    fn response_after_max_size_1xx() {
+        let (mut client, mut server, request_stream_id, _) = send_max_size_1xx_from_dynamic_table();
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &[Header::new(":status", "200")], &mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+        let is_final = |e| matches!(e, Http3ClientEvent::HeaderReady { interim: false, .. });
+        assert!(client.events().any(is_final));
+        assert_eq!(client.state(), Http3State::Connected);
     }
 
     #[test]
