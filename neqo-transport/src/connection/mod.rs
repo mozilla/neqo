@@ -1699,7 +1699,15 @@ impl Connection {
                 // > incoming packet that it attributes to the connection.
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
-                self.state_signaling.send_close();
+                //
+                // Deliberately not rate limited, despite the SHOULD in Section 10.2.1.
+                if self.cid_manager.is_valid(packet.dcid()) && !self.paths.is_temporary(path) {
+                    self.state_signaling.send_close();
+                } else {
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped("Unattributed packet while closing");
+                }
                 PreprocessResult::Next
             }
             State::Draining { .. } | State::Closed(..) => {
