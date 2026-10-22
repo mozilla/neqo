@@ -1674,11 +1674,6 @@ impl Connection {
             State::WaitInitial => PreprocessResult::Continue,
             State::WaitVersion | State::Handshaking | State::Connected | State::Confirmed => {
                 if self.cid_manager.is_valid(packet.dcid()) {
-                    if self.role == Role::Server && packet.packet_type() == packet::Type::Handshake
-                    {
-                        // Server has received a Handshake packet -> discard Initial keys and states
-                        self.discard_keys(PacketNumberSpace::Initial, now);
-                    }
                     PreprocessResult::Continue
                 } else {
                     self.stats
@@ -1740,6 +1735,11 @@ impl Connection {
             *space.ecn_marks() += ecn_mark;
         } else {
             qtrace!("Not tracking ECN for dropped packet number space");
+        }
+
+        if self.role == Role::Server && packet.packet_type() == packet::Type::Handshake {
+            // Server has received a Handshake packet -> discard Initial keys and states
+            self.discard_keys(PacketNumberSpace::Initial, now);
         }
 
         if self.state == State::WaitInitial {
@@ -2336,6 +2336,12 @@ impl Connection {
                 path.remote_cid(),
                 path.local_cid(),
             );
+            // 0-RTT keeps the original version (RFC 9369, Section 4.1).
+            let version = if epoch == Epoch::ZeroRtt {
+                tx.version()
+            } else {
+                version
+            };
             packet::Builder::long(
                 encoder,
                 pt,
