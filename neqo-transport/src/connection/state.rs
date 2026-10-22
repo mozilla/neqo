@@ -283,7 +283,6 @@ mod tests {
             DEFAULT_ADDR,
             DEFAULT_ADDR,
             &ConnectionParameters::default(),
-            None,
             Qlog::default(),
             now(),
         )));

@@ -389,7 +389,6 @@ impl Connection {
             local_addr,
             remote_addr,
             &c.conn_params,
-            None,
             Qlog::default(),
             now,
         );
