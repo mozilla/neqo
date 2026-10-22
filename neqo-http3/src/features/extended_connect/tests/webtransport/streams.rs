@@ -169,6 +169,52 @@ fn wt_server_stream_bidi_close() {
 }
 
 #[test]
+fn wt_client_stream_uni_close_empty() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.close_stream_sending_client(wt_stream);
+    wt.receive_data_server(wt_stream, true, &[], true);
+}
+
+#[test]
+fn wt_client_stream_bidi_close_empty() {
+    const BUF_SERVER: &[u8] = &[1; 20];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_client_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    wt.close_stream_sending_client(wt_client_stream);
+    let wt_server_stream = wt.receive_data_server(wt_client_stream, true, &[], true);
+    wt.send_data_server(&wt_server_stream, BUF_SERVER);
+    wt.close_stream_sending_server(&wt_server_stream);
+    wt.receive_data_client(wt_client_stream, false, BUF_SERVER, true);
+}
+
+#[test]
+fn wt_server_stream_uni_close_empty() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.close_stream_sending_server(&wt_server_stream);
+    wt.receive_data_client(wt_server_stream.stream_id(), true, &[], true);
+}
+
+#[test]
+fn wt_server_stream_bidi_close_empty() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    wt.close_stream_sending_server(&wt_server_stream);
+    wt.receive_data_client(wt_server_stream.stream_id(), true, &[], true);
+    wt.send_data_client(wt_server_stream.stream_id(), BUF_CLIENT);
+    wt.close_stream_sending_client(wt_server_stream.stream_id());
+    drop(wt.receive_data_server(wt_server_stream.stream_id(), false, BUF_CLIENT, true));
+}
+
+#[test]
 fn wt_client_stream_uni_reset() {
     const BUF_CLIENT: &[u8] = &[0; 10];
 

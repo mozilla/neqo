@@ -27,7 +27,7 @@ pub enum NewStreamType {
     Control,
     Decoder,
     Encoder,
-    WebTransportStream(u64),
+    WebTransportStream { session_id: u64, fin: bool },
     Http(u64),
     Unknown,
 }
@@ -190,10 +190,10 @@ impl NewStreamHeadReader {
                 Self::ReadId { .. } => {
                     *self = Self::Done;
                     qtrace!("New Stream stream session_id={output}");
-                    if fin {
-                        return Err(Error::HttpGeneralProtocol);
-                    }
-                    return Ok(Some(NewStreamType::WebTransportStream(output)));
+                    return Ok(Some(NewStreamType::WebTransportStream {
+                        session_id: output,
+                        fin,
+                    }));
                 }
                 Self::Done => {
                     unreachable!("Cannot be in state NewStreamHeadReader::Done");
@@ -210,7 +210,7 @@ impl NewStreamHeadReader {
             None => Err(Error::HttpStreamCreation),
             Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
-            Some(NewStreamType::WebTransportStream(_)) => {
+            Some(NewStreamType::WebTransportStream { .. }) => {
                 unreachable!("WebTransport streams are mapped to None at this stage")
             }
         }
@@ -260,6 +260,12 @@ mod tests {
         CloseType, Error, NewStreamType, ReceiveOutput, RecvStream as _, Res,
         control_stream_local::HTTP3_UNI_STREAM_TYPE_CONTROL, frames::HFrameType,
     };
+
+    const fn wt_stream(fin: bool) -> (ReceiveOutput, bool) {
+        let session_id = 0xaaaa_aaaa;
+        let t = NewStreamType::WebTransportStream { session_id, fin };
+        (ReceiveOutput::NewStream(t), true)
+    }
 
     struct Test {
         conn_c: Connection,
@@ -449,10 +455,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             false,
-            &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
-                true,
-            )),
+            &Ok(wt_stream(false)),
             true,
         );
 
@@ -468,10 +471,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             false,
-            &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
-                true,
-            )),
+            &Ok(wt_stream(false)),
             true,
         );
 
@@ -490,10 +490,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             false,
-            &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
-                true,
-            )),
+            &Ok(wt_stream(false)),
             true,
         );
 
@@ -510,10 +507,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             false,
-            &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
-                true,
-            )),
+            &Ok(wt_stream(false)),
             true,
         );
 
@@ -602,7 +596,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok(wt_stream(true)),
             true,
         );
 
@@ -618,7 +612,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok(wt_stream(true)),
             true,
         );
 
@@ -634,7 +628,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok(wt_stream(true)),
             true,
         );
 
@@ -650,7 +644,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok(wt_stream(true)),
             true,
         );
 
