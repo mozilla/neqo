@@ -22,7 +22,8 @@ use super::{
 #[cfg(not(feature = "disable-encryption"))]
 use crate::frame::FrameType;
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
+    ConnectionParameters, ERROR_VERSION_NEGOTIATION, Error, MIN_INITIAL_PACKET_SIZE, Stats,
+    Version,
     connection::tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
     packet,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -356,7 +357,7 @@ fn version_negotiation_downgrade() {
         &mut client,
         &mut server,
         Error::VersionNegotiation,
-        Error::Peer(Error::VersionNegotiation.code()),
+        Error::Peer(ERROR_VERSION_NEGOTIATION),
     );
 }
 
