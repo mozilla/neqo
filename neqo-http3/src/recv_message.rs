@@ -20,7 +20,10 @@ use tracing::{debug, info, trace};
 use crate::{
     CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
     MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
-    frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, hframe::HFrameType},
+    frames::{
+        FrameReader, HFrame, StreamReaderConnectionWrapper,
+        hframe::{HFrameType, MAX_HEADER_BYTES},
+    },
     headers_checks::{headers_valid, is_interim},
     priority::PriorityHandler,
     qlog,
@@ -73,6 +76,7 @@ pub struct RecvMessage {
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     priority_handler: PriorityHandler,
+    interim_budget: usize,
 }
 
 impl Display for RecvMessage {
@@ -102,6 +106,7 @@ impl RecvMessage {
             qpack_decoder,
             conn_events,
             priority_handler,
+            interim_budget: MAX_HEADER_BYTES,
         }
     }
 
@@ -159,12 +164,23 @@ impl RecvMessage {
             MessageType::Response => is_interim(&headers)?,
         };
         headers_valid(&headers, self.message_type)?;
-        if self.message_type == MessageType::Response {
-            headers.retain(Header::is_allowed_for_response);
-        }
 
         if fin && interim {
             return Err(Error::HttpGeneralProtocolStream);
+        }
+
+        if interim {
+            let size = headers
+                .iter()
+                .map(|h| h.name().len() + h.value().len() + 32) // RFC 9114, Section 4.2.2.
+                .sum();
+            self.interim_budget = self
+                .interim_budget
+                .checked_sub(size)
+                .ok_or(Error::HttpExcessiveLoad)?;
+        }
+        if self.message_type == MessageType::Response {
+            headers.retain(Header::is_allowed_for_response);
         }
 
         let is_extended_connect = self.message_type == MessageType::Request
