@@ -24,6 +24,7 @@ use crate::{
         },
     },
     frames::WebTransportFrame,
+    stream_type_reader::{WEBTRANSPORT_STREAM, WEBTRANSPORT_UNI_STREAM},
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
@@ -641,6 +642,94 @@ fn wt_streams_for_closing_session_refused() {
         Some(WT_SESSION_GONE),
         None,
     );
+}
+
+/// Streams the peer opens for a removed session are refused with `WT_SESSION_GONE`.
+#[test]
+fn wt_streams_for_removed_session_refused() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    drop(wt_session.conn.borrow_mut().stream_close_send(session_id));
+    wt.exchange_packets();
+    let stats = wt.client.webtransport_session_stats(session_id);
+    assert_eq!(stats, Err(Error::InvalidStreamId));
+
+    let unidi = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&unidi, &[0; 5]);
+    let bidi = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    wt.send_data_server(&bidi, &[0; 5]);
+
+    let ids = [unidi.stream_id(), bidi.stream_id()];
+    wt.check_events_after_closing_session_server(
+        &[bidi.stream_id()],
+        Some(WT_SESSION_GONE),
+        &ids,
+        Some(WT_SESSION_GONE),
+        None,
+    );
+}
+
+/// Streams the peer opens for a session ID that was never opened are stopped with
+/// `H3_STREAM_CREATION_ERROR`.
+#[test]
+fn wt_streams_for_unopened_session_stopped() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id().as_u64() + 4;
+    assert_wt_streams_stopped(&mut wt, &wt_session, session_id);
+}
+
+/// Streams the peer opens for the ID of an open request stream are stopped with
+/// `H3_STREAM_CREATION_ERROR`.
+#[test]
+fn wt_streams_for_open_request_stopped() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let req_id = wt
+        .client
+        .fetch(
+            now(),
+            "GET",
+            ("https", "something.com", "/"),
+            &[],
+            Priority::default(),
+        )
+        .unwrap();
+    wt.exchange_packets();
+    assert_wt_streams_stopped(&mut wt, &wt_session, req_id.as_u64());
+}
+
+/// Open a bidi and a uni WebTransport stream for `session_id` from the server and check that the
+/// client stops both with `H3_STREAM_CREATION_ERROR`.
+fn assert_wt_streams_stopped(wt: &mut WtTest, wt_session: &ServerSession, session_id: u64) {
+    let ids = [StreamType::BiDi, StreamType::UniDi]
+        .map(|t| open_raw_wt_stream(wt_session, t, session_id));
+
+    let stopped = |stream_id| ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error: Error::HttpStreamCreation.code(),
+    };
+    let events = server_stream_events_after_round_trip(wt, wt_session);
+    assert_eq!(events, [stopped(ids[0]), stopped(ids[1])]);
+}
+
+/// Open a server stream that only carries a WebTransport stream header for `session_id`.
+fn open_raw_wt_stream(
+    wt_session: &ServerSession,
+    stream_type: StreamType,
+    session_id: u64,
+) -> StreamId {
+    let signal = match stream_type {
+        StreamType::BiDi => WEBTRANSPORT_STREAM,
+        StreamType::UniDi => WEBTRANSPORT_UNI_STREAM,
+    };
+    let mut enc = Encoder::default();
+    enc.encode_varint(signal).encode_varint(session_id);
+    let mut conn = wt_session.conn.borrow_mut();
+    let id = conn.stream_create(stream_type).unwrap();
+    assert_eq!(conn.stream_send(id, enc.as_ref()), Ok(enc.len()));
+    id
 }
 
 /// A close capsule without FIN cancels the session's streams.

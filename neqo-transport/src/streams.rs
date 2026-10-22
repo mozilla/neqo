@@ -127,6 +127,18 @@ impl Streams {
         self.remote_stream_limits[stream_id.stream_type()].is_allowed(stream_id)
     }
 
+    #[must_use]
+    pub fn is_stream_id_opened(&self, stream_id: StreamId) -> bool {
+        if stream_id.is_remote_initiated(self.role) {
+            matches!(
+                self.remote_stream_limits[stream_id.stream_type()].is_new_stream(stream_id),
+                Ok(false)
+            )
+        } else {
+            stream_id.index() < self.local_stream_limits[stream_id.stream_type()].used()
+        }
+    }
+
     pub fn zero_rtt_rejected(&mut self) {
         self.clear_streams();
         // Rejected data does not count against the new 1-RTT flow-control limit.
