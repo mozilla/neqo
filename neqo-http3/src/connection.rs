@@ -1619,6 +1619,7 @@ impl Http3Connection {
 
     pub(crate) fn webtransport_create_stream_remote(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
@@ -1627,6 +1628,11 @@ impl Http3Connection {
         qtrace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
         let wt = self.get_extended_connect_session(session_id)?;
+        if wt.borrow().is_closing() {
+            drop(conn.stream_stop_sending(stream_id, WT_SESSION_GONE));
+            drop(conn.stream_reset_send(stream_id, WT_SESSION_GONE));
+            return Ok(());
+        }
 
         self.webtransport_create_stream_internal(
             wt,
