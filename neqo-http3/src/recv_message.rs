@@ -363,7 +363,7 @@ impl RecvStream for RecvMessage {
         if !self.closing() {
             self.qpack_decoder
                 .borrow_mut()
-                .cancel_stream(self.stream_info.stream_id());
+                .cancel_stream(self.stream_info.stream_id())?;
         }
         self.conn_events.recv_closed(&self.stream_info, close_type);
         self.state = RecvMessageState::Closed;
