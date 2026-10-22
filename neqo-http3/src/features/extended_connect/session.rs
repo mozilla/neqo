@@ -409,6 +409,13 @@ impl Session {
             now,
         )? {
             self.enter_state(new_state, conn, now);
+            if new_state == State::FinPending {
+                // FIN after any buffered data; this fails if a local close already queued it.
+                drop(self.control_stream_send.close(conn, now));
+                if self.control_stream_send.done() {
+                    self.state = State::Done;
+                }
+            }
         }
         Ok(())
     }
