@@ -654,20 +654,19 @@ fn wt_streams_for_removed_session_refused() {
     wt.exchange_packets();
     let stats = wt.client.webtransport_session_stats(session_id);
     assert_eq!(stats, Err(Error::InvalidStreamId));
+    let ids = [StreamType::BiDi, StreamType::UniDi]
+        .map(|t| open_raw_wt_stream(&wt_session, t, session_id.as_u64()));
 
-    let unidi = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
-    wt.send_data_server(&unidi, &[0; 5]);
-    let bidi = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
-    wt.send_data_server(&bidi, &[0; 5]);
-
-    let ids = [unidi.stream_id(), bidi.stream_id()];
-    wt.check_events_after_closing_session_server(
-        &[bidi.stream_id()],
-        Some(WT_SESSION_GONE),
-        &ids,
-        Some(WT_SESSION_GONE),
-        None,
-    );
+    let stopped = |stream_id| ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error: WT_SESSION_GONE,
+    };
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id: ids[0],
+        app_error: WT_SESSION_GONE,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset, stopped(ids[0]), stopped(ids[1])]);
 }
 
 /// Streams the peer opens for a session ID that was never opened are stopped with
@@ -921,6 +920,72 @@ fn wt_close_capsule_while_local_close_blocked() {
     assert_eq!(stats, Err(Error::InvalidStreamId));
     wt.check_session_closed_event_server(&wt_session, &CloseReason::Error(WT_SESSION_GONE));
     assert!(wt.server.next_event().is_none());
+}
+
+/// The recipient of a close capsule with FIN resets the CONNECT stream.
+#[test]
+fn wt_close_capsule_with_fin_resets_connect_stream() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    WtTest::session_close_frame_server(&wt_session, 5, "server");
+
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id: wt_session.stream_id(),
+        app_error: WT_SESSION_GONE,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset]);
+}
+
+/// The recipient of a FIN without a close capsule resets the CONNECT stream.
+#[test]
+fn wt_fin_without_close_capsule_resets_connect_stream() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    drop(wt_session.conn.borrow_mut().stream_close_send(session_id));
+
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id: session_id,
+        app_error: WT_SESSION_GONE,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset]);
+}
+
+/// A close capsule with FIN that arrives while the local close is held back by flow control
+/// resets the CONNECT stream, so the peer never gets the rest of the local close capsule.
+#[test]
+fn wt_close_capsule_with_fin_while_local_close_blocked() {
+    let conn_params = wt_default_parameters()
+        .get_connection_parameters()
+        .clone()
+        .max_stream_data(StreamDataLimit::BiDiRemote, 256);
+    let server_params = wt_default_parameters().connection_parameters(conn_params);
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    wt.session_close_frame_client(session_id, 23, &"a".repeat(1000));
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+    WtTest::session_close_frame_server(&wt_session, 5, "server");
+
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id: session_id,
+        app_error: WT_SESSION_GONE,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset]);
+    let reason = CloseReason::Clean {
+        error: 5,
+        message: "server".to_string(),
+    };
+    let closed = WebTransportEvent::SessionClosed {
+        stream_id: session_id,
+        reason,
+        headers: None,
+    };
+    let events: Vec<_> = wt.client.events().collect();
+    assert_eq!(events, [Http3ClientEvent::WebTransport(closed)]);
 }
 
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
