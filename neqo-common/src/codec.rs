@@ -74,11 +74,27 @@ impl<'a> Decoder<'a> {
     /// Skip while the current byte is `predicate`. Returns the number of bytes
     /// skipped.
     pub fn skip_while(&mut self, predicate: u8) -> usize {
-        let until = self
-            .as_ref() // remaining bytes
+        /// One SIMD register (SSE2/NEON), so each chunk is a single wide load and compare.
+        const CHUNK: usize = 16;
+
+        let buf = self.as_ref(); // remaining bytes
+        // Go bytewise until `CHUNK`-aligned, so chunk loads never straddle cache lines.
+        let head = buf.as_ptr().align_offset(CHUNK).min(buf.len());
+        if let Some(i) = buf[..head].iter().position(|v| *v != predicate) {
+            self.skip(i);
+            return i;
+        }
+        let (chunks, _) = buf[head..].as_chunks::<CHUNK>();
+        let start = head
+            + chunks
+                .iter()
+                .position(|c| *c != [predicate; CHUNK])
+                .unwrap_or(chunks.len())
+                * CHUNK;
+        let until = buf[start..]
             .iter()
             .position(|v| *v != predicate)
-            .unwrap_or_else(|| self.remaining());
+            .map_or(buf.len(), |i| start + i);
         self.skip(until);
         until
     }
@@ -226,6 +242,11 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
     }
 }
 
+/// Bytes reserved in an [`Encoder`] and later filled by [`Encoder::overwrite`].
+#[must_use = "call Encoder::overwrite to fill the reserved bytes"]
+#[derive(Copy, Clone)]
+pub struct Reservation<const N: usize>(usize);
+
 /// Encoder is good for building data structures.
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
@@ -329,6 +350,32 @@ impl<B: Buffer> Encoder<B> {
             () if v < (1 << 62) => self.encode((v | (3 << 62)).to_be_bytes()),
             () => panic!("Varint value too large"),
         }
+    }
+
+    /// Reserve `N` bytes, filled with zero, for a later [`Self::overwrite`].
+    ///
+    /// # Panics
+    ///
+    /// When the underlying buffer cannot hold `N` more bytes.
+    pub fn reserve<const N: usize>(&mut self) -> Reservation<N> {
+        let pos = self.buf.position();
+        self.pad_to(self.len() + N, 0);
+        Reservation(pos)
+    }
+
+    /// Overwrite bytes previously returned by [`Self::reserve`].
+    ///
+    /// # Panics
+    ///
+    /// When `rsv` is not contained in the bytes written to this encoder.
+    pub fn overwrite<const N: usize>(&mut self, rsv: Reservation<N>, data: [u8; N]) -> &mut Self {
+        assert!(rsv.0 >= self.start, "reservation is outside the encoder");
+        let offset = rsv.0 - self.start;
+        let end = offset + N;
+        let len = self.len();
+        assert!(end <= len, "reservation extends past encoder");
+        self.as_mut()[offset..end].copy_from_slice(&data);
+        self
     }
 
     /// Encode a length or byte count as a QUIC varint, accepting either `usize` or `u64`.
@@ -723,7 +770,30 @@ mod tests {
         io::{Cursor, Write as _},
     };
 
-    use super::{Buffer, Decoder, Encoder, MAX_VARINT};
+    use super::{Buffer, Decoder, Encoder, MAX_VARINT, Reservation};
+
+    #[test]
+    fn reserve_then_overwrite() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0xaa);
+        let one: Reservation<1> = enc.reserve();
+        let two: Reservation<2> = enc.reserve();
+        enc.encode_byte(0xbb);
+        assert_eq!(enc, Encoder::from_hex("aa000000bb"));
+        enc.overwrite(two, [0x22, 0x33]);
+        enc.overwrite(one, [0x11]);
+        assert_eq!(enc, Encoder::from_hex("aa112233bb"));
+
+        // `start` is not zero: the reserved offset is absolute in the buffer.
+        let mut buf = vec![0xff];
+        {
+            let mut enc = Encoder::new_borrowed_vec(&mut buf);
+            let reserved = enc.reserve::<1>();
+            enc.encode_byte(0x22);
+            enc.overwrite(reserved, [0x11]);
+        }
+        assert_eq!(buf, [0xff, 0x11, 0x22]);
+    }
 
     #[test]
     fn decode() {

@@ -6,9 +6,9 @@
 
 //! Per-session statistics exposed to the WebTransport API consumer.
 //!
-//! Limited to the members of [`WebTransportDatagramStats`], which describe
-//! per-session datagram queue behaviour and so cannot be derived from the
-//! connection-level counters in [`neqo_transport::Stats`]. Everything else
+//! Per-session datagram queue counters, which cannot be derived from
+//! [`neqo_transport::Stats`].  Only [`OutgoingDatagramStats::expired`] is a
+//! [`WebTransportDatagramStats`] member (`expiredOutgoing`).  Everything else
 //! `getStats()` reports is scoped to the underlying connection, and is only
 //! exposed at all when that connection is dedicated to a single session.
 //!
@@ -24,8 +24,22 @@
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SessionStats {
-    /// Outgoing datagrams that expired before being sent.
-    ///
-    /// Currently always zero; populated once datagram expiry is wired up.
-    pub datagrams_expired_outgoing: u64,
+    pub outgoing_datagrams: OutgoingDatagramStats,
+}
+
+/// What became of the datagrams handed to a session's outgoing queue.
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "stats::OutgoingDatagramStats is clearer than stats::OutgoingDatagram"
+)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct OutgoingDatagramStats {
+    /// Written into a packet, or to the control stream for the capsule
+    /// fallback.  Not a delivery guarantee.
+    pub sent: u64,
+    /// Expired (per `outgoingMaxAge`) before being sent.
+    pub expired: u64,
+    /// Discarded unsent and unexpired: evicted or refused by the queue, too
+    /// big for the path MTU, or still queued at close.
+    pub dropped: u64,
 }

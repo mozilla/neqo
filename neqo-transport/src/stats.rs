@@ -344,7 +344,7 @@ pub struct Stats {
     pub unacked_range_dropped: usize,
     /// Number of PMTUD probes sent.
     pub pmtud_tx: usize,
-    /// Number of PMTUD probes ACK'ed.
+    /// Number of PMTUD probes ACK'ed for the size under test during an active search.
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,

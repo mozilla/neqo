@@ -43,7 +43,7 @@ use crate::{
         ConnectionIdRef, ConnectionIdStore,
     },
     crypto::{Crypto, CryptoDxState, Epoch},
-    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome, DroppedDatagrams},
     ecn,
     events::{ConnectionEvent, ConnectionEvents, OutgoingDatagramOutcome},
     frame::{CloseError, Frame, FrameEncoder as _, FrameType},
@@ -58,7 +58,7 @@ use crate::{
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
-    stream_id::StreamType,
+    stream_id::{MAX_STREAMS_LIMIT, StreamType},
     streams::{SendGroupId, SendOrder, Streams},
     tparams::{
         self,
@@ -1392,6 +1392,7 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry(&path, now);
         self.handle_lost_packets(&lost_packets);
 
+        self.crypto.reset_early_resend();
         self.crypto.states_mut().init(
             self.conn_params.get_versions().compatible(),
             self.role,
@@ -1642,18 +1643,13 @@ impl Connection {
                 return Ok(PreprocessResult::Next);
             }
             (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
-                // This packet can't be processed now, but it could be a sign
-                // that Initial packets were lost.
-                // Resend Initial CRYPTO frames immediately a few times just
-                // in case.  As we don't have an RTT estimate yet, this helps
-                // when there is a short RTT and losses. Also mark all 0-RTT
-                // data as lost.
+                // Can't be processed yet, but hints that our Initial was lost: resend CRYPTO early
+                // (Section 6.2.3 of RFC 9002) and mark all 0-RTT data as lost.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
                 => {
-                    qtrace!("Resending Initial in response to an undecryptable packet");
-                    self.crypto.resend_unacked(PacketNumberSpace::Initial);
+                    self.crypto.resend_unacked_early();
                     self.resend_0rtt(now);
                 }
             (
@@ -2521,6 +2517,23 @@ impl Connection {
         probe
     }
 
+    /// Whether this packet should be a PMTUD probe.
+    fn should_probe_pmtud(
+        &self,
+        path: &PathRef,
+        space: PacketNumberSpace,
+        profile: &SendProfile,
+        coalesced: bool,
+    ) -> bool {
+        let path = path.borrow();
+        space == PacketNumberSpace::ApplicationData
+            && self.state.connected()
+            && !coalesced // Only send PMTUD probes using non-coalesced packets.
+            && path.is_primary()
+            && !profile.ack_only() // We could only send ACKs.
+            && path.can_probe_pmtud()
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
     /// whether the packet was padded.
@@ -2530,9 +2543,9 @@ impl Connection {
         space: PacketNumberSpace,
         profile: &SendProfile,
         builder: &mut packet::Builder<&mut Vec<u8>>,
+        pmtud_probe: bool,
         now: Instant,
     ) -> (recovery::Tokens, bool, bool) {
-        let coalesced = builder.is_coalesced();
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2552,7 +2565,11 @@ impl Connection {
 
         // Avoid sending path validation probes until the handshake completes,
         // but send them even when we don't have space.
-        let full_mtu = profile.limit() == path.borrow().plpmtu();
+        let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
+        // PMTUD must not record a success for a packet that was never probe-sized.
+        debug_assert!(
+            !pmtud_probe || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
+        );
         if space == PacketNumberSpace::ApplicationData && self.state.connected() {
             // Path validation probes should only be padded if the full MTU is available.
             // The probing code needs to know so it can track that.
@@ -2573,11 +2590,7 @@ impl Connection {
 
         if primary {
             if space == PacketNumberSpace::ApplicationData {
-                if self.state.connected()
-                    && path.borrow().pmtud().needs_probe()
-                    && !coalesced // Only send PMTUD probes using non-coalesced packets.
-                    && full_mtu
-                {
+                if pmtud_probe {
                     path.borrow_mut().pmtud_mut().send_probe(
                         builder,
                         &mut tokens,
@@ -2678,7 +2691,7 @@ impl Connection {
             if max_datagrams.get() <= num_datagrams {
                 break;
             }
-            if path.borrow().pmtud().needs_probe() && num_datagrams != 0 {
+            if path.borrow().can_probe_pmtud() && num_datagrams != 0 {
                 // Next datagram will be larger due to PMTUD probing.  GSO
                 // requires that all datagrams in a batch are of equal size.
                 // Only the last datagram can be smaller. Given that this would
@@ -2778,6 +2791,9 @@ impl Connection {
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
+            let coalesced = !encoder.is_empty();
+            let pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
+
             // Ensure we have tx crypto state for this epoch, or skip it.
             let Some((epoch, tx)) = self.crypto.states_mut().select_tx_mut(self.version, space)
             else {
@@ -2788,7 +2804,7 @@ impl Connection {
             let header_start = encoder.len();
 
             // Configure the limits and padding for this packet.
-            let limit = if path.borrow().pmtud().needs_probe() {
+            let limit = if pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
                 path.borrow().pmtud().probe_size()
@@ -2837,7 +2853,7 @@ impl Connection {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
                 (tokens, ack_eliciting, padded) =
-                    self.write_frames(path, space, &profile, &mut builder, now);
+                    self.write_frames(path, space, &profile, &mut builder, pmtud_probe, now);
             }
             if builder.packet_empty() {
                 // Nothing to include in this packet.
@@ -3369,8 +3385,7 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.padding += usize::from(length);
             }
             Frame::Ping => {
-                // If we get a PING and there are outstanding CRYPTO frames,
-                // prepare to resend them.
+                // A PING is likely a PTO probe, so resend any CRYPTO the peer may lack.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
                 // Send an ACK immediately if we might not otherwise do so.
@@ -3401,7 +3416,8 @@ impl Connection {
                     d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto
+                let duplicate = self
+                    .crypto
                     .streams_mut()
                     .inbound_frame(space, offset, data)?;
 
@@ -3421,14 +3437,9 @@ impl Connection {
                 {
                     self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
-                } else {
-                    // If we get a useless CRYPTO frame send outstanding CRYPTO frames and 0-RTT
-                    // data again.
-                    self.crypto.resend_unacked(space);
-                    if space == PacketNumberSpace::Initial {
-                        self.crypto.resend_unacked(PacketNumberSpace::Handshake);
-                        self.resend_0rtt(now);
-                    }
+                } else if duplicate && space == PacketNumberSpace::Initial {
+                    self.crypto.resend_unacked_early(); // See Section 6.2.3 of RFC 9002.
+                    self.resend_0rtt(now);
                 }
             }
             Frame::NewToken { token } => {
@@ -3602,7 +3613,7 @@ impl Connection {
                     }
                     recovery::Token::EcnEct0 => self.paths.lost_ecn(&mut self.stats.borrow_mut()),
                     // PMTUD probe loss is handled by the PMTUD state machine.
-                    recovery::Token::PmtudProbe => (),
+                    recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3674,7 +3685,7 @@ impl Connection {
                         .datagram_outcome(dgram_tracker, OutgoingDatagramOutcome::Acked),
                     recovery::Token::EcnEct0 => self.paths.acked_ecn(),
                     // We don't care about these being ACK'ed
-                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe => (),
+                    recovery::Token::HandshakeDone | recovery::Token::PmtudProbe(_) => (),
                 }
             }
         }
@@ -3824,6 +3835,19 @@ impl Connection {
         }
 
         self.streams.stream_create(st)
+    }
+
+    /// Raise the maximum number of concurrent incoming streams of `stream_type`.
+    ///
+    /// This is a local receive window: the cumulative stream count advertised
+    /// in `MAX_STREAMS` (RFC 9000, Section 4.6) advances by it as the peer's
+    /// streams are retired.  Raise-only: a `max` not greater than the current
+    /// window has no effect.  Shrinking the window would also be legal, taking
+    /// effect as streams retire, but no caller needs it.  A `max` above
+    /// [`MAX_STREAMS_LIMIT`] is clamped to it.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        debug_assert!(max <= MAX_STREAMS_LIMIT, "max_streams is too large");
+        self.streams.set_remote_max_streams(stream_type, max);
     }
 
     /// Set the priority of a stream.
@@ -4204,25 +4228,28 @@ impl Connection {
         self.quic_datagrams.take_session_expired_count(session)
     }
 
-    /// Whether any session has an expiry count waiting to be picked up by
-    /// [`Self::expire_session_datagrams`]. `process_timer` sheds stale
-    /// datagrams on its own schedule, so a caller that sweeps only when given
-    /// a reason to needs this to learn that there is now something to count.
-    ///
-    /// A queue's counts clear only when drained or when
-    /// [`Self::drop_session_datagrams`] removes the queue. A caller that
-    /// stops sweeping a session without dropping its queue therefore leaves
-    /// this `true` for the rest of the connection, and re-processes the
-    /// connection for nothing on every tick.
-    #[must_use]
-    pub fn has_pending_datagram_counts(&self) -> bool {
-        self.quic_datagrams.has_pending_counts()
+    /// Remove `session`'s queue, e.g. because the session is closing. Returns
+    /// how many datagrams were still queued, and the sent, expiry and
+    /// too-big counts not yet taken.
+    pub fn drop_session_datagrams(&mut self, session: StreamId) -> DroppedDatagrams {
+        self.quic_datagrams.drop_session_datagrams(session)
     }
 
-    /// Remove every datagram queued on `session`'s behalf, e.g. because the
-    /// session is closing. Returns how many were removed.
-    pub fn drop_session_datagrams(&mut self, session: StreamId) -> usize {
-        self.quic_datagrams.drop_session_datagrams(session)
+    /// The number of `session`'s datagrams written into a QUIC packet since
+    /// the last call.  Not a delivery signal: the packet can still be lost,
+    /// and a DATAGRAM frame is never retransmitted.  Tracked datagrams get
+    /// their delivery outcome via [`ConnectionEvent::OutgoingDatagramOutcome`].
+    ///
+    /// [`ConnectionEvent::OutgoingDatagramOutcome`]: crate::ConnectionEvent::OutgoingDatagramOutcome
+    pub fn take_session_sent_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_sent_count(session)
+    }
+
+    /// The number of `session`'s datagrams dropped at packet-build time since
+    /// the last call, for not fitting the path MTU.  Enqueueing only checks
+    /// the peer's `max_datagram_frame_size`, which can exceed the path MTU.
+    pub fn take_session_too_big_datagrams(&mut self, session: StreamId) -> u64 {
+        self.quic_datagrams.take_session_too_big_count(session)
     }
 
     /// Return the PLMTU of the primary path.

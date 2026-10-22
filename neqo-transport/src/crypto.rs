@@ -75,6 +75,8 @@ pub struct Crypto {
     tls: Agent,
     streams: CryptoStreams,
     states: CryptoStates,
+    /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
+    early_resend_used: bool,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -132,6 +134,7 @@ impl Crypto {
             tls: agent,
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
+            early_resend_used: false,
         })
     }
 
@@ -376,6 +379,30 @@ impl Crypto {
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
+    }
+
+    /// Resend unACK'ed Initial and Handshake data earlier than PTO, per Section 6.2.3 of RFC 9002.
+    /// Does nothing after the first call that finds data, until [`Self::reset_early_resend`].
+    pub fn resend_unacked_early(&mut self) {
+        if self.early_resend_used {
+            return;
+        }
+        let initial = self.streams.resend_unacked(PacketNumberSpace::Initial);
+        let handshake = self.streams.resend_unacked(PacketNumberSpace::Handshake);
+        self.early_resend_used = initial || handshake;
+        if self.early_resend_used {
+            qdebug!("Resending unACK'ed CRYPTO ahead of the PTO");
+        }
+    }
+
+    /// A Retry effectively restarts the connection (Section 6.3 of RFC 9002), so re-arm allowance.
+    pub const fn reset_early_resend(&mut self) {
+        self.early_resend_used = false;
+    }
+
+    #[cfg(test)]
+    pub const fn early_resend_used(&self) -> bool {
+        self.early_resend_used
     }
 
     /// Discard state for a packet number space and return true
@@ -832,12 +859,13 @@ impl CryptoDxAppData {
         Ok(Self {
             dx: CryptoDxState::new(version, dir, Epoch::ApplicationData, secret, cipher, 0)?,
             cipher,
-            next_secret: Self::update_secret(cipher, secret)?,
+            next_secret: Self::update_secret(version, cipher, secret)?,
         })
     }
 
-    fn update_secret(cipher: Cipher, secret: &SymKey) -> Res<SymKey> {
-        let next = hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], "quic ku")?;
+    fn update_secret(version: Version, cipher: Cipher, secret: &SymKey) -> Res<SymKey> {
+        let label = String::from(version.label_prefix()) + "ku";
+        let next = hkdf::expand_label(TLS_VERSION_1_3, cipher, secret, &[], &label)?;
         Ok(next)
     }
 
@@ -846,7 +874,7 @@ impl CryptoDxAppData {
             // Guard against too many key updates.
             return Err(Error::KeysExhausted);
         }
-        let next_secret = Self::update_secret(self.cipher, &self.next_secret)?;
+        let next_secret = Self::update_secret(self.dx.version, self.cipher, &self.next_secret)?;
         Ok(Self {
             dx: self.dx.next(&self.next_secret, self.cipher)?,
             cipher: self.cipher,
@@ -1550,18 +1578,25 @@ impl CryptoStreams {
         Ok(())
     }
 
+    /// Buffer a CRYPTO frame. Returns whether all of it had already been received.
     /// # Errors
     /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+    pub fn inbound_frame(
+        &mut self,
+        space: PacketNumberSpace,
+        offset: u64,
+        data: &[u8],
+    ) -> Res<bool> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
         // Nothing this far ahead can ever be delivered.
         if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
             return Err(Error::CryptoBufferExceeded);
         }
+        let duplicate = !data.is_empty() && rx.already_received(offset, data.len());
         rx.inbound_frame(offset, data)
             .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
-            Ok(())
+            Ok(duplicate)
         } else {
             Err(Error::CryptoBufferExceeded)
         }
@@ -1593,13 +1628,10 @@ impl CryptoStreams {
     }
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
-    /// This can help speed up handshake times.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
-        if space != PacketNumberSpace::ApplicationData
-            && let Some(cs) = self.get_mut(space)
-        {
-            cs.tx.unmark_sent();
-        }
+    /// This can help speed up handshake times. Returns whether anything was queued to resend.
+    pub fn resend_unacked(&mut self, space: PacketNumberSpace) -> bool {
+        space != PacketNumberSpace::ApplicationData
+            && self.get_mut(space).is_some_and(|cs| cs.tx.unmark_sent())
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
@@ -1796,9 +1828,57 @@ pub struct CryptoRecoveryToken {
 #[cfg(all(test, not(feature = "disable-encryption")))]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::hex::Hex;
+    use nss::{TLS_CHACHA20_POLY1305_SHA256, TLS_VERSION_1_3, hkdf};
     use test_fixture::fixture_init;
 
-    use super::CryptoDxState;
+    use super::{CryptoDxAppData, CryptoDxDirection, CryptoDxState};
+    use crate::Version;
+
+    #[test]
+    fn key_update_secrets() {
+        // The initial secret and first update are from RFC 9001, Appendix A.5,
+        // and RFC 9369, Appendix A.5. The second update applies HKDF-Expand-Label
+        // again with SHA-256 and the respective "quic ku" or "quicv2 ku" label.
+        const SECRET: &[u8] = &[
+            0x9a, 0xc3, 0x12, 0xa7, 0xf8, 0x77, 0x46, 0x8e, 0xbe, 0x69, 0x42, 0x27, 0x48, 0xad,
+            0x00, 0xa1, 0x54, 0x43, 0xf1, 0x82, 0x03, 0xa0, 0x7d, 0x60, 0x60, 0xf6, 0x88, 0xf3,
+            0x0f, 0x21, 0x63, 0x2b,
+        ];
+        const V1_SECRETS: [&str; 2] = [
+            "1223504755036d556342ee9361d253421a826c9ecdf3c7148684b36b714881f9",
+            "ef172661d26526b8adddf9497f88649df5786fa7d2f49a2341da624e8d7f3f94",
+        ];
+        const V2_SECRETS: [&str; 2] = [
+            "c69374c49e3d2a9466fa689e49d476db5d0dfbc87d32ceeaa6343fd0ae4c7d88",
+            "7f81b8fa265dac8413d60045461c28d11a0b70300c479c44310d34284fd780bc",
+        ];
+
+        fixture_init();
+        let secret = hkdf::import_key(TLS_VERSION_1_3, SECRET).unwrap();
+        for version in Version::all() {
+            let expected = match version {
+                Version::Version2 => V2_SECRETS,
+                Version::Version1 => V1_SECRETS,
+                #[cfg(feature = "draft-29")]
+                Version::Draft29 => V1_SECRETS,
+            };
+            for direction in [CryptoDxDirection::Read, CryptoDxDirection::Write] {
+                let mut app =
+                    CryptoDxAppData::new(version, direction, &secret, TLS_CHACHA20_POLY1305_SHA256)
+                        .unwrap();
+                for expected_secret in expected {
+                    assert_eq!(
+                        Hex::new(app.next_secret.key_data().unwrap()).to_string(),
+                        expected_secret,
+                        "{version:?} {direction:?} epoch {}",
+                        app.epoch(),
+                    );
+                    app = app.next().unwrap();
+                }
+            }
+        }
+    }
 
     #[test]
     fn crypto_dx_state_display() {
@@ -1831,8 +1911,18 @@ mod buffer_limits {
         );
         assert_eq!(
             CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
-            Ok(())
+            Ok(false) // Empty data is not duplicate data.
         );
+    }
+
+    /// The same bytes twice are duplicate; a partial overlap is not.
+    #[test]
+    fn crypto_duplicate_data() {
+        const SPACE: PacketNumberSpace = PacketNumberSpace::Initial;
+        let mut cs = CryptoStreams::default();
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(false));
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(true), "duplicate");
+        assert_eq!(cs.inbound_frame(SPACE, 1, &[0; 2]), Ok(false), "partial");
     }
 
     #[test]

@@ -34,8 +34,8 @@ runs:
           echo "CLOUDFLARE_QUICHE_VERSION=0.30.0"
           echo "CLOUDFLARE_QUICHE_REF=be47c5011215b9f13bad06bd7627d3ae49888a19"
           # renovate: depName=aws/s2n-quic datasource=github-tags
-          echo "S2N_QUIC_VERSION=v1.90.0"
-          echo "S2N_QUIC_REF=b0a09202be1c7e4676dfecf78390fbb23f3bdbd3"
+          echo "S2N_QUIC_VERSION=v1.91.0"
+          echo "S2N_QUIC_REF=be829a473881163369f7df4c739232ebbd1e7d27"
         } >> "$GITHUB_ENV"
 
     - name: Install Rust

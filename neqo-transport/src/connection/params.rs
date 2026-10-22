@@ -14,7 +14,7 @@ use crate::{
     CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
-    stream_id::StreamType,
+    stream_id::{MAX_STREAMS_LIMIT, StreamType},
     tparams::{
         PreferredAddress, TransportParameter, TransportParameterId,
         TransportParameterId::{
@@ -178,6 +178,9 @@ pub struct ConnectionParameters {
     /// Whether to recover from spurious congestion events by restoring prior Congestion Controller
     /// state. Detection and metrics are always active regardless of this setting.
     spurious_recovery: bool,
+    /// Whether to use Alternative Backoff with ECN (RFC 8511), i.e. a smaller multiplicative
+    /// decrease on ECN-CE congestion events than on loss. Only affects CUBIC.
+    abe: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -209,6 +212,7 @@ impl Default for ConnectionParameters {
             scone: false,
             reliable_stream_reset: true,
             spurious_recovery: true,
+            abe: true,
         }
     }
 }
@@ -295,7 +299,7 @@ impl ConnectionParameters {
     /// If v > 2^60 (the maximum allowed by the protocol).
     #[must_use]
     pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
-        assert!(v <= (1 << 60), "max_streams is too large");
+        assert!(v <= MAX_STREAMS_LIMIT, "max_streams is too large");
         self.max_streams[stream_type] = v;
         self
     }
@@ -541,6 +545,17 @@ impl ConnectionParameters {
         self
     }
 
+    #[must_use]
+    pub const fn abe_enabled(&self) -> bool {
+        self.abe
+    }
+
+    #[must_use]
+    pub const fn abe(mut self, abe: bool) -> Self {
+        self.abe = abe;
+        self
+    }
+
     /// # Errors
     /// When a connection ID cannot be obtained.
     /// # Panics
@@ -667,6 +682,13 @@ mod tests {
                 .spurious_recovery(false)
                 .spurious_recovery_enabled()
         );
+    }
+
+    #[test]
+    fn abe_enabled() {
+        // Default is true; verify builder can toggle it.
+        assert!(ConnectionParameters::default().abe_enabled());
+        assert!(!ConnectionParameters::default().abe(false).abe_enabled());
     }
 
     #[test]

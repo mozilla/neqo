@@ -31,7 +31,7 @@ use super::{
     zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder as _, ConnectionIdGenerator,
+    CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
     MIN_INITIAL_PACKET_SIZE,
     cid::ConnectionIdManager,
@@ -53,6 +53,99 @@ const SAMPLE_PREFERRED_ADDRESS: &[u8] = &[
     0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x01, 0xbb, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x03, 0x03,
     0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
 ];
+
+/// Supplies only the initial CID, then returns `None`. Panics after a bounded number of calls
+/// so a regression that keeps requesting CIDs fails instead of hanging the test suite.
+struct ExhaustibleConnectionIdGenerator {
+    inner: Option<CountingConnectionIdGenerator>,
+    attempts_left: usize,
+}
+
+impl ConnectionIdDecoder for ExhaustibleConnectionIdGenerator {
+    fn decode_cid<'a>(&self, dec: &mut Decoder<'a>) -> Option<ConnectionIdRef<'a>> {
+        // Decoding is stateless and must still work after the generator has been consumed.
+        CountingConnectionIdGenerator::default().decode_cid(dec)
+    }
+}
+
+impl ConnectionIdGenerator for ExhaustibleConnectionIdGenerator {
+    fn generate_cid(&mut self) -> Option<ConnectionId> {
+        assert!(
+            self.attempts_left > 0,
+            "CID generation did not stop after exhaustion"
+        );
+        self.attempts_left -= 1;
+        self.inner.take()?.generate_cid()
+    }
+
+    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
+        self
+    }
+}
+
+/// Exhausting either endpoint's generator after its initial CID must not block the handshake
+/// or subsequent stream output. Each case exhausts a different endpoint; both message directions
+/// use that same connection pair to check that it can still send and receive while exhausted.
+#[test]
+fn cid_generator_exhaustion_allows_connection_progress() {
+    fn transfer(sender: &mut Connection, receiver: &mut Connection) {
+        const MESSAGE: &[u8] = b"hello";
+
+        let stream_id = sender.stream_create(StreamType::UniDi).unwrap();
+        assert_eq!(
+            sender.stream_send(stream_id, MESSAGE).unwrap(),
+            MESSAGE.len()
+        );
+        sender.stream_close_send(stream_id).unwrap();
+        let datagram = sender.process_output(now()).dgram().unwrap();
+        receiver.process_input(datagram, now());
+        let mut buf = [0; MESSAGE.len()];
+        assert_eq!(
+            receiver.stream_recv(stream_id, &mut buf).unwrap(),
+            (MESSAGE.len(), true)
+        );
+        assert_eq!(buf, MESSAGE);
+    }
+
+    fixture_init();
+    for exhausted_client in [false, true] {
+        let generator: Rc<RefCell<dyn ConnectionIdGenerator>> =
+            Rc::new(RefCell::new(ExhaustibleConnectionIdGenerator {
+                inner: Some(CountingConnectionIdGenerator::default()),
+                attempts_left: 100,
+            }));
+        let (mut client, mut server) = if exhausted_client {
+            let client = Connection::new_client(
+                test_fixture::DEFAULT_SERVER_NAME,
+                test_fixture::DEFAULT_ALPN,
+                generator,
+                DEFAULT_ADDR,
+                DEFAULT_ADDR,
+                ConnectionParameters::default(),
+                now(),
+            )
+            .unwrap();
+            (client, default_server())
+        } else {
+            let server = Connection::new_server(
+                test_fixture::DEFAULT_KEYS,
+                test_fixture::DEFAULT_ALPN,
+                generator,
+                ConnectionParameters::default(),
+            )
+            .unwrap();
+            (default_client(), server)
+        };
+        connect(&mut client, &mut server);
+
+        transfer(&mut client, &mut server);
+        transfer(&mut server, &mut client);
+        assert_eq!(*client.state(), State::Confirmed);
+        assert_eq!(*server.state(), State::Confirmed);
+        let exhausted = if exhausted_client { &client } else { &server };
+        assert_eq!(exhausted.stats().frame_tx.new_connection_id, 0);
+    }
+}
 
 // These tests generally use two paths:
 // The connection is established on a path with the same IPv6 address on both ends.
@@ -423,6 +516,36 @@ fn path_forwarding_attack() {
     // But switches data transmission to the old path.
     let server_data4 = server.process_output(now).dgram().unwrap();
     assert_v6_path(&server_data4, false);
+}
+
+/// After a NAT rebinding whose old mapping still delivers, the server's `PATH_CHALLENGE`s on the
+/// new and the old path both reach the client on one path. Each needs a `PATH_RESPONSE`.
+#[test]
+fn path_challenges_on_one_path_each_get_a_response() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    let dgram = send_something(&mut client, now);
+    server.process_input(change_source_port(&dgram, 1), now);
+    let new_probe = server.process_output(now).dgram().unwrap();
+    let old_probe = server.process_output(now).dgram().unwrap();
+    assert_eq!(server.stats().frame_tx.path_challenge, 2);
+
+    // The NAT maps the new path back to the client's address.
+    let new_probe = Datagram::new(
+        new_probe.source(),
+        DEFAULT_ADDR,
+        new_probe.tos(),
+        &new_probe[..],
+    );
+    client.process_input(new_probe, now);
+    client.process_input(old_probe, now);
+    assert_eq!(client.stats().frame_rx.path_challenge, 2);
+
+    while client.process_output(now).dgram().is_some() {}
+    assert_eq!(client.stats().frame_tx.path_response, 2);
 }
 
 #[test]

@@ -28,7 +28,7 @@ use strum::Display;
 pub use self::fuzz::write_item_to_fuzzing_corpus;
 pub use self::{
     bytes::Bytes,
-    codec::{Buffer, Decoder, Encoder, MAX_VARINT},
+    codec::{Buffer, Decoder, Encoder, MAX_VARINT, Reservation},
     datagram::Datagram,
     header::Header,
     incrdecoder::{IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint},

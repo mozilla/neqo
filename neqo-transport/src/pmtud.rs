@@ -162,7 +162,9 @@ impl Pmtud {
         // The packet may include ACK-eliciting data already, but rather than check for that, it
         // seems OK to burn one byte here to simply include a PING.
         builder.encode_frame(FrameType::Ping, |_| {});
-        tokens.push(recovery::Token::PmtudProbe);
+        tokens.push(recovery::Token::PmtudProbe(
+            self.search_table[self.probe_index],
+        ));
         stats.frame_tx.ping += 1;
         stats.pmtud_tx += 1;
         self.probe_count += 1;
@@ -195,13 +197,26 @@ impl Pmtud {
         now: Instant,
         stats: &mut Stats,
     ) {
-        let acked = Self::count_probes(acked_pkts);
-        if acked == 0 {
+        // FIXME: ACKs of stale probes are not counted in `pmtud_ack`.
+        if self.probe_state == Probe::NotNeeded {
             return;
         }
 
-        // A probe was ACKed, confirm the new MTU and try to probe upwards further.
+        // Only the ACK of a probe for the size we are currently searching for confirms that size.
+        // Other probes are stale, e.g., the original of a probe that was spuriously declared lost
+        // and then retried. They say nothing about the size we are searching for, which may not
+        // have been probed yet.
+        let probe_mtu = self.search_table[self.probe_index];
+        let acked = acked_pkts
+            .iter()
+            .filter(|p| p.is_pmtud_probe_of(probe_mtu))
+            .count();
+        if acked == 0 {
+            return;
+        }
         stats.pmtud_ack += acked;
+
+        // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         let confirmed_idx = self.probe_index;
         qdebug!(
             "PMTUD probe of size {} succeeded",
@@ -323,16 +338,20 @@ mod tests {
         recovery::{self, SendProfile, sent},
     };
 
-    /// Test helper to create a sent PMTUD probe packet.
-    fn make_pmtud_probe(pn: packet::Number, sent_time: Instant, len: usize) -> sent::Packet {
-        sent::Packet::new(
-            packet::Type::Short,
-            pn,
-            sent_time,
-            true,
-            vec![recovery::Token::PmtudProbe],
-            len,
-        )
+    /// Test helper that sends a PMTUD probe and returns it as loss recovery would track it.
+    fn send_probe_packet(
+        pmtud: &mut Pmtud,
+        stats: &mut Stats,
+        pn: packet::Number,
+        now: Instant,
+    ) -> sent::Packet {
+        assert!(pmtud.needs_probe());
+        let len = pmtud.probe_size();
+        let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, len);
+        builder.pn(pn, 4);
+        let mut tokens = recovery::Tokens::new();
+        pmtud.send_probe(&mut builder, &mut tokens, stats);
+        sent::Packet::new(packet::Type::Short, pn, now, true, tokens, len)
     }
 
     const V4: IpAddr = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
@@ -383,14 +402,15 @@ mod tests {
         let pn = prot.next_pn();
         builder.pn(pn, 4);
         builder.enable_padding(true);
-        pmtud.send_probe(&mut builder, &mut Vec::new(), stats);
+        let mut tokens = recovery::Tokens::new();
+        pmtud.send_probe(&mut builder, &mut tokens, stats);
         builder.pad();
         let encoder = builder.build(prot).unwrap();
         assert_eq!(encoder.len(), pmtud.probe_size());
         assert!(!pmtud.needs_probe());
         assert_eq!(stats_before.pmtud_tx + 1, stats.pmtud_tx);
 
-        let packet = make_pmtud_probe(pn, now, encoder.len());
+        let packet = sent::Packet::new(packet::Type::Short, pn, now, true, tokens, encoder.len());
         if encoder.len() + Pmtud::header_size(addr) <= mtu {
             pmtud.on_packets_acked(&[packet], now, stats);
             assert_eq!(stats_before.pmtud_ack + 1, stats.pmtud_ack);
@@ -702,5 +722,139 @@ mod tests {
 
         // No probe ACKs should have been recorded.
         assert_eq!(initial_ack, stats.pmtud_ack);
+    }
+
+    /// A probe that is spuriously declared lost gets retried. When both the original and the retry
+    /// are acknowledged, only the first ACK confirms the size under test. The second one is for a
+    /// probe of the same size, so it says nothing about the next size, which has not been probed.
+    #[test]
+    fn retried_probe_ack_does_not_confirm_next_size() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        pmtud.next(now, &mut stats);
+        let first = pmtud.probe_size();
+
+        let original = send_probe_packet(&mut pmtud, &mut stats, 0, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        assert!(pmtud.needs_probe());
+        let retry = send_probe_packet(&mut pmtud, &mut stats, 1, now);
+
+        // The late ACK of the original confirms its size and moves on to the next one.
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first);
+        assert!(pmtud.needs_probe());
+        let second = pmtud.probe_size();
+        assert!(second > first);
+
+        // The ACK of the retry must not confirm the next size.
+        pmtud.on_packets_acked(&[retry], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first, "an untested size was confirmed");
+        assert!(pmtud.needs_probe());
+        assert_eq!(pmtud.probe_size(), second);
+        assert_eq!(stats.pmtud_ack, 1, "stale probe ACK must not be counted");
+    }
+
+    /// The late ACK of a probe for an earlier size must neither confirm the size of the probe that
+    /// is currently in flight, nor make PMTUD discard that probe.
+    #[test]
+    fn stale_probe_ack_does_not_disturb_probe_in_flight() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        pmtud.next(now, &mut stats);
+        let first = pmtud.probe_size();
+
+        let original = send_probe_packet(&mut pmtud, &mut stats, 0, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        let retry = send_probe_packet(&mut pmtud, &mut stats, 1, now);
+        pmtud.on_packets_acked(&[retry], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first);
+
+        // Probe for the next size is now in flight.
+        let second = pmtud.probe_size();
+        assert!(second > first);
+        let next = send_probe_packet(&mut pmtud, &mut stats, 2, now);
+        assert_eq!(pmtud.probe_state, Probe::Sent);
+
+        // The original of the earlier size is ACKed very late. This changes nothing.
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), first, "an untested size was confirmed");
+        assert_eq!(pmtud.probe_state, Probe::Sent, "probe in flight dropped");
+        assert_eq!(pmtud.probe_size(), second);
+        assert_eq!(stats.pmtud_ack, 1, "stale probe ACK must not be counted");
+
+        // Only the ACK of the probe in flight confirms the next size.
+        pmtud.on_packets_acked(&[next], now, &mut stats);
+        assert_eq!(pmtud.plpmtu(), second);
+        assert_eq!(stats.pmtud_ack, 2);
+    }
+
+    /// An ACK batch can contain stale probes, current probes and non-probe packets.
+    #[test]
+    fn mixed_probe_acks_only_count_current_size() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        pmtud.next(now, &mut stats);
+        let original_size = pmtud.probe_size();
+
+        let original = send_probe_packet(&mut pmtud, &mut stats, 0, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        let stale = send_probe_packet(&mut pmtud, &mut stats, 1, now);
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(stats.pmtud_ack, 1);
+
+        let size = pmtud.probe_size();
+        assert!(size > original_size);
+        let current = send_probe_packet(&mut pmtud, &mut stats, 2, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&current), &mut stats, now);
+        let retry = send_probe_packet(&mut pmtud, &mut stats, 3, now);
+        let large_non_probe = sent::make_packet(4, now, size);
+        pmtud.on_packets_acked(&[stale, large_non_probe, current, retry], now, &mut stats);
+
+        assert_eq!(pmtud.plpmtu(), size);
+        assert!(pmtud.needs_probe());
+        assert!(pmtud.probe_size() > size);
+        assert_eq!(
+            stats.pmtud_ack, 3,
+            "only current probe ACKs must be counted"
+        );
+    }
+
+    /// Once the search has stopped, the late ACK of a probe that is still outstanding must not
+    /// start it again before the raise timer fires.
+    #[test]
+    fn stale_probe_ack_after_search_stopped_ignored() {
+        let now = now();
+        let mut pmtud = Pmtud::new(V4, None);
+        let mut stats = Stats::default();
+        pmtud.next(now, &mut stats);
+        let first = pmtud.search_table[1];
+
+        // Two probes of the first size are in flight. The ACK of one of them confirms the size.
+        let original = send_probe_packet(&mut pmtud, &mut stats, 0, now);
+        pmtud.on_packets_lost(std::slice::from_ref(&original), &mut stats, now);
+        let retry = send_probe_packet(&mut pmtud, &mut stats, 1, now);
+        pmtud.on_packets_acked(&[original], now, &mut stats);
+        assert_eq!(pmtud.mtu, first);
+
+        // All probes of the next size are lost, which stops the search at the first size.
+        let mut pn = 2;
+        while pmtud.needs_probe() {
+            let probe = send_probe_packet(&mut pmtud, &mut stats, pn, now);
+            pmtud.on_packets_lost(&[probe], &mut stats, now);
+            pn += 1;
+        }
+        assert_mtu(&pmtud, first);
+        let raise_timer = pmtud.raise_timer;
+        assert!(raise_timer.is_some());
+
+        // The late ACK of the retry has the size the search stopped at. It must not restart it.
+        pmtud.on_packets_acked(&[retry], now, &mut stats);
+        assert_mtu(&pmtud, first);
+        assert_eq!(pmtud.raise_timer, raise_timer);
+        assert!(!pmtud.needs_probe());
+        assert_eq!(stats.pmtud_ack, 1, "stale probe ACK must not be counted");
     }
 }

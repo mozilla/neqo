@@ -69,7 +69,7 @@ pub use self::{
             MAX_DATAGRAM_FRAME_SIZE, MAX_LOCAL_MAX_STREAM_DATA, StreamDataLimit,
         },
     },
-    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome},
+    datagram_queue::{DatagramId, DatagramQueueCapacity, DatagramQueueOutcome, DroppedDatagrams},
     events::{ConnectionEvent, ConnectionEvents},
     frame::CloseError,
     packet::MIN_INITIAL_PACKET_SIZE,
@@ -79,7 +79,7 @@ pub use self::{
     sni::find_sni,
     stateless_reset::Token,
     stats::{SlowStartExitReason, Stats},
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
     version::Version,
 };
 #[cfg(feature = "bench")]
@@ -257,9 +257,6 @@ impl From<std::num::TryFromIntError> for Error {
 }
 
 pub type AppError = u64;
-
-#[deprecated(note = "use `CloseReason` instead")]
-pub type ConnectionError = CloseReason;
 
 /// Reason why a connection closed.
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq)]

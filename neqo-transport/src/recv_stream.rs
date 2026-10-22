@@ -243,6 +243,33 @@ impl RxStreamOrderer {
         Self::default()
     }
 
+    /// Whether every byte of `[offset, offset + len)` has already been received or read.
+    /// Call this before [`Self::inbound_frame`], which wipes the ability to determine this.
+    #[must_use]
+    pub(crate) fn already_received(&self, offset: u64, len: usize) -> bool {
+        let end = offset + to_u64(len);
+        if end > self.end {
+            return false;
+        }
+        let mut covered = max(offset, self.retired);
+        if covered >= end {
+            return true;
+        }
+        // Ranges never overlap, so only the last one starting at or below `covered` can extend it.
+        let first = self
+            .data_ranges
+            .range(..=covered)
+            .next_back()
+            .map_or(covered, |(&start, _)| start);
+        for (&start, data) in self.data_ranges.range(first..end) {
+            if start > covered {
+                return false;
+            }
+            covered = start + to_u64(data.len());
+        }
+        covered >= end
+    }
+
     /// Process an incoming stream frame off the wire. This may result in data
     /// being available to upper layers if frame is not out of order (ooo) or
     /// if the frame fills a gap.
@@ -1431,6 +1458,60 @@ mod tests {
             2,
             "a 4096-byte buffer must not be extended further"
         );
+    }
+
+    #[test]
+    fn already_received_across_chunks() {
+        const CHUNK: usize = RxStreamOrderer::RANGE_TARGET;
+        const TARGET: u64 = to_u64(CHUNK);
+        const LEN: usize = 2 * CHUNK + 10;
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[0u8; CHUNK]).unwrap();
+        s.inbound_frame(TARGET, &[1u8; CHUNK]).unwrap();
+        s.inbound_frame(2 * TARGET, &[2u8; 10]).unwrap();
+        assert_eq!(s.data_ranges.len(), 3);
+
+        assert!(s.already_received(0, LEN));
+        assert!(s.already_received(TARGET - 6, 16), "spans chunks");
+        assert!(!s.already_received(0, LEN + 1), "one byte past the end");
+
+        // The same duplicate frame grows `received`, which is why `already_received` exists.
+        let received = s.received();
+        s.inbound_frame(0, &[0u8; LEN]).unwrap();
+        assert!(s.received() > received);
+    }
+
+    /// Many gapped ranges, the shape a peer can create with one-byte CRYPTO frames.
+    #[test]
+    fn already_received_fragmented() {
+        const COUNT: u64 = 1000;
+        let mut s = RxStreamOrderer::default();
+        for i in 0..COUNT {
+            s.inbound_frame(i * 4, &[0u8; 1]).unwrap();
+        }
+        assert_eq!(s.data_ranges.len(), usize::try_from(COUNT).unwrap());
+
+        let last = (COUNT - 1) * 4;
+        assert!(s.already_received(last, 1), "the last byte received");
+        assert!(s.already_received(0, 1));
+        assert!(!s.already_received(last + 1, 1), "past the end");
+        assert!(!s.already_received(0, 4), "spans a gap");
+    }
+
+    /// Data already read still counts as received; a gap never does.
+    #[test]
+    fn already_received_includes_read_data() {
+        let mut s = RxStreamOrderer::default();
+        s.inbound_frame(0, &[0u8; 10]).unwrap();
+        s.inbound_frame(20, &[1u8; 10]).unwrap();
+
+        let mut buf = [0u8; 10];
+        assert_eq!(s.read(&mut buf), 10);
+        assert!(s.already_received(0, 10), "already read");
+        assert!(s.already_received(25, 5));
+        assert!(!s.already_received(10, 10), "the gap");
+        assert!(!s.already_received(5, 10), "spans into the gap");
+        assert!(s.already_received(15, 0), "an empty range is covered");
     }
 
     /// A buffer of 4095 bytes IS extended when the next frame is contiguous.

@@ -29,6 +29,7 @@ use crate::{
     cid::{ConnectionId, ConnectionIdEntry, ConnectionIdManager},
     packet::MIN_INITIAL_PACKET_SIZE,
     stateless_reset::Token as Srt,
+    stream_id::MAX_STREAMS_LIMIT,
     tracking::DEFAULT_REMOTE_ACK_DELAY,
     version::{self, Version},
 };
@@ -346,7 +347,7 @@ impl TransportParameter {
             },
             TransportParameterId::InitialMaxStreamsBidi
             | TransportParameterId::InitialMaxStreamsUni => match d.decode_varint() {
-                Some(v) if v <= (1 << 60) => Self::Integer(v),
+                Some(v) if v <= MAX_STREAMS_LIMIT => Self::Integer(v),
                 _ => return Err(Error::StreamLimit),
             },
             TransportParameterId::MaxUdpPayloadSize => match d.decode_varint() {
@@ -999,7 +1000,7 @@ mod tests {
 
     use super::PreferredAddress;
     use crate::{
-        ConnectionId, Error, Version,
+        ConnectionId, Error, MAX_STREAMS_LIMIT, Version,
         stateless_reset::Token as Srt,
         tparams::{TransportParameter, TransportParameterId, TransportParameters},
     };
@@ -1533,8 +1534,11 @@ mod tests {
     #[test]
     fn max_streams_boundary() {
         for tp in [InitialMaxStreamsBidi, InitialMaxStreamsUni] {
-            assert!(decode_tp_integer(tp, 1 << 60).is_ok(), "{tp}");
-            assert!(decode_tp_integer(tp, (1 << 60) + 1).is_err(), "{tp}");
+            assert!(decode_tp_integer(tp, MAX_STREAMS_LIMIT).is_ok(), "{tp}");
+            assert!(
+                decode_tp_integer(tp, MAX_STREAMS_LIMIT + 1).is_err(),
+                "{tp}"
+            );
         }
     }
 

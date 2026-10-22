@@ -23,7 +23,7 @@ use crate::{
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::{FrameStats, Stats},
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
     tparams::{
         TransportParameterId::{
             InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
@@ -131,13 +131,15 @@ impl Streams {
         self.clear_streams();
         // Rejected data does not count against the new 1-RTT flow-control limit.
         *self.sender_fc.borrow_mut() = SenderFlowControl::new((), 0);
-        debug_assert_eq!(
-            self.remote_stream_limits[StreamType::BiDi].max_active(),
-            self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
+        // `set_remote_max_streams` may have raised these above the configured transport
+        // parameter; they are never reduced.
+        debug_assert!(
+            self.remote_stream_limits[StreamType::BiDi].max_active()
+                >= self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
         );
-        debug_assert_eq!(
-            self.remote_stream_limits[StreamType::UniDi].max_active(),
-            self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
+        debug_assert!(
+            self.remote_stream_limits[StreamType::UniDi].max_active()
+                >= self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -573,6 +575,14 @@ impl Streams {
                 }
                 Ok(new_id)
             }
+        }
+    }
+
+    /// See `Connection::set_remote_max_streams`.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        let max = max.min(MAX_STREAMS_LIMIT);
+        if max > self.remote_stream_limits[stream_type].max_active() {
+            self.remote_stream_limits[stream_type].set_max_active(max);
         }
     }
 
