@@ -1195,7 +1195,6 @@ impl Http3Connection {
         now: Instant,
     ) -> Res<()> {
         qdebug!("[{self}] Close the sending side for stream {stream_id}");
-        debug_assert!(self.state.active());
         let send_stream = self
             .send_streams
             .get_mut(&stream_id)
@@ -1208,7 +1207,7 @@ impl Http3Connection {
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
         }
-        Ok(())
+        Ok(()) // Also after a peer close: the stream is closed implicitly (RFC 9114 Section 5.3).
     }
 
     pub fn extended_connect_create_session<T>(
