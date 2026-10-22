@@ -1207,6 +1207,7 @@ impl Http3Connection {
             self.remove_send_stream(stream_id, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
+            self.cancel_extended_connect_sub_streams(stream_id, conn);
         }
         Ok(())
     }
@@ -1523,8 +1524,17 @@ impl Http3Connection {
             self.remove_send_stream(session_id, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
+            self.cancel_extended_connect_sub_streams(session_id, conn);
         }
         Ok(session)
+    }
+
+    /// A session is terminated once its close is queued, even if flow control holds it back.
+    fn cancel_extended_connect_sub_streams(&mut self, session_id: StreamId, conn: &mut Connection) {
+        // TODO: Bound how long a closed session waits for flow-control credit.
+        if let Ok(wt) = self.get_extended_connect_session(session_id) {
+            self.remove_extended_connect(&wt, conn);
+        }
     }
 
     fn get_extended_connect_session(
