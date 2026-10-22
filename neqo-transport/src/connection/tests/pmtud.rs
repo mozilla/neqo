@@ -305,10 +305,24 @@ fn probe_waits_for_budget_covering_probe_size() {
 
 const LOOPBACK: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 443);
 
+fn loopback_client(params: ConnectionParameters) -> Connection {
+    fixture_init();
+    Connection::new_client(
+        test_fixture::DEFAULT_SERVER_NAME,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        LOOPBACK,
+        LOOPBACK,
+        params,
+        now(),
+    )
+    .expect("create a default client")
+}
+
 #[test]
 fn iface_mtu_for_first_path() {
-    let client = new_client(ConnectionParameters::default().pmtud(true));
-    let (_, mtu) = mtu::interface_and_mtu(DEFAULT_ADDR.ip()).unwrap();
+    let client = loopback_client(ConnectionParameters::default().pmtud(true));
+    let (_, mtu) = mtu::interface_and_mtu(LOOPBACK.ip()).unwrap();
     assert_eq!(client.stats().pmtud_iface_mtu, mtu);
 }
 
@@ -328,19 +342,19 @@ fn no_iface_mtu_for_junk_from_unknown_address() {
 /// PMTUD settles where it would if the path dropped packets above the interface MTU.
 #[test]
 fn iface_mtu_caps_pmtud() {
-    let (_, iface_mtu) = mtu::interface_and_mtu(DEFAULT_ADDR.ip()).unwrap();
-    let mut client = new_client(ConnectionParameters::default().pmtud(true));
+    let (_, iface_mtu) = mtu::interface_and_mtu(LOOPBACK.ip()).unwrap();
+    let mut client = loopback_client(ConnectionParameters::default().pmtud(true));
     let mut server = default_server();
     connect(&mut client, &mut server);
     drive_pmtud(&mut client, &mut server, usize::MAX, now());
-    let mut lossy = new_client(
+    let mut lossy = loopback_client(
         ConnectionParameters::default()
             .pmtud(true)
             .pmtud_iface_mtu(false),
     );
     let mut server = default_server();
     connect(&mut lossy, &mut server);
-    let path_mtu = iface_mtu - Pmtud::header_size(DEFAULT_ADDR.ip());
+    let path_mtu = iface_mtu - Pmtud::header_size(LOOPBACK.ip());
     drive_pmtud(&mut lossy, &mut server, path_mtu, now());
     assert_eq!(client.plpmtu(), lossy.plpmtu());
 }
@@ -348,7 +362,7 @@ fn iface_mtu_caps_pmtud() {
 #[test]
 fn no_iface_mtu_without_pmtud() {
     let iface_mtu = Stats::default().pmtud_iface_mtu;
-    let mut client = new_client(ConnectionParameters::default().pmtud(false));
+    let mut client = loopback_client(ConnectionParameters::default().pmtud(false));
     let mut server = default_server();
     connect(&mut client, &mut server);
     assert_eq!(client.stats().pmtud_iface_mtu, iface_mtu);
