@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
+use neqo_common::{Bytes, Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
     StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
@@ -12,8 +12,10 @@ use neqo_transport::{
 use test_fixture::now;
 
 use crate::{
-    Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
-    Http3State, Priority, SessionAcceptAction, WebTransportEvent,
+    ConnectUdpEvent, Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
+    Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Priority, SessionAcceptAction,
+    WebTransportEvent,
+    connect_udp::ClientSession as _,
     features::extended_connect::{
         CloseReason,
         stats::SessionStats,
@@ -21,8 +23,9 @@ use crate::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
     },
-    frames::WebTransportFrame,
-    webtransport::{ClientSession as _, ServerEvent},
+    frames::{WebTransportFrame, capsule::Capsule},
+    server_events::StreamHandler,
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
 fn wt_with_session() -> (WtTest, StreamId) {
@@ -259,6 +262,139 @@ fn wt_session_respone_200_with_fin() {
     assert!(wt.client.events().any(wt_session_close_event));
 
     assert_eq!(wt_session_id, wt_server_session.stream_id());
+}
+
+fn wt_session_request(wt: &mut WtTest) -> (StreamId, ServerSession) {
+    let wt_session_id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+    let wt_server_session = wt
+        .server
+        .events()
+        .find_map(|e| match e {
+            Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) => {
+                Some(session)
+            }
+            _ => None,
+        })
+        .unwrap();
+    wt.client.events().for_each(drop);
+    (wt_session_id, wt_server_session)
+}
+
+fn send_headers_and_close_frame(wt_server_session: &ServerSession, headers: &[Header]) {
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error: 1,
+        message: String::new(),
+    }
+    .encode(&mut enc);
+    wt_server_session.send_headers(headers).unwrap();
+    wt_server_session.send_data(enc.as_ref(), now()).unwrap();
+}
+
+fn wt_client_events(wt: &mut WtTest) -> Vec<WebTransportEvent> {
+    wt.client
+        .events()
+        .filter_map(|e| match e {
+            Http3ClientEvent::WebTransport(e) => Some(e),
+            _ => None,
+        })
+        .collect()
+}
+
+const fn rejected(stream_id: StreamId, headers: Vec<Header>) -> WebTransportEvent {
+    WebTransportEvent::SessionClosed {
+        stream_id,
+        reason: CloseReason::Status(403),
+        headers: Some(headers),
+    }
+}
+
+#[test]
+fn wt_session_reject_with_close_frame() {
+    let mut wt = WtTest::new();
+    let (wt_session_id, wt_server_session) = wt_session_request(&mut wt);
+    let headers = vec![Header::new(":status", "403")];
+    send_headers_and_close_frame(&wt_server_session, &headers);
+    wt.exchange_packets();
+
+    let closed = rejected(wt_session_id, headers);
+    assert_eq!(wt_client_events(&mut wt), [closed]);
+    let res = wt
+        .client
+        .webtransport_close_session(wt_session_id, 0, "", now());
+    assert_eq!(res, Err(Error::InvalidStreamId));
+}
+
+#[test]
+fn wt_session_reject_qpack_blocked_with_close_frame() {
+    let mut wt = WtTest::new();
+    let (other_id, other_server_session) = wt_session_request(&mut wt);
+    let (wt_session_id, wt_server_session) = wt_session_request(&mut wt);
+    let headers = vec![
+        Header::new(":status", "403"),
+        Header::new("my-header", "my-header"),
+    ];
+    let reject = SessionAcceptAction::Reject(headers.clone());
+    other_server_session.response(&reject, now()).unwrap();
+    let encoder_inst = wt.server.process_output(now()).dgram().unwrap();
+    send_headers_and_close_frame(&wt_server_session, &headers);
+    let response = wt.server.process_output(now()).dgram().unwrap();
+
+    wt.client.process_input(response, now());
+    assert_eq!(wt_client_events(&mut wt), []);
+    wt.client.process_input(encoder_inst, now());
+
+    let closed = [
+        rejected(wt_session_id, headers.clone()),
+        rejected(other_id, headers),
+    ];
+    assert_eq!(wt_client_events(&mut wt), closed);
+}
+
+#[test]
+fn connect_udp_session_reject_with_datagram_capsule() {
+    let params = wt_default_parameters().connect(true);
+    let mut wt = WtTest::new_with_params(params.clone(), params);
+    let wt_session = wt.create_wt_session();
+    let udp_session_id = wt
+        .client
+        .connect_udp_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+    // No server API sends data after a non-2xx response, so borrow the WT handler's connection.
+    let udp_server_session = StreamHandler {
+        stream_info: Http3StreamInfo::new(udp_session_id, Http3StreamType::Http),
+        ..(*wt_session).clone()
+    };
+
+    let headers = vec![Header::new(":status", "403")];
+    let mut enc = Encoder::default();
+    Capsule::Datagram {
+        payload: Bytes::from(vec![0, 1]),
+    }
+    .encode(&mut enc);
+    udp_server_session.send_headers(&headers).unwrap();
+    udp_server_session.send_data(enc.as_ref(), now()).unwrap();
+    wt.exchange_packets();
+
+    let events: Vec<_> = wt
+        .client
+        .events()
+        .filter_map(|e| match e {
+            Http3ClientEvent::ConnectUdp(e) => Some(e),
+            _ => None,
+        })
+        .collect();
+    let closed = ConnectUdpEvent::SessionClosed {
+        stream_id: udp_session_id,
+        reason: CloseReason::Status(403),
+        headers: Some(headers),
+    };
+    assert_eq!(events, [closed]);
 }
 
 #[test]
