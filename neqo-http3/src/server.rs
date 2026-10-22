@@ -989,11 +989,10 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x1, 0x2, 0x1, 0x2]);
     }
 
-    // Server push is not supported. A server that does not push has nothing to do with CANCEL_PUSH,
-    // so it is unexpected.
+    // No push ID has been mentioned by a PUSH_PROMISE frame (RFC 9114, Section 7.2.3).
     #[test]
     fn server_cancel_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(&[0x03, 0x01, 0x05]);
+        push_id_frame_on_control_stream(HFrameType::CANCEL_PUSH);
     }
 
     // Server: a server that does not push ignores MAX_PUSH_ID (RFC 9114, Section 7.2.7) rather than
