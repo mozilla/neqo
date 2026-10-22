@@ -10,6 +10,7 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
+    collections::BTreeMap,
     fmt::{self, Debug, Display, Formatter},
     ops::Deref,
     rc::Rc,
@@ -451,7 +452,7 @@ pub struct ConnectionIdManager {
     /// The next sequence number that will be used for sending `NEW_CONNECTION_ID` frames.
     next_seqno: u64,
     /// Outstanding, but lost `NEW_CONNECTION_ID` frames will be stored here.
-    lost_new_connection_id: Vec<ConnectionIdEntry<Srt>>,
+    lost_new_connection_id: BTreeMap<u64, ConnectionIdEntry<Srt>>,
 }
 
 impl ConnectionIdManager {
@@ -485,7 +486,7 @@ impl ConnectionIdManager {
             // value remains until the connection completes and transport parameters are handled.
             limit: 2,
             next_seqno: 1,
-            lost_new_connection_id: Vec::new(),
+            lost_new_connection_id: BTreeMap::new(),
         }
     }
 
@@ -544,7 +545,7 @@ impl ConnectionIdManager {
             qdebug!("Connection ID {seqno} is zero-length, not retiring");
         } else {
             self.connection_ids.retire(seqno);
-            self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
+            self.lost_new_connection_id.remove(&seqno);
         }
         Ok(())
     }
@@ -587,12 +588,12 @@ impl ConnectionIdManager {
             return;
         }
 
-        while let Some(entry) = self.lost_new_connection_id.pop() {
+        while let Some((seqno, entry)) = self.lost_new_connection_id.pop_first() {
             if entry.write(builder, stats) {
                 tokens.push(recovery::Token::NewConnectionId(Box::new(entry)));
             } else {
                 // This shouldn't happen often.
-                self.lost_new_connection_id.push(entry);
+                self.lost_new_connection_id.insert(seqno, entry);
                 break;
             }
         }
@@ -620,12 +621,19 @@ impl ConnectionIdManager {
     }
 
     pub fn lost(&mut self, entry: &ConnectionIdEntry<Srt>) {
-        self.lost_new_connection_id.push(entry.clone());
+        if self
+            .connection_ids
+            .cids
+            .iter()
+            .any(|c| c.seqno == entry.seqno)
+        {
+            self.lost_new_connection_id
+                .insert(entry.seqno, entry.clone());
+        }
     }
 
     pub fn acked(&mut self, entry: &ConnectionIdEntry<Srt>) {
-        self.lost_new_connection_id
-            .retain(|e| e.seqno != entry.seqno);
+        self.lost_new_connection_id.remove(&entry.seqno);
     }
 }
 
@@ -736,6 +744,76 @@ mod tests {
         assert_eq!(manager.next_seqno, 3);
         assert!(manager.is_valid(ConnectionIdRef::from(&[2])));
         assert!(generator.borrow().cids.is_empty());
+    }
+
+    /// Returns a manager that has sent one `NEW_CONNECTION_ID` and that frame's entry.
+    fn manager_with_sent_cid() -> (ConnectionIdManager, ConnectionIdEntry<Srt>) {
+        fixture_init();
+        let cids = VecDeque::from([Some(ConnectionId::from(&[1]))]);
+        let generator = Rc::new(RefCell::new(ScriptedConnectionIdGenerator { cids }));
+        let mut manager = ConnectionIdManager::new(generator, ConnectionId::from(&[0]));
+        manager.set_limit(2);
+        let mut builder = packet::Builder::short(Encoder::default(), false, Some(&[]), 1024);
+        let mut tokens = recovery::Tokens::new();
+        manager.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
+        let recovery::Token::NewConnectionId(entry) = tokens.pop().unwrap() else {
+            panic!("expected a NEW_CONNECTION_ID recovery token");
+        };
+        (manager, *entry)
+    }
+
+    /// Loss recovery reports a packet lost on PTO and again when it is declared lost.
+    #[test]
+    fn lost_twice_queued_once() {
+        let (mut manager, entry) = manager_with_sent_cid();
+        manager.lost(&entry);
+        manager.lost(&entry);
+        assert_eq!(manager.lost_new_connection_id.len(), 1);
+    }
+
+    /// A lost `NEW_CONNECTION_ID` that doesn't fit in the packet stays queued.
+    #[test]
+    fn lost_not_written_stays_queued() {
+        let (mut manager, entry) = manager_with_sent_cid();
+        manager.lost(&entry);
+        let mut builder = packet::Builder::short(Encoder::default(), false, Some(&[]), 1024);
+        builder.set_limit(builder.len());
+        let len = builder.len();
+        let mut tokens = recovery::Tokens::new();
+        manager.write_frames(&mut builder, &mut tokens, &mut FrameStats::default());
+        assert_eq!(builder.len(), len);
+        assert!(tokens.is_empty());
+        assert_eq!(
+            manager.lost_new_connection_id.get(&entry.seqno),
+            Some(&entry)
+        );
+    }
+
+    /// An ACK of a lost `NEW_CONNECTION_ID` removes it from the queue.
+    #[test]
+    fn lost_then_acked_dequeued() {
+        let (mut manager, entry) = manager_with_sent_cid();
+        manager.lost(&entry);
+        manager.acked(&entry);
+        assert!(manager.lost_new_connection_id.is_empty());
+    }
+
+    /// The peer retiring a connection ID drops its lost `NEW_CONNECTION_ID`.
+    #[test]
+    fn lost_then_retired_dequeued() {
+        let (mut manager, entry) = manager_with_sent_cid();
+        manager.lost(&entry);
+        manager.retire(entry.seqno).unwrap();
+        assert!(manager.lost_new_connection_id.is_empty());
+    }
+
+    /// A `NEW_CONNECTION_ID` declared lost after the peer retired it is not queued.
+    #[test]
+    fn retired_then_lost_not_queued() {
+        let (mut manager, entry) = manager_with_sent_cid();
+        manager.retire(entry.seqno).unwrap();
+        manager.lost(&entry);
+        assert!(manager.lost_new_connection_id.is_empty());
     }
 
     #[test]
