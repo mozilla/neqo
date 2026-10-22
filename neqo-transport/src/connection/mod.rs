@@ -3546,8 +3546,15 @@ impl Connection {
             }
             Frame::HandshakeDone => {
                 self.stats.borrow_mut().frame_rx.handshake_done += 1;
-                if self.role == Role::Server || !self.state.connected() {
+                // The server lacks our Finished until we send Handshake, which discards Initial.
+                if self.role == Role::Server
+                    || !self.state.connected()
+                    || self.acks.get_mut(PacketNumberSpace::Initial).is_some()
+                {
                     return Err(Error::ProtocolViolation);
+                }
+                if self.confirmed() {
+                    return Ok(());
                 }
                 self.set_confirmed(now)?;
                 self.discard_keys(PacketNumberSpace::Handshake, now);
