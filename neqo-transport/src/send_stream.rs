@@ -385,10 +385,11 @@ impl RangeTracker {
         self.used.insert(new_off, (new_len, RangeState::Sent));
     }
 
-    fn unmark_range(&mut self, off: u64, len: usize) {
+    /// Returns whether any range was actually unmarked.
+    fn unmark_range(&mut self, off: u64, len: usize) -> bool {
         if len == 0 {
             qdebug!("unmark 0-length range at {off}");
-            return;
+            return false;
         }
 
         self.first_unmarked = None;
@@ -397,6 +398,7 @@ impl RangeTracker {
 
         let mut to_remove = SmallVec::<[_; 8]>::new();
         let mut to_add = None;
+        let mut unmarked = false;
 
         // Walk backwards through possibly affected existing ranges
         for (cur_off, (cur_len, cur_state)) in self.used.range_mut(..end_off).rev() {
@@ -419,6 +421,7 @@ impl RangeTracker {
                 }
                 if head {
                     *cur_len = off - cur_off; // Cut, rather than remove.
+                    unmarked = true;
                 } else {
                     to_remove.push(*cur_off);
                 }
@@ -429,6 +432,7 @@ impl RangeTracker {
             }
         }
 
+        unmarked |= !to_remove.is_empty();
         for remove_off in to_remove {
             self.used.remove(&remove_off);
         }
@@ -436,15 +440,17 @@ impl RangeTracker {
         if let Some((new_cur_off, new_cur_len, cur_state)) = to_add {
             self.used.insert(new_cur_off, (new_cur_len, cur_state));
         }
+        unmarked
     }
 
-    /// Unmark all sent ranges.
+    /// Unmark all sent ranges. Returns whether any range was actually unmarked.
     /// # Panics
     /// On 32-bit machines where far too much is sent before calling this.
     /// That should not happen because this should only be called for handshakes,
     /// which never exceed that limit.
-    pub fn unmark_sent(&mut self) {
-        self.unmark_range(0, expect_usize(self.highest_offset()));
+    #[must_use]
+    pub fn unmark_sent(&mut self) -> bool {
+        self.unmark_range(0, expect_usize(self.highest_offset()))
     }
 
     #[cfg(feature = "bench")]
@@ -559,9 +565,10 @@ impl TxBuffer {
         self.ranges.unmark_range(offset, len);
     }
 
-    /// Forget about anything that was marked as sent.
-    pub fn unmark_sent(&mut self) {
-        self.ranges.unmark_sent();
+    /// Forget about anything that was marked as sent. Returns whether there was any.
+    #[must_use]
+    pub fn unmark_sent(&mut self) -> bool {
+        self.ranges.unmark_sent()
     }
 
     #[must_use]
@@ -3183,7 +3190,7 @@ mod tests {
         assert_eq!(rt.highest_offset(), 5);
         assert_eq!(rt.acked_from_zero(), 0);
 
-        rt.unmark_sent();
+        assert!(rt.unmark_sent());
         assert_eq!(rt.highest_offset(), 0);
         assert_eq!(rt.acked_from_zero(), 0);
         assert_eq!(rt.first_unmarked_range(), (0, None));
@@ -3204,7 +3211,7 @@ mod tests {
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (15, None));
 
-        rt.unmark_sent();
+        assert!(rt.unmark_sent());
         assert_eq!(rt.highest_offset(), 15);
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (5, Some(5)));
@@ -3222,10 +3229,20 @@ mod tests {
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (10, None));
 
-        rt.unmark_sent();
+        assert!(rt.unmark_sent());
         assert_eq!(rt.highest_offset(), 5);
         assert_eq!(rt.acked_from_zero(), 5);
         assert_eq!(rt.first_unmarked_range(), (5, None));
+    }
+
+    /// Nothing to unmark when nothing is outstanding, which preserves the resend allowance.
+    #[test]
+    fn unmark_sent_nothing_outstanding() {
+        let mut rt = RangeTracker::default();
+        assert!(!rt.unmark_sent(), "nothing sent");
+        rt.mark_acked(0, 5);
+        assert!(!rt.unmark_sent(), "all acked");
+        assert_eq!(rt.acked_from_zero(), 5);
     }
 
     #[test]

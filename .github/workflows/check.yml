@@ -101,7 +101,7 @@ jobs:
 
       - name: Run tests and determine coverage
         env:
-          RUST_LOG: trace
+          RUST_LOG: debug
           RUST_BACKTRACE: 1
           RUST_TEST_TIME_UNIT: 10,30
           RUST_TEST_TIME_INTEGRATION: 10,30

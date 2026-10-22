@@ -17,13 +17,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(feature = "log-payload")]
-use neqo_common::hex::HexWithLen;
 use neqo_common::{
     Buffer, Datagram, Decoder, Ecn, Encoder, Role, Tos, datagram,
     event::Provider as EventProvider,
     expect_usize,
-    hex::{Hex, HexSnipMiddle},
+    hex::{Hex, HexSnipMiddle, HexWithLen},
     hrtime, qdebug, qerror, qinfo,
     qlog::Qlog,
     qtrace, qwarn, to_u64,
@@ -1395,6 +1393,7 @@ impl Connection {
         let lost_packets = self.loss_recovery.retry(&path, now);
         self.handle_lost_packets(&lost_packets);
 
+        self.crypto.reset_early_resend();
         self.crypto.states_mut().init(
             self.conn_params.get_versions().compatible(),
             self.role,
@@ -1645,18 +1644,13 @@ impl Connection {
                 return Ok(PreprocessResult::Next);
             }
             (packet::Type::Handshake | packet::Type::Short, State::WaitInitial, Role::Client)
-                // This packet can't be processed now, but it could be a sign
-                // that Initial packets were lost.
-                // Resend Initial CRYPTO frames immediately a few times just
-                // in case.  As we don't have an RTT estimate yet, this helps
-                // when there is a short RTT and losses. Also mark all 0-RTT
-                // data as lost.
+                // Can't be processed yet, but hints that our Initial was lost: resend CRYPTO early
+                // (Section 6.2.3 of RFC 9002) and mark all 0-RTT data as lost.
                 if dcid.is_none()
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
                 => {
-                    qtrace!("Resending Initial in response to an undecryptable packet");
-                    self.crypto.resend_unacked(PacketNumberSpace::Initial);
+                    self.crypto.resend_unacked_early();
                     self.resend_0rtt(now);
                 }
             (
@@ -1815,7 +1809,6 @@ impl Connection {
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
     ) -> Res<()> {
-        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
         let remote = d.source();
@@ -1848,7 +1841,6 @@ impl Connection {
                 PreprocessResult::End => return Ok(()),
             }
 
-            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
@@ -3307,7 +3299,6 @@ impl Connection {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<()> {
-        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] Handshake space={space} data: {:?}",
             data.as_ref().map(HexWithLen::new),
@@ -3394,8 +3385,7 @@ impl Connection {
                 self.stats.borrow_mut().frame_rx.padding += usize::from(length);
             }
             Frame::Ping => {
-                // If we get a PING and there are outstanding CRYPTO frames,
-                // prepare to resend them.
+                // A PING is likely a PTO probe, so resend any CRYPTO the peer may lack.
                 self.stats.borrow_mut().frame_rx.ping += 1;
                 self.crypto.resend_unacked(space);
                 // Send an ACK immediately if we might not otherwise do so.
@@ -3426,7 +3416,8 @@ impl Connection {
                     d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
-                self.crypto
+                let duplicate = self
+                    .crypto
                     .streams_mut()
                     .inbound_frame(space, offset, data)?;
 
@@ -3446,14 +3437,9 @@ impl Connection {
                 {
                     self.handshake(now, packet_version, space, Some(&buf))?;
                     self.create_resumption_token(now);
-                } else {
-                    // If we get a useless CRYPTO frame send outstanding CRYPTO frames and 0-RTT
-                    // data again.
-                    self.crypto.resend_unacked(space);
-                    if space == PacketNumberSpace::Initial {
-                        self.crypto.resend_unacked(PacketNumberSpace::Handshake);
-                        self.resend_0rtt(now);
-                    }
+                } else if duplicate && space == PacketNumberSpace::Initial {
+                    self.crypto.resend_unacked_early(); // See Section 6.2.3 of RFC 9002.
+                    self.resend_0rtt(now);
                 }
             }
             Frame::NewToken { token } => {

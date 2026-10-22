@@ -75,6 +75,8 @@ pub struct Crypto {
     tls: Agent,
     streams: CryptoStreams,
     states: CryptoStates,
+    /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
+    early_resend_used: bool,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -132,6 +134,7 @@ impl Crypto {
             tls: agent,
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
+            early_resend_used: false,
         })
     }
 
@@ -216,7 +219,6 @@ impl Crypto {
                 epoch: space.into(),
                 data: d.to_vec(),
             };
-            #[cfg(feature = "log-payload")]
             qtrace!("Handshake record received {rec:?} ");
             rec
         });
@@ -337,7 +339,6 @@ impl Crypto {
             if r.ct != TLS_CT_HANDSHAKE {
                 return Err(Error::ProtocolViolation);
             }
-            #[cfg(feature = "log-payload")]
             qtrace!("[{self}] Adding CRYPTO data {r:?}");
             self.streams.send(r.epoch.into(), &r.data)?;
         }
@@ -378,6 +379,30 @@ impl Crypto {
     /// that they can be sent again.
     pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
         self.streams.resend_unacked(space);
+    }
+
+    /// Resend unACK'ed Initial and Handshake data earlier than PTO, per Section 6.2.3 of RFC 9002.
+    /// Does nothing after the first call that finds data, until [`Self::reset_early_resend`].
+    pub fn resend_unacked_early(&mut self) {
+        if self.early_resend_used {
+            return;
+        }
+        let initial = self.streams.resend_unacked(PacketNumberSpace::Initial);
+        let handshake = self.streams.resend_unacked(PacketNumberSpace::Handshake);
+        self.early_resend_used = initial || handshake;
+        if self.early_resend_used {
+            qdebug!("Resending unACK'ed CRYPTO ahead of the PTO");
+        }
+    }
+
+    /// A Retry effectively restarts the connection (Section 6.3 of RFC 9002), so re-arm allowance.
+    pub const fn reset_early_resend(&mut self) {
+        self.early_resend_used = false;
+    }
+
+    #[cfg(test)]
+    pub const fn early_resend_used(&self) -> bool {
+        self.early_resend_used
     }
 
     /// Discard state for a packet number space and return true
@@ -723,7 +748,6 @@ impl CryptoDxState {
         data: &mut [u8],
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Write);
-        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] encrypt_in_place pn={pn} hdr={} body={}",
             Hex::new(data[hdr.clone()].as_ref()),
@@ -747,7 +771,6 @@ impl CryptoDxState {
         // Use only the actual current header for AAD.
         let len = self.aead.encrypt_in_place(pn, &prev[hdr], data)?;
 
-        #[cfg(feature = "log-payload")]
         qtrace!("[{self}] encrypt ct={}", Hex::new(&data[..len]));
         debug_assert_eq!(pn, self.next_pn());
         self.used(pn)?;
@@ -766,7 +789,6 @@ impl CryptoDxState {
         data: &mut [u8],
     ) -> Res<usize> {
         debug_assert_eq!(self.direction, CryptoDxDirection::Read);
-        #[cfg(feature = "log-payload")]
         qtrace!(
             "[{self}] decrypt_in_place pn={pn} hdr={} body={}",
             Hex::new(data[hdr.clone()].as_ref()),
@@ -1556,18 +1578,25 @@ impl CryptoStreams {
         Ok(())
     }
 
+    /// Buffer a CRYPTO frame. Returns whether all of it had already been received.
     /// # Errors
     /// `CryptoBufferExceeded` when too much data is buffered, or when it is in too many ranges.
-    pub fn inbound_frame(&mut self, space: PacketNumberSpace, offset: u64, data: &[u8]) -> Res<()> {
+    pub fn inbound_frame(
+        &mut self,
+        space: PacketNumberSpace,
+        offset: u64,
+        data: &[u8],
+    ) -> Res<bool> {
         let rx = &mut self.get_mut(space).ok_or(Error::Internal)?.rx;
         // Nothing this far ahead can ever be delivered.
         if !data.is_empty() && offset > rx.retired() + Self::BUFFER_LIMIT {
             return Err(Error::CryptoBufferExceeded);
         }
+        let duplicate = !data.is_empty() && rx.already_received(offset, data.len());
         rx.inbound_frame(offset, data)
             .map_err(|_| Error::CryptoBufferExceeded)?;
         if rx.received() - rx.retired() <= Self::BUFFER_LIMIT {
-            Ok(())
+            Ok(duplicate)
         } else {
             Err(Error::CryptoBufferExceeded)
         }
@@ -1599,13 +1628,10 @@ impl CryptoStreams {
     }
 
     /// Resend any Initial or Handshake CRYPTO frames that might be outstanding.
-    /// This can help speed up handshake times.
-    pub fn resend_unacked(&mut self, space: PacketNumberSpace) {
-        if space != PacketNumberSpace::ApplicationData
-            && let Some(cs) = self.get_mut(space)
-        {
-            cs.tx.unmark_sent();
-        }
+    /// This can help speed up handshake times. Returns whether anything was queued to resend.
+    pub fn resend_unacked(&mut self, space: PacketNumberSpace) -> bool {
+        space != PacketNumberSpace::ApplicationData
+            && self.get_mut(space).is_some_and(|cs| cs.tx.unmark_sent())
     }
 
     pub fn is_empty(&mut self, space: PacketNumberSpace) -> bool {
@@ -1885,8 +1911,18 @@ mod buffer_limits {
         );
         assert_eq!(
             CryptoStreams::default().inbound_frame(PacketNumberSpace::Initial, offset, &[]),
-            Ok(())
+            Ok(false) // Empty data is not duplicate data.
         );
+    }
+
+    /// The same bytes twice are duplicate; a partial overlap is not.
+    #[test]
+    fn crypto_duplicate_data() {
+        const SPACE: PacketNumberSpace = PacketNumberSpace::Initial;
+        let mut cs = CryptoStreams::default();
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(false));
+        assert_eq!(cs.inbound_frame(SPACE, 0, &[0; 2]), Ok(true), "duplicate");
+        assert_eq!(cs.inbound_frame(SPACE, 1, &[0; 2]), Ok(false), "partial");
     }
 
     #[test]

@@ -167,7 +167,7 @@ use std::{cell::RefCell, fmt::Debug, rc::Rc, time::Instant};
 use buffered_send_stream::BufferedStream;
 pub use client_events::{ConnectUdpEvent, Http3ClientEvent, WebTransportEvent};
 pub use conn_params::Http3Parameters;
-pub use connection::{Http3State, SessionAcceptAction};
+pub use connection::{Http3State, MAX_ANTICIPATED_INCOMING_STREAMS, SessionAcceptAction};
 pub use connection_client::Http3Client;
 use frames::HFrame;
 pub use neqo_common::Header;

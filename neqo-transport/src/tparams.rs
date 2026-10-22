@@ -906,7 +906,6 @@ impl ExtensionHandler for TransportParametersHandler {
     }
 
     fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
-        #[cfg(feature = "log-payload")]
         qtrace!(
             "Handling transport parameters, msg={msg:?} value={}",
             Hex::new(d),

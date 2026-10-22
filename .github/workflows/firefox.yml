@@ -116,10 +116,6 @@ jobs:
             echo ""
           done >> supply-chain/audits.toml
 
-          # Hide .git to prevent mach from running git operations
-          mv .git .git.bak
-          trap 'mv .git.bak .git' EXIT
-
           if ./mach vendor rust --ignore-modified 2>&1 | tee vendor.log; then
             echo "Vendoring succeeded"
             exit 0
@@ -129,6 +125,8 @@ jobs:
             echo "::error::Vendoring failed with no output"
             exit 1
           fi
+
+          UNUSED_PATCH='Unused patch in top-level Cargo.toml|has an override in .* that is not used'
 
           # Check if this is a vet-related failure
           if grep -qE "Vet error|Missing audit for" vendor.log; then
@@ -145,6 +143,20 @@ jobs:
             done
             echo "::warning::Vet failures are unrelated to neqo, forcing"
             ./mach vendor rust --ignore-modified --force
+          elif grep -qE "$UNUSED_PATCH" vendor.log &&
+               ! grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor.log | grep -vE "$UNUSED_PATCH" > /dev/null; then
+            for crate in $NEQO_CRATES; do
+              if grep -qF "Unused patch in top-level Cargo.toml for $crate." vendor.log; then
+                echo "::error::Patch for neqo crate $crate was not used"
+                exit 1
+              fi
+            done
+            grep -E "$UNUSED_PATCH" vendor.log | sed 's/^.* E /::warning::/'
+            ./mach vendor rust --ignore-modified --force 2>&1 | tee vendor-force.log
+            if grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor-force.log | grep -vE "$UNUSED_PATCH" > /dev/null; then
+              echo "::error::Forced vendoring reported errors besides unused patches"
+              exit 1
+            fi
           else
             echo "::error::Vendoring failed for non-vet reasons:"
             cat vendor.log

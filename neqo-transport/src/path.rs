@@ -24,7 +24,7 @@ use crate::{
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
-    frame::{FrameEncoder as _, FrameType},
+    frame::{FrameEncoder as _, FrameType, PATH_CHALLENGE_LEN},
     packet,
     pmtud::Pmtud,
     recovery::{self, sent},
@@ -352,7 +352,7 @@ impl Paths {
     #[must_use]
     pub fn path_response(
         &mut self,
-        response: [u8; 8],
+        response: [u8; PATH_CHALLENGE_LEN],
         now: Instant,
         stats: &mut Stats,
     ) -> Option<PathRef> {
@@ -522,7 +522,7 @@ enum ProbeState {
         /// The number of probes that have been sent.
         probe_count: usize,
         /// The probe that was last sent.
-        data: [u8; 8],
+        data: [u8; PATH_CHALLENGE_LEN],
         /// Whether the probe was sent in a datagram padded to the path MTU.
         mtu: bool,
         /// When the probe was sent.
@@ -569,7 +569,7 @@ pub struct Path {
     validated: Option<Instant>,
     /// Path challenges that were received and for which `PATH_RESPONSE` has not been sent,
     /// oldest first.  At most [`Self::MAX_PENDING_CHALLENGES`] are kept.
-    challenges: VecDeque<[u8; 8]>,
+    challenges: VecDeque<[u8; PATH_CHALLENGE_LEN]>,
 
     /// The round trip time estimate for this path.
     rtt: RttEstimate,
@@ -609,8 +609,8 @@ impl Path {
     const MAX_PENDING_CHALLENGES: usize = 4;
 
     /// The encoded size of a `PATH_CHALLENGE` or `PATH_RESPONSE` frame: a one-byte frame type
-    /// followed by eight bytes of data.
-    const PATH_FRAME_LEN: usize = 1 + 8;
+    /// followed by the challenge data.
+    const PATH_FRAME_LEN: usize = 1 + PATH_CHALLENGE_LEN;
 
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
@@ -842,7 +842,12 @@ impl Path {
     }
 
     /// Handle a `PATH_RESPONSE` frame. Returns true if the response was accepted.
-    pub fn path_response(&mut self, response: [u8; 8], now: Instant, stats: &mut Stats) -> bool {
+    pub fn path_response(
+        &mut self,
+        response: [u8; PATH_CHALLENGE_LEN],
+        now: Instant,
+        stats: &mut Stats,
+    ) -> bool {
         if let ProbeState::Probing { data, mtu, .. } = &mut self.state {
             if response == *data {
                 let need_full_probe = !*mtu;
@@ -862,7 +867,7 @@ impl Path {
 
     /// The path has been challenged.  This generates a response.
     /// Each challenge gets its own response; if too many are pending, the oldest is dropped.
-    pub fn challenged(&mut self, challenge: [u8; 8]) {
+    pub fn challenged(&mut self, challenge: [u8; PATH_CHALLENGE_LEN]) {
         if self.challenges.len() >= Self::MAX_PENDING_CHALLENGES {
             self.challenges.pop_front();
         }
@@ -934,7 +939,7 @@ impl Path {
         // Send PATH_CHALLENGE.
         if let ProbeState::ProbeNeeded { probe_count } = self.state {
             qtrace!("[{self}] Initiating path challenge {probe_count}");
-            let data = random::<8>();
+            let data = random::<PATH_CHALLENGE_LEN>();
             builder.encode_frame(FrameType::PathChallenge, |b| {
                 b.encode(data);
             });
@@ -1252,8 +1257,8 @@ mod tests {
 
     use super::{Path, PathRef, Paths};
     use crate::{
-        ConnectionParameters, Stats, cc::CWND_INITIAL_PKTS, cid::RemoteConnectionIdEntry, packet,
-        stats::FrameStats,
+        ConnectionParameters, Stats, cc::CWND_INITIAL_PKTS, cid::RemoteConnectionIdEntry,
+        frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
     };
 
     fn find_path(paths: &Paths) -> PathRef {
@@ -1283,10 +1288,10 @@ mod tests {
     fn pending_challenges_are_bounded() {
         let mut path = path();
         for i in 0..=Path::MAX_PENDING_CHALLENGES {
-            path.challenged([u8::try_from(i).unwrap(); 8]);
+            path.challenged([u8::try_from(i).unwrap(); PATH_CHALLENGE_LEN]);
         }
         assert_eq!(path.challenges.len(), Path::MAX_PENDING_CHALLENGES);
-        assert_eq!(path.challenges.front(), Some(&[1; 8]));
+        assert_eq!(path.challenges.front(), Some(&[1; PATH_CHALLENGE_LEN]));
     }
 
     /// Responses that don't fit in the packet stay pending for the next one.
@@ -1294,7 +1299,7 @@ mod tests {
     fn path_responses_that_do_not_fit_stay_pending() {
         let mut path = path();
         for i in 0..3 {
-            path.challenged([i; 8]);
+            path.challenged([i; PATH_CHALLENGE_LEN]);
         }
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
@@ -1305,7 +1310,7 @@ mod tests {
         assert!(path.write_frames(&mut builder, &mut stats, false, now()));
         assert_eq!(stats.path_response, 2);
         assert_eq!(stats.path_challenge, 0);
-        assert_eq!(path.challenges, [[2; 8]]);
+        assert_eq!(path.challenges, [[2; PATH_CHALLENGE_LEN]]);
     }
 
     /// A path created once the peer's `max_udp_payload_size` is known starts out limited.
