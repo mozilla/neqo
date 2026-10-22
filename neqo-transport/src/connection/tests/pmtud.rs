@@ -49,6 +49,10 @@ fn assert_peer_limited(c: &Connection, d: &Datagram) {
 /// The server applies the client's limit as soon as it has its transport parameters.
 #[test]
 fn peer_max_udp_payload_limits_first_flight() {
+    // An unfragmented ClientHello is processed while the server's path is still temporary,
+    // so the limit is applied in `Paths::make_permanent`. A fragmented one completes after
+    // the first datagram made the path permanent, so `Paths::set_peer_max_udp_payload`
+    // applies it.
     for fragmented in [false, true] {
         let mut client = default_client();
         let mut server = default_server();
