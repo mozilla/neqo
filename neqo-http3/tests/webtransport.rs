@@ -8,10 +8,11 @@
 
 use std::{cell::RefCell, rc::Rc};
 
-use neqo_common::{event::Provider as _, header::HeadersExt as _};
+use neqo_common::{Datagram, event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
-    Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
+    Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    features::extended_connect::session::CloseReason,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 use neqo_transport::{ConnectionParameters, StreamId, StreamType, streams::SendGroupId};
@@ -333,42 +334,54 @@ fn wt_server_stream_bidi() {
     );
 }
 
+fn request_wt_session() -> (Http3Client, Http3Server, ServerSession) {
+    let now = now();
+    let (mut client, mut server) = connect();
+
+    // Client creates a WebTransport session.
+    client
+        .webtransport_create_session(now, ("https", "something.com", "/"), &[])
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(server.process_output(now).dgram(), None);
+    while client.next_event().is_some() {}
+
+    let wt_server_session = server
+        .events()
+        .find_map(|event| {
+            if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+                Some(session)
+            } else {
+                None
+            }
+        })
+        .expect("Should receive WebTransport session request");
+    (client, server, wt_server_session)
+}
+
+fn accept_wt_session_held_back() -> (Http3Client, Http3Server, ServerSession, Datagram) {
+    let now = now();
+    let (client, mut server, wt_server_session) = request_wt_session();
+
+    // Server accepts the session, but hold back the UDP datagram.
+    wt_server_session
+        .response(&SessionAcceptAction::Accept, now)
+        .unwrap();
+    let server_accept_dgram = server
+        .process_output(now)
+        .dgram()
+        .expect("Expected server to produce session acceptance datagram");
+    assert_eq!(server.process_output(now).dgram(), None);
+    (client, server, wt_server_session, server_accept_dgram)
+}
+
 #[test]
 fn wt_race_condition_server_stream_before_confirmation() {
     let now = now();
 
     for in_order in [true, false] {
-        let (mut client, mut server) = connect();
-
-        // Client creates a WebTransport session.
-        client
-            .webtransport_create_session(now, ("https", "something.com", "/"), &[])
-            .unwrap();
-        exchange_packets(&mut client, &mut server, false, None);
-        assert_eq!(server.process_output(now).dgram(), None);
-        while client.next_event().is_some() {}
-
-        // Server accepts the session, but hold back the UDP datagram.
-        let wt_server_session = server
-            .events()
-            .find_map(|event| {
-                if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) =
-                    event
-                {
-                    Some(session)
-                } else {
-                    None
-                }
-            })
-            .expect("Should receive WebTransport session request");
-        wt_server_session
-            .response(&SessionAcceptAction::Accept, now)
-            .unwrap();
-        let server_accept_dgram = server
-            .process_output(now)
-            .dgram()
-            .expect("Expected server to produce session acceptance datagram");
-        assert_eq!(server.process_output(now).dgram(), None);
+        let (mut client, mut server, wt_server_session, server_accept_dgram) =
+            accept_wt_session_held_back();
 
         // Server creates a stream, but hold back the UDP datagram.
         let wt_server_stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
@@ -432,6 +445,165 @@ fn wt_race_condition_server_stream_before_confirmation() {
 
         assert_eq!(events.next(), None);
     }
+}
+
+#[test]
+fn wt_server_stream_closed_before_confirmation() {
+    let now = now();
+
+    for (stream_type, reset, stop_sending, announced) in [
+        (StreamType::UniDi, true, false, false),
+        (StreamType::BiDi, true, false, true),
+        (StreamType::BiDi, false, true, true),
+        (StreamType::BiDi, true, true, false),
+    ] {
+        let (mut client, mut server, wt_server_session, server_accept_dgram) =
+            accept_wt_session_held_back();
+
+        // Server creates a stream and closes it, but hold back the session acceptance.
+        let wt_server_stream = wt_server_session.create_stream(stream_type).unwrap();
+        assert_eq!(wt_server_stream.send_data(&[42], now).unwrap(), 1);
+        let mut server_dgrams = vec![server.process_output(now).dgram().unwrap()];
+        if reset {
+            wt_server_stream.stream_reset_send(0).unwrap();
+            server_dgrams.push(server.process_output(now).dgram().unwrap());
+        }
+        if stop_sending {
+            wt_server_stream.stream_stop_sending(0).unwrap();
+            server_dgrams.push(server.process_output(now).dgram().unwrap());
+        }
+        assert_eq!(server.process_output(now).dgram(), None);
+        for dgram in server_dgrams {
+            client.process_input(dgram, now);
+        }
+        assert_eq!(client.next_event(), None);
+
+        client.process_input(server_accept_dgram, now);
+        let mut events = client.events();
+        assert!(matches!(
+            events.next(),
+            Some(Http3ClientEvent::WebTransport(
+                WebTransportEvent::NewSession { .. }
+            ))
+        ));
+        if announced {
+            assert_eq!(
+                events.next(),
+                Some(Http3ClientEvent::WebTransport(
+                    WebTransportEvent::NewStream {
+                        stream_id: wt_server_stream.stream_id(),
+                        session_id: wt_server_session.stream_id(),
+                    }
+                ))
+            );
+            if !reset {
+                assert_eq!(
+                    events.next(),
+                    Some(Http3ClientEvent::DataReadable {
+                        stream_id: wt_server_stream.stream_id()
+                    })
+                );
+            }
+        }
+        assert_eq!(events.next(), None);
+    }
+}
+
+/// Opens a session 0 stream on the server transport, unknown to the server's HTTP/3 layer.
+fn open_raw_wt_stream(wt_server_session: &ServerSession, stream_type: StreamType) -> StreamId {
+    assert_eq!(wt_server_session.stream_id(), StreamId::new(0));
+    let preface = if stream_type == StreamType::UniDi {
+        0x54
+    } else {
+        0x41
+    };
+    let data = [0x40, preface, 0, 42]; // Stream type varint, session ID, data.
+    let mut conn = wt_server_session.conn.borrow_mut();
+    let stream_id = conn.stream_create(stream_type).unwrap();
+    assert_eq!(conn.stream_send(stream_id, &data).unwrap(), data.len());
+    stream_id
+}
+
+#[test]
+fn wt_server_streams_buffered_when_session_fails() {
+    let now = now();
+    let headers = vec![Header::new(":status", "404")];
+
+    for reject in [true, false] {
+        let (mut client, mut server, wt_server_session) = request_wt_session();
+
+        for stream_type in [StreamType::UniDi, StreamType::BiDi] {
+            open_raw_wt_stream(&wt_server_session, stream_type);
+            client.process_input(server.process_output(now).dgram().unwrap(), now);
+        }
+        assert_eq!(server.process_output(now).dgram(), None);
+        assert_eq!(client.next_event(), None);
+
+        let reason = if reject {
+            wt_server_session
+                .response(&SessionAcceptAction::Reject(headers.clone()), now)
+                .unwrap();
+            CloseReason::Status(404)
+        } else {
+            wt_server_session
+                .conn
+                .borrow_mut()
+                .stream_reset_send(wt_server_session.stream_id(), 0)
+                .unwrap();
+            CloseReason::Error(0)
+        };
+        exchange_packets(&mut client, &mut server, false, None);
+        assert_eq!(
+            client.events().collect::<Vec<_>>(),
+            [Http3ClientEvent::WebTransport(
+                WebTransportEvent::SessionClosed {
+                    stream_id: wt_server_session.stream_id(),
+                    reason,
+                    headers: reject.then(|| headers.clone()),
+                }
+            )]
+        );
+    }
+}
+
+#[test]
+fn wt_session_close_frame_and_bidi_stream_server() {
+    let (mut client, mut server, wt_session) = setup_wt();
+    let stream_id = open_raw_wt_stream(&wt_session, StreamType::BiDi);
+    exchange_packets(&mut client, &mut server, false, None);
+    assert_eq!(
+        client.events().collect::<Vec<_>>(),
+        [
+            Http3ClientEvent::WebTransport(WebTransportEvent::NewStream {
+                stream_id,
+                session_id: wt_session.stream_id(),
+            }),
+            Http3ClientEvent::DataReadable { stream_id }
+        ]
+    );
+
+    wt_session.close_session(23, "", now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+    let error = neqo_http3::Error::HttpRequestCancelled.code();
+    assert_eq!(
+        client.events().collect::<Vec<_>>(),
+        [
+            Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
+                stream_id: wt_session.stream_id(),
+                reason: CloseReason::Clean {
+                    error: 23,
+                    message: String::new(),
+                },
+                headers: None,
+            }),
+            Http3ClientEvent::Reset {
+                stream_id,
+                error,
+                local: false,
+            },
+            Http3ClientEvent::StopSending { stream_id, error },
+        ]
+    );
 }
 
 #[test]
