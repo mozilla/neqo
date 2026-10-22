@@ -454,8 +454,8 @@ impl Session {
         self.control_stream_send.send_data(conn, buf, now)
     }
 
-    /// Send a datagram, as a QUIC datagram or, when the peer offers no QUIC
-    /// datagram support, an HTTP DATAGRAM Capsule (connect-udp only).
+    /// Send a datagram, as a QUIC datagram or, when `quic_datagrams` is false
+    /// (QUIC DATAGRAM not negotiated), an HTTP DATAGRAM Capsule (connect-udp only).
     ///
     /// # Errors
     ///
@@ -472,6 +472,10 @@ impl Session {
     ///
     /// On success, returns the queue's backpressure signal (see
     /// [`DatagramQueueOutcome`]) so the caller can throttle further writes.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "only the caller knows whether QUIC DATAGRAM is negotiated"
+    )]
     pub(crate) fn send_datagram<I: Into<DatagramTracking>>(
         &mut self,
         conn: &mut Connection,
@@ -480,6 +484,7 @@ impl Session {
         now: Instant,
         send_group_id: SendGroupId,
         send_order: SendOrder,
+        quic_datagrams: bool,
     ) -> Res<DatagramQueueOutcome> {
         trace!("[{self}] send_datagram state={:?}", self.state);
         if self.state != State::Active {
@@ -487,7 +492,7 @@ impl Session {
             return Err(Error::Unavailable);
         }
 
-        if conn.remote_datagram_size() == 0 {
+        if !quic_datagrams {
             if !self.protocol.datagram_capsule_support() {
                 // WebTransport only negotiates with a peer that supports QUIC
                 // DATAGRAM, and connect-udp always has the Capsule fallback.
@@ -495,7 +500,7 @@ impl Session {
                 debug!("[{self}]: peer supports neither QUIC DATAGRAM nor the Capsule fallback");
                 return Err(Error::Transport(neqo_transport::Error::NotAvailable));
             }
-            trace!("[{self}] remote_datagram_size is 0, trying HTTP DATAGRAM Capsule");
+            trace!("[{self}] QUIC DATAGRAM not negotiated, trying HTTP DATAGRAM Capsule");
             // The Capsule path errors when the control stream's flow-control
             // window is exhausted, then emits a resume event once the stream is
             // writable again (see `stream_writable`).
