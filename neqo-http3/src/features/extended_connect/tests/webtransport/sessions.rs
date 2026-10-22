@@ -15,7 +15,7 @@ use crate::{
     Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
     Http3State, Priority, SessionAcceptAction, WebTransportEvent,
     features::extended_connect::{
-        CloseReason,
+        CloseReason, WT_SESSION_GONE,
         stats::SessionStats,
         tests::webtransport::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
@@ -331,7 +331,7 @@ fn wt_unknown_session_frame_client() {
 
     wt.check_events_after_closing_session_client(
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         &[],
         None,
         false,
@@ -341,7 +341,7 @@ fn wt_unknown_session_frame_client() {
         &[],
         None,
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         Some(&(
             wt_session.stream_id(),
             CloseReason::Clean {
@@ -456,7 +456,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
         &[],
         None,
         &[unidi_client],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         false,
         Some(&(
             wt_session.stream_id(),
@@ -495,9 +495,9 @@ fn assert_wt_streams_cancelled_client(
 ) {
     wt.check_events_after_closing_session_client(
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         &[unidi_client],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         false,
         None,
     );
@@ -521,9 +521,9 @@ fn wt_close_session_blocked_by_flow_control_cancels_streams() {
     wt.exchange_packets();
     wt.check_events_after_closing_session_server(
         &[unidi_client],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         Some(&(
             session_id,
             CloseReason::Clean {

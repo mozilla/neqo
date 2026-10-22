@@ -36,7 +36,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            TransportPrerequisites,
+            TransportPrerequisites, WT_SESSION_GONE,
             send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
@@ -1964,9 +1964,9 @@ impl Http3Connection {
             // Use CloseType::ResetRemote so that an event will be sent. CloseType::LocalError would
             // have the same effect.
             if let Some(mut s) = self.recv_streams.remove(&id) {
-                drop(s.reset(CloseType::ResetRemote(Error::HttpRequestCancelled.code())));
+                drop(s.reset(CloseType::ResetRemote(WT_SESSION_GONE)));
             }
-            drop(conn.stream_stop_sending(id, Error::HttpRequestCancelled.code()));
+            drop(conn.stream_stop_sending(id, WT_SESSION_GONE));
         }
         #[expect(
             clippy::iter_over_hash_type,
@@ -1975,9 +1975,9 @@ impl Http3Connection {
         for id in send {
             qtrace!("Remove the extended connect sub send stream {id}");
             if let Some(mut s) = self.send_streams.remove(&id) {
-                s.handle_stop_sending(CloseType::ResetRemote(Error::HttpRequestCancelled.code()));
+                s.handle_stop_sending(CloseType::ResetRemote(WT_SESSION_GONE));
             }
-            drop(conn.stream_reset_send(id, Error::HttpRequestCancelled.code()));
+            drop(conn.stream_reset_send(id, WT_SESSION_GONE));
         }
     }
 
