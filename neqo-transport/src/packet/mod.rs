@@ -994,15 +994,15 @@ impl<'a> Public<'a> {
             dcid: self.dcid.clone(),
             packet_type: self.packet_type,
         };
+        let rx_epoch = rx.epoch();
         // If this is the first packet ever successfully decrypted
         // using `rx`, make sure to initiate a key update.
         if rx.needs_update() {
-            let rx_epoch = rx.epoch();
             crypto
                 .key_update_received(rx_epoch, release_at)
                 .map_err(make_err)?;
         }
-        crypto.check_pn_overlap().map_err(make_err)?;
+        crypto.check_pn_overlap(rx_epoch, pn).map_err(make_err)?;
         Ok(Decrypted {
             version,
             pt: self.packet_type,
@@ -1414,6 +1414,108 @@ mod tests {
             builder.encode(SAMPLE_INITIAL_PAYLOAD);
             reject_reserved_bit(builder, bit);
         }
+    }
+
+    /// `CryptoStates::test_default` uses the same keys for both key phases,
+    /// so one sender can protect packets for either phase.
+    fn short_packet(tx: &mut CryptoDxState, key_phase: bool) -> Vec<u8> {
+        let mut builder = Builder::short(
+            Encoder::default(),
+            key_phase,
+            Some(ConnectionId::from(SERVER_CID)),
+            packet::LIMIT,
+        );
+        builder.pn(tx.next_pn(), 1);
+        builder.encode(SAMPLE_SHORT_PAYLOAD);
+        builder.build(tx).expect("build").as_ref().to_vec()
+    }
+
+    fn decrypt_short(crypto: &mut CryptoStates, mut buf: Vec<u8>) -> Result<(), Error> {
+        let (packet, _) = Public::decode(&mut buf, &cid_mgr())?;
+        packet
+            .decrypt(crypto, now())
+            .map(|_| ())
+            .map_err(|e| e.error)
+    }
+
+    /// <https://www.rfc-editor.org/rfc/rfc9001.html#section-6.4>
+    #[test]
+    fn old_keys_after_newer_keys_with_lower_pn() {
+        fixture_init();
+        let mut tx = CryptoDxState::test_default_write();
+        let mut crypto = CryptoStates::test_default();
+        let old = short_packet(&mut tx, false);
+        let new = short_packet(&mut tx, true);
+        let old_higher_pn = short_packet(&mut tx, false);
+        decrypt_short(&mut crypto, old).unwrap();
+        decrypt_short(&mut crypto, new).unwrap();
+        let error = decrypt_short(&mut crypto, old_higher_pn).unwrap_err();
+        assert_eq!(error, Error::KeyUpdate);
+    }
+
+    /// The comparison is with the lowest packet number received with the new
+    /// keys, not the first.
+    #[test]
+    fn old_keys_after_newer_keys_with_lower_pn_reordered() {
+        fixture_init();
+        let mut tx = CryptoDxState::test_default_write();
+        let mut crypto = CryptoStates::test_default();
+        let new_lower_pn = short_packet(&mut tx, true);
+        let old = short_packet(&mut tx, false);
+        let new = short_packet(&mut tx, true);
+        decrypt_short(&mut crypto, new).unwrap();
+        decrypt_short(&mut crypto, new_lower_pn).unwrap();
+        let error = decrypt_short(&mut crypto, old).unwrap_err();
+        assert_eq!(error, Error::KeyUpdate);
+    }
+
+    /// The same violation seen in reverse order: a packet protected with new
+    /// keys arrives after one protected with old keys and a higher packet number.
+    #[test]
+    fn newer_keys_after_old_keys_with_higher_pn() {
+        fixture_init();
+        let mut tx = CryptoDxState::test_default_write();
+        let mut crypto = CryptoStates::test_default();
+        let old = short_packet(&mut tx, false);
+        let new = short_packet(&mut tx, true);
+        let old_higher_pn = short_packet(&mut tx, false);
+        decrypt_short(&mut crypto, old).unwrap();
+        decrypt_short(&mut crypto, old_higher_pn).unwrap();
+        let error = decrypt_short(&mut crypto, new).unwrap_err();
+        assert_eq!(error, Error::KeyUpdate);
+    }
+
+    /// A packet protected with new keys and a packet number lower than one
+    /// protected with old keys, after the key update was already detected.
+    #[test]
+    fn newer_keys_after_old_keys_with_higher_pn_during_update() {
+        fixture_init();
+        let mut tx = CryptoDxState::test_default_write();
+        let mut crypto = CryptoStates::test_default();
+        let old = short_packet(&mut tx, false);
+        let new_lower_pn = short_packet(&mut tx, true);
+        let old_higher_pn = short_packet(&mut tx, false);
+        let new = short_packet(&mut tx, true);
+        decrypt_short(&mut crypto, old).unwrap();
+        decrypt_short(&mut crypto, new).unwrap();
+        decrypt_short(&mut crypto, old_higher_pn).unwrap();
+        let error = decrypt_short(&mut crypto, new_lower_pn).unwrap_err();
+        assert_eq!(error, Error::KeyUpdate);
+    }
+
+    /// A packet protected with old keys that arrives after the first packet
+    /// protected with new keys, but has a lower packet number, is valid.
+    #[test]
+    fn old_keys_reordered_after_newer_keys() {
+        fixture_init();
+        let mut tx = CryptoDxState::test_default_write();
+        let mut crypto = CryptoStates::test_default();
+        let old = short_packet(&mut tx, false);
+        let old_delayed = short_packet(&mut tx, false);
+        let new = short_packet(&mut tx, true);
+        decrypt_short(&mut crypto, old).unwrap();
+        decrypt_short(&mut crypto, new).unwrap();
+        decrypt_short(&mut crypto, old_delayed).unwrap();
     }
 
     #[test]

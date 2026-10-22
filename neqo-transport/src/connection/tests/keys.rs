@@ -4,18 +4,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Datagram, qdebug};
+use neqo_common::{Datagram, Encoder, qdebug};
 use test_fixture::{
     assertions::{is_handshake, is_initial},
-    now, split_datagram,
+    datagram, now, split_datagram,
 };
 
+#[cfg(not(feature = "disable-encryption"))]
+use super::connect;
 use super::{
     super::{
         super::{CloseReason, ERROR_AEAD_LIMIT_REACHED},
         Connection, ConnectionParameters, Error, Output, State, StreamType,
     },
-    AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
+    AT_LEAST_PTO, connect_force_idle, default_client, default_server, maybe_authenticate,
     send_and_receive, send_something,
 };
 use crate::{
@@ -182,6 +184,7 @@ fn key_update_client() {
 }
 
 #[test]
+#[cfg(not(feature = "disable-encryption"))]
 fn key_update_consecutive() {
     let mut client = default_client();
     let mut server = default_server();
@@ -278,6 +281,73 @@ fn key_update_received_after_rotation() {
     // Redelivering the packet now must not start another key update.
     client.process_input(dgram, now);
     assert_eq!(client.get_epochs(), (Some(4), Some(4)));
+}
+
+// A packet protected with old keys can arrive after the first packet
+// protected with new keys. If its packet number is lower, it is valid.
+#[test]
+fn key_update_reordered_old_packet() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    let old = send_something(&mut server, now);
+    let old_delayed = send_something(&mut server, now);
+    assert!(server.initiate_key_update().is_ok());
+    let new = send_something(&mut server, now);
+
+    client.process_input(old, now);
+    client.process_input(new, now);
+    assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+    let before = client.stats().dropped_rx;
+    client.process_input(old_delayed, now);
+    assert_eq!(client.stats().dropped_rx, before);
+    assert_eq!(*client.state(), State::Confirmed);
+}
+
+// <https://www.rfc-editor.org/rfc/rfc9001.html#section-6.4>
+//
+// The server protects one packet with the next keys without installing them,
+// so it keeps sending with the old keys and higher packet numbers.
+#[test]
+fn key_update_old_keys_after_newer_keys() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    let old = send_something(&mut server, now);
+    let mut next = server.crypto.states().test_next_write();
+    let dcid = client
+        .paths
+        .primary()
+        .unwrap()
+        .borrow()
+        .local_cid()
+        .cloned();
+    let mut builder =
+        packet::Builder::short(Encoder::default(), next.key_phase(), dcid, packet::LIMIT);
+    builder.pn(next.next_pn(), 4);
+    builder.encode([0x01; 3]); // PING frames
+    let new = datagram(builder.build(&mut next).unwrap().as_ref().to_vec());
+    drop(send_something(&mut server, now)); // Same packet number as `new`.
+    let old_higher_pn = send_something(&mut server, now);
+
+    client.process_input(old, now);
+    client.process_input(new, now);
+    assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+    client.process_input(old_higher_pn, now);
+    assert_eq!(
+        client.state().error(),
+        Some(&CloseReason::Transport(Error::KeyUpdate))
+    );
+
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    assert_eq!(
+        server.state().error(),
+        Some(&CloseReason::Transport(Error::Peer(14)))
+    );
 }
 
 // Key updates can't be initiated too early.
