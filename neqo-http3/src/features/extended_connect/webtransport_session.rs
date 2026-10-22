@@ -18,7 +18,7 @@ use sfv::{BareItem, Item, Parser};
 use crate::{
     Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
-        CloseReason, ExtendedConnectEvents, ExtendedConnectType,
+        CloseReason, ExtendedConnectEvents, ExtendedConnectType, WT_SESSION_GONE,
         session::{DgramContextIdError, Protocol, State},
         stats::SessionStats,
     },
@@ -137,11 +137,17 @@ impl Protocol for Session {
                 CloseReason::Clean { error, message },
                 None,
             );
-            if fin {
-                Ok(Some(State::Done))
-            } else {
-                Ok(Some(State::FinPending))
+            if !fin {
+                let more = control_stream_recv.read_data(conn, &mut [0], now);
+                let error = if matches!(more, Ok((0, _))) {
+                    WT_SESSION_GONE
+                } else {
+                    Error::HttpMessage.code()
+                };
+                drop(conn.stream_reset_send(self.id, error));
+                drop(conn.stream_stop_sending(self.id, WT_SESSION_GONE));
             }
+            Ok(Some(State::Done))
         } else if fin {
             events.session_end(
                 ExtendedConnectType::WebTransport,
