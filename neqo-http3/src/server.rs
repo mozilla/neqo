@@ -441,7 +441,8 @@ mod tests {
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
+        CloseReason, Connection, ConnectionEvent, Error as TransportError, State, StreamId,
+        StreamType, ZeroRttState,
     };
     use nss::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
@@ -1024,9 +1025,12 @@ mod tests {
         peer_conn.stream_close_send(stream_id).unwrap();
 
         let out = peer_conn.process_output(now());
-        hconn.process(out.dgram(), now());
+        let out = hconn.process(out.dgram(), now());
 
         assert_closed(&hconn, &Error::HttpFrame);
+        peer_conn.process_input(out.dgram().unwrap(), now());
+        let err = CloseReason::Transport(TransportError::PeerApplication(Error::HttpFrame.code()));
+        assert!(matches!(peer_conn.state(), State::Draining { error, .. } if *error == err));
     }
 
     const REQUEST_WITH_BODY: &[u8] = &[
@@ -1065,6 +1069,34 @@ mod tests {
     #[test]
     fn server_incomplete_unknown_frame() {
         test_incomplete_frame(&[0x21]);
+    }
+
+    #[test]
+    fn server_incomplete_frame_type() {
+        test_incomplete_frame(&[0x40]);
+    }
+
+    #[test]
+    fn server_incomplete_frame_length() {
+        test_incomplete_frame(&[0x01, 0x40]);
+    }
+
+    #[test]
+    fn server_empty_request() {
+        let (mut hconn, mut peer_conn) = connect();
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        peer_conn.stream_close_send(stream_id).unwrap();
+        let out = peer_conn.process_output(now());
+        let out = hconn.process(out.dgram(), now());
+        drop(peer_conn.process(out.dgram(), now()));
+
+        let app_error = Error::HttpRequestIncomplete.code();
+        let reset = ConnectionEvent::RecvStreamReset {
+            stream_id,
+            app_error,
+        };
+        assert!(peer_conn.events().any(|e| e == reset));
+        assert_not_closed(&hconn);
     }
 
     #[test]
