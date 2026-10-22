@@ -49,22 +49,12 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// Returns an error if response headers do not contain
 /// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
-    if let Some(h) = headers.iter().take(1).find_header(":status") {
-        if !matches!(h.value(), [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9']) {
-            return Err(Error::InvalidHeader); // RFC 9110, Section 15.
-        }
-        let status_code = std::str::from_utf8(h.value())
-            .map_err(|_| Error::InvalidHeader)?
-            .parse::<u16>()
-            .map_err(|_| Error::InvalidHeader)?;
-        if status_code == 101 {
-            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
-            Err(Error::InvalidHeader)
-        } else {
-            Ok((100..200).contains(&status_code))
-        }
-    } else {
-        Err(Error::InvalidHeader)
+    let status = headers.iter().take(1).find_header(":status");
+    match status.map(Header::value) {
+        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
+        Some(b"101") => Err(Error::InvalidHeader),
+        Some([d @ b'0'..=b'9', b'0'..=b'9', b'0'..=b'9']) => Ok(*d == b'1'),
+        _ => Err(Error::InvalidHeader), // RFC 9110, Section 15.
     }
 }
 
@@ -276,7 +266,9 @@ mod tests {
     #[test]
     fn is_interim_not_three_digits() {
         // A status code is a three-digit integer (RFC 9110, Section 15).
-        for bad in ["+200", "0200", "20", "7", "65535", "+150"] {
+        for bad in [
+            "+200", "0200", "20", "7", "65535", "+150", "x00", "1x0", "10x",
+        ] {
             let headers = vec![Header::new(":status", bad)];
             assert_eq!(is_interim(&headers), Err(Error::InvalidHeader));
         }
