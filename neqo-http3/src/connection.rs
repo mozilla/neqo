@@ -370,10 +370,14 @@ impl Http3Connection {
     /// streams.
     fn initialize_http3_connection(&mut self, conn: &mut Connection) -> Res<()> {
         debug!("[{self}] Initialize the http3 connection");
-        self.control_stream_local.create(conn)?;
+        let peer_limit = |e| match e {
+            Error::StreamLimit => Error::HttpGeneralProtocol, // RFC 9114, Section 6.2.
+            e => e,
+        };
+        self.control_stream_local.create(conn).map_err(peer_limit)?;
 
         self.send_settings();
-        self.create_qpack_streams(conn)?;
+        self.create_qpack_streams(conn).map_err(peer_limit)?;
         Ok(())
     }
 

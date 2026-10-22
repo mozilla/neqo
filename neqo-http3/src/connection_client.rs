@@ -5386,7 +5386,7 @@ mod tests {
                 DEFAULT_ALPN_H3,
                 ConnectionParameters::default().max_streams(StreamType::UniDi, 0),
             ));
-        handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
+        handshake_client_error(&mut client, &mut server, &Error::HttpGeneralProtocol);
     }
 
     /// 2 streams isn't enough for control and QPACK streams.
@@ -5398,7 +5398,7 @@ mod tests {
                 DEFAULT_ALPN_H3,
                 ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
             ));
-        handshake_client_error(&mut client, &mut server, &Error::StreamLimit);
+        handshake_client_error(&mut client, &mut server, &Error::HttpGeneralProtocol);
     }
 
     fn do_malformed_response_test(headers: &[Header]) {

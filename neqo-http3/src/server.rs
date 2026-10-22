@@ -442,12 +442,13 @@ mod tests {
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
+        CloseReason, Connection, ConnectionEvent, ConnectionParameters, State, StreamId,
+        StreamType, ZeroRttState,
     };
     use nss::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
         CountingConnectionIdGenerator, DEFAULT_ALPN, DEFAULT_KEYS, anti_replay, default_client,
-        fixture_init, now,
+        fixture_init, new_client, now,
     };
 
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
@@ -953,6 +954,28 @@ mod tests {
         }
         assert!(stop_sending_event_found);
         assert_not_closed(&hconn);
+    }
+
+    // Server: the peer's transport parameters must allow three unidirectional streams
+    // (RFC 9114, Section 6.2).
+    #[test]
+    fn server_peer_uni_stream_limit_too_low() {
+        let mut server = default_server();
+        let mut client = new_client::<CountingConnectionIdGenerator>(
+            ConnectionParameters::default().max_streams(StreamType::UniDi, 2),
+        );
+        let c1 = client.process_output(now());
+        let c11 = client.process_output(now());
+        _ = server.process(c1.dgram(), now());
+        let s1 = server.process(c11.dgram(), now());
+        let c2 = client.process(s1.dgram(), now());
+        let s2 = server.process(c2.dgram(), now());
+        let c2 = client.process(s2.dgram(), now());
+        drop(server.process(c2.dgram(), now()));
+        client.authenticated(AuthenticationStatus::Ok, now());
+        let c3 = client.process_output(now());
+        drop(server.process(c3.dgram(), now()));
+        assert_closed(&server, &Error::HttpGeneralProtocol);
     }
 
     // Server: a push stream (unidirectional type 0x1) is H3_STREAM_CREATION_ERROR
