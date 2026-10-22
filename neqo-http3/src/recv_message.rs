@@ -206,7 +206,11 @@ impl RecvMessage {
 
         match self.state {
             RecvMessageState::WaitingForResponseHeaders { .. } => {
-                return Err(Error::HttpGeneralProtocolStream);
+                return Err(if self.message_type == MessageType::Request {
+                    Error::HttpRequestIncomplete
+                } else {
+                    Error::HttpGeneralProtocolStream
+                });
             }
             RecvMessageState::ReadingData { .. } => {}
             RecvMessageState::WaitingForData { .. }

@@ -837,6 +837,10 @@ impl Http3Connection {
                 if e.stream_reset_error() && !self.recv_stream_is_critical(stream_id) {
                     drop(conn.stream_stop_sending(stream_id, e.code()));
                     self.close_recv(stream_id, CloseType::LocalError(e.code()), conn)?;
+                    if *e == Error::HttpRequestIncomplete {
+                        self.remove_send_stream(stream_id, conn);
+                        drop(conn.stream_reset_send(stream_id, e.code()));
+                    }
                     return Ok((U::default(), false));
                 }
             }

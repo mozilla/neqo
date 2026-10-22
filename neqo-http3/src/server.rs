@@ -441,7 +441,8 @@ mod tests {
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
+        AppError, CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType,
+        ZeroRttState,
     };
     use nss::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
@@ -450,7 +451,7 @@ mod tests {
     };
 
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
+    use crate::{Error, HFrame, Header, Http3OrWebTransportStream, Http3Parameters, Priority};
 
     fn qpack_defaults() -> qpack::Settings {
         qpack::Settings::default()
@@ -1065,6 +1066,50 @@ mod tests {
     #[test]
     fn server_incomplete_unknown_frame() {
         test_incomplete_frame(&[0x21]);
+    }
+
+    fn stream_reset(hconn: &Http3Server) -> (Http3OrWebTransportStream, AppError) {
+        hconn
+            .events()
+            .find_map(|e| match e {
+                Http3ServerEvent::StreamReset { stream, error } => Some((stream, error)),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn test_incomplete_request(request: &[u8]) {
+        let (mut hconn, mut peer_conn) = connect();
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        peer_conn.stream_send(stream_id, request).unwrap();
+        peer_conn.stream_close_send(stream_id).unwrap();
+        let out = peer_conn.process_output(now());
+        let out = hconn.process(out.dgram(), now());
+        let out = peer_conn.process(out.dgram(), now());
+
+        let app_error = Error::HttpRequestIncomplete.code();
+        let reset = ConnectionEvent::RecvStreamReset {
+            stream_id,
+            app_error,
+        };
+        assert!(peer_conn.events().any(|e| e == reset));
+        assert!(peer_conn.state().connected());
+        let (stream, error) = stream_reset(&hconn);
+        assert_eq!((stream.stream_id(), error), (stream_id, app_error));
+        let headers = [Header::new(":status", "200")];
+        assert_eq!(stream.send_headers(&headers), Err(Error::InvalidStreamId));
+        hconn.process(out.dgram(), now());
+        assert_not_closed(&hconn);
+    }
+
+    #[test]
+    fn server_request_reserved_frame_only() {
+        test_incomplete_request(&[0x21, 0x00]);
+    }
+
+    #[test]
+    fn server_request_unknown_frames_only() {
+        test_incomplete_request(&[0x21, 0x00, 0x0a, 0x01, 0x00]);
     }
 
     #[test]
