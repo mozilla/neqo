@@ -20,7 +20,7 @@ use neqo_common::{
 use nss::random;
 
 use crate::{
-    ConnectionParameters, Stats,
+    ConnectionParameters, Error, Res, Stats,
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
@@ -222,11 +222,15 @@ impl Paths {
     }
 
     /// Process elapsed time for active paths.
-    /// Returns an true if there are viable paths remaining after tidying up.
+    /// Returns whether it failed over to another path.
     ///
     /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
     /// for themselves.
-    pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoAvailablePath`] if no valid path is left to fail over to.
+    pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> Res<bool> {
         let to_retire = &mut self.to_retire;
         let mut primary_failed = false;
         self.paths.retain(|p| {
@@ -245,24 +249,19 @@ impl Paths {
         if primary_failed {
             self.primary = None;
             // Find a valid path to fall back to.
-            #[expect(
-                clippy::option_if_let_else,
-                reason = "The alternative is less readable."
-            )]
-            if let Some(fallback) = self
+            let Some(path) = self
                 .paths
                 .iter()
                 .rev() // More recent paths are toward the end.
                 .find(|p| p.borrow().is_valid())
-            {
-                // Need a clone as `fallback` is borrowed from `self`.
-                let path = Rc::clone(fallback);
-                qinfo!("[{}] Failing over after primary path failed", path.borrow());
-                drop(self.select_primary(&path, now));
-                true
-            } else {
-                false
-            }
+                .map(Rc::clone)
+            else {
+                qinfo!("Last available path failed");
+                return Err(Error::NoAvailablePath);
+            };
+            qinfo!("[{}] Failing over after primary path failed", path.borrow());
+            drop(self.select_primary(&path, now));
+            Ok(true)
         } else {
             // See if the PMTUD raise timer wants to fire.
             if let Some(path) = self.primary() {
@@ -270,7 +269,7 @@ impl Paths {
                     .pmtud_mut()
                     .maybe_fire_raise_timer(now, stats);
             }
-            true
+            Ok(false)
         }
     }
 
