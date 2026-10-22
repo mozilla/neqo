@@ -697,6 +697,27 @@ fn simultaneous_stop_sending_and_reset() {
 }
 
 #[test]
+fn stream_reset_code() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, &[0x00]).unwrap();
+    server.process_input(client.process_output(now()).dgram().unwrap(), now());
+    assert_eq!(server.stream_reset_code(stream_id), Ok(None));
+
+    let code = 7;
+    client.stream_reset_send(stream_id, code).unwrap();
+    server.process_input(client.process_output(now()).dgram().unwrap(), now());
+    assert_eq!(server.stream_reset_code(stream_id), Ok(Some(code)));
+    assert_eq!(
+        server.stream_recv(stream_id, &mut [0]),
+        Err(Error::NoMoreData)
+    );
+    assert_eq!(server.stream_reset_code(stream_id), Ok(Some(code)));
+}
+
+#[test]
 /// Make a stream data or control frame arrive after the stream has been used and cleared.
 fn late_stream_related_frames() {
     fn late_stream_related_frame(frame_type: FrameType) {
