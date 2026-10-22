@@ -356,14 +356,14 @@ impl Http3ServerHandler {
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
-                        HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
                         // Server push is not supported. A server that does not push ignores
-                        // MAX_PUSH_ID (RFC 9114, Section 7.2.7); any other push frame is
-                        // unexpected.
+                        // MAX_PUSH_ID (RFC 9114, Section 7.2.7); CANCEL_PUSH is unexpected.
                         HFrame::MaxPushId => Ok(()),
-                        HFrame::CancelPush | HFrame::PriorityUpdatePush => {
+                        HFrame::Goaway { .. } | HFrame::CancelPush => {
                             Err(Error::HttpFrameUnexpected)
                         }
+                        // No push ID has been promised (RFC 9218, Section 7.2).
+                        HFrame::PriorityUpdatePush => Err(Error::HttpId),
                         HFrame::PriorityUpdateRequest {
                             element_id,
                             priority,

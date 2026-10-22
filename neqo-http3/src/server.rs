@@ -451,7 +451,7 @@ mod tests {
     };
 
     use super::{ConnectionRef, Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
+    use crate::{Error, HFrame, Header, Http3Parameters, Priority, frames::HFrameType};
 
     fn qpack_defaults() -> qpack::Settings {
         qpack::Settings::default()
@@ -1005,6 +1005,26 @@ mod tests {
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
         assert_not_closed(&hconn);
+    }
+
+    /// Send a `frame_type` frame for push ID 0 and expect `Error::HttpId`.
+    fn push_id_frame_on_control_stream(frame_type: HFrameType) {
+        const PUSH_ID: u64 = 0;
+        let (mut hconn, mut peer_conn) = connect();
+        let mut e = Encoder::default();
+        e.encode_varint(frame_type).encode_vvec_with(|e| {
+            e.encode_varint(PUSH_ID);
+        });
+        peer_conn.control_send(e.as_ref());
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&hconn, &Error::HttpId);
+    }
+
+    // No push ID has been promised (RFC 9218, Section 7.2).
+    #[test]
+    fn server_priority_update_push_frame_on_control_stream() {
+        push_id_frame_on_control_stream(HFrameType::PRIORITY_UPDATE_PUSH);
     }
 
     // Server: receive unknown stream type
