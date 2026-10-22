@@ -143,9 +143,12 @@ impl NewStreamHeadReader {
         loop {
             let (output, fin) = self.read(conn)?;
             let Some(output) = output else {
-                if fin {
+                if let (true, Self::ReadType { stream_id, .. } | Self::ReadId { stream_id, .. }) =
+                    (fin, &*self)
+                {
+                    let res = Self::incomplete_header(*stream_id);
                     *self = Self::Done;
-                    return Err(Error::HttpStreamCreation);
+                    return res;
                 }
                 return Ok(None);
             };
@@ -170,8 +173,9 @@ impl NewStreamHeadReader {
                             return final_type;
                         }
                         (Ok(t), true) => {
+                            let stream_id = *stream_id;
                             *self = Self::Done;
-                            return Self::map_stream_fin(*t);
+                            return Self::map_stream_fin(*t, stream_id);
                         }
                         (Ok(Some(t)), false) => {
                             qtrace!("Decoded stream type {:?}", *t);
@@ -202,12 +206,25 @@ impl NewStreamHeadReader {
         }
     }
 
-    fn map_stream_fin(decoded: Option<NewStreamType>) -> Res<Option<NewStreamType>> {
+    /// A unidirectional stream that ends mid-header is ignored (RFC 9114, Section 6.2).
+    /// Section 6.2 only covers the type; WebTransport has no error for a FIN before the session ID.
+    const fn incomplete_header(stream_id: StreamId) -> Res<Option<NewStreamType>> {
+        if stream_id.is_uni() {
+            Ok(Some(NewStreamType::Unknown))
+        } else {
+            Err(Error::HttpStreamCreation)
+        }
+    }
+
+    fn map_stream_fin(
+        decoded: Option<NewStreamType>,
+        stream_id: StreamId,
+    ) -> Res<Option<NewStreamType>> {
         match decoded {
             Some(NewStreamType::Control | NewStreamType::Encoder | NewStreamType::Decoder) => {
                 Err(Error::HttpClosedCriticalStream)
             }
-            None => Err(Error::HttpStreamCreation),
+            None => Self::incomplete_header(stream_id),
             Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
             Some(NewStreamType::WebTransportStream(_)) => {
@@ -610,7 +627,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM],
             true,
-            &Err(Error::HttpStreamCreation),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
 
@@ -626,7 +643,7 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM],
             true,
-            &Err(Error::HttpStreamCreation),
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
 
@@ -659,6 +676,16 @@ mod tests {
             &[WEBTRANSPORT_STREAM],
             true,
             &Err(Error::HttpStreamCreation),
+            true,
+        );
+
+        let mut t = Test::new(StreamType::UniDi, Role::Client);
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_UNI_STREAM).encode_byte(0x40); // Half a 2-byte session ID.
+        t.decode_buffer(
+            enc.as_ref(),
+            true,
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
             true,
         );
     }
@@ -676,7 +703,15 @@ mod tests {
         let mut t = Test::new(StreamType::UniDi, Role::Client);
         // A stream ID of 0x3fff_ffff_ffff_ffff is encoded into [0xff; 8].
         // For this test the stream type is truncated.
-        // This should cause an error.
+        // The stream is ignored (RFC 9114, Section 6.2).
+        t.decode_buffer(
+            &[0xff; 7],
+            true,
+            &Ok((ReceiveOutput::NewStream(NewStreamType::Unknown), true)),
+            true,
+        );
+
+        let mut t = Test::new(StreamType::BiDi, Role::Server);
         t.decode_buffer(&[0xff; 7], true, &Err(Error::HttpStreamCreation), true);
     }
 }
