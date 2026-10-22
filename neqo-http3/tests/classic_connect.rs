@@ -111,3 +111,17 @@ fn classic_connect_via_fetch_panics_in_debug() {
     );
     assert_eq!(res, Err(Error::InvalidInput));
 }
+
+#[test]
+fn classic_connect_invalid_header_value() {
+    let mut client = default_http3_client();
+    let mut server = default_http3_server();
+    let out = test_fixture::connect_peers(&mut client, &mut server);
+    assert_eq!(server.process(out, now()).dgram(), None);
+
+    let headers = [Header::new("x", "a\rb")];
+    let res = client.connect(now(), AUTHORITY, &headers, Priority::default());
+    assert_eq!(res, Err(Error::InvalidInput));
+    let res = client.connect(now(), AUTHORITY, &[], Priority::default());
+    assert_eq!(res.unwrap(), 0);
+}

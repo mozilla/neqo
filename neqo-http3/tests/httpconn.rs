@@ -10,6 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
+use http::Uri;
 use neqo_common::{Datagram, event::Provider as _, expect_usize};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
@@ -175,6 +176,55 @@ fn fetch() {
     let out = hconn_s.process(None::<Datagram>, now());
     drop(hconn_c.process(out.dgram(), now()));
     process_client_events(&mut hconn_c);
+}
+
+fn fetch_uri(uri: &str) -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
+    let (mut hconn_c, mut hconn_s, dgram) = connect();
+    let uri = uri.parse::<Uri>().unwrap();
+    let req = hconn_c
+        .fetch(now(), "GET", &uri, &[], Priority::default())
+        .unwrap();
+    hconn_c.stream_close_send(req, now()).unwrap();
+    let out = hconn_c.process(dgram, now());
+    _ = hconn_s.process(out.dgram(), now());
+    let request = receive_request(&hconn_s).unwrap();
+    (hconn_c, hconn_s, request)
+}
+
+#[test]
+fn fetch_uri_drops_userinfo() {
+    fetch_uri("https://u:p@something.com/");
+}
+
+#[test]
+fn fetch_invalid_uri() {
+    let (mut hconn_c, _hconn_s, _dgram) = connect();
+    for uri in ["/", "https://a.example/\x7f", "https://a.example/?\x7f"] {
+        let uri = uri.parse::<Uri>().unwrap();
+        let res = hconn_c.fetch(now(), "GET", &uri, &[], Priority::default());
+        assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
+    }
+    let target = ("https", "something.com", "/");
+    let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
+    assert_eq!(res.unwrap(), 0);
+}
+
+#[test]
+fn fetch_invalid_header_value() {
+    let (mut hconn_c, _hconn_s, _dgram) = connect();
+    let headers = [Header::new("x", "a\rb")];
+    let target = ("https", "something.com", "/");
+    let res = hconn_c.fetch(now(), "GET", target, &headers, Priority::default());
+    assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
+    let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
+    assert_eq!(res.unwrap(), 0);
+}
+
+#[test]
+fn response_invalid_header_value() {
+    let (_hconn_c, _hconn_s, request) = fetch_uri("https://something.com/");
+    let res = request.send_headers(&[Header::new(":status", "200"), Header::new("x", "a\rb")]);
+    assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
 }
 
 #[test]
