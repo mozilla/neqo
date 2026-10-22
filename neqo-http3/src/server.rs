@@ -955,6 +955,26 @@ mod tests {
         assert_not_closed(&hconn);
     }
 
+    // Server: a reliable reset that cuts a request stream inside its first frame type is a
+    // stream reset, not a connection error.
+    #[test]
+    fn server_reliable_reset_inside_request_frame_type() {
+        let (mut hconn, mut peer_conn) = connect();
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        // First byte of a two-byte varint.
+        _ = peer_conn.stream_send(stream_id, &[0x40]).unwrap();
+        peer_conn.stream_commit(stream_id).unwrap();
+        peer_conn
+            .stream_reset_send(stream_id, Error::HttpRequestCancelled.code())
+            .unwrap();
+        let out = peer_conn.process_output(now());
+        drop(hconn.process(out.dgram(), now()));
+        assert_not_closed(&hconn);
+        let mut handler = hconn.http3_handlers.values().next().unwrap().borrow_mut();
+        let recv_streams = handler.base_handler_mut().recv_streams();
+        assert!(!recv_streams.contains_key(&stream_id));
+    }
+
     // Server: a push stream (unidirectional type 0x1) is H3_STREAM_CREATION_ERROR
     // (RFC 9114, Section 6.2.2); a server must never receive one.
     #[test]
