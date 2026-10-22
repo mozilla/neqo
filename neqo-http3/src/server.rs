@@ -920,6 +920,34 @@ mod tests {
         assert_not_closed(&hconn);
     }
 
+    // Server: a client GOAWAY carries a push ID (RFC 9114, Section 7.2.6).
+    #[test]
+    fn server_goaway_frame_accepted() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn.control_send(&[0x7, 0x1, 0x1]);
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_not_closed(&hconn);
+    }
+
+    #[test]
+    fn server_goaway_push_id_not_increased() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn.control_send(&[0x7, 0x1, 0x2, 0x7, 0x1, 0x2, 0x7, 0x1, 0x1]);
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_not_closed(&hconn);
+    }
+
+    #[test]
+    fn server_goaway_push_id_increased() {
+        let (mut hconn, mut peer_conn) = connect();
+        peer_conn.control_send(&[0x7, 0x1, 0x1, 0x7, 0x1, 0x2]);
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&hconn, &Error::HttpId);
+    }
+
     // Server: receive unknown stream type
     // also test getting stream id that does not fit into a single byte.
     #[test]
