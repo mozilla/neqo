@@ -482,8 +482,10 @@ impl<B: Buffer> Encoder<B> {
 }
 
 impl Encoder<Vec<u8>> {
-    /// Skip the first `n` bytes from the encoder buffer without copying.
+    /// Skip the first `n` bytes from the encoder buffer.
     /// This advances the internal offset, making those bytes inaccessible.
+    /// Skipped bytes are released once they are at least as many as the remaining bytes.
+    /// This invalidates any outstanding [`Reservation`].
     ///
     /// # Panics
     ///
@@ -491,6 +493,10 @@ impl Encoder<Vec<u8>> {
     pub fn skip(&mut self, n: usize) {
         assert!(n <= self.len(), "Cannot skip beyond buffer length");
         self.start += n;
+        if self.start >= self.len() {
+            self.buf.drain(..self.start);
+            self.start = 0;
+        }
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
@@ -1374,6 +1380,18 @@ mod tests {
     fn encoder_skip_too_much() {
         let mut enc = Encoder::from_hex("0102");
         enc.skip(3);
+    }
+
+    /// [`Encoder::skip`] should release skipped bytes from the underlying buffer.
+    #[test]
+    fn encoder_skip_releases_skipped_bytes() {
+        let mut enc = Encoder::from_hex("010203040506");
+        enc.skip(2);
+        assert_eq!((enc.start, enc.buf.len()), (2, 6));
+        enc.skip(1);
+        assert_eq!((enc.start, enc.buf.as_slice()), (0, [4, 5, 6].as_slice()));
+        enc.skip(3);
+        assert_eq!((enc.start, enc.buf.len()), (0, 0));
     }
 
     /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this
