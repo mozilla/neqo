@@ -2201,7 +2201,10 @@ impl Connection {
         };
         if let Some((addr, cid)) = spa {
             // The connection ID isn't special, so just save it.
-            self.cids.add_remote(cid)?;
+            if !self.cids.add_remote(cid, 0)? {
+                self.paths
+                    .retire_old_cid(ConnectionIdManager::SEQNO_PREFERRED);
+            }
 
             // The preferred address doesn't dictate what the local address is, so this
             // has to use the existing address.  So only pay attention to a preferred
@@ -3462,12 +3465,18 @@ impl Connection {
                 retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
-                self.cids.add_remote(ConnectionIdEntry::new(
-                    sequence_number,
-                    ConnectionId::from(connection_id),
-                    stateless_reset_token,
-                ))?;
+                let added = self.cids.add_remote(
+                    ConnectionIdEntry::new(
+                        sequence_number,
+                        ConnectionId::from(connection_id),
+                        stateless_reset_token,
+                    ),
+                    retire_prior,
+                )?;
                 self.paths.retire_cids(retire_prior, &mut self.cids);
+                if !added {
+                    self.paths.retire_old_cid(sequence_number);
+                }
                 let too_many = if self.cids.len() >= ConnectionIdManager::ACTIVE_LIMIT {
                     Some("received too many active connection IDs")
                 } else if self.paths.retire_queue_len() > ConnectionIdManager::MAX_RETIRE_QUEUE {

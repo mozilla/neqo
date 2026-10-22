@@ -26,9 +26,9 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, connect_fail, connect_force_idle,
+    connect_rtt_idle, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1443,6 +1443,131 @@ fn retire_prior_to_migration_success() {
     assert_v4_path(&dgram, false);
     assert_ne!(get_cid(&dgram), original_cid);
     assert_ne!(get_cid(&dgram), probe_cid);
+}
+
+fn counting_server() -> (Connection, Rc<RefCell<dyn ConnectionIdGenerator>>) {
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    (server, cid_gen)
+}
+
+/// Complete the handshake without the server receiving an acknowledgment
+/// for its `NEW_CONNECTION_ID` frames.
+fn handshake_unacked_new_connection_ids() -> (
+    Connection,
+    Connection,
+    Rc<RefCell<dyn ConnectionIdGenerator>>,
+) {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    let dgram = fast_handshake(&mut client, &mut server);
+    client.process_input(dgram.unwrap(), now());
+    (client, server, cid_gen)
+}
+
+/// Have the server retransmit its `NEW_CONNECTION_ID` frames on PTO.
+/// The client's PTO doesn't fire, so it doesn't retransmit anything.
+fn repeat_new_connection_ids(client: &mut Connection, server: &mut Connection) {
+    let before = client.stats().frame_rx.new_connection_id;
+    let pto = server.process_output(now() + AT_LEAST_PTO).dgram().unwrap();
+    client.process_input(pto, now());
+    let repeated = ConnectionIdManager::ACTIVE_LIMIT - 1;
+    assert_eq!(client.stats().frame_rx.new_connection_id, before + repeated);
+}
+
+/// RFC 9000, Section 9.5: a repeated `NEW_CONNECTION_ID` frame doesn't
+/// make a connection ID that a path used available to another path.
+#[test]
+fn new_connection_id_repeated_after_use() {
+    let (mut client, mut server, _) = handshake_unacked_new_connection_ids();
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now())
+        .unwrap();
+    let first_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
+
+    repeat_new_connection_ids(&mut client, &mut server);
+
+    let second_addr = new_port(DEFAULT_ADDR_V4);
+    client
+        .migrate(Some(second_addr), Some(second_addr), true, now())
+        .unwrap();
+    assert_ne!(get_cid(&send_something(&mut client, now())), first_cid);
+}
+
+/// RFC 9000, Section 19.15: a `NEW_CONNECTION_ID` frame with a sequence number
+/// below an earlier Retire Prior To value is retired, not used.
+#[test]
+fn new_connection_id_repeated_after_retire_prior_to() {
+    let (mut client, mut server, cid_gen) = handshake_unacked_new_connection_ids();
+    let ncid = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
+    client.process_input(ncid, now());
+    drop(send_something(&mut client, now()));
+    let retired = client.stats().frame_tx.retire_connection_id;
+
+    repeat_new_connection_ids(&mut client, &mut server);
+    assert_eq!(*client.state(), State::Confirmed);
+
+    // Only the primary path has a connection ID.
+    assert_eq!(
+        client.migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now()),
+        Err(Error::InvalidMigration)
+    );
+    drop(send_something(&mut client, now()));
+    let expected = retired + ConnectionIdManager::ACTIVE_LIMIT - 1;
+    assert_eq!(client.stats().frame_tx.retire_connection_id, expected);
+}
+
+/// Writes a `NEW_CONNECTION_ID` frame with the given sequence number and Retire Prior To.
+struct NewConnectionId(u64, u64, Rc<RefCell<dyn ConnectionIdGenerator>>);
+
+impl crate::connection::test_internal::FrameWriter for NewConnectionId {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        let cid = self.2.borrow_mut().generate_cid().unwrap();
+        let mut srt = [0; 16];
+        srt[..8].copy_from_slice(&self.0.to_be_bytes());
+        builder
+            .encode_varint(FrameType::NewConnectionId)
+            .encode_varint(self.0)
+            .encode_varint(self.1)
+            .encode_vec(1, &cid)
+            .encode(srt);
+    }
+}
+
+/// RFC 9000, Section 19.15: a `NEW_CONNECTION_ID` frame that arrives after a higher
+/// sequence number was used, but increases Retire Prior To, is applied and used.
+#[test]
+fn new_connection_id_late_with_retire_prior_to() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let writer = NewConnectionId(seqno + 2, 0, Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let primary_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
+    let retired = client.stats().frame_tx.retire_connection_id;
+
+    // The probe uses `seqno + 2`.
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now())
+        .unwrap();
+    drop(client.process_output(now()).dgram().unwrap());
+
+    let writer = NewConnectionId(seqno + 1, seqno + 1, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let dgram = send_something(&mut client, now());
+    assert_v6_path(&dgram, false);
+    assert_ne!(get_cid(&dgram), primary_cid);
+    assert_eq!(client.stats().frame_tx.retire_connection_id, retired + 1);
 }
 
 struct GarbageWriter {}

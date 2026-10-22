@@ -356,6 +356,10 @@ pub type RemoteConnectionIdEntry = ConnectionIdEntry<Srt>;
 #[derive(Debug, Default)]
 pub struct ConnectionIdStore<SRT: Clone + PartialEq> {
     cids: SmallVec<[ConnectionIdEntry<SRT>; 8]>,
+    /// Sequence numbers below this were used or retired.
+    min_seqno: u64,
+    /// The largest Retire Prior To received.
+    retire_prior: u64,
 }
 
 impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
@@ -371,7 +375,9 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
         if self.cids.is_empty() {
             None
         } else {
-            Some(self.cids.remove(0))
+            let entry = self.cids.remove(0);
+            self.min_seqno = max(self.min_seqno, entry.seqno + 1);
+            Some(entry)
         }
     }
 
@@ -381,10 +387,15 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
 }
 
 impl ConnectionIdStore<Srt> {
-    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>) -> Res<()> {
+    /// Returns `false` if the sequence number was used or retired already.
+    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>, retire_prior: u64) -> Res<bool> {
         // It's OK if this perfectly matches an existing entry.
         if self.cids.iter().any(|c| c == &entry) {
-            return Ok(());
+            return Ok(true);
+        }
+        // A frame that increases Retire Prior To can't be a repeat.
+        if entry.seqno < self.min_seqno && retire_prior <= self.retire_prior {
+            return Ok(false);
         }
         // It's not OK if any individual piece matches though.
         if self.cids.iter().any(|c| c.any_part_equal(&entry)) {
@@ -395,7 +406,7 @@ impl ConnectionIdStore<Srt> {
         // Insert in order so that we use them in order where possible.
         if let Err(idx) = self.cids.binary_search_by_key(&entry.seqno, |e| e.seqno) {
             self.cids.insert(idx, entry);
-            Ok(())
+            Ok(true)
         } else {
             Err(Error::ProtocolViolation)
         }
@@ -404,6 +415,8 @@ impl ConnectionIdStore<Srt> {
     // Retire connection IDs and return the sequence numbers of those that were retired.
     pub fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
         let mut retired = Vec::new();
+        self.min_seqno = max(self.min_seqno, retire_prior);
+        self.retire_prior = max(self.retire_prior, retire_prior);
         self.cids.retain(|e| {
             if !e.is_empty() && e.seqno < retire_prior {
                 retired.push(e.seqno);
