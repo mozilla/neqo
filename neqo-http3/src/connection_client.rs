@@ -825,7 +825,7 @@ impl Http3Client {
                 qinfo!("[{self}] Connection error: goaway stream_id increased");
                 self.close(
                     now,
-                    Error::HttpGeneralProtocol.code(),
+                    Error::HttpId.code(),
                     "Connection error: goaway stream_id increased",
                 );
                 true
@@ -3209,7 +3209,7 @@ mod tests {
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
 
-        assert_closed(&client, &Error::HttpGeneralProtocol);
+        assert_closed(&client, &Error::HttpId);
     }
 
     #[test]
