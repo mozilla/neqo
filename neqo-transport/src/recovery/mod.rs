@@ -1169,7 +1169,6 @@ mod tests {
                 &ConnectionParameters::default(),
                 Qlog::default(),
                 now(),
-                &mut stats.borrow_mut(),
             );
             path.make_permanent(
                 None,

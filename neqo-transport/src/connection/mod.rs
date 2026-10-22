@@ -390,7 +390,6 @@ impl Connection {
             &c.conn_params,
             Qlog::default(),
             now,
-            &mut c.stats.borrow_mut(),
         );
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
         Ok(c)
@@ -449,7 +448,10 @@ impl Connection {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
-            paths: Paths::new(conn_params.pmtud_enabled()),
+            paths: Paths::new(
+                conn_params.pmtud_enabled(),
+                conn_params.pmtud_enabled() && conn_params.pmtud_iface_mtu_enabled(),
+            ),
             cid_manager,
             tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
@@ -1790,13 +1792,9 @@ impl Connection {
         now: Instant,
     ) {
         // First determine the path.
-        let path = self.paths.find_path(
-            d.destination(),
-            d.source(),
-            &self.conn_params,
-            now,
-            &mut self.stats.borrow_mut(),
-        );
+        let path = self
+            .paths
+            .find_path(d.destination(), d.source(), &self.conn_params, now);
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
@@ -2029,6 +2027,7 @@ impl Connection {
                     .clone(),
             ),
             now,
+            &mut self.stats.borrow_mut(),
         );
         if self.role == Role::Client {
             path.borrow_mut().set_valid(now);
@@ -2043,7 +2042,8 @@ impl Connection {
             // no path probes or PATH_RESPONSE.  But it's not fatal.
             match self.cids.next() {
                 Some(cid) => {
-                    self.paths.make_permanent(path, None, cid, now);
+                    self.paths
+                        .make_permanent(path, None, cid, now, &mut self.stats.borrow_mut());
                     Ok(())
                 }
                 None => {
@@ -2054,6 +2054,7 @@ impl Connection {
                                 None,
                                 ConnectionIdEntry::empty_remote(),
                                 now,
+                                &mut self.stats.borrow_mut(),
                             );
                             Ok(())
                         } else {
@@ -2160,13 +2161,7 @@ impl Connection {
             return Err(Error::InvalidMigration);
         }
 
-        let path = self.paths.find_path(
-            local,
-            remote,
-            &self.conn_params,
-            now,
-            &mut self.stats.borrow_mut(),
-        );
+        let path = self.paths.find_path(local, remote, &self.conn_params, now);
         self.ensure_permanent(&path, now)?;
         qinfo!(
             "[{self}] Migrate to {} probe {}",
