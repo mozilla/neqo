@@ -1274,7 +1274,7 @@ mod tests {
                     .find(|s| s.setting_type == HSettingType::BlockedStreams)
                     .map_or(100, |s| s.value),
             )
-            .unwrap();
+            .unwrap_or(u16::MAX);
             let qpack = Rc::new(RefCell::new(qpack::Encoder::new(
                 &qpack::Settings::default()
                     .max_table_size_encoder(max_table_size)
@@ -1901,6 +1901,20 @@ mod tests {
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
         assert_closed(&client, &Error::HttpFrameUnexpected);
+    }
+
+    // Client: QPACK settings larger than the encoder can use are accepted.
+    #[test]
+    fn client_receive_large_qpack_settings() {
+        let mut client = default_http3_client();
+        let mut server = TestServer::new();
+        server.settings = HFrame::Settings {
+            settings: HSettings::new(&[
+                HSetting::new(HSettingType::MaxTableCapacity, 1 << 30),
+                HSetting::new(HSettingType::BlockedStreams, u64::from(u16::MAX) + 1),
+            ]),
+        };
+        connect_with(&mut client, &mut server);
     }
 
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
@@ -4167,6 +4181,24 @@ mod tests {
     }
 
     #[test]
+    fn zero_rtt_new_server_setting_blocked_streams_above_u16() {
+        zero_rtt_change_settings(
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, 100),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+            ],
+            &[
+                HSetting::new(HSettingType::MaxTableCapacity, 100),
+                HSetting::new(HSettingType::BlockedStreams, u64::from(u16::MAX) + 1),
+                HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+            ],
+            &Http3State::Connected,
+            ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
+        );
+    }
+
+    #[test]
     fn zero_rtt_new_server_setting_blocked_streams_smaller() {
         // Send a new server settings withBlockedStreams=50
         zero_rtt_change_settings(
@@ -4773,13 +4805,8 @@ mod tests {
         server
             .encoder
             .borrow_mut()
-            .set_max_capacity(max_blocked_streams)
-            .unwrap();
-        server
-            .encoder
-            .borrow_mut()
-            .set_max_blocked_streams(100)
-            .unwrap();
+            .set_max_capacity(max_blocked_streams);
+        server.encoder.borrow_mut().set_max_blocked_streams(100);
         server
             .encoder
             .borrow_mut()

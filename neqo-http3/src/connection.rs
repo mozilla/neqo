@@ -466,7 +466,7 @@ impl Http3Connection {
         settings: HSettings,
     ) -> Res<()> {
         self.initialize_http3_connection(conn)?;
-        self.set_qpack_settings(&settings)?;
+        self.set_qpack_settings(&settings);
         self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
         self.state = Http3State::ZeroRtt;
         Ok(())
@@ -1785,11 +1785,10 @@ impl Http3Connection {
         }
     }
 
-    fn set_qpack_settings(&self, settings: &HSettings) -> Res<()> {
+    fn set_qpack_settings(&self, settings: &HSettings) {
         let mut qpe = self.qpack_encoder.borrow_mut();
-        qpe.set_max_capacity(settings.get(HSettingType::MaxTableCapacity))?;
-        qpe.set_max_blocked_streams(settings.get(HSettingType::BlockedStreams))?;
-        Ok(())
+        qpe.set_max_capacity(settings.get(HSettingType::MaxTableCapacity));
+        qpe.set_max_blocked_streams(settings.get(HSettingType::BlockedStreams));
     }
 
     fn handle_settings(&mut self, conn: &Connection, new_settings: HSettings) -> Res<()> {
@@ -1800,7 +1799,7 @@ impl Http3Connection {
         );
         match &self.settings_state {
             Http3RemoteSettingsState::NotReceived => {
-                self.set_qpack_settings(&new_settings)?;
+                self.set_qpack_settings(&new_settings);
                 self.webtransport.handle_settings(&new_settings, &prereqs);
                 self.connect_udp.handle_settings(&new_settings, &prereqs);
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
@@ -1852,7 +1851,7 @@ impl Http3Connection {
                 }
                 if qpack_changed {
                     qdebug!("[{self}] Settings after zero rtt differ");
-                    self.set_qpack_settings(&(new_settings))?;
+                    self.set_qpack_settings(&(new_settings));
                 }
                 self.settings_state = Http3RemoteSettingsState::Received(new_settings);
                 Ok(())
