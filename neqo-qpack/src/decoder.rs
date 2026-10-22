@@ -20,6 +20,7 @@ use crate::{
 };
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
+const MAX_UNSENT_INSTRUCTIONS: usize = 1 << 16;
 
 #[derive(Debug)]
 pub struct Decoder {
@@ -187,6 +188,9 @@ impl Decoder {
                 .map_err(|_| Error::DecoderStream)?;
             qdebug!("[{self}] {r} bytes sent");
             self.send_buf.skip(r);
+            if self.send_buf.len() > MAX_UNSENT_INSTRUCTIONS {
+                return Err(Error::ExcessiveLoad);
+            }
         }
         Ok(())
     }
@@ -297,10 +301,12 @@ pub(crate) fn map_error(err: Error) -> Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::{Header, to_u64};
-    use neqo_transport::{StreamId, StreamType};
-    use test_fixture::now;
+    use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamId, StreamType};
+    use test_fixture::{
+        CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, handshake, new_server, now,
+    };
 
-    use super::{Connection, Decoder, Error, Res, map_error};
+    use super::{Connection, Decoder, Error, MAX_UNSENT_INSTRUCTIONS, Res, map_error};
     use crate::Settings;
 
     const STREAM_0: StreamId = StreamId::new(0);
@@ -882,6 +888,29 @@ mod tests {
                 .decode_header_block(BLOCKING_HEADER_BLOCK, StreamId::new(0))
                 .is_err()
         );
+    }
+
+    /// The decoder must not queue unlimited instructions while the peer withholds credit.
+    #[test]
+    fn unsent_instructions_limit() {
+        let mut conn = default_client();
+        let mut peer_conn = new_server::<CountingConnectionIdGenerator, _>(
+            DEFAULT_ALPN,
+            ConnectionParameters::default().max_stream_data(StreamDataLimit::UniDi, 1),
+        );
+        handshake(&mut conn, &mut peer_conn);
+        let mut decoder = Decoder::new(&Settings::default());
+        decoder
+            .add_send_stream(conn.stream_create(StreamType::UniDi).unwrap())
+            .unwrap();
+        decoder.set_capacity(100).unwrap();
+
+        for _ in 0..MAX_UNSENT_INSTRUCTIONS {
+            decoder.cancel_stream(STREAM_0); // One byte each.
+        }
+        assert_eq!(decoder.send(&mut conn), Ok(()));
+        decoder.cancel_stream(STREAM_0);
+        assert_eq!(decoder.send(&mut conn), Err(Error::ExcessiveLoad));
     }
 
     #[test]
