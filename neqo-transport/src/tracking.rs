@@ -481,6 +481,7 @@ impl RecvdPackets {
 
         let mut ack_needed = self.ranges.iter().filter(|range| range.ack_needed());
         let Some(first) = ack_needed.next().cloned() else {
+            self.ack_time = None; // Nothing to acknowledge, e.g., when `trim_ranges` dropped it.
             return;
         };
         let Some(largest_pn_time) = self.largest_pn_time else {
@@ -1475,6 +1476,31 @@ mod tests {
         }
         // Two ranges should have been dropped.
         assert_eq!(stats.unacked_range_dropped, 2);
+    }
+
+    #[test]
+    fn trimmed_packet_clears_ack_timer() {
+        let mut stats = Stats::default();
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        for i in 1..=MAX_TRACKED_RANGES {
+            rp.set_received(now(), to_u64(i * 2), true, &mut stats)
+                .unwrap();
+        }
+        write_frame(&mut rp);
+        let acked = rp.ranges.iter().cloned().collect::<Vec<_>>();
+        rp.acknowledged(&acked);
+
+        // Packet 0 is below every tracked range, so it is dropped right away.
+        rp.set_received(now(), 0, true, &mut stats).unwrap();
+        assert_eq!(stats.unacked_range_dropped, 1);
+        assert_eq!(rp.ack_time(), Some(now()));
+
+        let mut builder = ack_builder(packet::LIMIT);
+        let mut frame_stats = FrameStats::default();
+        let mut tokens = recovery::Tokens::new();
+        rp.write_frame(now(), RTT, &mut builder, &mut tokens, &mut frame_stats);
+        assert!(tokens.is_empty());
+        assert_eq!(rp.ack_time(), None);
     }
 
     #[test]

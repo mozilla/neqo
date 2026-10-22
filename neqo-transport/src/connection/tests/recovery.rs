@@ -17,7 +17,7 @@ use test_fixture::{
 
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
-    AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
+    AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND, PingWriter,
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
     default_client, default_server, fill_cwnd, maybe_authenticate, new_client,
     new_client_with_qlog, new_server, send_and_receive, send_something,
@@ -32,7 +32,7 @@ use crate::{
     },
     rtt::GRANULARITY,
     tparams::{TransportParameter, TransportParameterId::*},
-    tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY},
+    tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY, PacketNumberSpace},
 };
 
 #[test]
@@ -1029,6 +1029,61 @@ fn ack_for_unsent() {
             ..
         }
     ));
+}
+
+/// A PING below every tracked ACK range is dropped at once and must not leave the ACK timer due.
+#[test]
+fn trimmed_ping_does_not_stall_ack_timer() {
+    /// This inserts an ACK of the peer's packets `first..=last`, then a PING.
+    struct AckThenPingWriter {
+        first: packet::Number,
+        last: packet::Number,
+    }
+
+    impl FrameWriter for AckThenPingWriter {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+            builder.encode_varint(FrameType::Ack);
+            builder.encode_varint(self.last); // Largest ACKed
+            builder.encode_varint(0u8); // ACK delay
+            builder.encode_varint(0u8); // ACK block count
+            builder.encode_varint(self.last - self.first); // ACK block length
+            builder.encode_varint(FrameType::Ping);
+        }
+    }
+
+    const GAPPED_PINGS: packet::Number = 128; // `MAX_TRACKED_RANGES`, private to `tracking`.
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // The client answers each gapped PING with one ACK; `low` acknowledges all of them.
+    let (_, tx) = client
+        .crypto
+        .states()
+        .select_tx(client.version(), PacketNumberSpace::ApplicationData)
+        .unwrap();
+    let first = tx.next_pn();
+    let last = first + GAPPED_PINGS - 1;
+    let ping = |c: &mut Connection| c.test_write_frames(PingWriter {}, now()).dgram().unwrap();
+    for _ in 0..GAPPED_PINGS {
+        _ = ping(&mut server); // Unacknowledged, so `low` gets a packet number the client decodes.
+    }
+    let low = server
+        .test_write_frames(AckThenPingWriter { first, last }, now())
+        .dgram()
+        .unwrap();
+    for _ in 0..GAPPED_PINGS {
+        _ = ping(&mut server); // A gap.
+        let ack = client.process(Some(ping(&mut server)), now()).dgram();
+        assert!(ack.is_some());
+    }
+    let before = client.process_output(now());
+    let dropped = client.stats().unacked_range_dropped;
+
+    client.process_input(low, now());
+    assert_eq!(client.stats().unacked_range_dropped, dropped + 1);
+    assert_eq!(client.process_output(now()), before);
 }
 
 /// Test that PTO fires for Handshake space even when no Handshake packets have been sent.
