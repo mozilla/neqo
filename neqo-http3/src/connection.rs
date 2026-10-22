@@ -870,7 +870,7 @@ impl Http3Connection {
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
-                    Header::new(":path", request.target.path()),
+                    Header::new(":path", request.target.request_path()),
                 ]
             }
             Some(ConnectType::Classic) => {
@@ -887,7 +887,7 @@ impl Http3Connection {
                     Header::new(":method", request.method),
                     Header::new(":scheme", request.target.scheme()),
                     Header::new(":authority", request.target.authority()),
-                    Header::new(":path", request.target.path()),
+                    Header::new(":path", request.target.request_path()),
                     Header::new(":protocol", protocol.to_string()),
                 ];
                 if protocol == ExtendedConnectType::ConnectUdp {
@@ -2063,11 +2063,12 @@ impl Http3Connection {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::Uri;
+    use neqo_common::{Header, header::HeadersExt as _};
 
     use crate::{
         Error, Priority,
         connection::{Http3Connection, RequestDescription},
-        features::ConnectType,
+        features::{ConnectType, extended_connect::ExtendedConnectType},
     };
 
     #[test]
@@ -2097,6 +2098,38 @@ mod tests {
         assert_eq!(
             Http3Connection::create_request_headers(&request),
             Err(Error::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn create_request_headers_path_includes_query() {
+        let request = RequestDescription {
+            method: "GET",
+            target: &Uri::from_static("https://example.com/search?q=term"),
+            headers: &[],
+            connect_type: None,
+            priority: Priority::default(),
+        };
+        let headers = Http3Connection::create_request_headers(&request).unwrap();
+        assert_eq!(
+            headers.find_header(":path").map(Header::value),
+            Some(b"/search?q=term".as_slice())
+        );
+    }
+
+    #[test]
+    fn create_request_headers_extended_connect_path_includes_query() {
+        let request = RequestDescription {
+            method: "CONNECT",
+            target: &Uri::from_static("https://proxy.example.org/masque?h=example.com&p=443"),
+            headers: &[],
+            connect_type: Some(ConnectType::Extended(ExtendedConnectType::ConnectUdp)),
+            priority: Priority::default(),
+        };
+        let headers = Http3Connection::create_request_headers(&request).unwrap();
+        assert_eq!(
+            headers.find_header(":path").map(Header::value),
+            Some(b"/masque?h=example.com&p=443".as_slice())
         );
     }
 }

@@ -461,6 +461,38 @@ fn create_session_without_connect_setting() {
     );
 }
 
+/// The proxy receives the query of the target URI in `:path`, as needed for
+/// query-based URI templates such as `?h={target_host}&p={target_port}`.
+///
+/// <https://www.rfc-editor.org/rfc/rfc9298#section-2>
+#[test]
+fn create_session_path_includes_query() {
+    let mut client = http3_client_with_params(Http3Parameters::default().connect(true));
+    let mut proxy = http3_server_with_params(Http3Parameters::default().connect(true));
+    let out = test_fixture::connect_peers(&mut client, &mut proxy);
+    let out = proxy.process(out, now()).dgram();
+    exchange_packets(&mut client, &mut proxy, false, out);
+    assert!(client.connect_udp_enabled());
+
+    client
+        .connect_udp_create_session(
+            now(),
+            &Uri::from_static("https://example.com/masque?h=192.0.2.6&p=443"),
+            &[],
+        )
+        .unwrap();
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let headers = proxy
+        .events()
+        .find_map(|event| match event {
+            Http3ServerEvent::ConnectUdp(ServerEvent::NewSession { headers, .. }) => Some(headers),
+            _ => None,
+        })
+        .unwrap();
+    assert!(headers.contains_header(":path", "/masque?h=192.0.2.6&p=443"));
+}
+
 #[test]
 fn server_stream_reset_results_in_client_session_close() {
     let (mut client, mut proxy, _connect_udp_session_id) = initiate_new_session();
