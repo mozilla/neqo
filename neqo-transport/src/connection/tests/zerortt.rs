@@ -7,16 +7,17 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, qdebug, to_u64};
-use nss::{AllowZeroRtt, AntiReplay};
+use nss::{AllowZeroRtt, AntiReplay, constants::TLS_GRP_EC_SECP384R1};
 use test_fixture::{assertions, now};
 
 use super::{
-    super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
-    default_server, exchange_ticket, new_server, resumed_server,
+    super::{Connection, ZeroRttState},
+    CountingConnectionIdGenerator, Output, connect, default_client, default_server,
+    exchange_ticket, new_server, resumed_server,
 };
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamDataLimit, StreamType, Version,
-    events::ConnectionEvent,
+    crypto::Epoch, events::ConnectionEvent, packet,
 };
 
 #[test]
@@ -175,6 +176,11 @@ fn zero_rtt_send_reject() {
     }
 }
 
+fn next_pn(client: &Connection, epoch: Epoch) -> packet::Number {
+    let tx = client.crypto.states().tx(client.version(), epoch);
+    tx.unwrap().next_pn()
+}
+
 fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) {
     const MESSAGE: &[u8] = &[1, 2, 3];
 
@@ -208,9 +214,13 @@ fn zero_rtt_send_reject_with_max_data(max_data: usize, stream_type: StreamType) 
     let dgram = server.process(dgram, now()).dgram();
 
     // Client should get a rejection.
-    let client_fin = client.process(dgram, now());
+    let zero_rtt_next_pn = next_pn(&client, Epoch::ZeroRtt);
+    client.process_input(dgram.unwrap(), now());
     let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
     assert!(client.events().any(recvd_0rtt_reject));
+    // 1-RTT packet numbers continue from 0-RTT (RFC 9000, Section 12.3).
+    assert_eq!(next_pn(&client, Epoch::ApplicationData), zero_rtt_next_pn);
+    let client_fin = client.process_output(now());
 
     // Server consume client_fin
     let server_ack = server.process(client_fin.dgram(), now());
@@ -294,6 +304,39 @@ fn zero_rtt_reject_after_set_remote_max_streams() {
             .count();
         assert_eq!(opened, 1000, "{st:?}");
     }
+}
+
+/// A `HelloRetryRequest` rejects 0-RTT (RFC 9001, Section 4.6.2).
+#[test]
+fn zero_rtt_send_reject_hello_retry_request() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+    server.set_groups(&[TLS_GRP_EC_SECP384R1]).unwrap(); // No key share, so HelloRetryRequest.
+
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream_id, &[1]).unwrap();
+    let client_hs = client.process_output(now()).dgram();
+    let client_0rtt = client.process_output(now()).dgram();
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Sending);
+
+    _ = server.process(client_hs, now());
+    let server_hrr = server.process(client_0rtt, now()).dgram();
+    let client_hs2 = client.process(server_hrr, now()).dgram();
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
+    let recvd_0rtt_reject = |e| e == ConnectionEvent::ZeroRttRejected;
+    assert!(client.events().any(recvd_0rtt_reject));
+    let res = client.stream_send(stream_id, &[1]);
+    assert_eq!(res, Err(Error::InvalidStreamId));
+
+    server.process_input(client_hs2.unwrap(), now());
+    connect(&mut client, &mut server);
+    assert!(!client.events().any(recvd_0rtt_reject));
 }
 
 #[test]

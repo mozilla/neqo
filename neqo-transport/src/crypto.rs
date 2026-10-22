@@ -689,6 +689,13 @@ impl CryptoDxState {
         }
     }
 
+    /// Like `continuation`, for unused keys whose predecessor is already discarded.
+    pub fn skip_to(&mut self, next: packet::Number) {
+        debug_assert!(self.used_pn.is_empty());
+        self.min_pn = next;
+        self.used_pn = next..next;
+    }
+
     /// Mark a packet number as used.  If this is too low, reject it.
     /// Note that this won't catch a value that is too high if packets protected with
     /// old keys are received after a key update.  That needs to be caught elsewhere.
@@ -897,6 +904,8 @@ pub struct CryptoStates {
     initials: EnumMap<Version, Option<CryptoState>>,
     handshake: Option<CryptoState>,
     zero_rtt: Option<CryptoDxState>, // One direction only!
+    /// Where 1-RTT packet numbers continue after discarding 0-RTT write keys.
+    zero_rtt_next_pn: packet::Number,
     cipher: Cipher,
     app_write: Option<CryptoDxAppData>,
     app_read: Option<CryptoDxAppData>,
@@ -1219,7 +1228,9 @@ impl CryptoStates {
             self.app_read.is_none(),
             "Can't discard 0-RTT after setting application keys"
         );
-        self.zero_rtt = None;
+        if let Some(z) = self.zero_rtt.take() {
+            self.zero_rtt_next_pn = z.next_pn(); // Only clients discard, so these are write keys.
+        }
     }
 
     pub fn set_handshake_keys(
@@ -1259,6 +1270,8 @@ impl CryptoStates {
             && z.direction == CryptoDxDirection::Write
         {
             app.dx.continuation(z)?;
+        } else {
+            app.dx.skip_to(self.zero_rtt_next_pn);
         }
         self.zero_rtt = None;
         self.app_write = Some(app);
@@ -1447,6 +1460,7 @@ impl CryptoStates {
             initials,
             handshake: None,
             zero_rtt: None,
+            zero_rtt_next_pn: 0,
             cipher: TLS_AES_128_GCM_SHA256,
             // This isn't used, but the epoch is read to check for a key update.
             app_write: Some(app_read(3)),
@@ -1498,6 +1512,7 @@ impl CryptoStates {
             initials: EnumMap::default(),
             handshake: None,
             zero_rtt: None,
+            zero_rtt_next_pn: 0,
             cipher: TLS_CHACHA20_POLY1305_SHA256,
             app_write: Some(app_read(3)),
             app_read: Some(app_read(3)),
