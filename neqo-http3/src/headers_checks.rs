@@ -81,6 +81,11 @@ fn track_pseudo(
     }
 }
 
+/// Whether `b` is a `tchar` (RFC 9110, Section 5.6.2).
+fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+}
+
 /// Checks if request/response headers are well formed, i.e. contain
 /// allowed pseudo headers and in a right order, etc.
 ///
@@ -107,13 +112,14 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
             _ = bytes.next();
         }
 
-        if bytes.any(|b| matches!(b, 0 | 0x0a | 0x0d | 0x3a | 0x41..=0x5a)) {
+        if header.name().is_empty() || bytes.any(|b| !is_tchar(b) || b.is_ascii_uppercase()) {
             return Err(Error::InvalidHeader); // illegal characters.
         }
 
         // CR, LF, and NUL are not permitted in a field value either (RFC 9114,
         // Section 4.3); carried verbatim into an HTTP/1.1 serialization they
         // would split the message.
+        // Other CTLs are accepted, as in Firefox's HTTP/2 stack and Fetch (httpwg/http-core#215).
         if header.value().iter().any(|b| matches!(b, 0 | 0x0a | 0x0d)) {
             return Err(Error::InvalidHeader); // illegal characters.
         }
@@ -363,6 +369,53 @@ mod tests {
             Header::new(":path", b"/\r\nx".as_slice()),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn reject_non_token_field_name() {
+        // A non-token field name is malformed (RFC 9114, Section 10.3), in either direction.
+        for bad in [
+            "", "x y", "x\ty", "te ", "x\x0by", "x\x7fy", "x\u{e9}y", "x(y)",
+        ] {
+            let response = vec![Header::new(":status", "200"), Header::new(bad, "1")];
+            assert_eq!(
+                headers_valid(&response, MessageType::Response),
+                Err(Error::InvalidHeader)
+            );
+
+            let request = vec![
+                Header::new(":method", "GET"),
+                Header::new(":scheme", "https"),
+                Header::new(":path", "/"),
+                Header::new(bad, "1"),
+            ];
+            assert_eq!(
+                headers_valid(&request, MessageType::Request),
+                Err(Error::InvalidHeader)
+            );
+        }
+
+        // Every lowercase tchar is allowed.
+        let response = vec![
+            Header::new(":status", "200"),
+            Header::new("abcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~", "1"),
+        ];
+        assert_eq!(headers_valid(&response, MessageType::Response), Ok(()));
+    }
+
+    #[test]
+    fn accept_other_ctl_in_field_value() {
+        let value = b"1\x0b\x7f2".as_slice();
+        let response = vec![Header::new(":status", "200"), Header::new("x", value)];
+        assert_eq!(headers_valid(&response, MessageType::Response), Ok(()));
+
+        let request = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":path", "/"),
+            Header::new("x", value),
+        ];
+        assert_eq!(headers_valid(&request, MessageType::Request), Ok(()));
     }
 
     #[test]
