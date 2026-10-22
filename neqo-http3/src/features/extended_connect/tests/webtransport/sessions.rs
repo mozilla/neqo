@@ -912,6 +912,30 @@ fn open_raw_wt_stream(
     id
 }
 
+/// A session ID that is not a client-initiated bidirectional stream ID closes the connection with
+/// `H3_ID_ERROR`.
+fn wt_stream_for_invalid_session_id(stream_type: StreamType, session_id: u64) {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    open_raw_wt_stream(&wt_session, stream_type, session_id);
+    let t = now() + Duration::from_secs(1); // Past the pacing of earlier exchanges.
+    let out = wt.server.process_output(t).dgram();
+    drop(wt.client.process(out, t));
+
+    let reason = neqo_transport::CloseReason::Application(Error::HttpId.code());
+    assert_eq!(wt.client.state(), Http3State::Closing(reason));
+}
+
+#[test]
+fn wt_uni_stream_for_invalid_session_id() {
+    wt_stream_for_invalid_session_id(StreamType::UniDi, 2); // Client-initiated unidirectional.
+}
+
+#[test]
+fn wt_bidi_stream_for_invalid_session_id() {
+    wt_stream_for_invalid_session_id(StreamType::BiDi, 1); // Server-initiated bidirectional.
+}
+
 /// A close capsule without FIN cancels the session's streams.
 #[test]
 fn wt_close_capsule_without_fin_cancels_streams() {
