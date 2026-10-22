@@ -1355,6 +1355,57 @@ fn retire_cid_queue_bounded() {
     ));
 }
 
+/// Writes `count` `NEW_CONNECTION_ID` frames with consecutive sequence numbers
+/// starting at `first`, retiring none.
+struct AddConnectionIds {
+    first: u64,
+    count: u64,
+}
+
+impl test_internal::FrameWriter for AddConnectionIds {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        for seqno in self.first..self.first + self.count {
+            let cid = seqno.to_be_bytes(); // Unlike `CountingConnectionIdGenerator` CIDs, starts with 0.
+            let mut srt = [0; 16];
+            srt[..8].copy_from_slice(&seqno.to_be_bytes());
+            builder
+                .encode_varint(FrameType::NewConnectionId)
+                .encode_varint(seqno)
+                .encode_varint(0u64) // Retire Prior To
+                .encode_vec(1, &cid)
+                .encode(srt);
+        }
+    }
+}
+
+/// RFC 9000, Section 5.1.1: exceeding `active_connection_id_limit` is a
+/// `CONNECTION_ID_LIMIT_ERROR`.
+#[test]
+fn active_cid_limit_exceeded() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // The connection ID in use is not in `cids`, so this reaches the limit exactly.
+    let first = NewConnectionIds::SEQNO;
+    let count = to_u64(ConnectionIdManager::ACTIVE_LIMIT - 1 - client.cids.len());
+    let ncids = send_with_extra(&mut server, AddConnectionIds { first, count }, now());
+    client.process_input(ncids, now());
+    assert_eq!(*client.state(), State::Confirmed);
+
+    let one_more = AddConnectionIds {
+        first: first + count,
+        count: 1,
+    };
+    let ncid = send_with_extra(&mut server, one_more, now());
+    client.process_input(ncid, now());
+    let err = CloseReason::Transport(Error::ConnectionIdLimitExceeded);
+    assert_error(&client, &err);
+    let close = client.process_output(now()).dgram();
+    server.process_input(close.unwrap(), now());
+    assert_error(&server, &CloseReason::Transport(Error::Peer(9)));
+}
+
 /// Injects a `RETIRE_CONNECTION_ID` frame for a given sequence number.
 struct RetireConnectionId(u64);
 
@@ -1705,4 +1756,18 @@ fn no_new_token_for_handshake_from_new_address() {
     server.process_input(change_source_address_and_port(&dgram, 1), now());
     assert_eq!(*server.state(), State::Confirmed);
     assert_no_new_token(&mut server);
+}
+
+/// An unknown frame type closes the connection with `FRAME_ENCODING_ERROR`.
+#[test]
+fn unknown_frame_type() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let garbage = send_with_extra(&mut server, GarbageWriter {}, now());
+    let close = client.process(Some(garbage), now()).dgram();
+    assert_error(&client, &CloseReason::Transport(Error::UnknownFrameType));
+    server.process_input(close.unwrap(), now());
+    assert_error(&server, &CloseReason::Transport(Error::Peer(7)));
 }
