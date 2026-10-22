@@ -476,7 +476,7 @@ impl<'a> Frame<'a> {
         const MAX_ACK_RANGE_COUNT: u64 = 32 * 1024;
 
         fn d<T>(v: Option<T>) -> Res<T> {
-            v.ok_or(Error::NoMoreData)
+            v.ok_or(Error::FrameEncoding)
         }
         fn dv(dec: &mut Decoder) -> Res<u64> {
             d(dec.decode_varint())
@@ -489,7 +489,7 @@ impl<'a> Frame<'a> {
                 if nr < MAX_ACK_RANGE_COUNT {
                     Ok(nr)
                 } else {
-                    Err(Error::TooMuchData)
+                    Err(Error::FrameEncoding)
                 }
             })?;
             let fa = dv(dec)?;
@@ -625,7 +625,7 @@ impl<'a> Frame<'a> {
             FrameType::MaxStreamsBiDi | FrameType::MaxStreamsUniDi => {
                 let m = dv(dec)?;
                 if m > MAX_STREAMS_LIMIT {
-                    return Err(Error::StreamLimit);
+                    return Err(Error::FrameEncoding);
                 }
                 Ok(Self::MaxStreams {
                     stream_type: t.try_into()?,
@@ -659,7 +659,7 @@ impl<'a> Frame<'a> {
                 if connection_id.is_empty() || connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let stateless_reset_token = Srt::try_from(dec)?;
+                let stateless_reset_token = Srt::try_from(dec).map_err(|_| Error::FrameEncoding)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,
@@ -826,7 +826,7 @@ mod tests {
         // Try to parse ACK_ECN without ECN values
         let enc = Encoder::from_hex("035234523502523601020304");
         let mut dec = enc.as_decoder();
-        assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
+        assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::FrameEncoding);
 
         // Try to parse ACK_ECN with ECN values
         let ecn_count = Some(Count::new(0, 1, 2, 3));
@@ -1093,6 +1093,17 @@ mod tests {
     }
 
     #[test]
+    fn truncated_new_connection_id() {
+        let mut enc = Encoder::from_hex("18523400"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[0x01, 0x02]);
+        enc.encode(&[0x11; 15][..]); // One byte short of a stateless reset token.
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
     fn new_connection_id_retire_prior_after_sequence_number() {
         // retire_prior (5) greater than sequence_number (2).
         let mut enc = Encoder::from_hex("180205"); // type, sequence_number, retire_prior
@@ -1245,7 +1256,8 @@ mod tests {
         e.encode_varint(0u64); // ACK delay
         e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
 
-        assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
+        let res = Frame::decode(&mut e.as_decoder());
+        assert_eq!(res, Err(Error::FrameEncoding));
     }
 
     #[test]
@@ -1554,11 +1566,12 @@ mod tests {
     fn decode_ack_too_many_ranges() {
         let enc = encode_ack_header(32768);
         let result = Frame::decode(&mut enc.as_decoder());
-        assert_eq!(result.unwrap_err(), Error::TooMuchData);
+        assert_eq!(result.unwrap_err(), Error::FrameEncoding);
 
-        let enc = encode_ack_header(32767);
+        let mut enc = encode_ack_header(32767);
+        enc.pad_to(enc.len() + 1 + 2 * 32767, 0); // First ACK Range and 32767 ACK Ranges.
         let result = Frame::decode(&mut enc.as_decoder());
-        assert_ne!(result.unwrap_err(), Error::TooMuchData);
+        assert!(result.is_ok());
     }
 
     /// Both Stream and Crypto frames reject `offset + data.len() > MAX_VARINT`.
@@ -1594,7 +1607,7 @@ mod tests {
         enc.encode_varint(MAX_STREAMS_LIMIT + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::StreamLimit
+            Error::FrameEncoding
         );
     }
 
