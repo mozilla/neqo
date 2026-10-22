@@ -392,6 +392,10 @@ impl Session {
         self.protocol.take_sub_streams()
     }
 
+    pub(crate) fn reset_control_stream_recv(&mut self) {
+        drop(self.control_stream_recv.reset(CloseType::Done));
+    }
+
     /// # Errors
     ///
     /// It may return an error if the frame is not correctly decoded.

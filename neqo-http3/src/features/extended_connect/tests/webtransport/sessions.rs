@@ -301,6 +301,17 @@ fn wt_session_close_frame_server() {
 }
 
 #[test]
+fn wt_session_close_frame_server_stream_cancellation() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    assert_eq!(wt.client.qpack_encoder_stats().stream_cancelled_recv, 0);
+
+    WtTest::session_close_frame_server(&wt_session, 0, "");
+    wt.exchange_packets();
+    assert_eq!(wt.client.qpack_encoder_stats().stream_cancelled_recv, 1);
+}
+
+#[test]
 fn wt_unknown_session_frame_client() {
     const UNKNOWN_FRAME_LEN: usize = 832;
     const BUF: &[u8] = &[0; 10];
