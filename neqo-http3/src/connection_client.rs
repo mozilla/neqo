@@ -1969,6 +1969,25 @@ mod tests {
         assert_eq!(client.state(), Http3State::Connected);
     }
 
+    /// A reliable reset that cuts a unidirectional stream inside its stream type is tolerated
+    /// (RFC 9114, Section 6.2).
+    #[test]
+    fn client_reliable_reset_inside_uni_stream_type() {
+        let (mut client, mut server) = connect();
+        let stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
+        // First byte of a two-byte varint.
+        _ = server.conn.stream_send(stream_id, &[0x40]).unwrap();
+        server.conn.stream_commit(stream_id).unwrap();
+        server
+            .conn
+            .stream_reset_send(stream_id, Error::HttpRequestCancelled.code())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+        assert!(!client.base_handler.recv_streams().contains_key(&stream_id));
+    }
+
     // Test wrong frame on req/rec stream
     fn test_wrong_frame_on_request_stream(v: &[u8]) {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(false);
