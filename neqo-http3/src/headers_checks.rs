@@ -50,6 +50,9 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
     if let Some(h) = headers.iter().take(1).find_header(":status") {
+        if !matches!(h.value(), [b'0'..=b'9', b'0'..=b'9', b'0'..=b'9']) {
+            return Err(Error::InvalidHeader); // RFC 9110, Section 15.
+        }
         let status_code = std::str::from_utf8(h.value())
             .map_err(|_| Error::InvalidHeader)?
             .parse::<u16>()
@@ -195,7 +198,7 @@ mod tests {
     use neqo_common::Header;
 
     use super::{headers_valid, is_interim};
-    use crate::MessageType;
+    use crate::{Error, MessageType};
 
     fn create_connect_headers() -> Vec<Header> {
         vec![
@@ -268,6 +271,17 @@ mod tests {
     fn is_interim_not_a_number() {
         let headers = vec![Header::new(":status", "not-a-number")];
         assert!(is_interim(&headers).is_err());
+    }
+
+    #[test]
+    fn is_interim_not_three_digits() {
+        // A status code is a three-digit integer (RFC 9110, Section 15).
+        for bad in ["+200", "0200", "20", "7", "65535", "+150"] {
+            let headers = vec![Header::new(":status", bad)];
+            assert_eq!(is_interim(&headers), Err(Error::InvalidHeader));
+        }
+        assert_eq!(is_interim(&[Header::new(":status", "103")]), Ok(true));
+        assert_eq!(is_interim(&[Header::new(":status", "200")]), Ok(false));
     }
 
     #[test]
