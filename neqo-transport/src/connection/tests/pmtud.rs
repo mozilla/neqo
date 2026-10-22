@@ -65,6 +65,30 @@ fn peer_max_udp_payload_limits_first_flight() {
     }
 }
 
+/// The server's receive limit caps client data without limiting the opposite direction.
+#[test]
+fn peer_max_udp_payload_limits_data_in_one_direction() {
+    let mut client = default_client();
+    let mut server = default_server();
+    limit_udp_payload(&server);
+    connect_force_idle(&mut client, &mut server);
+
+    for c in [&mut client, &mut server] {
+        let stream = c.stream_create(StreamType::UniDi).unwrap();
+        fill_stream(c, stream);
+    }
+    let c1 = client.process_output(now()).dgram().unwrap();
+    assert_eq!(c1.len(), PEER_MAX_UDP_PAYLOAD);
+    let s1 = server.process_output(now()).dgram().unwrap();
+    assert_eq!(s1.len(), server.plpmtu());
+    assert!(s1.len() > PEER_MAX_UDP_PAYLOAD);
+
+    server.process_input(c1, now());
+    client.process_input(s1, now());
+    assert_eq!(server.stats().frame_rx.stream, 1);
+    assert_eq!(client.stats().frame_rx.stream, 1);
+}
+
 /// A resuming client applies the limit it remembers from the previous connection.
 #[test]
 fn peer_max_udp_payload_limits_resumption() {
