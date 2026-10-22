@@ -7,6 +7,7 @@
 use std::{
     collections::VecDeque,
     fmt::{self, Display, Formatter},
+    rc::Rc,
 };
 
 use neqo_common::to_u64;
@@ -28,8 +29,8 @@ pub struct LookupResult {
 #[derive(Debug)]
 pub struct DynamicTableEntry {
     base: u64,
-    name: Vec<u8>,
-    value: Vec<u8>,
+    name: Rc<[u8]>,
+    value: Rc<[u8]>,
     /// Number of header blocks that refer this entry.
     /// This is only used by the encoder.
     refs: u64,
@@ -40,7 +41,7 @@ impl DynamicTableEntry {
         self.refs == 0 && self.base < first_not_acked
     }
 
-    pub const fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         self.name.len() + self.value.len() + ADDITIONAL_TABLE_ENTRY_SIZE
     }
 
@@ -243,8 +244,8 @@ impl HeaderTable {
             if !can_block && iter.index() >= self.acked_inserts_cnt {
                 continue;
             }
-            if iter.name == name {
-                if iter.value == value {
+            if iter.name() == name {
+                if iter.value() == value {
                     return Some(LookupResult {
                         index: iter.index(),
                         static_table: false,
@@ -304,10 +305,14 @@ impl HeaderTable {
     /// `DynamicTableFull` if an entry cannot be added to the table because there is not enough
     /// space and/or other entry cannot be evicted.
     pub fn insert(&mut self, name: &[u8], value: &[u8]) -> Res<u64> {
+        self.insert_shared(name.into(), value.into())
+    }
+
+    fn insert_shared(&mut self, name: Rc<[u8]>, value: Rc<[u8]>) -> Res<u64> {
         trace!("[{self}] insert name={name:?} value={value:?}");
         let entry = DynamicTableEntry {
-            name: name.to_vec(),
-            value: value.to_vec(),
+            name,
+            value,
             base: self.base,
             refs: 0,
         };
@@ -345,13 +350,11 @@ impl HeaderTable {
             },
         );
         let name = if name_static_table {
-            Self::get_static(name_index)?.name().to_vec()
+            Self::get_static(name_index)?.name().into()
         } else {
-            self.get_dynamic(name_index, self.base, false)?
-                .name()
-                .to_vec()
+            Rc::clone(&self.get_dynamic(name_index, self.base, false)?.name)
         };
-        self.insert(&name, value)
+        self.insert_shared(name, value.into())
     }
 
     /// Duplicate an entry.
@@ -364,15 +367,11 @@ impl HeaderTable {
     pub fn duplicate(&mut self, index: u64) -> Res<u64> {
         trace!("[{self}] duplicate entry={index}");
         // need to remember name and value because insert may delete the entry.
-        let name: Vec<u8>;
-        let value: Vec<u8>;
-        {
-            let entry = self.get_dynamic(index, self.base, false)?;
-            name = entry.name().to_vec();
-            value = entry.value().to_vec();
-            trace!("[{self}] duplicate name={name:?} value={value:?}");
-        }
-        self.insert(&name, &value)
+        let entry = self.get_dynamic(index, self.base, false)?;
+        let name = Rc::clone(&entry.name);
+        let value = Rc::clone(&entry.value);
+        trace!("[{self}] duplicate name={name:?} value={value:?}");
+        self.insert_shared(name, value)
     }
 
     /// Increment number of acknowledge entries.
@@ -467,6 +466,41 @@ mod tests {
         // A malicious increment that would push the count past u64::MAX must be
         // reported as an error, not overflow.
         assert_eq!(table.increment_acked(u64::MAX), Err(Error::IncrementAck));
+    }
+
+    /// Duplicate and dynamic name references share the referenced entry's storage.
+    #[test]
+    fn referencing_an_entry_shares_its_storage() {
+        let mut table = HeaderTable::new(false);
+        table.set_capacity(10_000).unwrap();
+        table.insert(b"name", b"value").unwrap();
+
+        table.duplicate(0).unwrap();
+        table.insert_with_name_ref(false, 0, b"other").unwrap();
+
+        let [name_ref, duplicate, original] =
+            [0, 1, 2].map(|i| table.get_dynamic_with_relative_index(i).unwrap());
+        assert_eq!(duplicate.name().as_ptr(), original.name().as_ptr());
+        assert_eq!(duplicate.value().as_ptr(), original.value().as_ptr());
+        assert_eq!(name_ref.name().as_ptr(), original.name().as_ptr());
+        assert_eq!(name_ref.value(), b"other");
+    }
+
+    /// RFC 9204 Section 3.2.2: a new entry can reference an entry that is evicted to make room.
+    #[test]
+    fn duplicate_evicts_the_referenced_entry() {
+        const NAME: &[u8] = b"name";
+        const VALUE: &[u8] = b"value";
+        let mut table = HeaderTable::new(false);
+        let size = NAME.len() + VALUE.len() + ADDITIONAL_TABLE_ENTRY_SIZE;
+        table.set_capacity(to_u64(size)).unwrap();
+        table.insert(NAME, VALUE).unwrap();
+
+        assert_eq!(table.duplicate(0).unwrap(), 1);
+
+        let entry = table.get_dynamic(0, table.base(), false).unwrap();
+        assert_eq!((entry.name(), entry.value()), (NAME, VALUE));
+        assert_eq!(table.dynamic.len(), 1);
     }
 
     #[test]
