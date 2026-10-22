@@ -772,9 +772,10 @@ impl Http3Connection {
                     .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
                 if !session_exists {
                     let session = StreamId::from(session_id);
-                    if session.is_client_initiated()
-                        && session.is_bidi()
-                        && conn.is_stream_id_opened(session)
+                    if !session.is_client_initiated() || !session.is_bidi() {
+                        return Err(Error::HttpId);
+                    }
+                    if conn.is_stream_id_opened(session)
                         && !self.recv_streams.contains_key(&session)
                     {
                         drop(conn.stream_stop_sending(stream_id, WT_SESSION_GONE));
