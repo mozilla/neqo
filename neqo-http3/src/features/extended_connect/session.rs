@@ -291,6 +291,7 @@ impl Session {
     }
 
     pub(crate) fn maybe_check_headers(&mut self) -> Res<()> {
+        let headers = self.stream_event_listener.borrow_mut().get_headers();
         if self.state != State::Negotiating {
             return Ok(());
         }
@@ -299,7 +300,7 @@ impl Session {
             headers,
             interim,
             fin,
-        }) = self.stream_event_listener.borrow_mut().get_headers()
+        }) = headers
         {
             trace!("ExtendedConnect response headers {headers:?}, fin={fin}");
 
@@ -893,4 +894,70 @@ pub(crate) enum DgramContextIdError {
     MissingIdentifier,
     #[error("Unknown context identifier: {0}")]
     UnknownIdentifier(u64),
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_common::{Header, Role, event::Provider as _};
+    use neqo_qpack::{Decoder, Encoder, Settings};
+    use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamType};
+    use test_fixture::{
+        CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, handshake, new_server, now,
+    };
+
+    use super::{Session, State};
+    use crate::{
+        client_events::Http3ClientEvents, features::extended_connect::ExtendedConnectType,
+    };
+
+    /// A response to a session that was closed locally, but whose close is held
+    /// back by flow control, is neither reported nor kept.
+    #[test]
+    fn response_after_local_close_is_dropped() {
+        let mut client = default_client();
+        let mut server = new_server::<CountingConnectionIdGenerator, _>(
+            DEFAULT_ALPN,
+            ConnectionParameters::default().max_stream_data(StreamDataLimit::BiDiRemote, 1),
+        );
+        handshake(&mut client, &mut server);
+
+        let id = client.stream_create(StreamType::BiDi).unwrap();
+        let events = Http3ClientEvents::default();
+        let settings = Settings::default();
+        let mut session = Session::new(
+            id,
+            Box::new(events.clone()),
+            Role::Client,
+            Rc::new(RefCell::new(Encoder::new(&settings, true))),
+            Rc::new(RefCell::new(Decoder::new(&settings))),
+            ExtendedConnectType::WebTransport,
+        );
+        let request = [
+            Header::new(":method", "CONNECT"),
+            Header::new(":protocol", "webtransport"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
+            Header::new(":path", "/"),
+        ];
+        session.send_request(&request, &mut client).unwrap();
+        session.close_session(&mut client, 0, "", now()).unwrap();
+        assert_eq!(session.state, State::FinPending);
+        let out = client.process_output(now());
+        server.process_input(out.dgram().unwrap(), now());
+
+        // A HEADERS frame with `:status: 200`.
+        server
+            .stream_send(id, &[0x01, 0x03, 0x00, 0x00, 0xd9])
+            .unwrap();
+        let out = server.process_output(now());
+        client.process_input(out.dgram().unwrap(), now());
+        let (_, done) = session.receive(&mut client, now()).unwrap();
+
+        assert!(!done);
+        assert!(session.stream_event_listener.borrow().headers.is_none());
+        assert!(!events.has_events());
+    }
 }
