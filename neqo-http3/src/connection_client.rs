@@ -623,6 +623,8 @@ impl Http3Client {
             .stream_close_send(&mut self.conn, stream_id, now)
     }
 
+    /// For `WebTransport` data streams, map `error` per draft-ietf-webtrans-http3 §4.4.
+    ///
     /// # Errors
     ///
     /// An error will be return if a stream does not exist.
@@ -644,6 +646,8 @@ impl Http3Client {
             .stream_commit(&mut self.conn, stream_id, now)
     }
 
+    /// For `WebTransport` data streams, map `error` per draft-ietf-webtrans-http3 §4.4.
+    ///
     /// # Errors
     ///
     /// An error will be return if a stream does not exist.

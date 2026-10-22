@@ -104,6 +104,8 @@ impl StreamHandler {
 
     /// Request a peer to stop sending a stream.
     ///
+    /// For `WebTransport` data streams, map `app_error` per draft-ietf-webtrans-http3 §4.4.
+    ///
     /// # Errors
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
@@ -120,6 +122,8 @@ impl StreamHandler {
     }
 
     /// Reset sending side of a stream.
+    ///
+    /// For `WebTransport` data streams, map `app_error` per draft-ietf-webtrans-http3 §4.4.
     ///
     /// # Errors
     ///
@@ -261,10 +265,12 @@ pub enum Http3ServerEvent {
     DataWritable {
         stream: Http3OrWebTransportStream,
     },
+    /// For `WebTransport` data streams, unmap `error` per draft-ietf-webtrans-http3 §4.4.
     StreamReset {
         stream: Http3OrWebTransportStream,
         error: AppError,
     },
+    /// For `WebTransport` data streams, unmap `error` per draft-ietf-webtrans-http3 §4.4.
     StreamStopSending {
         stream: Http3OrWebTransportStream,
         error: AppError,
