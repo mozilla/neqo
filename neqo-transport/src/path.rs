@@ -69,6 +69,9 @@ pub struct Paths {
 
     /// Whether PMTUD is limited to the local interface MTU.
     pmtud_iface_mtu: bool,
+
+    /// The peer's `max_udp_payload_size` transport parameter, once known.
+    peer_max_udp_payload: Option<usize>,
 }
 
 impl Paths {
@@ -83,6 +86,7 @@ impl Paths {
             qlog: Qlog::disabled(),
             pmtud,
             pmtud_iface_mtu: pmtud && conn_params.pmtud_iface_mtu_enabled(),
+            peer_max_udp_payload: None,
         }
     }
 
@@ -99,15 +103,29 @@ impl Paths {
             .iter()
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
-                let mut p = Path::temporary(local, remote, conn_params, self.qlog.clone(), now);
+                let mut p = Path::temporary(
+                    local,
+                    remote,
+                    conn_params,
+                    self.peer_max_udp_payload,
+                    self.qlog.clone(),
+                    now,
+                );
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
-                    if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
-                        p.set_peer_max_udp_payload(peer_max, now);
-                    }
                 }
                 Rc::new(RefCell::new(p))
             })
+    }
+
+    /// Applies the peer's `max_udp_payload_size` to all permanent paths and remembers it for
+    /// paths that are created or made permanent later.
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        self.peer_max_udp_payload = Some(peer_max_udp_payload);
+        for p in &self.paths {
+            p.borrow_mut()
+                .set_peer_max_udp_payload(peer_max_udp_payload, now);
+        }
     }
 
     /// Get a reference to the primary path, if one exists.
@@ -178,6 +196,10 @@ impl Paths {
                     warn!("Failed to determine outbound interface for destination {ip}: {e}");
                 }
             }
+        }
+        // The path might have been created before the peer's transport parameters arrived.
+        if let Some(peer_max) = self.peer_max_udp_payload {
+            path.borrow_mut().set_peer_max_udp_payload(peer_max, now);
         }
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
@@ -610,14 +632,21 @@ impl Path {
 
     /// Create a path from addresses and a remote connection ID.
     /// This is used for migration and for new datagrams.
+    /// `peer_max_udp_payload` is the peer's `max_udp_payload_size`, if already known.
     pub fn temporary(
         local: SocketAddr,
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
+        peer_max_udp_payload: Option<usize>,
         qlog: Qlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip()), now);
+        let mut pmtud = Pmtud::new(remote.ip());
+        // Apply the limit before the sender sizes its initial window and pacer.
+        if let Some(peer_max) = peer_max_udp_payload {
+            pmtud.set_peer_max_udp_payload(peer_max, now);
+        }
+        let mut sender = PacketSender::new(conn_params, pmtud, now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -1248,14 +1277,27 @@ mod tests {
     use neqo_common::{Encoder, qlog::Qlog};
     use test_fixture::{DEFAULT_ADDR, now};
 
-    use super::Path;
-    use crate::{ConnectionParameters, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats};
+    use super::{Path, PathRef, Paths};
+    use crate::{
+        ConnectionParameters, Stats, cc::CWND_INITIAL_PKTS, cid::RemoteConnectionIdEntry,
+        frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
+    };
+
+    fn find_path(paths: &Paths) -> PathRef {
+        paths.find_path(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            &ConnectionParameters::default().pmtud_iface_mtu(false),
+            now(),
+        )
+    }
 
     fn path() -> Path {
         Path::temporary(
             DEFAULT_ADDR,
             DEFAULT_ADDR,
             &ConnectionParameters::default().pmtud_iface_mtu(false),
+            None,
             Qlog::disabled(),
             now(),
         )
@@ -1289,5 +1331,39 @@ mod tests {
         assert_eq!(stats.path_response, 2);
         assert_eq!(stats.path_challenge, 0);
         assert_eq!(path.challenges, [[2; PATH_CHALLENGE_LEN]]);
+    }
+
+    /// A path created once the peer's `max_udp_payload_size` is known starts out limited.
+    #[test]
+    fn new_path_uses_peer_max_udp_payload() {
+        let mut paths = Paths::new(&ConnectionParameters::default());
+        paths.set_peer_max_udp_payload(1200, now());
+
+        let path = find_path(&paths);
+        assert_eq!(path.borrow().plpmtu(), 1200);
+        assert_eq!(path.borrow().sender().cwnd(), 1200 * CWND_INITIAL_PKTS);
+    }
+
+    /// A path created before the peer's `max_udp_payload_size` was known is limited once it is
+    /// made permanent.
+    #[test]
+    fn make_permanent_applies_peer_max_udp_payload() {
+        let mut paths = Paths::new(&ConnectionParameters::default());
+        let path = find_path(&paths);
+        assert!(path.borrow().plpmtu() > 1200);
+
+        // `Paths` does not track temporary paths.
+        paths.set_peer_max_udp_payload(1200, now());
+        assert!(path.borrow().plpmtu() > 1200);
+
+        paths.make_permanent(
+            &path,
+            None,
+            RemoteConnectionIdEntry::empty_remote(),
+            now(),
+            &mut Stats::default(),
+        );
+        assert_eq!(path.borrow().plpmtu(), 1200);
+        assert_eq!(path.borrow().sender().cwnd(), 1200 * CWND_INITIAL_PKTS);
     }
 }
