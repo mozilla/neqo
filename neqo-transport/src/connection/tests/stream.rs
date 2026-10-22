@@ -56,6 +56,25 @@ fn stream_create() {
 }
 
 #[test]
+fn is_stream_id_opened() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    for stream_type in [StreamType::BiDi, StreamType::UniDi] {
+        let id = client.stream_create(stream_type).unwrap();
+        client.stream_send(id, &[0]).unwrap();
+        let next = StreamId::new(id.as_u64() + 4);
+        assert!(!server.is_stream_id_opened(id));
+        server.process_input(client.process_output(now()).dgram().unwrap(), now());
+        assert!(client.is_stream_id_opened(id));
+        assert!(server.is_stream_id_opened(id));
+        assert!(!client.is_stream_id_opened(next));
+        assert!(!server.is_stream_id_opened(next));
+    }
+    assert!(!server.is_stream_id_opened(StreamId::new(1 << 60))); // Beyond the stream limit.
+}
+
+#[test]
 // tests stream send/recv after connection is established.
 fn transfer() {
     let mut client = default_client();

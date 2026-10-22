@@ -3093,6 +3093,13 @@ impl Connection {
         self.streams.is_stream_id_allowed(stream_id)
     }
 
+    /// Whether the stream with this ID has been opened, by this endpoint or by the peer, even if
+    /// it is closed now.
+    #[must_use]
+    pub fn is_stream_id_opened(&self, stream_id: StreamId) -> bool {
+        self.streams.is_stream_id_opened(stream_id)
+    }
+
     /// Process the final set of transport parameters.
     fn process_tps(&mut self, now: Instant) -> Res<()> {
         self.validate_cids()?;
