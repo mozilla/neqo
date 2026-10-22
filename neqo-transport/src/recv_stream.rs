@@ -651,6 +651,7 @@ enum RecvStreamState {
     ResetRecvd {
         final_received: u64,
         final_read: u64,
+        err: Option<AppError>,
     },
     // Defined by spec but we don't use it: ResetRead
 }
@@ -840,6 +841,7 @@ impl RecvStream {
             | RecvStreamState::ResetRecvd {
                 final_received,
                 final_read,
+                ..
             } => {
                 let received = *final_received;
                 let read = *final_read;
@@ -1073,6 +1075,7 @@ impl RecvStream {
         self.set_state(RecvStreamState::ResetRecvd {
             final_received,
             final_read,
+            err: Some(err),
         });
         true
     }
@@ -1142,6 +1145,15 @@ impl RecvStream {
     pub const fn set_stream_max_data(&mut self, max_data: u64) {
         if let RecvStreamState::Recv { fc, .. } = &mut self.state {
             fc.set_max_active(max_data);
+        }
+    }
+
+    #[must_use]
+    pub(crate) const fn reset_code(&self) -> Option<AppError> {
+        if let RecvStreamState::ResetRecvd { err, .. } = self.state {
+            err
+        } else {
+            None
         }
     }
 
@@ -1360,6 +1372,7 @@ impl RecvStream {
                 self.set_state(RecvStreamState::ResetRecvd {
                     final_received: received,
                     final_read: read,
+                    err: None,
                 });
                 return true;
             }

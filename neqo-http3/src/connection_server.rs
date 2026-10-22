@@ -342,6 +342,7 @@ impl Http3ServerHandler {
             }
             ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
                 self.base_handler.webtransport_create_stream_remote(
+                    conn,
                     StreamId::from(session_id),
                     stream_id,
                     Box::new(self.events.clone()),
