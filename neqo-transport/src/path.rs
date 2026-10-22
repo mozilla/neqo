@@ -67,6 +67,9 @@ pub struct Paths {
 
     /// Whether PMTUD is enabled for this connection.
     pmtud: bool,
+
+    /// The peer's `max_udp_payload_size` transport parameter, once known.
+    peer_max_udp_payload: Option<usize>,
 }
 
 impl Paths {
@@ -79,6 +82,7 @@ impl Paths {
             to_retire: Vec::new(),
             qlog: Qlog::disabled(),
             pmtud,
+            peer_max_udp_payload: None,
         }
     }
 
@@ -100,12 +104,19 @@ impl Paths {
                     Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
-                    if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
-                        p.pmtud_mut().set_peer_max_udp_payload(peer_max);
-                    }
                 }
                 Rc::new(RefCell::new(p))
             })
+    }
+
+    /// Applies the peer's `max_udp_payload_size` to all permanent paths and remembers it for
+    /// paths that are made permanent later.
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        self.peer_max_udp_payload = Some(peer_max_udp_payload);
+        for p in &self.paths {
+            p.borrow_mut()
+                .set_peer_max_udp_payload(peer_max_udp_payload, now);
+        }
     }
 
     /// Get a reference to the primary path, if one exists.
@@ -163,6 +174,10 @@ impl Paths {
 
         qdebug!("[{}] Make permanent", path.borrow());
         path.borrow_mut().make_permanent(local_cid, remote_cid);
+        // Temporary paths don't send, so they only get the peer's limit here.
+        if let Some(peer_max) = self.peer_max_udp_payload {
+            path.borrow_mut().set_peer_max_udp_payload(peer_max, now);
+        }
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
             assert!(self.select_primary(path, now).is_none());
@@ -1014,6 +1029,12 @@ impl Path {
         self.sender.pmtud_mut()
     }
 
+    /// Limit datagrams on this path to the peer's `max_udp_payload_size` transport parameter.
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        self.sender
+            .set_peer_max_udp_payload(peer_max_udp_payload, now);
+    }
+
     /// Read-only access to the owned sender.
     pub const fn sender(&self) -> &PacketSender {
         &self.sender
@@ -1220,10 +1241,21 @@ mod tests {
     use neqo_common::{Encoder, qlog::Qlog};
     use test_fixture::{DEFAULT_ADDR, now};
 
-    use super::Path;
+    use super::{Path, PathRef, Paths};
     use crate::{
-        ConnectionParameters, Stats, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
+        ConnectionParameters, Stats, cc::CWND_INITIAL_PKTS, cid::RemoteConnectionIdEntry,
+        frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
     };
+
+    fn find_path(paths: &Paths) -> PathRef {
+        paths.find_path(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            &ConnectionParameters::default().pmtud_iface_mtu(false),
+            now(),
+            &mut Stats::default(),
+        )
+    }
 
     fn path() -> Path {
         Path::temporary(
@@ -1264,5 +1296,21 @@ mod tests {
         assert_eq!(stats.path_response, 2);
         assert_eq!(stats.path_challenge, 0);
         assert_eq!(path.challenges, [[2; PATH_CHALLENGE_LEN]]);
+    }
+
+    /// A temporary path gets the peer's `max_udp_payload_size` once it is made permanent.
+    #[test]
+    fn make_permanent_applies_peer_max_udp_payload() {
+        let mut paths = Paths::new(false);
+        let path = find_path(&paths);
+        assert!(path.borrow().plpmtu() > 1200);
+
+        // `Paths` does not track temporary paths.
+        paths.set_peer_max_udp_payload(1200, now());
+        assert!(path.borrow().plpmtu() > 1200);
+
+        paths.make_permanent(&path, None, RemoteConnectionIdEntry::empty_remote(), now());
+        assert_eq!(path.borrow().plpmtu(), 1200);
+        assert_eq!(path.borrow().sender().cwnd(), 1200 * CWND_INITIAL_PKTS);
     }
 }
