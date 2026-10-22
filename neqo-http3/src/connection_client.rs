@@ -935,7 +935,7 @@ impl Http3Client {
     /// server. The following actions need to be handled by the client-specific code:
     ///  - `ReceiveOutput::NewStream(NewStreamType::Http)` - client cannot  receive a
     ///    server-initiated HTTP request,
-    ///  - `ReceiveOutput::NewStream(NewStreamType::WebTransportStream(_))` - because
+    ///  - `ReceiveOutput::NewStream(NewStreamType::WebTransportStream { .. })` - because
     ///    `Http3ClientEvents`is needed and events handler is specific to the client.
     ///  - `ReceiveOutput::ControlFrames(control_frames)` - some control frame handling differs
     ///    between the  client and the server:
@@ -950,10 +950,11 @@ impl Http3Client {
             .handle_stream_readable(&mut self.conn, stream_id, now)?
         {
             ReceiveOutput::NewStream(NewStreamType::Http(_)) => Err(Error::HttpStreamCreation),
-            ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
+            ReceiveOutput::NewStream(NewStreamType::WebTransportStream { session_id, fin }) => {
                 self.base_handler.webtransport_create_stream_remote(
                     StreamId::from(session_id),
                     stream_id,
+                    fin,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
                 )?;
@@ -1181,6 +1182,7 @@ mod tests {
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
+        stream_type_reader::WEBTRANSPORT_UNI_STREAM,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1966,6 +1968,23 @@ mod tests {
             }
         }
         assert!(stop_sending_event_found);
+        assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    #[test]
+    fn client_received_wt_stream_header_with_fin() {
+        let (mut client, mut server) = connect();
+        let new_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_UNI_STREAM);
+        enc.encode_varint(0u64);
+        _ = server
+            .conn
+            .stream_send(new_stream_id, enc.as_ref())
+            .unwrap();
+        server.conn.stream_close_send(new_stream_id).unwrap();
+        let out = server.conn.process_output(now());
+        drop(client.process(out.dgram(), now()));
         assert_eq!(client.state(), Http3State::Connected);
     }
 

@@ -39,6 +39,7 @@ const fn preface_len(stream_info: &Http3StreamInfo) -> u64 {
 #[derive(Debug)]
 pub struct WebTransportRecvStream {
     stream_info: Http3StreamInfo,
+    fin: bool, // The FIN was read with the stream header, so the stream carries no data.
     events: Box<dyn RecvStreamEvents>,
     session: Rc<RefCell<Session>>,
 }
@@ -46,12 +47,14 @@ pub struct WebTransportRecvStream {
 impl WebTransportRecvStream {
     pub fn new(
         stream_id: StreamId,
+        fin: bool,
         events: Box<dyn RecvStreamEvents>,
         session: Rc<RefCell<Session>>,
     ) -> Self {
         let session_id = session.borrow().id();
         Self {
             stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
+            fin,
             events,
             session,
         }
@@ -89,7 +92,11 @@ impl RecvStream for WebTransportRecvStream {
         _now: Instant,
     ) -> Res<(usize, bool)> {
         let stream_id = self.stream_info.stream_id();
-        let (amount, fin) = conn.stream_recv(stream_id, buf)?;
+        let (amount, fin) = if self.fin {
+            (0, true)
+        } else {
+            conn.stream_recv(stream_id, buf)?
+        };
         if fin {
             self.session.borrow_mut().remove_recv_stream(stream_id);
         }
