@@ -5142,7 +5142,7 @@ mod tests {
     }
 
     #[test]
-    fn qpack_stream_reset_dynamic_table_zero() {
+    fn qpack_stream_reset_before_dynamic_table_capacity() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         // Cancel request.
         client
@@ -5157,7 +5157,7 @@ mod tests {
                 .receive(&mut server.conn, now())
                 .unwrap(),
         );
-        assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
+        assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
 
     #[test]
