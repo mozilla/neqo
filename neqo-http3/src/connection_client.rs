@@ -454,8 +454,12 @@ impl Http3Client {
             return Err(Error::Fatal);
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
-            self.base_handler
-                .set_0rtt_settings(&mut self.conn, settings)?;
+            let res = self
+                .base_handler
+                .set_0rtt_settings(&mut self.conn, settings);
+            if self.check_result(now, &res) {
+                return Err(Error::Fatal);
+            }
             self.events
                 .connection_state_change(self.base_handler.state().clone());
         }
@@ -1165,6 +1169,7 @@ mod tests {
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
         MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        tparams::TransportParameterId,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -3900,6 +3905,45 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    /// Rewrite the `initial_max_streams_uni` remembered in a resumption token.
+    fn token_with_max_streams_uni(token: &ResumptionToken, limit: u64) -> Vec<u8> {
+        let mut dec = Decoder::from(token.as_ref());
+        let mut enc = Encoder::default();
+        enc.encode_vvec(dec.decode_vvec().unwrap()); // HTTP/3 settings
+        enc.encode_uint(4, dec.decode_uint::<u32>().unwrap()); // QUIC version
+        enc.encode_varint(dec.decode_varint().unwrap()); // RTT
+        let mut tps = Decoder::from(dec.decode_vvec().unwrap());
+        enc.encode_vvec_with(|enc| {
+            while let Some(id) = tps.decode_varint() {
+                let value = tps.decode_vvec().unwrap();
+                enc.encode_varint(id);
+                if id == u64::from(TransportParameterId::InitialMaxStreamsUni) {
+                    enc.encode_vvec_with(|enc| {
+                        enc.encode_varint(limit);
+                    });
+                } else {
+                    enc.encode_vvec(value);
+                }
+            }
+        });
+        enc.encode(dec.decode_remainder());
+        enc.into()
+    }
+
+    /// The control and QPACK streams don't fit a remembered limit of two uni streams.
+    #[test]
+    fn zero_rtt_stream_limit_too_low() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), token_with_max_streams_uni(&token, 2));
+        assert_eq!(res, Err(Error::Fatal));
+        assert_closed(&client, &Error::StreamLimit);
+        let closing = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Closing(_)));
+        assert!(client.events().any(closing));
     }
 
     #[test]
