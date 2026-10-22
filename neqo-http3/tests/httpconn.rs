@@ -241,6 +241,8 @@ fn response_invalid_header_value() {
     let (_hconn_c, _hconn_s, request) = fetch_uri("https://something.com/");
     let res = request.send_headers(&[Header::new(":status", "200"), Header::new("x", "a\rb")]);
     assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
+    let res = request.send_headers(&[Header::new(":status", "101")]);
+    assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
 }
 
 #[test]

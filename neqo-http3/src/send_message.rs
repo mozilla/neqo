@@ -68,7 +68,7 @@ impl MessageState {
                     }
                     MessageType::Response => {
                         headers_valid(headers, message_type).map_err(|_| Error::InvalidInput)?;
-                        if !is_interim(headers)? {
+                        if !is_interim(headers).map_err(|_| Error::InvalidInput)? {
                             *self = Self::WaitingForData;
                         }
                     }
