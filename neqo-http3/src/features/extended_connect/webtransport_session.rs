@@ -79,6 +79,12 @@ impl Session {
     pub(crate) fn validate_send_group(&self, group_id: SendGroupId) -> bool {
         self.send_groups.contains(&group_id)
     }
+
+    fn remove_pending_stream_if_closed(&mut self, stream_id: StreamId) {
+        if !self.recv_streams.contains(&stream_id) && !self.send_streams.contains(&stream_id) {
+            self.pending_streams.remove(&stream_id);
+        }
+    }
 }
 
 impl Protocol for Session {
@@ -91,7 +97,7 @@ impl Protocol for Session {
         // > datagrams until they can be associated with an
         // > established session.
         //
-        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+        // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-16.html#section-4.6>
         #[expect(clippy::iter_over_hash_type, reason = "no defined order necessary")]
         for stream_id in self.pending_streams.drain() {
             events.extended_connect_new_stream(
@@ -99,7 +105,7 @@ impl Protocol for Session {
                 // Explicitly emit a stream readable event. Such
                 // event was previously suppressed as the
                 // session was still negotiating.
-                true,
+                self.recv_streams.contains(&stream_id),
             )?;
         }
 
@@ -184,7 +190,7 @@ impl Protocol for Session {
                 unreachable!("see match above");
             }
             State::Negotiating => {
-                // > a client may receive a server-initiated stream or a datagram
+                // > a client can receive a server-initiated stream or a datagram
                 // > before receiving the CONNECT response headers from the
                 // > server.
                 // >
@@ -192,7 +198,7 @@ impl Protocol for Session {
                 // > streams and datagrams until they can be associated with an
                 // > established session.
                 //
-                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-16.html#section-4.6>
                 self.pending_streams.insert(stream_id);
             }
             State::Active => {
@@ -212,11 +218,18 @@ impl Protocol for Session {
     }
 
     fn remove_recv_stream(&mut self, stream_id: StreamId) {
-        self.recv_streams.remove(&stream_id);
+        if self.recv_streams.remove(&stream_id) {
+            self.remove_pending_stream_if_closed(stream_id);
+        }
     }
 
     fn remove_send_stream(&mut self, stream_id: StreamId) {
         self.send_streams.remove(&stream_id);
+        self.remove_pending_stream_if_closed(stream_id);
+    }
+
+    fn is_pending_stream(&self, stream_id: StreamId) -> bool {
+        self.pending_streams.contains(&stream_id)
     }
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {
