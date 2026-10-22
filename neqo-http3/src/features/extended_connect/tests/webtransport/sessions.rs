@@ -6,7 +6,7 @@
 
 use neqo_common::{Bytes, Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
-    StreamId, StreamType,
+    StreamDataLimit, StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
@@ -603,6 +603,87 @@ fn wt_close_session_cannot_be_sent_at_once() {
         )),
     );
     wt.check_events_after_closing_session_server(&[], None, &[], None, None);
+}
+
+/// A session whose CONNECT stream has 256 bytes of credit, with one stream from each side.
+fn wt_session_with_little_credit() -> (WtTest, StreamId, StreamId, Http3OrWebTransportStream) {
+    let conn_params = wt_default_parameters()
+        .get_connection_parameters()
+        .clone()
+        .max_stream_data(StreamDataLimit::BiDiRemote, 256);
+    let server_params = wt_default_parameters().connection_parameters(conn_params);
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let unidi_client = wt.create_wt_stream_client(session_id, StreamType::UniDi);
+    wt.send_data_client(unidi_client, &[0; 5]);
+    let unidi_server = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&unidi_server, &[0; 5]);
+    drop(wt.server.events());
+    (wt, session_id, unidi_client, unidi_server)
+}
+
+/// Assert that the client has cancelled both streams of a closed session.
+fn assert_wt_streams_cancelled_client(
+    wt: &mut WtTest,
+    unidi_client: StreamId,
+    unidi_server: &Http3OrWebTransportStream,
+) {
+    wt.check_events_after_closing_session_client(
+        &[unidi_server.stream_id()],
+        Some(Error::HttpRequestCancelled.code()),
+        &[unidi_client],
+        Some(Error::HttpRequestCancelled.code()),
+        false,
+        None,
+    );
+    assert_eq!(
+        wt.client.send_data(unidi_client, &[0; 5], now()),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// A local close that flow control holds back still cancels the session's streams.
+#[test]
+fn wt_close_session_blocked_by_flow_control_cancels_streams() {
+    const ERROR_NUM: u32 = 23;
+    let error_message = "a".repeat(1000);
+    let (mut wt, session_id, unidi_client, unidi_server) = wt_session_with_little_credit();
+
+    wt.session_close_frame_client(session_id, ERROR_NUM, &error_message);
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+    assert_wt_streams_cancelled_client(&mut wt, unidi_client, &unidi_server);
+
+    wt.exchange_packets();
+    wt.check_events_after_closing_session_server(
+        &[unidi_client],
+        Some(Error::HttpRequestCancelled.code()),
+        &[unidi_server.stream_id()],
+        Some(Error::HttpRequestCancelled.code()),
+        Some(&(
+            session_id,
+            CloseReason::Clean {
+                error: ERROR_NUM,
+                message: error_message,
+            },
+        )),
+    );
+    assert_eq!(
+        wt.client.webtransport_session_stats(session_id),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// Closing the CONNECT stream when flow control holds back the FIN still cancels the session's
+/// streams.
+#[test]
+fn wt_stream_close_send_blocked_by_flow_control_cancels_streams() {
+    let (mut wt, session_id, unidi_client, unidi_server) = wt_session_with_little_credit();
+    while wt.client.send_data(session_id, &[0; 256], now()).unwrap() > 0 {}
+
+    wt.client.stream_close_send(session_id, now()).unwrap();
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+    assert_wt_streams_cancelled_client(&mut wt, unidi_client, &unidi_server);
 }
 
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
