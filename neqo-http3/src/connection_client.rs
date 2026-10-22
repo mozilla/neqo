@@ -2670,12 +2670,12 @@ mod tests {
                 .conn
                 .stream_stop_sending(request_stream_id, Error::HttpRequestRejected.code())
         );
-        // also reset with RequestRejected.
+        // Reset with RequestCancelled.
         assert_eq!(
             Ok(()),
             server
                 .conn
-                .stream_reset_send(request_stream_id, Error::HttpRequestRejected.code())
+                .stream_reset_send(request_stream_id, Error::HttpRequestCancelled.code())
         );
 
         let out = server.conn.process_output(now());
@@ -2696,7 +2696,7 @@ mod tests {
                     local,
                 } => {
                     assert_eq!(stream_id, request_stream_id);
-                    assert_eq!(error, Error::HttpRequestRejected.code());
+                    assert_eq!(error, Error::HttpRequestCancelled.code());
                     assert!(!local);
                     reset = true;
                 }

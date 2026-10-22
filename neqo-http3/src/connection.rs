@@ -598,6 +598,12 @@ impl Http3Connection {
             return Err(Error::HttpClosedCriticalStream);
         }
 
+        let app_error = self
+            .send_streams
+            .get(&stream_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .and_then(|_| conn.stream_reset_code(stream_id).ok().flatten())
+            .unwrap_or(app_error);
         self.close_send(stream_id, CloseType::ResetRemote(app_error), conn);
         Ok(())
     }

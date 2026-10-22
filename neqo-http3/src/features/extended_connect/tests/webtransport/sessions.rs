@@ -513,7 +513,7 @@ fn wt_close_session_frame_broken_client() {
     // check that the webtransport session is closed.
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        &CloseReason::Error(WT_SESSION_GONE), // The server's stop arrives before its reset.
+        &CloseReason::Error(Error::HttpMessage.code()),
         None,
     );
     wt.check_session_closed_event_server(
@@ -542,9 +542,8 @@ fn wt_close_session_frame_too_long_client() {
         .unwrap();
     wt.exchange_packets();
 
-    let reason = CloseReason::Error(WT_SESSION_GONE); // The server's stop arrives before its reset.
-    wt.check_session_closed_event_client(wt_session.stream_id(), &reason, None);
     let reason = CloseReason::Error(Error::HttpMessage.code());
+    wt.check_session_closed_event_client(wt_session.stream_id(), &reason, None);
     wt.check_session_closed_event_server(&wt_session, &reason);
     assert_eq!(wt.client.state(), Http3State::Connected);
 }
@@ -823,14 +822,14 @@ fn wt_close_capsule_without_fin_ends_connect_stream() {
     wt.check_session_closed_event_server(&wt_session, &CloseReason::Error(WT_SESSION_GONE));
 }
 
-/// The peer handles the `WT_SESSION_GONE` stop before the reset for data after a close capsule.
+/// Data after a close capsule resets the CONNECT stream with `H3_MESSAGE_ERROR`.
 #[test]
 fn wt_data_after_close_capsule_resets_connect_stream() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
     send_close_capsule_without_fin(&mut wt, &wt_session, 0, "", &[0; 5]);
 
-    let reason = CloseReason::Error(WT_SESSION_GONE);
+    let reason = CloseReason::Error(Error::HttpMessage.code());
     assert!(wt.server.events().any(|e| matches!(
         e,
         Http3ServerEvent::WebTransport(ServerEvent::SessionClosed { reason: r, .. }) if r == reason
