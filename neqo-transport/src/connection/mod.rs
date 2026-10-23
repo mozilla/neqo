@@ -930,10 +930,10 @@ impl Connection {
 
     /// Call by application when the peer cert has been verified.
     ///
-    /// Does nothing if TLS is not waiting for a verdict.
+    /// Does nothing if TLS is not waiting for a verdict or the connection is closed.
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         debug!("[{self}] Authenticated {status:?}");
-        if !self.crypto.tls().state().authentication_needed() {
+        if self.state.closed() || !self.crypto.tls().state().authentication_needed() {
             return;
         }
         self.crypto.tls_mut().authenticated(status);
@@ -1983,6 +1983,9 @@ impl Connection {
                 now,
             ) {
                 self.capture_error(Some(Rc::clone(path)), now, t, Err(e))?;
+            }
+            if self.state.closed() {
+                break; // RFC 9000, Section 10.2.1: no need to process any further frames.
             }
         }
 
