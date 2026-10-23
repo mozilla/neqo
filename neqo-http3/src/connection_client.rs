@@ -1164,7 +1164,7 @@ mod tests {
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        MIN_INITIAL_PACKET_SIZE, Output, State, StreamDataLimit, StreamId, StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -5369,6 +5369,43 @@ mod tests {
             client.read_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
+    }
+
+    // Client: a malformed response also resets a request that flow control keeps unsent.
+    #[test]
+    fn malformed_response_resets_blocked_request() {
+        let (mut client, mut server) = connect_with_connection_parameters(
+            ConnectionParameters::default().max_stream_data(StreamDataLimit::BiDiRemote, 1),
+        );
+        let request_stream_id = make_request(&mut client, true, &[]);
+        let has_send_stream =
+            |c: &Http3Client| c.handler().send_streams().contains_key(&request_stream_id);
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        assert!(has_send_stream(&client));
+
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &[Header::new("a", "b")], &mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        let reset = Http3ClientEvent::Reset {
+            stream_id: request_stream_id,
+            error: Error::InvalidHeader.code(),
+            local: true,
+        };
+        assert_eq!(client.events().collect::<Vec<_>>(), [reset]);
+        assert!(!has_send_stream(&client));
+        let reset_stream = ConnectionEvent::RecvStreamReset {
+            stream_id: request_stream_id,
+            app_error: Error::InvalidHeader.code(),
+        };
+        assert!(server.conn.events().any(|e| e == reset_stream));
     }
 
     fn handshake_client_error(client: &mut Http3Client, server: &mut TestServer, error: &Error) {
