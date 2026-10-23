@@ -232,6 +232,8 @@ pub enum Error {
     HttpVersionFallback,
     #[error("HTTP message error")]
     HttpMessage,
+    #[error("HTTP datagram error")]
+    HttpDatagram,
     #[error("QPACK error: {0}")]
     Qpack(#[source] neqo_qpack::Error),
 
@@ -297,6 +299,7 @@ impl Error {
             Self::HttpMessage => 0x10e,
             Self::HttpConnect => 0x10f,
             Self::HttpVersionFallback => 0x110,
+            Self::HttpDatagram => 0x33,
             Self::Qpack(e) => e.code(),
             // These are all internal errors.
             _ => 3,
@@ -317,6 +320,7 @@ impl Error {
                 | Self::HttpId
                 | Self::HttpSettings
                 | Self::HttpMissingSettings
+                | Self::HttpDatagram
                 | Self::Qpack(QpackError::EncoderStream | QpackError::DecoderStream)
         )
     }
@@ -710,9 +714,15 @@ mod tests {
             (Error::HttpMessage, 0x10e),
             (Error::HttpConnect, 0x10f),
             (Error::HttpVersionFallback, 0x110),
+            (Error::HttpDatagram, 0x33),
         ] {
             assert_eq!(error.code(), expected);
         }
+    }
+
+    #[test]
+    fn datagram_error_is_connection_error() {
+        assert!(Error::HttpDatagram.connection_error());
     }
 
     #[test]

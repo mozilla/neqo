@@ -14,7 +14,7 @@ use std::{
 };
 
 use neqo_common::{
-    Bytes, Decoder, Header, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
+    Bytes, Decoder, Header, MAX_VARINT, MessageType, Role, qdebug, qerror, qinfo, qtrace, qwarn,
 };
 use neqo_qpack as qpack;
 use neqo_transport::{
@@ -683,24 +683,34 @@ impl Http3Connection {
         }
     }
 
-    pub(crate) fn handle_datagram(&mut self, datagram: Vec<u8>) {
+    pub(crate) fn handle_datagram(&mut self, datagram: Vec<u8>, conn: &mut Connection) -> Res<()> {
         let mut decoder = Decoder::new(&datagram);
-        let Some(id) = decoder.decode_varint() else {
+        let Some(id) = decoder.decode_varint().filter(|id| *id <= MAX_VARINT / 4) else {
             qdebug!("[{self}] handle_datagram: failed to decode session ID");
-            return;
+            return Err(Error::HttpDatagram);
         };
         let varint_len = decoder.offset();
+        let stream_id = StreamId::from(id * 4);
 
-        let Some(stream) = self
-            .recv_streams
-            .get_mut(&StreamId::from(id * 4))
-            .and_then(|s| s.extended_connect_session())
-        else {
+        let Some(stream) = self.recv_streams.get(&stream_id) else {
+            // RFC 9297 Section 2.1 SHOULD; the client cannot see the server's bidi stream limit.
+            if self.role == Role::Server && !conn.is_stream_id_allowed(stream_id) {
+                return Err(Error::HttpId);
+            }
             qdebug!("[{self}] handle_datagram for unknown extended connect session");
-            return;
+            return Ok(());
         };
 
-        stream.borrow().datagram(Bytes::new(datagram, varint_len));
+        if let Some(session) = stream.extended_connect_session() {
+            session.borrow().datagram(Bytes::new(datagram, varint_len));
+        } else if stream.stream_type() == Http3StreamType::Http {
+            let error = Error::HttpDatagram.code();
+            drop(conn.stream_stop_sending(stream_id, error));
+            drop(conn.stream_reset_send(stream_id, error));
+            self.close_recv(stream_id, CloseType::LocalError(error), conn)?;
+            self.close_send(stream_id, CloseType::LocalError(error), conn);
+        }
+        Ok(())
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
