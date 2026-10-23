@@ -18,7 +18,10 @@ use std::{
 };
 
 use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, qdebug, to_u64};
-use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
+use nss::{
+    AuthenticationStatus, ExtensionHandler, ExtensionWriterResult, HandshakeMessage,
+    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys,
+};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
@@ -2320,5 +2323,32 @@ fn server_odcid_absent() {
         &mut server,
         Error::TransportParameter,
         Error::Peer(Error::TransportParameter.code()),
+    );
+}
+
+/// Omits the `quic_transport_parameters` extension.
+struct NoTpExtension;
+
+impl ExtensionHandler for NoTpExtension {
+    fn write(&mut self, _: HandshakeMessage, _: bool, _: &mut [u8]) -> ExtensionWriterResult {
+        ExtensionWriterResult::Skip
+    }
+}
+
+/// RFC 9001, Section 8.2: a missing `quic_transport_parameters` extension is a 0x16d error.
+#[test]
+fn server_tp_extension_absent() {
+    let mut client = default_client();
+    let mut server = default_server();
+    server
+        .crypto
+        .tls_mut()
+        .extension_handler(0x39, Rc::new(RefCell::new(NoTpExtension)))
+        .unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::CryptoAlert(109),
+        Error::Peer(Error::CryptoAlert(109).code()),
     );
 }
