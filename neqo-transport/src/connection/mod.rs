@@ -3663,6 +3663,11 @@ impl Connection {
             self.decode_ack_delay(ack_delay)?,
             now,
         );
+        if space == PacketNumberSpace::ApplicationData {
+            let la = self.loss_recovery.largest_acknowledged_pn(space);
+            let expiration = now + 3 * self.pto();
+            self.crypto.states_mut().key_update_acked(la, expiration);
+        }
         let largest_acknowledged = acked_packets.first().map(sent::Packet::pn);
         qlog::packets_acked(&mut self.qlog, space, &acked_packets, now);
         let mut bytes_acked = 0;
