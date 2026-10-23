@@ -1626,10 +1626,12 @@ impl Connection {
                         || versions.contains(&0)
                         || &packet.scid() != self.odcid().ok_or(Error::Internal)?
                         || matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+                        || self.reacted_to_vn()
                     {
                         // Ignore VersionNegotiation packets that contain the current version.
                         // Or don't have the right connection ID.
                         // Or are received after a Retry.
+                        // Or are received after reacting to a VersionNegotiation packet.
                         self.stats.borrow_mut().pkt_dropped("Invalid VN");
                     } else {
                         self.version_negotiation(&versions, now)?;
@@ -3200,6 +3202,11 @@ impl Connection {
         Ok(())
     }
 
+    /// Whether this client made its connection attempt based on a Version Negotiation packet.
+    fn reacted_to_vn(&self) -> bool {
+        self.tps.borrow().version() != self.conn_params.get_versions().initial()
+    }
+
     /// Validate the `version_negotiation` transport parameter from the peer.
     fn validate_versions(&self) -> Res<()> {
         let tph = self.tps.borrow();
@@ -3220,26 +3227,18 @@ impl Connection {
             } else if self.version().wire_version() != current {
                 info!("[{self}] validate_versions: current version mismatch");
                 Err(Error::VersionNegotiation)
-            } else if self
-                .conn_params
-                .get_versions()
-                .initial()
-                .is_compatible(self.version)
-            {
-                // 2. The current version is compatible with what we attempted.
-                // That's a compatible upgrade and that's OK.
+            } else if !self.reacted_to_vn() {
+                // 2. Without Version Negotiation, the transport parameter handler
+                // has validated any compatible upgrade.
                 Ok(())
             } else {
-                // 3. The initial version we attempted isn't compatible.  Check that
-                // the one we would have chosen is compatible with this one.
+                // 3. RFC 9368, Section 4: after Version Negotiation, check that
+                // we would have attempted the same version.
                 let mut all_versions = other.to_owned();
                 all_versions.push(current);
-                if self
-                    .conn_params
-                    .get_versions()
-                    .preferred(&all_versions)
-                    .ok_or(Error::VersionNegotiation)?
-                    .is_compatible(self.version)
+                if !other.is_empty()
+                    && self.conn_params.get_versions().preferred(&all_versions)
+                        == Some(tph.version())
                 {
                     Ok(())
                 } else {
@@ -3247,7 +3246,9 @@ impl Connection {
                     Err(Error::VersionNegotiation)
                 }
             }
-        } else if self.version != Version::Version1 && !self.version.is_draft() {
+        } else if self.reacted_to_vn()
+            || (self.version != Version::Version1 && !self.version.is_draft())
+        {
             info!("[{self}] validate_versions: missing extension");
             Err(Error::VersionNegotiation)
         } else {
