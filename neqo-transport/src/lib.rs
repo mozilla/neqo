@@ -6,7 +6,7 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use nss::Error as CryptoError;
+use nss::{Error as CryptoError, TLS_ALERT_ECH_REQUIRED};
 use thiserror::Error;
 use tracing::debug;
 
@@ -94,6 +94,7 @@ pub type TransportError = u64;
 const ERROR_APPLICATION_CLOSE: TransportError = 12;
 const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError = 13;
 const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
+const ERROR_CRYPTO_BASE: TransportError = 0x100;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
 pub enum Error {
@@ -229,10 +230,10 @@ impl Error {
             Self::Application => ERROR_APPLICATION_CLOSE,
             Self::NoAvailablePath | Self::TooManyPtos => 16,
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
-            Self::CryptoAlert(a) => 0x100 + u64::from(*a),
+            Self::CryptoAlert(a) => ERROR_CRYPTO_BASE + u64::from(*a),
             // As we have a special error code for ECH fallbacks, we lose the alert.
             // Send the server "ech_required" directly.
-            Self::EchRetry(_) => 0x100 + 121,
+            Self::EchRetry(_) => Self::CryptoAlert(TLS_ALERT_ECH_REQUIRED).code(),
             Self::VersionNegotiation => 0x53f8,
             // All the rest are internal errors.
             _ => 1,
