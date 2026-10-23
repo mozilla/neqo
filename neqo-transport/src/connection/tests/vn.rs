@@ -343,10 +343,7 @@ fn version_negotiation_downgrade() {
         new_server(ConnectionParameters::default().versions(DOWNGRADE, Version::all()));
 
     // Start the handshake and spoof a VN packet.
-    let initial = client.process_output(now()).dgram().unwrap();
-    let vn = create_vn(&initial, &[DOWNGRADE.wire_version()]);
-    let dgram = datagram(vn);
-    client.process_input(dgram, now());
+    vn_to_client(&mut client, &[DOWNGRADE]);
 
     connect_fail(
         &mut client,
