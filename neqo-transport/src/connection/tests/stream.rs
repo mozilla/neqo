@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap, fmt::Debug};
+use std::{cmp::max, collections::HashMap, fmt::Debug, num::NonZeroUsize};
 
 use neqo_common::{Role, event::Provider as _, qdebug, to_u64};
 use test_fixture::now;
@@ -447,6 +447,49 @@ fn max_data() {
         evts[0],
         ConnectionEvent::SendStreamWritable { .. }
     ));
+}
+
+/// `MAX_DATA` wakes exactly the streams whose low watermark the previous limit did not exceed.
+#[test]
+fn max_data_low_watermark() {
+    const SMALL_MAX_DATA: usize = 1024;
+    const WATERMARK: usize = 100;
+
+    fn writable_after_max_data(client: &mut Connection, max_data: usize) -> Vec<StreamId> {
+        client.streams.handle_max_data(to_u64(max_data));
+        client
+            .events()
+            .filter_map(|e| match e {
+                ConnectionEvent::SendStreamWritable { stream_id } => Some(stream_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
+    connect(&mut client, &mut server);
+
+    let low = client.stream_create(StreamType::UniDi).unwrap();
+    let high = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(
+        client.stream_send(low, &[b'a'; SMALL_MAX_DATA]).unwrap(),
+        SMALL_MAX_DATA
+    );
+    _ = client.events().count();
+
+    let limit = SMALL_MAX_DATA + WATERMARK / 2;
+    assert_eq!(writable_after_max_data(&mut client, limit), [low, high]);
+
+    client
+        .stream_set_writable_event_low_watermark(high, NonZeroUsize::new(WATERMARK).unwrap())
+        .unwrap();
+    let limit = SMALL_MAX_DATA + WATERMARK;
+    assert_eq!(writable_after_max_data(&mut client, limit), [high]);
+    let limit = SMALL_MAX_DATA + WATERMARK * 3 / 2;
+    assert_eq!(writable_after_max_data(&mut client, limit), [high]);
+    let limit = SMALL_MAX_DATA + WATERMARK * 3;
+    assert!(writable_after_max_data(&mut client, limit).is_empty());
 }
 
 #[test]

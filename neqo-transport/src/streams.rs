@@ -8,6 +8,7 @@
 use std::{
     cell::RefCell,
     cmp::Ordering,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -592,9 +593,8 @@ impl Streams {
             return;
         };
 
-        for (_id, ss) in &mut self.send {
-            ss.maybe_emit_writable_event(previous_limit, current_limit);
-        }
+        self.send
+            .maybe_emit_writable_events(previous_limit, current_limit);
     }
 
     pub fn handle_data_blocked(&self) {
@@ -643,6 +643,15 @@ impl Streams {
     /// When the stream does not exist.
     pub fn get_send_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut SendStream> {
         self.send.get_mut(stream_id)
+    }
+
+    pub(crate) fn set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        self.send
+            .set_writable_event_low_watermark(stream_id, watermark)
     }
 
     /// # Errors
