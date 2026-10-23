@@ -3277,6 +3277,9 @@ impl Connection {
         if !matches!(self.state, State::WaitInitial | State::WaitVersion) {
             return Ok(());
         }
+        if self.role == Role::Client && self.version != self.tps.borrow().version() {
+            return Ok(()); // Only the first version change counts (RFC 9369, Section 4.1).
+        }
 
         let v = if self.role == Role::Client {
             packet_version

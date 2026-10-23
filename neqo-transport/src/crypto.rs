@@ -1152,7 +1152,7 @@ impl CryptoStates {
                     .as_mut()
                     .ok_or(Error::VersionNegotiation)
                     .and_then(|next| {
-                        next.rx.continuation(&prev.rx)?;
+                        _ = next.rx.continuation(&prev.rx); // Reordered |orig| packets are OK.
                         next.tx.continuation(&prev.tx)
                     });
                 self.initials[orig] = Some(prev); // Also on error, as the connection stays on |orig|.
