@@ -1924,6 +1924,8 @@ pub struct SendStreams {
     // hash lookup) while still resuming after the last-served stream when the packet
     // builder fills mid-pass, preserving fairness.
     fair_rr_next: usize,
+
+    max_low_watermark: Option<NonZeroUsize>, // Upper bound of the streams' low watermarks.
 }
 
 impl SendStreams {
@@ -2402,6 +2404,33 @@ impl SendStreams {
             };
             ss.set_max_stream_data(limit);
         }
+    }
+
+    pub(crate) fn set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        self.get_mut(stream_id)?
+            .set_writable_event_low_watermark(watermark);
+        self.max_low_watermark = max(self.max_low_watermark, Some(watermark));
+        Ok(())
+    }
+
+    pub(crate) fn maybe_emit_writable_events(
+        &mut self,
+        previous_limit: usize,
+        current_limit: usize,
+    ) {
+        if self.max_low_watermark.unwrap_or(NonZeroUsize::MIN).get() < previous_limit {
+            return; // No stream was waiting for connection flow control.
+        }
+        let mut max_low_watermark = NonZeroUsize::MIN;
+        for ss in self.map.values() {
+            ss.maybe_emit_writable_event(previous_limit, current_limit);
+            max_low_watermark = max(max_low_watermark, ss.writable_event_low_watermark);
+        }
+        self.max_low_watermark = Some(max_low_watermark);
     }
 }
 
