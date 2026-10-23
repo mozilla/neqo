@@ -36,8 +36,8 @@ use nss::{
     Record, RecordList, RecordProtection as Aead, RecordProtectionOps as _, ResumptionToken,
     SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
     TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
-    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp,
-    random,
+    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_HS_KEY_UDPATE, TLS_VERSION_1_3,
+    ZeroRttChecker, hkdf, hp, random,
 };
 
 use crate::{
@@ -77,6 +77,7 @@ pub struct Crypto {
     states: CryptoStates,
     /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
     early_resend_used: bool,
+    handshake_message_filter: HandshakeMessageFilter,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -135,6 +136,7 @@ impl Crypto {
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
             early_resend_used: false,
+            handshake_message_filter: HandshakeMessageFilter::default(),
         })
     }
 
@@ -209,6 +211,9 @@ impl Crypto {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
+        if let Some(d) = data {
+            self.handshake_message_filter.check(d)?;
+        }
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
             if space == PacketNumberSpace::Initial && self.is_server() {
@@ -1814,6 +1819,39 @@ impl Default for CryptoStreams {
             handshake: CryptoStream::default(),
             application: CryptoStream::default(),
         }
+    }
+}
+
+/// Follows TLS handshake message framing to reject a `KeyUpdate` (RFC 9001 6) before NSS sees it.
+#[derive(Debug, Default)]
+struct HandshakeMessageFilter {
+    header_len: usize,
+    body_len: usize,
+}
+
+impl HandshakeMessageFilter {
+    const HEADER_LEN: usize = 4;
+
+    fn check(&mut self, mut data: &[u8]) -> Res<()> {
+        while let Some((&b, rest)) = data.split_first() {
+            if self.header_len < Self::HEADER_LEN {
+                if self.header_len > 0 {
+                    self.body_len = (self.body_len << 8) | usize::from(b);
+                } else if b == TLS_HS_KEY_UDPATE {
+                    return Err(Error::CryptoAlert(10)); // unexpected_message
+                }
+                self.header_len += 1;
+                data = rest;
+            } else {
+                let skip = min(self.body_len, data.len());
+                self.body_len -= skip;
+                data = &data[skip..];
+            }
+            if self.header_len == Self::HEADER_LEN && self.body_len == 0 {
+                self.header_len = 0;
+            }
+        }
+        Ok(())
     }
 }
 
