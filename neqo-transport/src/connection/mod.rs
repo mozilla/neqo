@@ -1403,6 +1403,33 @@ impl Connection {
             token: packet.token().to_vec(),
             retry_source_cid: retry_scid,
         };
+        let tx = self
+            .crypto
+            .states()
+            .tx(self.version(), Epoch::Initial)
+            .ok_or(Error::Internal)?;
+        let mut buf = Vec::new();
+        let (_, builder, _) = Self::build_packet_header(
+            &path.borrow(),
+            Epoch::Initial,
+            Encoder::new_borrowed_vec(&mut buf),
+            tx,
+            &self.address_validation,
+            self.version(),
+            self.can_grease_quic_bit(),
+            Self::packet_limit(
+                &self.conn_params,
+                PacketNumberSpace::Initial,
+                path.borrow().plpmtu(),
+                tx.expansion(),
+            ),
+            self.loss_recovery
+                .largest_acknowledged_pn(PacketNumberSpace::Initial),
+        );
+        // RFC 9000, Section 8.1.3: every Initial must carry the token, so give up if it can't fit.
+        if builder.is_full() {
+            return Err(Error::InvalidRetry);
+        }
         Ok(())
     }
 
@@ -2310,6 +2337,26 @@ impl Connection {
         res.unwrap_or_default()
     }
 
+    fn packet_limit(
+        conn_params: &ConnectionParameters,
+        space: PacketNumberSpace,
+        limit: usize,
+        aead_expansion: usize,
+    ) -> usize {
+        limit
+            - if space == PacketNumberSpace::Initial && conn_params.scone_enabled() {
+                // Reserve some space for the SCONE indication in an Initial.
+                // This reduces the amount available for building the packet,
+                // but we'll pad to `profile.limit()` when padding.
+                // This will not reserve space for the indication if packets
+                // are coalesced (with Handshake or 0-RTT). That's too bad.
+                Self::SCONE_INDICATION.len()
+            } else {
+                0
+            }
+            - aead_expansion
+    }
+
     #[expect(clippy::too_many_arguments, reason = "no easy way to simplify")]
     fn build_packet_header<'a>(
         path: &Path,
@@ -2807,20 +2854,10 @@ impl Connection {
             let limit = if pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size()
+                path.borrow().pmtud().probe_size() - aead_expansion
             } else {
-                profile.limit()
-                    - if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
-                        // Reserve some space for the SCONE indication in an Initial.
-                        // This reduces the amount available for building the packet,
-                        // but we'll pad to `profile.limit()` when padding.
-                        // This will not reserve space for the indication if packets
-                        // are coalesced (with Handshake or 0-RTT). That's too bad.
-                        Self::SCONE_INDICATION.len()
-                    } else {
-                        0
-                    }
-            } - aead_expansion;
+                Self::packet_limit(&self.conn_params, space, profile.limit(), aead_expansion)
+            };
 
             let (pt, mut builder, pn) = Self::build_packet_header(
                 &path.borrow(),
