@@ -30,6 +30,7 @@ pub struct RecvMessageInfo {
     pub stream_type: Http3StreamType,
     pub stream_id: StreamId,
     pub first_frame_type: Option<u64>,
+    pub connect_enabled: bool,
 }
 
 /*
@@ -72,6 +73,7 @@ pub struct RecvMessage {
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     priority_handler: PriorityHandler,
+    connect_enabled: bool,
 }
 
 impl Display for RecvMessage {
@@ -101,6 +103,7 @@ impl RecvMessage {
             qpack_decoder,
             conn_events,
             priority_handler,
+            connect_enabled: message_info.connect_enabled,
         }
     }
 
@@ -169,6 +172,9 @@ impl RecvMessage {
         let is_extended_connect = self.message_type == MessageType::Request
             && headers.contains_header(":method", "CONNECT")
             && headers.find_header(":protocol").is_some();
+        if is_extended_connect && !self.connect_enabled {
+            return Err(Error::InvalidHeader); // RFC 9220, Section 3.
+        }
         if is_extended_connect {
             self.conn_events
                 .extended_connect_new_session(self.stream_info.stream_id(), headers);

@@ -4,9 +4,16 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
-use neqo_http3::{Error, Header, Http3ClientEvent, Http3ServerEvent, Priority};
-use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
+use neqo_http3::{
+    Error, Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
+    Http3State, Priority, StreamId,
+};
+use test_fixture::{
+    default_http3_client, default_http3_server, exchange_packets, http3_server_with_params, now,
+};
 
 const AUTHORITY: &str = "something.com";
 
@@ -93,6 +100,59 @@ fn classic_connect() {
     let mut data = vec![0; 4];
     let (amount, _fin) = client.read_data(now(), stream_id, &mut data).unwrap();
     assert_eq!(&data[..amount], b"pong");
+}
+
+fn send_extended_connect(server: &mut Http3Server, protocol: &str) -> (Http3Client, StreamId) {
+    let mut client = default_http3_client();
+    let out = test_fixture::connect_peers(&mut client, server);
+    assert_eq!(server.process(out, now()).dgram(), None);
+    drop(server.events());
+
+    let headers = [
+        Header::new(":scheme", "https"),
+        Header::new(":path", "/"),
+        Header::new(":protocol", protocol),
+    ];
+    let stream_id = client
+        .connect(now(), AUTHORITY, &headers, Priority::default())
+        .unwrap();
+    exchange_packets(&mut client, server, false, None);
+    (client, stream_id)
+}
+
+#[test]
+fn extended_connect_unknown_protocol() {
+    let mut server = http3_server_with_params(Http3Parameters::default().connect(true));
+    let (mut client, stream_id) = send_extended_connect(&mut server, "websocket");
+
+    let headers = vec![Header::new(":status", "501")];
+    let response = Http3ClientEvent::HeaderReady {
+        stream_id,
+        headers,
+        interim: false,
+        fin: true,
+    };
+    assert!(client.events().any(|e| e == response));
+    assert_eq!(client.state(), Http3State::Connected);
+    assert!(server.next_event().is_none());
+}
+
+#[test]
+fn extended_connect_not_enabled() {
+    let mut server = default_http3_server();
+    let (mut client, stream_id) = send_extended_connect(&mut server, "connect-udp");
+
+    assert!(
+        !server
+            .events()
+            .any(|e| matches!(e, Http3ServerEvent::ConnectUdp(_)))
+    );
+    let error = Error::InvalidHeader.code();
+    assert!(
+        client
+            .events()
+            .any(|e| e == Http3ClientEvent::StopSending { stream_id, error })
+    );
 }
 
 #[test]
