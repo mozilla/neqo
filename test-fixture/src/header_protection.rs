@@ -156,8 +156,9 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
     }
 }
 
-/// Decrypt the Initial packet at the start of `dgram`, let `f` modify its plaintext, and return a
-/// datagram with just the re-encrypted packet. `dcid` is the DCID of the client's first Initial.
+/// Decrypt the Initial packet at the start of `dgram`, let `f` modify its plaintext, and return
+/// the re-encrypted packet zero-padded to the length of `dgram`.
+/// `dcid` is the DCID of the client's first Initial.
 #[must_use]
 pub fn rewrite_initial<F: FnOnce(&mut [u8])>(
     dgram: &Datagram,
@@ -182,5 +183,6 @@ pub fn rewrite_initial<F: FnOnce(&mut [u8])>(
         .encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
         .unwrap();
     apply(&hp, &mut packet, protected_header.len()..header.len());
+    packet.resize(dgram.len(), 0);
     Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), packet)
 }

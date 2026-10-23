@@ -13,7 +13,7 @@ use neqo_transport::{
 use nss::RecordProtectionOps as _;
 use test_fixture::{
     CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, default_server,
-    header_protection::{self, decode_initial_header, initial_aead_and_hp},
+    header_protection::{self, decode_initial_header, initial_aead_and_hp, rewrite_initial},
     new_client, new_server, now, split_datagram,
 };
 
@@ -106,37 +106,20 @@ fn reorder_server_initial() {
 
     let server_packet = server.process(client_initial.dgram(), now()).dgram();
     let (server_initial, server_hs) = split_datagram(server_packet.as_ref().unwrap());
-    let (protected_header, _, _, payload) =
-        decode_initial_header(&server_initial, Role::Server).unwrap();
+    let mut packet = rewrite_initial(&server_initial, &client_dcid, Role::Server, |plaintext| {
+        // Now we need to find the frames.  Make some really strong assumptions.
+        let mut dec = Decoder::new(plaintext);
+        assert_eq!(dec.decode(ACK_FRAME.len()), Some(ACK_FRAME));
+        assert_eq!(dec.decode_varint(), Some(0x06)); // CRYPTO
+        assert_eq!(dec.decode_varint(), Some(0x00)); // offset
+        dec.skip_vvec(); // Skip over the payload.
+        let end = dec.offset();
 
-    // Now decrypt the packet.
-    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
-    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
-    let pn_len = header.len() - protected_header.len();
-    let mut buf = vec![0; payload.len()];
-    let mut plaintext = aead_dec
-        .decrypt(pn, &header, &payload[pn_len..], &mut buf)
-        .unwrap()
-        .to_owned();
-
-    // Now we need to find the frames.  Make some really strong assumptions.
-    let mut dec = Decoder::new(&plaintext[..]);
-    assert_eq!(dec.decode(ACK_FRAME.len()), Some(ACK_FRAME));
-    assert_eq!(dec.decode_varint(), Some(0x06)); // CRYPTO
-    assert_eq!(dec.decode_varint(), Some(0x00)); // offset
-    dec.skip_vvec(); // Skip over the payload.
-    let end = dec.offset();
-
-    // Move the ACK frame after the CRYPTO frame.
-    plaintext[..end].rotate_left(ACK_FRAME.len());
-
-    // And rebuild a packet.
-    let mut packet = header.clone();
+        // Move the ACK frame after the CRYPTO frame.
+        plaintext[..end].rotate_left(ACK_FRAME.len());
+    })
+    .to_vec();
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
-    aead_enc
-        .encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
-        .unwrap();
-    header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let reordered = Datagram::new(
         server_initial.source(),
         server_initial.destination(),
