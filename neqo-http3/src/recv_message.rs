@@ -67,6 +67,15 @@ enum RecvMessageState {
     ExtendedConnect,
 }
 
+impl RecvMessageState {
+    const fn has_seen_header(&self) -> bool {
+        !matches!(
+            self,
+            Self::WaitingForResponseHeaders { .. } | Self::DecodingHeaders { .. }
+        )
+    }
+}
+
 #[derive(Debug)]
 pub struct RecvMessage {
     state: RecvMessageState,
@@ -418,6 +427,12 @@ impl RecvStream for RecvMessage {
 
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
+    }
+
+    fn datagram_is_error(&self) -> bool {
+        // A request's method is not known before its headers are decoded.
+        self.stream_type == Http3StreamType::Http
+            && (self.message_type == MessageType::Response || self.state.has_seen_header())
     }
 }
 

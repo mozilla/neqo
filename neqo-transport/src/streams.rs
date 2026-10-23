@@ -126,7 +126,11 @@ impl Streams {
 
     #[must_use]
     pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
-        self.remote_stream_limits[stream_id.stream_type()].is_allowed(stream_id)
+        if stream_id.is_remote_initiated(self.role) {
+            self.remote_stream_limits[stream_id.stream_type()].is_allowed(stream_id)
+        } else {
+            stream_id.index() < self.local_stream_limits[stream_id.stream_type()].used()
+        }
     }
 
     pub fn zero_rtt_rejected(&mut self) {

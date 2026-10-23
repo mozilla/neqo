@@ -443,7 +443,8 @@ mod tests {
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
+        CloseReason, Connection, ConnectionEvent, DatagramQueueOutcome, State, StreamId,
+        StreamType, ZeroRttState, streams::SendGroupId,
     };
     use nss::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
@@ -452,7 +453,9 @@ mod tests {
     };
 
     use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
+    use crate::{
+        Error, HFrame, Header, Http3Parameters, Priority, connection::MAX_QUARTER_STREAM_ID,
+    };
 
     fn qpack_defaults() -> qpack::Settings {
         qpack::Settings::default()
@@ -1519,5 +1522,97 @@ mod tests {
         connect_transport(&mut server, &mut client, true);
         assert!(client.tls_info().unwrap().resumed());
         assert_eq!(client.zero_rtt_state(), ZeroRttState::Rejected);
+    }
+
+    fn send_raw_datagram(hconn: &mut Http3Server, peer_conn: &mut Connection, payload: Vec<u8>) {
+        let res = peer_conn.enqueue_datagram(
+            StreamId::new(0),
+            payload,
+            None,
+            now(),
+            SendGroupId::new(0),
+            0,
+        );
+        assert_eq!(res, Ok(DatagramQueueOutcome::Ok));
+        hconn.process(peer_conn.process_output(now()).dgram(), now());
+    }
+
+    fn server_receive_raw_datagram(payload: Vec<u8>) -> Http3Server {
+        let (mut hconn, mut peer_conn) = connect();
+        send_raw_datagram(&mut hconn, &mut peer_conn, payload);
+        hconn
+    }
+
+    fn quarter_stream_id(id: u64) -> Vec<u8> {
+        let mut enc = Encoder::default();
+        enc.encode_varint(id);
+        enc.into()
+    }
+
+    /// RFC 9297, Section 2.1: a Quarter Stream ID that cannot be parsed or exceeds 2^60-1.
+    #[test]
+    fn datagram_invalid_quarter_stream_id() {
+        let too_large = quarter_stream_id(MAX_QUARTER_STREAM_ID + 1);
+        for payload in [vec![], vec![0x40], too_large] {
+            assert_closed(&server_receive_raw_datagram(payload), &Error::HttpDatagram);
+        }
+    }
+
+    /// The Quarter Stream ID of the first client-initiated bidirectional stream beyond the limit.
+    fn quarter_stream_id_limit() -> u64 {
+        Http3Parameters::default()
+            .get_connection_parameters()
+            .get_max_streams(StreamType::BiDi)
+    }
+
+    fn server_receive_quarter_stream_id(id: u64) -> Http3Server {
+        server_receive_raw_datagram(quarter_stream_id(id))
+    }
+
+    /// RFC 9297, Section 2.1: `H3_ID_ERROR` beyond the client-initiated bidirectional stream limit.
+    #[test]
+    fn datagram_beyond_stream_limit() {
+        let hconn = server_receive_quarter_stream_id(quarter_stream_id_limit());
+        assert_closed(&hconn, &Error::HttpId);
+    }
+
+    /// RFC 9297, Section 2.1: the last allowed, not yet created stream is silently dropped.
+    #[test]
+    fn datagram_at_stream_limit() {
+        let hconn = server_receive_quarter_stream_id(quarter_stream_id_limit() - 1);
+        assert_not_closed(&hconn);
+    }
+
+    #[test]
+    fn datagram_on_extended_connect_with_partial_headers() {
+        let (mut hconn, mut peer_conn) = connect();
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        let headers = [
+            Header::new(":method", "CONNECT"),
+            Header::new(":protocol", "webtransport"),
+            Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
+            Header::new(":path", "/"),
+        ];
+        let mut qpack = qpack::Encoder::new(&qpack::Settings::default(), true);
+        let header_block = qpack
+            .encode_header_block(&mut peer_conn, &headers, stream_id)
+            .to_vec();
+        let mut frame = Encoder::default();
+        HFrame::Headers { header_block }.encode(&mut frame);
+        let (first, rest) = frame.as_ref().split_at(3);
+        peer_conn.stream_send(stream_id, first).unwrap();
+        hconn.process(peer_conn.process_output(now()).dgram(), now());
+
+        send_raw_datagram(
+            &mut hconn,
+            &mut peer_conn,
+            quarter_stream_id(stream_id.as_u64() / 4),
+        );
+        assert_not_closed(&hconn);
+
+        peer_conn.stream_send(stream_id, rest).unwrap();
+        hconn.process(peer_conn.process_output(now()).dgram(), now());
+        assert_not_closed(&hconn);
     }
 }

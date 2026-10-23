@@ -285,7 +285,9 @@ impl Http3ServerHandler {
                         s.stream_writable();
                     }
                 }
-                ConnectionEvent::Datagram(dgram) => self.base_handler.handle_datagram(dgram),
+                ConnectionEvent::Datagram(dgram) => {
+                    self.base_handler.handle_datagram(dgram, conn)?;
+                }
                 ConnectionEvent::OutgoingDatagramSpaceAvailable { stream_id } => {
                     self.events.datagram_space_available(stream_id);
                 }

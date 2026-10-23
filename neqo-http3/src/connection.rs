@@ -13,7 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Bytes, Decoder, Header, MessageType, Role};
+use neqo_common::{Bytes, Decoder, Header, MAX_VARINT, MessageType, Role};
 use neqo_qpack as qpack;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramQueueCapacity, DatagramQueueOutcome,
@@ -62,6 +62,9 @@ pub const HTTP3_UNI_CONTROL_STREAMS: u64 = 3;
 /// could ratchet the advertised `MAX_STREAMS` arbitrarily high; the limit is monotonic, so it
 /// never comes back down as sessions close.
 pub const MAX_ANTICIPATED_INCOMING_STREAMS: u64 = 10_000;
+
+/// Largest legal Quarter Stream ID of an HTTP/3 Datagram (RFC 9297, Section 2.1).
+pub const MAX_QUARTER_STREAM_ID: u64 = MAX_VARINT / 4;
 
 pub struct RequestDescription<'b, T: RequestTarget> {
     pub method: &'b str,
@@ -683,24 +686,36 @@ impl Http3Connection {
         }
     }
 
-    pub(crate) fn handle_datagram(&mut self, datagram: Vec<u8>) {
+    pub(crate) fn handle_datagram(&self, datagram: Vec<u8>, conn: &mut Connection) -> Res<()> {
         let mut decoder = Decoder::new(&datagram);
-        let Some(id) = decoder.decode_varint() else {
+        let Some(id) = decoder
+            .decode_varint()
+            .filter(|id| *id <= MAX_QUARTER_STREAM_ID)
+        else {
             debug!("[{self}] handle_datagram: failed to decode session ID");
-            return;
+            return Err(Error::HttpDatagram);
         };
         let varint_len = decoder.offset();
+        let stream_id = StreamId::from(id * 4);
 
-        let Some(stream) = self
-            .recv_streams
-            .get_mut(&StreamId::from(id * 4))
-            .and_then(|s| s.extended_connect_session())
-        else {
+        // Datagrams for streams not yet created are dropped, not buffered (RFC 9297 Section 2.1).
+        let Some(stream) = self.recv_streams.get(&stream_id) else {
+            // RFC 9297 Section 2.1 SHOULD.
+            if !conn.is_stream_id_allowed(stream_id) {
+                return Err(Error::HttpId);
+            }
             debug!("[{self}] handle_datagram for unknown extended connect session");
-            return;
+            return Ok(());
         };
 
-        stream.borrow().datagram(Bytes::new(datagram, varint_len));
+        if let Some(session) = stream.extended_connect_session() {
+            session.borrow().datagram(Bytes::new(datagram, varint_len));
+        } else if stream.datagram_is_error() && conn.stream_recv_is_open(stream_id).unwrap_or(false)
+        {
+            // RFC 9114 Section 8 allows escalating this RFC 9297 Section 2 stream error.
+            return Err(Error::HttpDatagram);
+        }
+        Ok(())
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
