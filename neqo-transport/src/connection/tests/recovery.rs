@@ -18,9 +18,9 @@ use test_fixture::{
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
     AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
-    assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
-    default_client, default_server, fill_cwnd, maybe_authenticate, new_client,
-    new_client_with_qlog, new_server, send_and_receive, send_something,
+    assert_error, assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle,
+    connect_with_rtt, cwnd, default_client, default_server, fill_cwnd, maybe_authenticate,
+    new_client, new_client_with_qlog, new_server, send_and_receive, send_something,
 };
 use crate::{
     CloseReason, Error, Pmtud, Stats, StreamType,
@@ -1021,7 +1021,7 @@ fn ack_for_unsent() {
         .unwrap();
 
     // Now deliver the packet with the spoofed ACK frame
-    client.process_input(spoofed, now());
+    let close = client.process(Some(spoofed), now()).dgram();
     assert!(matches!(
         client.state(),
         State::Closing {
@@ -1029,6 +1029,11 @@ fn ack_for_unsent() {
             ..
         }
     ));
+    server.process_input(close.unwrap(), now());
+    assert_error(
+        &server,
+        &CloseReason::Transport(Error::Peer(Error::ProtocolViolation.code())),
+    );
 }
 
 /// Test that PTO fires for Handshake space even when no Handshake packets have been sent.
