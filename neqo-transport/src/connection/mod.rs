@@ -3416,6 +3416,9 @@ impl Connection {
                     d = HexSnipMiddle::new(data),
                 );
                 self.stats.borrow_mut().frame_rx.crypto += 1;
+                if self.crypto.discards(space) {
+                    return Ok(());
+                }
                 let duplicate = self
                     .crypto
                     .streams_mut()
