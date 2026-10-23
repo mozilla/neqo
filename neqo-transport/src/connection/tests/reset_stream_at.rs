@@ -6,11 +6,12 @@
 
 // Tests for RESET_STREAM_AT (draft-ietf-quic-reliable-stream-reset).
 
-use neqo_common::event::Provider as _;
+use neqo_common::{Datagram, event::Provider as _};
 use test_fixture::now;
 
 use super::{
-    connect, default_client, default_server, exchange, new_client, new_server, send_with_extra,
+    AT_LEAST_PTO, connect, default_client, default_server, exchange, new_client, new_server,
+    send_with_extra,
 };
 use crate::{
     Connection, ConnectionParameters, Error, StreamId, StreamType,
@@ -118,6 +119,10 @@ fn happy_path() {
     assert!(server.events().any(
         |e| matches!(e, ConnectionEvent::RecvStreamReset { stream_id: id, .. } if id == stream_id)
     ));
+    assert_eq!(
+        client.send_stream_stats(stream_id).unwrap_err(),
+        Error::InvalidStreamId
+    );
 }
 
 /// No STREAM FIN is emitted while a reliable reset is in progress: the receiver never sees a
@@ -176,4 +181,110 @@ fn unadvertised_reset_stream_at_is_rejected() {
     let dgram = send_with_extra(&mut server, ResetStreamAtWriter(0), now());
     client.process_input(dgram, now());
     assert!(client.state().closed());
+}
+
+/// Writes a raw `STOP_SENDING` frame for `stream_id` with a zero error code.
+struct StopSendingWriter(u64);
+
+impl FrameWriter for StopSendingWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        // type, stream_id, application_error_code
+        builder.write_varint_frame(&[FrameType::StopSending.into(), self.0, 0]);
+    }
+}
+
+/// Commit all of `DATA` and lose it, then reset. Returns the `RESET_STREAM_AT` datagram.
+fn commit_lose_and_reset(c: &mut Connection) -> (StreamId, Option<Datagram>) {
+    let stream_id = c.stream_create(StreamType::UniDi).unwrap();
+    c.stream_send(stream_id, DATA).unwrap();
+    c.stream_commit(stream_id).unwrap();
+    _ = c.process_output(now()).dgram(); // Lost.
+    c.stream_reset_send(stream_id, 0).unwrap();
+    (stream_id, c.process_output(now()).dgram())
+}
+
+/// A `STOP_SENDING` that arrives after the `RESET_STREAM_AT` is acked, while the committed data
+/// is still outstanding, is answered with a `RESET_STREAM`, and its ack removes the stream.
+#[test]
+fn stop_sending_after_reset_stream_at_acked() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let (stream_id, reset) = commit_lose_and_reset(&mut client);
+    let ack = server.process(reset, now()).dgram();
+    client.process_input(ack.unwrap(), now());
+
+    let stop_sending = send_with_extra(&mut server, StopSendingWriter(stream_id.as_u64()), now());
+    let reset = client.process(Some(stop_sending), now()).dgram();
+    assert_eq!(client.stats().frame_tx.reset_stream, 1);
+    let ack = server.process(reset, now()).dgram();
+    client.process_input(ack.unwrap(), now());
+    assert_eq!(
+        client.send_stream_stats(stream_id).unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+/// A `STOP_SENDING` that arrives while the `RESET_STREAM_AT` is unacked is answered with a
+/// `RESET_STREAM`; the late ack of the `RESET_STREAM_AT` does not end the stream, its ack does.
+#[test]
+fn stop_sending_before_reset_stream_at_acked() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let (stream_id, reset_stream_at) = commit_lose_and_reset(&mut client);
+    let stop_sending = send_with_extra(&mut server, StopSendingWriter(stream_id.as_u64()), now());
+    let ack = server.process(reset_stream_at, now()).dgram();
+
+    let reset = client.process(Some(stop_sending), now()).dgram();
+    client.process_input(ack.unwrap(), now());
+    assert!(client.send_stream_stats(stream_id).is_ok());
+    assert_eq!(client.stats().frame_tx.reset_stream, 1);
+    let ack = server.process(reset, now()).dgram();
+    client.process_input(ack.unwrap(), now());
+    assert_eq!(
+        client.send_stream_stats(stream_id).unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+/// Deliver the PTO retransmission and its ack, then check that the stream is removed.
+fn pto_and_ack(client: &mut Connection, server: &mut Connection, stream_id: StreamId) {
+    let reset = client.process_output(now() + AT_LEAST_PTO).dgram();
+    let ack = server.process(reset, now() + AT_LEAST_PTO).dgram();
+    client.process_input(ack.unwrap(), now() + AT_LEAST_PTO);
+    assert_eq!(
+        client.send_stream_stats(stream_id).unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+/// A lost `RESET_STREAM_AT` is retransmitted.
+#[test]
+fn reset_stream_at_lost() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let (stream_id, _lost) = commit_lose_and_reset(&mut client);
+    pto_and_ack(&mut client, &mut server, stream_id);
+    assert_eq!(client.stats().frame_tx.reset_stream_at, 2);
+}
+
+/// A lost `RESET_STREAM` sent in response to `STOP_SENDING` is retransmitted.
+#[test]
+fn reset_stream_after_stop_sending_lost() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let (stream_id, reset) = commit_lose_and_reset(&mut client);
+    let ack = server.process(reset, now()).dgram();
+    client.process_input(ack.unwrap(), now());
+    let stop_sending = send_with_extra(&mut server, StopSendingWriter(stream_id.as_u64()), now());
+    _ = client.process(Some(stop_sending), now()).dgram(); // Lost.
+    pto_and_ack(&mut client, &mut server, stream_id);
+    assert_eq!(client.stats().frame_tx.reset_stream, 2);
 }
