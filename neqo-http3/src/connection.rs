@@ -980,6 +980,7 @@ impl Http3Connection {
                     stream_type,
                     stream_id,
                     first_frame_type: None,
+                    connect_enabled: false,
                 },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,
@@ -2008,6 +2009,10 @@ impl Http3Connection {
 
     pub const fn webtransport_enabled(&self) -> bool {
         self.webtransport.enabled()
+    }
+
+    pub(crate) const fn connect_enabled(&self) -> bool {
+        self.local_params.connect_enabled()
     }
 
     pub const fn connect_udp_enabled(&self) -> bool {

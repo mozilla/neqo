@@ -48,6 +48,9 @@ pub enum Http3ServerConnEvent {
     OutgoingDatagramSpaceAvailable,
     WebTransport(WebTransportEvent),
     ConnectUdp(ConnectUdpEvent),
+    UnsupportedExtendedConnect {
+        stream_id: StreamId,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -161,7 +164,8 @@ impl HttpRecvStreamEvents for Http3ServerConnEvents {
                     }));
             }
             Some(_) => {
-                unimplemented!("Extended connect other than webtransport or connect-udp")
+                self.events
+                    .push(Http3ServerConnEvent::UnsupportedExtendedConnect { stream_id });
             }
             None => {
                 unimplemented!("connect without :protocol header");
