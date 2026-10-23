@@ -1171,7 +1171,7 @@ impl CryptoStates {
                 .get_disjoint_mut([orig.into_usize(), confirmed.into_usize()])
             {
                 let next = next.as_mut().ok_or(Error::VersionNegotiation)?;
-                next.rx.continuation(&prev.rx)?;
+                _ = next.rx.continuation(&prev.rx); // Reordered |orig| packets are OK.
                 next.tx.continuation(&prev.tx)?;
             }
         }
