@@ -718,8 +718,8 @@ fn compatible_upgrade_and_back() {
     assert_version(&close.unwrap(), Version::Version2.wire_version());
 }
 
-/// Interleaved Initial packets can make the first version switch fail.
-/// The client closes the connection in the version it is using.
+/// Interleaved Initial packets in the original version do not stop the version switch,
+/// as other versions can appear in long headers at any point (RFC 9368, Section 4).
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn compatible_upgrade_interleaved() {
@@ -732,8 +732,8 @@ fn compatible_upgrade_interleaved() {
         forged_server_initial(&ci, Version::Version2, 2, &[], &crypto_with_gap()),
     ]
     .concat();
-    let close = client.process(Some(datagram(s)), now()).dgram();
-    assert_error(&client, &CloseReason::Transport(Error::PacketNumberOverlap));
-    assert_eq!(client.version(), Version::Version1);
-    assert_version(&close.unwrap(), Version::Version1.wire_version());
+    let out = client.process(Some(datagram(s)), now()).dgram();
+    assert_eq!(*client.state(), State::WaitVersion);
+    assert_eq!(client.version(), Version::Version2);
+    assert_version(&out.unwrap(), Version::Version2.wire_version());
 }
