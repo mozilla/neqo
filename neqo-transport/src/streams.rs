@@ -339,7 +339,7 @@ impl Streams {
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
         match token {
             StreamRecoveryToken::Stream(st) => self.send.lost(st),
-            StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_lost(*stream_id),
+            StreamRecoveryToken::ResetStream { stream_id, .. } => self.send.reset_lost(*stream_id),
             StreamRecoveryToken::StreamDataBlocked { stream_id, limit } => {
                 self.send.blocked_lost(*stream_id, *limit);
             }
@@ -377,7 +377,19 @@ impl Streams {
     pub fn acked(&mut self, token: &StreamRecoveryToken) {
         match token {
             StreamRecoveryToken::Stream(st) => self.send.acked(st),
-            StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_acked(*stream_id),
+            StreamRecoveryToken::ResetStream {
+                stream_id,
+                reliable_size,
+            } => {
+                // An ack of a `RESET_STREAM_AT` superseded by a `RESET_STREAM` is ignored.
+                if self
+                    .send
+                    .get(*stream_id)
+                    .is_ok_and(|ss| ss.reset_reliable_size() == Some(*reliable_size))
+                {
+                    self.send.reset_acked(*stream_id);
+                }
+            }
             StreamRecoveryToken::StopSending { stream_id } => {
                 self.recv.stop_sending_acked(*stream_id);
             }
