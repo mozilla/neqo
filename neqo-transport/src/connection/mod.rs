@@ -3148,33 +3148,37 @@ impl Connection {
         let tph = self.tps.borrow();
         let remote_tps = tph.remote_handshake().ok_or(Error::TransportParameter)?;
 
-        let tp = remote_tps.get_bytes(InitialSourceConnectionId);
+        let tp = remote_tps
+            .get_bytes(InitialSourceConnectionId)
+            .ok_or(Error::TransportParameter)?;
         if self
             .remote_initial_source_cid
             .as_ref()
             .map(ConnectionId::as_cid_ref)
-            != tp.map(ConnectionIdRef::from)
+            != Some(ConnectionIdRef::from(tp))
         {
             warn!(
                 "[{self}] ISCID test failed: self cid {:?} != tp cid {:?}",
                 self.remote_initial_source_cid,
-                tp.map(Hex::new),
+                Hex::new(tp),
             );
             return Err(Error::ProtocolViolation);
         }
 
         if self.role == Role::Client {
-            let tp = remote_tps.get_bytes(OriginalDestinationConnectionId);
+            let tp = remote_tps
+                .get_bytes(OriginalDestinationConnectionId)
+                .ok_or(Error::TransportParameter)?;
             if self
                 .original_destination_cid
                 .as_ref()
                 .map(ConnectionId::as_cid_ref)
-                != tp.map(ConnectionIdRef::from)
+                != Some(ConnectionIdRef::from(tp))
             {
                 warn!(
                     "[{self}] ODCID test failed: self cid {:?} != tp cid {:?}",
                     self.original_destination_cid,
-                    tp.map(Hex::new),
+                    Hex::new(tp),
                 );
                 return Err(Error::ProtocolViolation);
             }

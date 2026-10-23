@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, to_u64};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, to_u64};
 use nss::{
     AuthenticationStatus, HandshakeMessage,
     constants::TLS_CHACHA20_POLY1305_SHA256,
@@ -55,7 +55,7 @@ use crate::{
     server::ValidateAddress,
     stats::FrameStats,
     streams::SendGroupId,
-    tparams::{TransportParameter, TransportParameterId::*},
+    tparams::{TransportParameter, TransportParameterId, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
 
@@ -2435,4 +2435,64 @@ fn client_omits_transport_parameters_0rtt() {
     }
     assert_eq!(server.stats().frame_rx.stream, 0);
     assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(109)));
+}
+
+fn remove_local_tp(c: &Connection, id: TransportParameterId) {
+    c.tps.borrow_mut().local_mut().remove(id);
+}
+
+/// The peer closes with `TRANSPORT_PARAMETER_ERROR` when `remover` omits `id`.
+fn absent_tp(remover: Role, id: TransportParameterId) {
+    let mut client = default_client();
+    let mut server = default_server();
+    let local = Error::TransportParameter;
+    let peer = Error::Peer(Error::TransportParameter.code());
+    if remover == Role::Client {
+        remove_local_tp(&client, id);
+        connect_fail(&mut client, &mut server, peer, local);
+    } else {
+        remove_local_tp(&server, id);
+        connect_fail(&mut client, &mut server, local, peer);
+    }
+}
+
+#[test]
+fn iscid_absent() {
+    absent_tp(Role::Client, InitialSourceConnectionId);
+    absent_tp(Role::Server, InitialSourceConnectionId);
+}
+
+/// RFC 9000, Section 7.3: the client closes with `PROTOCOL_VIOLATION` on a mismatched server ISCID.
+#[test]
+fn iscid_mismatch() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut tps = server.tps.borrow_mut();
+    let old = tps.local().get_bytes(InitialSourceConnectionId).unwrap();
+    let iscid = [old, &[0]].concat();
+    tps.local_mut().set_bytes(InitialSourceConnectionId, iscid);
+    drop(tps);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::ProtocolViolation,
+        Error::Peer(Error::ProtocolViolation.code()),
+    );
+}
+
+#[test]
+fn server_odcid_absent() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let ch1 = client.process_output(now()).dgram();
+    let ch2 = client.process_output(now()).dgram();
+    server.process_input(ch1.unwrap(), now()); // Sets the server's ODCID transport parameter.
+    remove_local_tp(&server, OriginalDestinationConnectionId);
+    server.process_input(ch2.unwrap(), now());
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
+    );
 }
