@@ -15,12 +15,13 @@ use test_fixture::{
 };
 
 use super::{
-    AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
-    get_tokens, new_client, resumed_server, send_something,
+    AT_LEAST_PTO, connect, connect_with_rtt, cwnd, cwnd_avail, default_client, default_server,
+    exchange_ticket, get_tokens, new_client, resumed_server, send_something,
 };
 use crate::{
     ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State, Version,
     addr_valid::{AddressValidation, ValidateAddress},
+    crypto::MAX_POST_HANDSHAKE_MESSAGES,
     frame::FrameType,
 };
 
@@ -313,6 +314,53 @@ fn take_token() {
     // But we should be able to get the token directly, and use it.
     let token = client.take_resumption_token(now()).unwrap();
     can_resume(token, false);
+}
+
+/// A client ignores tickets beyond a limit, but acknowledges them and stays connected.
+///
+/// See RFC 9000 7.5 <https://www.rfc-editor.org/rfc/rfc9000.html#section-7.5-4>.
+#[test]
+fn too_many_tickets() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    for _ in 0..MAX_POST_HANDSHAKE_MESSAGES {
+        exchange_ticket(&mut client, &mut server, now());
+    }
+    for _ in 0..2 {
+        server.send_ticket(now(), &[]).unwrap();
+        let ticket = server.process_output(now()).dgram();
+        let ack = client.process(ticket, now()).dgram();
+        assert_eq!(*client.state(), State::Confirmed);
+        assert!(get_tokens(&mut client).is_empty());
+        assert!(client.take_resumption_token(now()).is_none());
+        server.process_input(ack.unwrap(), now());
+        assert_eq!(cwnd_avail(&server), cwnd(&server));
+    }
+}
+
+/// A client accepts the last ticket within the limit when the next one is in the same frame.
+#[test]
+fn too_many_tickets_in_one_frame() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let mut tokens = Vec::new();
+    for _ in 1..MAX_POST_HANDSHAKE_MESSAGES {
+        tokens.push(exchange_ticket(&mut client, &mut server, now()));
+    }
+    let validation = AddressValidation::new(now(), ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(&validation);
+    server.send_ticket(now(), &[]).unwrap();
+    server.send_ticket(now(), &[]).unwrap();
+    let crypto_frames = client.stats().frame_rx.crypto;
+    let tickets = server.process_output(now()).dgram();
+    client.process_input(tickets.unwrap(), now());
+    assert_eq!(client.stats().frame_rx.crypto, crypto_frames + 1);
+    tokens.extend(get_tokens(&mut client));
+    assert_eq!(tokens.len(), MAX_POST_HANDSHAKE_MESSAGES);
+    assert!(client.take_resumption_token(now()).is_none());
 }
 
 /// If a version is selected and subsequently disabled, resumption fails.

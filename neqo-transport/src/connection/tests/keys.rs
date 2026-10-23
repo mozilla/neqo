@@ -5,7 +5,10 @@
 // except according to those terms.
 
 use neqo_common::Datagram;
-use nss::{Agent, TLS_HS_KEY_UDPATE};
+use nss::{
+    Agent, TLS_HS_CERTIFICATE, TLS_HS_CERTIFICATE_REQUEST, TLS_HS_FINISHED, TLS_HS_KEY_UDPATE,
+    TLS_HS_NEW_SESSION_TICKET,
+};
 use test_fixture::{
     assertions::{is_handshake, is_initial},
     now, split_datagram,
@@ -18,11 +21,12 @@ use super::{
         Connection, ConnectionParameters, Error, Output, State, StreamType,
     },
     AT_LEAST_PTO, assert_error, connect, connect_force_idle, default_client, default_server,
-    exchange_ticket, flush_to, maybe_authenticate, send_and_receive, send_something,
+    drop_flight, exchange_ticket, flush_to, get_tokens, maybe_authenticate, send_and_receive,
+    send_something,
 };
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
-    crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
+    crypto::{MAX_POST_HANDSHAKE_MESSAGES, OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
     packet,
     tracking::PacketNumberSpace,
 };
@@ -427,9 +431,93 @@ fn automatic_update_write_keys_blocked() {
 /// See RFC 9001 6 <https://www.rfc-editor.org/rfc/rfc9001.html#section-6-3>.
 fn tls_key_update(sender: &mut Connection, receiver: &mut Connection, update_requested: u8) {
     send_tls_key_update(sender, PacketNumberSpace::ApplicationData, update_requested);
+    deliver_and_assert_error(sender, receiver, Error::CryptoAlert(10));
+}
+
+fn deliver_and_assert_error(sender: &mut Connection, receiver: &mut Connection, error: Error) {
     let dgram = sender.process_output(now()).dgram();
     receiver.process_input(dgram.unwrap(), now());
-    assert_error(receiver, &CloseReason::Transport(Error::CryptoAlert(10)));
+    assert_error(receiver, &CloseReason::Transport(error));
+}
+
+/// Have `sender` send `msg` after the handshake, which `receiver` must reject with `error`.
+fn post_handshake_message(msg: &[u8], to_client: bool, error: Error) {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let (sender, receiver) = if to_client {
+        (&mut server, &mut client)
+    } else {
+        (&mut client, &mut server)
+    };
+    let space = PacketNumberSpace::ApplicationData;
+    sender.crypto.streams_mut().send(space, msg).unwrap();
+    deliver_and_assert_error(sender, receiver, error);
+}
+
+/// A client rejects a post-handshake `CertificateRequest`.
+///
+/// See RFC 9001 4.4 <https://www.rfc-editor.org/rfc/rfc9001.html#section-4.4-6>.
+#[test]
+fn post_handshake_certificate_request() {
+    post_handshake_message(&CERTIFICATE_REQUEST, true, Error::ProtocolViolation);
+}
+
+const CERTIFICATE_REQUEST: [u8; 15] = [
+    TLS_HS_CERTIFICATE_REQUEST,
+    0,
+    0,
+    11,
+    0, // certificate_request_context
+    0,
+    8,
+    0,
+    13, // signature_algorithms
+    0,
+    4,
+    0,
+    2,
+    4,
+    3, // ecdsa_secp256r1_sha256
+];
+
+const TICKET: [u8; 18] = [
+    TLS_HS_NEW_SESSION_TICKET,
+    0,
+    0,
+    14,
+    0,
+    0,
+    0x1c,
+    0x20, // ticket_lifetime
+    0,
+    0,
+    0,
+    0, // ticket_age_add
+    0, // ticket_nonce
+    0,
+    1,
+    0, // ticket
+    0,
+    0, // extensions
+];
+
+/// A server rejects any 1-RTT CRYPTO message from a client.
+#[test]
+fn post_handshake_message_to_server() {
+    let certificate = [TLS_HS_CERTIFICATE, 0, 0, 4, 0, 0, 0, 0];
+    let mut finished = vec![TLS_HS_FINISHED, 0, 0, 32];
+    finished.resize(36, 0);
+    let tickets = TICKET.repeat(MAX_POST_HANDSHAKE_MESSAGES + 1);
+    for msg in [
+        &TICKET[..],
+        &CERTIFICATE_REQUEST,
+        &certificate,
+        &finished,
+        &tickets,
+    ] {
+        post_handshake_message(msg, false, Error::CryptoAlert(10));
+    }
 }
 
 fn send_tls_key_update(sender: &mut Connection, space: PacketNumberSpace, update_requested: u8) {
@@ -517,6 +605,63 @@ fn tls_key_update_after_split_header() {
     client.process_input(dgram.unwrap(), now());
     server.crypto.streams_mut().send(space, tail).unwrap();
     tls_key_update(&mut server, &mut client, 1);
+}
+
+/// Too many 1-RTT messages do not make a client discard Handshake CRYPTO frames.
+#[test]
+fn too_many_messages_before_confirmed() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+    flush_to(&mut client, &mut server, &mut now);
+    flush_to(&mut server, &mut client, &mut now);
+    maybe_authenticate(&mut client);
+    drop_flight(&mut client, &mut now);
+    let msgs = TICKET.repeat(MAX_POST_HANDSHAKE_MESSAGES + 1);
+    let space = PacketNumberSpace::ApplicationData;
+    server.crypto.streams_mut().send(space, &msgs).unwrap();
+    flush_to(&mut server, &mut client, &mut now);
+    assert!(client.crypto.discards(space));
+    send_tls_key_update(&mut server, PacketNumberSpace::Handshake, 1);
+    flush_to(&mut server, &mut client, &mut now);
+    assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(10)));
+}
+
+/// Once there are too many messages, a client discards all later CRYPTO data, but still gets the
+/// last accepted message in full, and the connection keeps working.
+#[test]
+fn too_many_messages_after_split_ticket() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut tokens = Vec::new();
+    for _ in 1..MAX_POST_HANDSHAKE_MESSAGES {
+        tokens.push(exchange_ticket(&mut client, &mut server, now()));
+    }
+    let Agent::Server(s) = server.crypto.tls_mut() else {
+        unreachable!();
+    };
+    let mut now = now();
+    let ticket = s.send_ticket(now, &[]).unwrap();
+    let (head, tail) = ticket[0].data.split_at(ticket[0].data.len() / 2);
+    let space = PacketNumberSpace::ApplicationData;
+    server.crypto.streams_mut().send(space, head).unwrap();
+    flush_to(&mut server, &mut client, &mut now);
+    server.crypto.streams_mut().send(space, tail).unwrap();
+    server.send_ticket(now, &[]).unwrap();
+    flush_to(&mut server, &mut client, &mut now);
+    send_tls_key_update(&mut server, space, 1);
+    flush_to(&mut server, &mut client, &mut now);
+    assert_eq!(*client.state(), State::Confirmed);
+    tokens.extend(get_tokens(&mut client));
+    assert_eq!(tokens.len(), MAX_POST_HANDSHAKE_MESSAGES);
+    assert!(client.take_resumption_token(now).is_none());
+
+    send_and_receive(&mut server, &mut client, now);
+    send_and_receive(&mut client, &mut server, now);
+    client.close(now, 0, "");
+    flush_to(&mut client, &mut server, &mut now);
+    assert_error(&server, &CloseReason::Transport(Error::PeerApplication(0)));
 }
 
 /// Test that when both Initial and Handshake packets are sent together due to PTO,
