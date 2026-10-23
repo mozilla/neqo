@@ -3146,7 +3146,7 @@ impl Connection {
 
     fn validate_cids(&self) -> Res<()> {
         let tph = self.tps.borrow();
-        let remote_tps = tph.remote_handshake().ok_or(Error::TransportParameter)?;
+        let remote_tps = tph.remote_handshake().ok_or(Error::CryptoAlert(109))?; // missing_extension
 
         let tp = remote_tps
             .get_bytes(InitialSourceConnectionId)

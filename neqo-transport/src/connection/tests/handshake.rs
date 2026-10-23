@@ -21,7 +21,7 @@ use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, to_u6
 use nss::{
     AuthenticationStatus, HandshakeMessage,
     constants::TLS_CHACHA20_POLY1305_SHA256,
-    ext::{ExtensionHandler, ExtensionWriterResult},
+    ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     generate_ech_keys,
 };
 #[cfg(not(feature = "disable-encryption"))]
@@ -55,7 +55,10 @@ use crate::{
     server::ValidateAddress,
     stats::FrameStats,
     streams::SendGroupId,
-    tparams::{TransportParameter, TransportParameterId, TransportParameterId::*},
+    tparams::{
+        TransportParameter, TransportParameterId, TransportParameterId::*,
+        TransportParametersHandler,
+    },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
 
@@ -2494,5 +2497,37 @@ fn server_odcid_absent() {
         &mut server,
         Error::TransportParameter,
         Error::Peer(Error::TransportParameter.code()),
+    );
+}
+
+/// Reads the peer's `quic_transport_parameters` extension but omits its own.
+struct NoTpExtension(Rc<RefCell<TransportParametersHandler>>);
+
+impl ExtensionHandler for NoTpExtension {
+    fn write(&mut self, _: HandshakeMessage, _: bool, _: &mut [u8]) -> ExtensionWriterResult {
+        ExtensionWriterResult::Skip
+    }
+
+    fn handle(&mut self, msg: HandshakeMessage, d: &[u8]) -> ExtensionHandlerResult {
+        self.0.borrow_mut().handle(msg, d)
+    }
+}
+
+/// RFC 9001, Section 8.2: a missing `quic_transport_parameters` extension is a 0x16d error.
+#[test]
+fn server_tp_extension_absent() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let handler = NoTpExtension(Rc::clone(&server.tps));
+    server
+        .crypto
+        .tls_mut()
+        .extension_handler(0x39, Rc::new(RefCell::new(handler)))
+        .unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::CryptoAlert(109),
+        Error::Peer(Error::CryptoAlert(109).code()),
     );
 }
