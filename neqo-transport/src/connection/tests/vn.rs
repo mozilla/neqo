@@ -501,6 +501,31 @@ fn no_compatible_version() {
     );
 }
 
+/// A server treats a client Chosen Version that is not in its Available Versions as a parsing
+/// failure, even if Available Versions lists another compatible version.
+#[test]
+fn chosen_version_not_available() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    client
+        .set_local_tparam(
+            VersionInformation,
+            TransportParameter::Versions {
+                current: Version::Version1.wire_version(),
+                other: vec![Version::Version2.wire_version()],
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
+    );
+}
+
 /// When a compatible upgrade chooses a different version, 0-RTT is rejected.
 #[test]
 fn compatible_upgrade_0rtt_rejected() {
