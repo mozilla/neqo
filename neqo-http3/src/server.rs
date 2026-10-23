@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::Datagram;
+use neqo_common::{Datagram, Header};
 use neqo_transport::{
     ConnectionIdGenerator, Output, OutputBatch, State,
     server::{ConnectionRef, Server, ValidateAddress},
@@ -349,6 +349,16 @@ impl Http3Server {
                             ),
                             datagram,
                         );
+                    }
+                    Http3ServerConnEvent::UnsupportedExtendedConnect { stream_id } => {
+                        let mut c = conn.borrow_mut();
+                        let headers = [Header::new(":status", "501")]; // RFC 9220, Section 3.
+                        if handler_borrowed
+                            .send_headers(stream_id, &headers, &mut c)
+                            .is_ok()
+                        {
+                            drop(handler_borrowed.stream_close_send(stream_id, &mut c, now));
+                        }
                     }
                 }
             }
