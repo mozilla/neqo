@@ -795,8 +795,10 @@ impl Http3Connection {
     pub fn close(&mut self, error: AppError) {
         debug!("[{self}] Close connection error {error:?}");
         self.state = Http3State::Closing(CloseReason::Application(error));
-        if (!self.send_streams.is_empty() || !self.recv_streams.is_empty()) && (error == 0) {
-            debug!("close(0) called when streams still active");
+        if (!self.send_streams.is_empty() || !self.recv_streams.is_empty())
+            && (error == Error::HttpNone.code())
+        {
+            debug!("close(H3_NO_ERROR) called when streams still active");
         }
         self.send_streams.clear();
         self.recv_streams.clear();
