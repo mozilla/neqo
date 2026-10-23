@@ -17,8 +17,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, qdebug, to_u64};
-use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, qdebug, to_u64};
+use nss::{
+    AuthenticationStatus, ExtensionHandler, ExtensionWriterResult, HandshakeMessage,
+    constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys,
+};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
@@ -30,9 +33,9 @@ use test_fixture::{
 use super::{
     super::{Connection, Output, State},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
-    send_something, zero_len_cid_client,
+    assert_error, connect, connect_fail, connect_force_idle, connect_with_rtt, default_client,
+    default_server, drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram,
+    resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
@@ -44,7 +47,7 @@ use crate::{
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
-    tparams::{TransportParameter, TransportParameterId::*},
+    tparams::{TransportParameter, TransportParameterId, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
 
@@ -2279,4 +2282,73 @@ fn crypto_resend_chance_survives_useless_duplicate() {
     now += DEFAULT_RTT;
     let dup = make_dummy_crypto(&mut client, &mut now);
     assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
+}
+
+fn remove_local_tp(c: &Connection, id: TransportParameterId) {
+    c.tps.borrow_mut().local_mut().remove(id);
+}
+
+/// The peer closes with `TRANSPORT_PARAMETER_ERROR` when `remover` omits `id`.
+fn absent_tp(remover: Role, id: TransportParameterId) {
+    let mut client = default_client();
+    let mut server = default_server();
+    let local = Error::TransportParameter;
+    let peer = Error::Peer(Error::TransportParameter.code());
+    if remover == Role::Client {
+        remove_local_tp(&client, id);
+        connect_fail(&mut client, &mut server, peer, local);
+    } else {
+        remove_local_tp(&server, id);
+        connect_fail(&mut client, &mut server, local, peer);
+    }
+}
+
+#[test]
+fn iscid_absent() {
+    absent_tp(Role::Client, InitialSourceConnectionId);
+    absent_tp(Role::Server, InitialSourceConnectionId);
+}
+
+#[test]
+fn server_odcid_absent() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let ch1 = client.process_output(now()).dgram();
+    let ch2 = client.process_output(now()).dgram();
+    server.process_input(ch1.unwrap(), now()); // Sets the server's ODCID transport parameter.
+    remove_local_tp(&server, OriginalDestinationConnectionId);
+    server.process_input(ch2.unwrap(), now());
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
+    );
+}
+
+/// Omits the `quic_transport_parameters` extension.
+struct NoTpExtension;
+
+impl ExtensionHandler for NoTpExtension {
+    fn write(&mut self, _: HandshakeMessage, _: bool, _: &mut [u8]) -> ExtensionWriterResult {
+        ExtensionWriterResult::Skip
+    }
+}
+
+/// RFC 9001, Section 8.2: a missing `quic_transport_parameters` extension is a 0x16d error.
+#[test]
+fn server_tp_extension_absent() {
+    let mut client = default_client();
+    let mut server = default_server();
+    server
+        .crypto
+        .tls_mut()
+        .extension_handler(0x39, Rc::new(RefCell::new(NoTpExtension)))
+        .unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::CryptoAlert(109),
+        Error::Peer(Error::CryptoAlert(109).code()),
+    );
 }
