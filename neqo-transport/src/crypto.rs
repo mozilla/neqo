@@ -36,8 +36,8 @@ use nss::{
     Record, RecordList, RecordProtection as Aead, RecordProtectionOps as _, ResumptionToken,
     SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
     TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
-    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_HS_KEY_UDPATE, TLS_VERSION_1_3,
-    ZeroRttChecker, hkdf, hp, random,
+    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_HS_CERTIFICATE_REQUEST, TLS_HS_KEY_UDPATE,
+    TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp, random,
 };
 
 use crate::{
@@ -59,6 +59,9 @@ use crate::{
 /// by `CryptoDxState::limit` or updates will happen too often.  As we don't
 /// need to ask permission to update, this can be quite small.
 pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
+
+/// The number of TLS messages accepted after the handshake, equal to nss-rs `MAX_TICKETS`.
+pub const MAX_POST_HANDSHAKE_MESSAGES: usize = 4;
 
 // This is a testing kludge that allows for overwriting the number of
 // invocations of the next cipher to operate.  With this, it is possible
@@ -209,10 +212,15 @@ impl Crypto {
         &mut self,
         now: Instant,
         space: PacketNumberSpace,
-        data: Option<&[u8]>,
+        mut data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
         if let Some(d) = data {
-            self.handshake_message_filter.check(d)?;
+            let client_1rtt = space == PacketNumberSpace::ApplicationData && !self.is_server();
+            let len = self.handshake_message_filter.check(d, client_1rtt)?;
+            if len == 0 {
+                return Ok(self.tls.state());
+            }
+            data = Some(&d[..len]);
         }
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
@@ -242,6 +250,12 @@ impl Crypto {
                     .map_or(Error::Crypto(e), Error::CryptoAlert))
             }
         }
+    }
+
+    /// Whether CRYPTO frames in `space` are discarded, as RFC 9000 7.5 allows.
+    pub const fn discards(&self, space: PacketNumberSpace) -> bool {
+        matches!(space, PacketNumberSpace::ApplicationData)
+            && self.handshake_message_filter.post_handshake > MAX_POST_HANDSHAKE_MESSAGES
     }
 
     /// Enable 0-RTT and return `true` if it is enabled successfully.
@@ -1822,23 +1836,34 @@ impl Default for CryptoStreams {
     }
 }
 
-/// Follows TLS handshake message framing to reject a `KeyUpdate` (RFC 9001 6) before NSS sees it.
+/// Follows TLS handshake message framing to reject a `KeyUpdate` (RFC 9001 6) or a post-handshake
+/// `CertificateRequest` (RFC 9001 4.4) before NSS sees it, and counts a client's 1-RTT messages.
 #[derive(Debug, Default)]
 struct HandshakeMessageFilter {
     header_len: usize,
     body_len: usize,
+    post_handshake: usize,
 }
 
 impl HandshakeMessageFilter {
     const HEADER_LEN: usize = 4;
 
-    fn check(&mut self, mut data: &[u8]) -> Res<()> {
+    fn check(&mut self, mut data: &[u8], client_1rtt: bool) -> Res<usize> {
+        let len = data.len();
         while let Some((&b, rest)) = data.split_first() {
             if self.header_len < Self::HEADER_LEN {
                 if self.header_len > 0 {
                     self.body_len = (self.body_len << 8) | usize::from(b);
                 } else if b == TLS_HS_KEY_UDPATE {
                     return Err(Error::CryptoAlert(10)); // unexpected_message
+                } else if client_1rtt {
+                    if b == TLS_HS_CERTIFICATE_REQUEST {
+                        return Err(Error::ProtocolViolation);
+                    }
+                    self.post_handshake += 1;
+                    if self.post_handshake > MAX_POST_HANDSHAKE_MESSAGES {
+                        return Ok(len - data.len());
+                    }
                 }
                 self.header_len += 1;
                 data = rest;
@@ -1851,7 +1876,7 @@ impl HandshakeMessageFilter {
                 self.header_len = 0;
             }
         }
-        Ok(())
+        Ok(len)
     }
 }
 
@@ -1867,10 +1892,13 @@ pub struct CryptoRecoveryToken {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::hex::Hex;
-    use nss::{TLS_CHACHA20_POLY1305_SHA256, TLS_VERSION_1_3, hkdf};
+    use nss::{TLS_CHACHA20_POLY1305_SHA256, TLS_HS_NEW_SESSION_TICKET, TLS_VERSION_1_3, hkdf};
     use test_fixture::fixture_init;
 
-    use super::{CryptoDxAppData, CryptoDxDirection, CryptoDxState};
+    use super::{
+        CryptoDxAppData, CryptoDxDirection, CryptoDxState, HandshakeMessageFilter,
+        MAX_POST_HANDSHAKE_MESSAGES,
+    };
     use crate::Version;
 
     #[test]
@@ -1923,6 +1951,18 @@ mod tests {
         fixture_init();
         let dx = CryptoDxState::test_default_write();
         assert_eq!(dx.to_string(), "epoch 0 Write");
+    }
+
+    /// The filter cuts a client's 1-RTT data at the first byte of the message after the limit,
+    /// even when that byte ends a read, and returns nothing after that.
+    #[test]
+    fn handshake_message_filter_cut() {
+        let msg = [TLS_HS_NEW_SESSION_TICKET, 0, 0, 1, 0];
+        let accepted = msg.repeat(MAX_POST_HANDSHAKE_MESSAGES);
+        let read = [&accepted[..], &msg[..1]].concat();
+        let mut filter = HandshakeMessageFilter::default();
+        assert_eq!(filter.check(&read, true).unwrap(), accepted.len());
+        assert_eq!(filter.check(&msg[1..], true).unwrap(), 0);
     }
 }
 
