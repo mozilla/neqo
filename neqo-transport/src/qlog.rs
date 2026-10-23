@@ -223,7 +223,7 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
                 length: Some(to_u64(meta.length())),
-                payload_length: None,
+                payload_length: Some(to_u64(meta.payload_length())),
                 data: None,
             };
 

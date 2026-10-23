@@ -32,7 +32,8 @@ pub struct MetaData<'a> {
     packet_number: packet::Number,
     version: Version,
     tos: Tos,
-    len: usize,
+    /// `lengths.payload` can exceed `payload`: header protection padding is added later.
+    lengths: packet::Lengths,
     payload: &'a [u8],
     /// The CIDs of a received packet, as these can differ from the path's.
     rx_cids: Option<Cids<'a>>,
@@ -52,7 +53,10 @@ impl MetaData<'_> {
             packet_number: decrypted.pn(),
             version,
             tos,
-            len,
+            lengths: packet::Lengths {
+                packet: len,
+                payload: decrypted.len(),
+            },
             payload: decrypted,
             rx_cids: Some((decrypted.scid.as_deref(), Some(&decrypted.dcid))),
         }
@@ -62,7 +66,7 @@ impl MetaData<'_> {
         path: &'a PathRef,
         packet_type: packet::Type,
         packet_number: packet::Number,
-        length: usize,
+        lengths: packet::Lengths,
         payload: &'a [u8],
         tos: Tos,
         version: Version,
@@ -73,7 +77,7 @@ impl MetaData<'_> {
             packet_number,
             version,
             tos,
-            len: length,
+            lengths,
             payload,
             rx_cids: None,
         }
@@ -90,12 +94,17 @@ impl MetaData<'_> {
 
     #[must_use]
     pub const fn length(&self) -> usize {
-        self.len
+        self.lengths.packet
     }
 
     #[must_use]
     pub const fn payload(&self) -> &[u8] {
         self.payload
+    }
+
+    #[must_use]
+    pub const fn payload_length(&self) -> usize {
+        self.lengths.payload
     }
 }
 
@@ -128,7 +137,7 @@ impl Display for MetaData<'_> {
             self.packet_type,
             self.path.borrow(),
             self.tos,
-            self.len,
+            self.lengths.packet,
         )
     }
 }
