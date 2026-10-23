@@ -1170,12 +1170,15 @@ impl CryptoStates {
             // Note that on the server, we might not have initials for |orig| if it
             // was configured for |orig| and only |confirmed| Initial packets arrived.
             if let Some(prev) = self.initials[orig].take() {
-                let next = self.initials[confirmed]
+                let res = self.initials[confirmed]
                     .as_mut()
-                    .ok_or(Error::VersionNegotiation)?;
-                next.rx.continuation(&prev.rx)?;
-                next.tx.continuation(&prev.tx)?;
-                self.initials[orig] = Some(prev);
+                    .ok_or(Error::VersionNegotiation)
+                    .and_then(|next| {
+                        next.rx.continuation(&prev.rx)?;
+                        next.tx.continuation(&prev.tx)
+                    });
+                self.initials[orig] = Some(prev); // Also on error, as the connection stays on |orig|.
+                res?;
             }
         }
         Ok(())

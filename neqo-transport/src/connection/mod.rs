@@ -3283,12 +3283,12 @@ impl Connection {
             version
         };
 
+        self.crypto.confirm_version(v)?;
         // OK, it's all confirmed.
         if self.version != v {
             qdebug!("[{self}] Compatible upgrade {:?} ==> {v:?}", self.version);
             self.version = v;
         }
-        self.crypto.confirm_version(v)?;
         Ok(())
     }
 

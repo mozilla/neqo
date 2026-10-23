@@ -362,6 +362,46 @@ fn assert_error(c: &Connection, expected: &CloseReason) {
     }
 }
 
+/// A server Initial packet carrying `token` and `frames`, each encoded as a varint,
+/// forged with the Initial keys derived from the client's first datagram.
+#[cfg(not(feature = "disable-encryption"))]
+fn forged_server_initial(
+    client_initial: &[u8],
+    version: Version,
+    pn: packet::Number,
+    token: &[u8],
+    frames: &[u64],
+) -> Vec<u8> {
+    use neqo_common::Encoder;
+
+    use crate::crypto::{CryptoDxDirection, CryptoDxState};
+
+    // Skip the first byte and 4-byte version, then read the length-prefixed
+    // original Destination CID (the Initial-key seed) and Source CID (which the
+    // client expects as the Destination CID of packets sent back to it).
+    let mut dec = Decoder::from(&client_initial[5..]);
+    let seed = dec.decode_vec(1).unwrap();
+    let dcid = dec.decode_vec(1).unwrap();
+    let mut write =
+        CryptoDxState::new_initial(version, CryptoDxDirection::Write, "server in", seed, pn)
+            .unwrap();
+    let mut builder = packet::Builder::long(
+        Encoder::default(),
+        packet::Type::Initial,
+        version,
+        Some(dcid),
+        Some(b"fakescid"),
+        packet::LIMIT,
+    );
+    builder.initial_token(token);
+    builder.pn(pn, 1);
+    for f in frames {
+        builder.encode_varint(*f);
+    }
+    builder.encode([0; 20]); // PADDING, for the header protection sample.
+    builder.build(&mut write).unwrap().into()
+}
+
 /// Pump datagrams between two peers until neither has anything more to send.
 fn exchange(a: &mut Connection, b: &mut Connection) {
     let mut d = a.process_output(now()).dgram();

@@ -2092,37 +2092,14 @@ fn retry_scid_matching_initial_dcid() {
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn client_initial_with_token() {
-    use neqo_common::Encoder;
-
-    use crate::crypto::{CryptoDxDirection, CryptoDxState};
+    use super::forged_server_initial;
+    use crate::frame::FrameType;
 
     // A server Initial addressed to the client, encrypted with the Initial keys
     // seeded by the client's original Destination CID, carrying `token` and a PING.
     fn server_initial(client_initial: &[u8], token: &[u8]) -> Vec<u8> {
-        // Skip the first byte and 4-byte version, then read the length-prefixed
-        // original Destination CID (the Initial-key seed) and Source CID (which the
-        // client expects as the Destination CID of packets sent back to it).
-        let mut dec = Decoder::from(&client_initial[5..]);
-        let seed = dec.decode_vec(1).expect("client DCID").to_vec();
-        let dcid = dec.decode_vec(1).expect("client SCID").to_vec();
-
-        let version = Version::default();
-        let mut write =
-            CryptoDxState::new_initial(version, CryptoDxDirection::Write, "server in", &seed, 0)
-                .expect("initial keys");
-        let mut builder = crate::packet::Builder::long(
-            Encoder::default(),
-            crate::packet::Type::Initial,
-            version,
-            Some(dcid.as_slice()),
-            Some(b"fakescid"),
-            crate::packet::LIMIT,
-        );
-        builder.initial_token(token);
-        builder.pn(0, 1);
-        builder.encode([0x01_u8]); // PING, so the packet is ack-eliciting
-        builder.encode([0_u8; 20]); // PADDING, ample sample for header protection
-        builder.build(&mut write).expect("build").as_ref().to_vec()
+        let ping = [FrameType::Ping.into()]; // PING, so the packet is ack-eliciting
+        forged_server_initial(client_initial, Version::default(), 0, token, &ping)
     }
 
     // A token-free server Initial decrypts and is processed (also confirming the
