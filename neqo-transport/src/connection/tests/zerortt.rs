@@ -7,16 +7,17 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, qdebug, to_u64};
-use nss::{AllowZeroRtt, AntiReplay};
-use test_fixture::{assertions, now};
+use nss::{Agent, AllowZeroRtt, AntiReplay};
+use test_fixture::{anti_replay, assertions, now};
 
 use super::{
-    super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
-    default_server, exchange_ticket, new_server, resumed_server,
+    super::{CloseReason, Connection},
+    CountingConnectionIdGenerator, Output, assert_error, connect, default_client, default_server,
+    exchange_ticket, new_server, resumed_server,
 };
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, StreamDataLimit, StreamType, Version,
-    events::ConnectionEvent,
+    events::ConnectionEvent, tparams::TpZeroRttChecker,
 };
 
 #[test]
@@ -511,4 +512,38 @@ fn zero_rtt_no_time_threshold_loss_detection_before_first_ack() {
     // detection does not yet apply.
     assert!(client.process_output(now).dgram().is_none());
     assert_eq!(client.stats().lost, 0);
+}
+
+/// RFC 9001, Section 4.6.1: a ticket's `max_early_data_size` must be 0xffffffff.
+#[test]
+fn zero_rtt_bad_max_early_data_size() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let checker = TpZeroRttChecker::wrap(Rc::clone(&server.tps), AllowZeroRtt {});
+    let Agent::Server(tls) = server.crypto.tls_mut() else {
+        panic!("not a server");
+    };
+    tls.enable_0rtt(&anti_replay(), 1234, checker).unwrap();
+    connect(&mut client, &mut server);
+
+    server.send_ticket(now(), &[]).unwrap();
+    let ticket = server.process_output(now()).dgram();
+    client.process_input(ticket.unwrap(), now());
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+#[test]
+fn zero_rtt_disabled_max_early_data_size() {
+    let mut client = default_client();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    assert_eq!(token.max_early_data_size(), 0);
 }
