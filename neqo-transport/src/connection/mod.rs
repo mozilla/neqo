@@ -3914,6 +3914,14 @@ impl Connection {
         Ok(stream.stats())
     }
 
+    /// Whether the receive side of a stream is open: no FIN or reset received, reading not stopped.
+    ///
+    /// # Errors
+    /// When the stream does not exist.
+    pub fn stream_recv_is_open(&mut self, stream_id: StreamId) -> Res<bool> {
+        Ok(self.streams.get_recv_stream_mut(stream_id)?.is_open())
+    }
+
     /// Send data on a stream.
     /// Returns how many bytes were successfully sent. Could be less
     /// than total, based on receiver credit space available, etc.
