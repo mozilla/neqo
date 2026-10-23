@@ -26,9 +26,9 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, connect_fail, connect_force_idle,
+    connect_rtt_idle, default_client, default_server, fill_cwnd, maybe_authenticate, new_client,
+    new_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -42,6 +42,7 @@ use crate::{
     packet,
     path::Path,
     pmtud::Pmtud,
+    recovery::MAX_PTO_PACKET_COUNT,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
 };
@@ -357,6 +358,10 @@ fn change_source_port(d: &Datagram, i: usize) -> Datagram {
         d.tos(),
         &d[..],
     )
+}
+
+fn change_destination_port(d: &Datagram) -> Datagram {
+    Datagram::new(d.source(), new_port(d.destination()), d.tos(), &d[..])
 }
 
 fn change_source_address_and_port(d: &Datagram, i: usize) -> Datagram {
@@ -977,6 +982,53 @@ fn preferred_address_loopback() {
     preferred_address(a, a, new_port(a));
 }
 
+/// Returns a client, the server's preferred address and the packet containing `HANDSHAKE_DONE`.
+fn preferred_address_handshake() -> (Connection, SocketAddr, Option<Datagram>) {
+    let preferred = new_port(DEFAULT_ADDR);
+    let mut client = default_client();
+    let spa = PreferredAddress::new_any(None, Some(preferred));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+
+    let dgram = fast_handshake(&mut client, &mut server);
+    (client, preferred, dgram)
+}
+
+/// Only the path probe goes to the preferred address.
+#[test]
+fn probed_path_sends_only_probe() {
+    let (mut client, preferred, dgram) = preferred_address_handshake();
+    client.process_input(dgram.unwrap(), now());
+    let probe = client
+        .process_multiple_output(now(), 2.try_into().unwrap())
+        .dgram()
+        .unwrap();
+    assert_eq!(probe.destination(), preferred);
+    assert_eq!(probe.num_datagrams(), 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+}
+
+/// A path probe doesn't use up the primary path's PTO packet.
+#[test]
+fn path_probe_keeps_pto_packet() {
+    let (mut client, preferred, dgram) = preferred_address_handshake();
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    let (_, now) = fill_cwnd(&mut client, stream, now());
+    client.process_input(dgram.unwrap(), now);
+
+    let now = now + AT_LEAST_PTO;
+    let probe = client
+        .process_multiple_output(now, 2.try_into().unwrap())
+        .dgram()
+        .unwrap();
+    assert_eq!(probe.destination(), preferred);
+    let stream_before = client.stats().frame_tx.stream;
+    while let Some(dgram) = client.process_output(now).dgram() {
+        assert_eq!(dgram.destination(), DEFAULT_ADDR);
+    }
+    let pto_stream = client.stats().frame_tx.stream - stream_before;
+    assert_eq!(pto_stream, MAX_PTO_PACKET_COUNT - 1);
+}
+
 fn expect_no_migration(client: &mut Connection, server: &mut Connection) {
     let dgram = fast_handshake(client, server);
 
@@ -1231,6 +1283,43 @@ impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
                 .encode(srt);
         }
     }
+}
+
+/// Writes a `NEW_CONNECTION_ID` frame and a padded `PATH_CHALLENGE` frame.
+struct PaddedPathChallengeWriter {}
+
+impl crate::connection::test_internal::FrameWriter for PaddedPathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder
+            .encode_varint(FrameType::NewConnectionId)
+            .encode_varint(1_u64) // Sequence Number
+            .encode_varint(0_u64) // Retire Prior To
+            .encode_vec(1, &[0x5a; 8])
+            .encode([0xa5; 16]);
+        builder
+            .encode_varint(FrameType::PathChallenge)
+            .encode([1; 8]);
+        builder.enable_padding(true);
+    }
+}
+
+/// Before `HANDSHAKE_DONE`, a client answers `PATH_CHALLENGE` on a new path,
+/// but has nothing to send there with Handshake keys.
+#[test]
+fn path_challenge_before_handshake_done() {
+    let mut client = default_client();
+    let mut server = default_server();
+    drop(fast_handshake(&mut client, &mut server)); // Lose HANDSHAKE_DONE.
+    assert_eq!(*client.state(), State::Connected);
+
+    let challenge = send_with_extra(&mut server, PaddedPathChallengeWriter {}, now());
+    let challenge = change_destination_port(&challenge);
+    client.process_input(challenge.clone(), now());
+    assert_eq!(*client.state(), State::Connected);
+
+    let response = client.process_output(now()).dgram().unwrap();
+    assert_eq!(response.source(), challenge.destination());
+    assert_eq!(client.stats().frame_tx.path_response, 1);
 }
 
 /// Test that forcing retirement of connection IDs forces retirement of all active
@@ -1494,4 +1583,20 @@ fn error_on_new_path_with_no_connection_id() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::UnknownFrameType))
     ));
+}
+
+/// An invalid frame from a new path closes the connection on that path.
+#[test]
+fn close_on_new_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let garbage = send_with_extra(&mut server, GarbageWriter {}, now());
+    let garbage = change_destination_port(&garbage);
+    client.process_input(garbage.clone(), now());
+
+    let close = client.process_output(now()).dgram().unwrap();
+    assert_eq!(close.source(), garbage.destination());
+    assert_eq!(client.stats().frame_tx.connection_close, 1);
 }
