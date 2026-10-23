@@ -28,7 +28,8 @@ use neqo_common::{
 };
 use nss::{
     Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
-    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
+    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server,
+    TLS_ALERT_NO_APPLICATION_PROTOCOL, ZeroRttChecker,
     cert::{CertificateCompressor, CertificateInfo},
 };
 use smallvec::SmallVec;
@@ -3736,8 +3737,7 @@ impl Connection {
             .is_none()
         {
             qwarn!("[{self}] No ALPN, closing connection");
-            // 120 = no_application_protocol
-            return Err(Error::CryptoAlert(120));
+            return Err(Error::CryptoAlert(TLS_ALERT_NO_APPLICATION_PROTOCOL));
         }
         if self.role == Role::Server {
             // Remove the randomized client CID from the list of acceptable CIDs.

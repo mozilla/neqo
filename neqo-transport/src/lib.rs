@@ -7,7 +7,7 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
 use neqo_common::qdebug;
-use nss::Error as CryptoError;
+use nss::{Error as CryptoError, TLS_ALERT_ECH_REQUIRED};
 use thiserror::Error;
 
 mod ackrate;
@@ -91,9 +91,38 @@ pub use self::{
 };
 
 pub type TransportError = u64;
-const ERROR_APPLICATION_CLOSE: TransportError = 12;
-const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError = 13;
-const ERROR_AEAD_LIMIT_REACHED: TransportError = 15;
+
+#[repr(u64)]
+enum TransportErrorCode {
+    NoError = 0x00,
+    InternalError = 0x01,
+    ConnectionRefused = 0x02,
+    FlowControlError = 0x03,
+    StreamLimitError = 0x04,
+    StreamStateError = 0x05,
+    FinalSizeError = 0x06,
+    FrameEncodingError = 0x07,
+    TransportParameterError = 0x08,
+    ProtocolViolation = 0x0a,
+    InvalidToken = 0x0b,
+    ApplicationError = 0x0c,
+    CryptoBufferExceeded = 0x0d,
+    AeadLimitReached = 0x0f,
+    NoViablePath = 0x10,
+    VersionNegotiationError = 0x53f8,
+}
+
+impl TransportErrorCode {
+    const fn code(self) -> TransportError {
+        self as TransportError
+    }
+}
+
+const ERROR_APPLICATION_CLOSE: TransportError = TransportErrorCode::ApplicationError.code();
+const ERROR_CRYPTO_BUFFER_EXCEEDED: TransportError =
+    TransportErrorCode::CryptoBufferExceeded.code();
+const ERROR_AEAD_LIMIT_REACHED: TransportError = TransportErrorCode::AeadLimitReached.code();
+const ERROR_CRYPTO_BASE: TransportError = 0x100;
 
 #[derive(Clone, Debug, PartialEq, PartialOrd, Ord, Eq, Error)]
 pub enum Error {
@@ -215,27 +244,29 @@ impl Error {
     #[must_use]
     pub fn code(&self) -> TransportError {
         match self {
-            Self::None | Self::IdleTimeout | Self::Peer(_) | Self::PeerApplication(_) => 0,
-            Self::ConnectionRefused => 2,
-            Self::FlowControl => 3,
-            Self::StreamLimit => 4,
-            Self::StreamState => 5,
-            Self::FinalSize => 6,
-            Self::FrameEncoding => 7,
-            Self::TransportParameter => 8,
-            Self::ProtocolViolation => 10,
-            Self::InvalidToken => 11,
+            Self::None | Self::IdleTimeout | Self::Peer(_) | Self::PeerApplication(_) => {
+                TransportErrorCode::NoError.code()
+            }
+            Self::ConnectionRefused => TransportErrorCode::ConnectionRefused.code(),
+            Self::FlowControl => TransportErrorCode::FlowControlError.code(),
+            Self::StreamLimit => TransportErrorCode::StreamLimitError.code(),
+            Self::StreamState => TransportErrorCode::StreamStateError.code(),
+            Self::FinalSize => TransportErrorCode::FinalSizeError.code(),
+            Self::FrameEncoding => TransportErrorCode::FrameEncodingError.code(),
+            Self::TransportParameter => TransportErrorCode::TransportParameterError.code(),
+            Self::ProtocolViolation => TransportErrorCode::ProtocolViolation.code(),
+            Self::InvalidToken => TransportErrorCode::InvalidToken.code(),
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::Application => ERROR_APPLICATION_CLOSE,
-            Self::NoAvailablePath | Self::TooManyPtos => 16,
+            Self::NoAvailablePath | Self::TooManyPtos => TransportErrorCode::NoViablePath.code(),
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
-            Self::CryptoAlert(a) => 0x100 + u64::from(*a),
+            Self::CryptoAlert(a) => ERROR_CRYPTO_BASE + u64::from(*a),
             // As we have a special error code for ECH fallbacks, we lose the alert.
             // Send the server "ech_required" directly.
-            Self::EchRetry(_) => 0x100 + 121,
-            Self::VersionNegotiation => 0x53f8,
+            Self::EchRetry(_) => Self::CryptoAlert(TLS_ALERT_ECH_REQUIRED).code(),
+            Self::VersionNegotiation => TransportErrorCode::VersionNegotiationError.code(),
             // All the rest are internal errors.
-            _ => 1,
+            _ => TransportErrorCode::InternalError.code(),
         }
     }
 }
