@@ -95,6 +95,7 @@ fn priority_update() {
         if let Http3ServerEvent::PriorityUpdate {
             stream_id: update_id,
             priority,
+            ..
         } = e
         {
             assert_eq!(update_id, stream_id);

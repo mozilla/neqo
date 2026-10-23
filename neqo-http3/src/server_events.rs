@@ -274,6 +274,7 @@ pub enum Http3ServerEvent {
         state: Http3State,
     },
     PriorityUpdate {
+        conn: ConnectionRef,
         stream_id: StreamId,
         priority: Priority,
     },
@@ -390,8 +391,19 @@ impl Http3ServerEvents {
         });
     }
 
-    pub(crate) fn priority_update(&self, stream_id: StreamId, priority: Priority) {
+    pub(crate) fn priority_update(
+        &self,
+        conn: ConnectionRef,
+        stream_id: StreamId,
+        priority: Priority,
+    ) {
+        self.events.remove_matching(|evt| {
+            matches!(evt,
+                Http3ServerEvent::PriorityUpdate { conn: c, stream_id: x, .. }
+                    if *c == conn && *x == stream_id)
+        });
         self.events.push(Http3ServerEvent::PriorityUpdate {
+            conn,
             stream_id,
             priority,
         });
