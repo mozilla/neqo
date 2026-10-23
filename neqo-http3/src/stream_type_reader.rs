@@ -553,7 +553,9 @@ mod tests {
     #[test]
     fn reset() {
         let mut t = Test::new(StreamType::UniDi, Role::Client);
-        t.decoder.reset(CloseType::ResetRemote(0x100)).unwrap();
+        t.decoder
+            .reset(CloseType::ResetRemote(Error::HttpNone.code()))
+            .unwrap();
         // after a reset NewStreamHeadReader will not read more data.
         t.decode(
             &[QPACK_UNI_STREAM_TYPE_DECODER],
