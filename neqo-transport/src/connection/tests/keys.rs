@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use neqo_common::{Datagram, qdebug};
+use nss::{Cipher, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256};
 use test_fixture::{
     assertions::{is_handshake, is_initial},
     now, split_datagram,
@@ -16,11 +17,14 @@ use super::{
         Connection, ConnectionParameters, Error, Output, State, StreamType,
     },
     AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
-    send_and_receive, send_something,
+    send_and_receive, send_something, send_something_with_modifier,
 };
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
-    crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
+    crypto::{
+        AES_GCM_INTEGRITY_LIMIT, CHACHA_INTEGRITY_LIMIT, OVERWRITE_AUTH_FAILURES,
+        OVERWRITE_INVOCATIONS, OVERWRITE_MIN_PN, UPDATE_WRITE_KEYS_AT,
+    },
     packet,
 };
 
@@ -53,6 +57,18 @@ fn overwrite_invocations(n: packet::Number) {
     OVERWRITE_INVOCATIONS.with(|v| {
         *v.borrow_mut() = Some(n);
     });
+}
+
+fn overwrite_auth_failures(n: packet::Number) {
+    OVERWRITE_AUTH_FAILURES.with(|v| {
+        *v.borrow_mut() = Some(n);
+    });
+}
+
+/// Flip the last bit of the datagram, which is in the AEAD tag.
+fn corrupt(mut d: Datagram) -> Datagram {
+    *d.as_mut().last_mut().unwrap() ^= 1;
+    d
 }
 
 #[test]
@@ -348,7 +364,7 @@ fn exhaust_write_keys() {
 }
 
 #[test]
-fn exhaust_read_keys() {
+fn decrypt_not_counted() {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
@@ -356,20 +372,79 @@ fn exhaust_read_keys() {
     let dgram = send_something(&mut client, now());
 
     overwrite_invocations(0);
-    let dgram = server.process(Some(dgram), now()).dgram();
+    overwrite_auth_failures(AES_GCM_INTEGRITY_LIMIT);
+    server.process_input(dgram, now());
+    assert_eq!(*server.state(), State::Confirmed);
+}
+
+#[test]
+fn decrypt_error_not_counted() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let dgram = send_something(&mut client, now());
+    OVERWRITE_MIN_PN.set(Some(packet::Number::MAX));
+    overwrite_auth_failures(AES_GCM_INTEGRITY_LIMIT);
+    server.process_input(dgram, now());
+    assert_eq!(*server.state(), State::Confirmed);
+
+    let dgram = send_something_with_modifier(&mut client, now(), corrupt);
+    server.process_input(dgram, now());
+    let closed = State::Closed(CloseReason::Transport(Error::KeysExhausted));
+    assert_eq!(*server.state(), closed);
+}
+
+/// Fail authentication of `limit + 1` packets, split across a key update.
+fn exhaust_auth_failures(cipher: Cipher, limit: packet::Number) {
+    let mut client = default_client();
+    client.set_ciphers(&[cipher]).unwrap();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+
+    overwrite_auth_failures(limit - 1);
+    let dgram = send_something_with_modifier(&mut server, now, corrupt);
+    client.process_input(dgram, now);
+    assert_eq!(*client.state(), State::Confirmed);
+
+    assert!(server.initiate_key_update().is_ok());
+    let dgram = send_something(&mut server, now);
+    client.process_input(dgram, now);
+    now += AT_LEAST_PTO;
+    drop(client.process_output(now));
+    assert_eq!(client.get_epochs(), (Some(4), Some(4)));
+
+    let dgram = send_something_with_modifier(&mut server, now, corrupt);
+    let dgram = client.process(Some(dgram), now).dgram();
     assert!(matches!(
-        server.state(),
+        client.state(),
         State::Closed(CloseReason::Transport(Error::KeysExhausted))
     ));
 
-    client.process_input(dgram.unwrap(), now());
+    server.process_input(dgram.unwrap(), now);
     assert!(matches!(
-        client.state(),
+        server.state(),
         State::Draining {
             error: CloseReason::Transport(Error::Peer(ERROR_AEAD_LIMIT_REACHED)),
             ..
         }
     ));
+}
+
+#[test]
+fn exhaust_auth_failures_aes_128_gcm() {
+    exhaust_auth_failures(TLS_AES_128_GCM_SHA256, AES_GCM_INTEGRITY_LIMIT);
+}
+
+#[test]
+fn exhaust_auth_failures_aes_256_gcm() {
+    exhaust_auth_failures(TLS_AES_256_GCM_SHA384, AES_GCM_INTEGRITY_LIMIT);
+}
+
+#[test]
+fn exhaust_auth_failures_chacha20_poly1305() {
+    exhaust_auth_failures(TLS_CHACHA20_POLY1305_SHA256, CHACHA_INTEGRITY_LIMIT);
 }
 
 #[test]

@@ -60,6 +60,10 @@ use crate::{
 /// need to ask permission to update, this can be quite small.
 pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 
+/// RFC 9001 Section 6.6 integrity limits.
+pub const AES_GCM_INTEGRITY_LIMIT: packet::Number = 1 << 52;
+pub const CHACHA_INTEGRITY_LIMIT: packet::Number = 1 << 36;
+
 // This is a testing kludge that allows for overwriting the number of
 // invocations of the next cipher to operate.  With this, it is possible
 // to test what happens when the number of invocations reaches 0, or
@@ -67,6 +71,12 @@ pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 // This is a little crude, but it saves a lot of plumbing.
 #[cfg(test)]
 thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
+// The same for the number of received packets that failed authentication.
+#[cfg(test)]
+thread_local!(pub static OVERWRITE_AUTH_FAILURES: RefCell<Option<packet::Number>> = RefCell::default());
+// The same for the lowest acceptable packet number of the next decryption.
+#[cfg(test)]
+thread_local!(pub static OVERWRITE_MIN_PN: RefCell<Option<packet::Number>> = RefCell::default());
 
 #[derive(Debug)]
 pub struct Crypto {
@@ -586,9 +596,8 @@ impl CryptoDxState {
             // This uses the smaller limits for 2^16 byte packets
             // as we don't control incoming packet size.
             CryptoDxDirection::Read => match cipher {
-                TLS_AES_128_GCM_SHA256 => 1 << 52,
-                TLS_AES_256_GCM_SHA384 => packet::Number::MAX,
-                TLS_CHACHA20_POLY1305_SHA256 => 1 << 36,
+                TLS_AES_128_GCM_SHA256 | TLS_AES_256_GCM_SHA384 => AES_GCM_INTEGRITY_LIMIT,
+                TLS_CHACHA20_POLY1305_SHA256 => CHACHA_INTEGRITY_LIMIT,
                 _ => unreachable!(),
             },
             // This uses the larger limits for 2^11 byte packets.
@@ -624,14 +633,6 @@ impl CryptoDxState {
 
     pub fn next(&self, next_secret: &SymKey, cipher: Cipher) -> Res<Self> {
         let pn = self.next_pn();
-        // We count invocations of each write key just for that key, but all
-        // attempts to invocations to read count toward a single limit.
-        // This doesn't count use of Handshake keys.
-        let invocations = if self.direction == CryptoDxDirection::Read {
-            self.invocations
-        } else {
-            Self::limit(CryptoDxDirection::Write, cipher)
-        };
         Ok(Self {
             version: self.version,
             direction: self.direction,
@@ -646,7 +647,7 @@ impl CryptoDxState {
             hpkey: self.hpkey.try_clone()?,
             used_pn: pn..pn,
             min_pn: pn,
-            invocations,
+            invocations: Self::limit(self.direction, cipher),
             largest_packet_len: INITIAL_LARGEST_PACKET_LEN,
         })
     }
@@ -794,9 +795,12 @@ impl CryptoDxState {
             Hex::new(data[hdr.clone()].as_ref()),
             Hex::new(data[hdr.end..].as_ref())
         );
-        self.invoked()?;
         let (hdr, data) = data.split_at_mut(hdr.end);
         let len = self.aead.decrypt_in_place(pn, hdr, data)?;
+        #[cfg(test)]
+        if let Some(n) = OVERWRITE_MIN_PN.take() {
+            self.min_pn = n;
+        }
         self.used(pn)?;
         Ok(len)
     }
@@ -909,6 +913,8 @@ pub struct CryptoStates {
     // keys and would otherwise be detected as that update again; comparing
     // against this stops us from responding to the same update twice.
     read_update_epoch: Option<usize>,
+    /// The number of received packets that failed authentication, across all keys.
+    auth_failures: packet::Number,
 }
 
 impl CryptoStates {
@@ -1424,6 +1430,26 @@ impl CryptoStates {
         Ok(())
     }
 
+    /// Count a received packet that failed authentication.  Exceeding the
+    /// integrity limit of the selected AEAD is fatal; see RFC 9001 Section 6.6.
+    pub fn auth_failed(&mut self) -> Res<()> {
+        #[cfg(test)]
+        if let Some(n) = OVERWRITE_AUTH_FAILURES.take() {
+            self.auth_failures = n;
+        }
+        self.auth_failures += 1;
+        // Initial packets use AES-128-GCM until a cipher is selected.
+        let cipher = if self.cipher == 0 {
+            TLS_AES_128_GCM_SHA256
+        } else {
+            self.cipher
+        };
+        if self.auth_failures > CryptoDxState::limit(CryptoDxDirection::Read, cipher) {
+            return Err(Error::KeysExhausted);
+        }
+        Ok(())
+    }
+
     /// Make some state for removing protection in tests.
     #[cfg(all(not(feature = "disable-encryption"), any(test, feature = "bench")))]
     pub fn test_default() -> Self {
@@ -1454,6 +1480,7 @@ impl CryptoStates {
             app_read_next: Some(app_read(4)),
             read_update_time: None,
             read_update_epoch: None,
+            auth_failures: 0,
         }
     }
 
@@ -1504,6 +1531,7 @@ impl CryptoStates {
             app_read_next: Some(app_read(4)),
             read_update_time: None,
             read_update_epoch: None,
+            auth_failures: 0,
         }
     }
 }
