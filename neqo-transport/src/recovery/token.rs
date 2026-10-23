@@ -22,6 +22,7 @@ pub enum StreamRecoveryToken {
     Stream(send_stream::RecoveryToken),
     ResetStream {
         stream_id: StreamId,
+        reliable_size: u64,
     },
     StopSending {
         stream_id: StreamId,
