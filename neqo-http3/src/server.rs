@@ -441,7 +441,8 @@ mod tests {
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
+        CloseReason, Connection, ConnectionEvent, Error as TransportError, State, StreamId,
+        StreamType, ZeroRttState,
     };
     use nss::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
@@ -1272,6 +1273,30 @@ mod tests {
             .unwrap();
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
+        assert_closed(&hconn, &Error::HttpClosedCriticalStream);
+    }
+
+    // Server: a reliable reset of the client control stream closes a critical stream.
+    #[test]
+    fn server_reliable_reset_control_stream() {
+        let (mut hconn, mut peer_conn) = connect();
+        // A reserved frame type (RFC 9114 Section 7.2.8) with zero length.
+        peer_conn.control_send(&[0x21, 0x00]);
+        peer_conn
+            .stream_commit(CLIENT_SIDE_CONTROL_STREAM_ID)
+            .unwrap();
+        peer_conn
+            .stream_reset_send(CLIENT_SIDE_CONTROL_STREAM_ID, Error::HttpNone.code())
+            .unwrap();
+        let out = peer_conn.process_output(now());
+        assert_eq!(peer_conn.stats().frame_tx.reset_stream_at, 1);
+        let out = hconn.process(out.dgram(), now());
+        peer_conn.process_input(out.dgram().unwrap(), now());
+        let State::Draining { error, .. } = peer_conn.state() else {
+            panic!("Wrong state {:?}", peer_conn.state());
+        };
+        let peer = TransportError::PeerApplication(Error::HttpClosedCriticalStream.code());
+        assert_eq!(error, &CloseReason::Transport(peer));
         assert_closed(&hconn, &Error::HttpClosedCriticalStream);
     }
 
