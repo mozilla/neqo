@@ -53,7 +53,7 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// The QPACK specification limits the table size to `(1 << 30) - 1`.
+    /// The largest table size these settings accept.
     const TABLE_SIZE_LIMIT: u64 = (1 << 30) - 1;
 
     #[must_use]
@@ -63,7 +63,7 @@ impl Settings {
 
     /// # Panics
     ///
-    /// The table size must be smaller than `1 << 30` by the spec.
+    /// The table size must be smaller than `1 << 30`.
     #[must_use]
     pub const fn max_table_size_decoder(mut self, v: u64) -> Self {
         assert!(v <= Self::TABLE_SIZE_LIMIT);
@@ -78,7 +78,7 @@ impl Settings {
 
     /// # Panics
     ///
-    /// The table size must be smaller than `1 << 30` by the spec.
+    /// The table size must be smaller than `1 << 30`.
     #[must_use]
     pub const fn max_table_size_encoder(mut self, v: u64) -> Self {
         assert!(v <= Self::TABLE_SIZE_LIMIT);
