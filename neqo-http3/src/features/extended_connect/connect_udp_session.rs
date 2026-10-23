@@ -26,6 +26,12 @@ use crate::{
 /// The only context ID RFC 9298 defines: the payload is a UDP packet.
 const CONTEXT_ID: u64 = 0;
 
+/// Datagram bytes one control stream read may queue as events (RFC 9298 Section 5).
+const MAX_DATAGRAM_BYTES_PER_READ: usize = 256 * 1024;
+
+/// Per-event bookkeeping charge, as `PER_DATAGRAM_OVERHEAD` in neqo-transport's datagram queue.
+const PER_DATAGRAM_OVERHEAD: usize = 64;
+
 #[derive(Debug)]
 pub struct Session {
     frame_reader: FrameReader,
@@ -60,6 +66,7 @@ impl Protocol for Session {
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>> {
+        let mut budget = MAX_DATAGRAM_BYTES_PER_READ;
         loop {
             let (capsule, fin) = self
                 .frame_reader
@@ -74,7 +81,14 @@ impl Protocol for Session {
             match capsule {
                 Some(Capsule::Datagram { payload }) => match self.dgram_context_id(payload) {
                     Ok(slice) => {
-                        events.new_datagram(self.session_id, slice, self.connect_type());
+                        let cost = slice.len().saturating_add(PER_DATAGRAM_OVERHEAD);
+                        if let Some(rest) = budget.checked_sub(cost) {
+                            budget = rest;
+                            events.new_datagram(self.session_id, slice, self.connect_type());
+                        } else {
+                            // RFC 9221 Section 5.3 lets the receiver drop datagrams.
+                            qdebug!("[{self}]: dropped datagram over the per-read budget");
+                        }
                     }
                     Err(e) => {
                         qdebug!("[{self}]: received capsule with invalid context identifier: {e}");
@@ -170,11 +184,164 @@ impl Protocol for Session {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use neqo_common::Bytes;
-    use neqo_transport::StreamId;
+    use std::iter;
 
-    use super::Session;
-    use crate::features::extended_connect::session::Protocol as _;
+    use neqo_common::{Bytes, Datagram, event::Provider as _};
+    use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamId};
+    use test_fixture::now;
+
+    use super::{MAX_DATAGRAM_BYTES_PER_READ, PER_DATAGRAM_OVERHEAD, Session};
+    use crate::{
+        ConnectUdpEvent, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
+        Http3ServerEvent, Res, SessionAcceptAction,
+        connect_udp::{ClientSession as _, ServerEvent, ServerSession},
+        features::extended_connect::{session::Protocol as _, tests::webtransport::connect},
+    };
+
+    trait Peer {
+        /// Processes `dgrams` in one batch and returns everything sent in response.
+        fn exchange(&mut self, dgrams: Vec<Datagram>) -> Vec<Datagram>;
+        fn datagram_events(&mut self) -> usize;
+    }
+
+    impl Peer for Http3Client {
+        fn exchange(&mut self, dgrams: Vec<Datagram>) -> Vec<Datagram> {
+            self.process_multiple_input(dgrams, now());
+            iter::from_fn(|| self.process_output(now()).dgram()).collect()
+        }
+
+        fn datagram_events(&mut self) -> usize {
+            self.events()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram { .. })
+                    )
+                })
+                .count()
+        }
+    }
+
+    impl Peer for Http3Server {
+        fn exchange(&mut self, dgrams: Vec<Datagram>) -> Vec<Datagram> {
+            let first = self.process(dgrams, now()).dgram();
+            first
+                .into_iter()
+                .chain(iter::from_fn(|| {
+                    self.process(None::<Datagram>, now()).dgram()
+                }))
+                .collect()
+        }
+
+        fn datagram_events(&mut self) -> usize {
+            self.events()
+                .filter(|e| {
+                    matches!(
+                        e,
+                        Http3ServerEvent::ConnectUdp(ServerEvent::Datagram { .. })
+                    )
+                })
+                .count()
+        }
+    }
+
+    /// Runs both peers until `sender` is idle. With `hold_first`, the first datagram of every
+    /// flight is held back, so the receiver cannot read past the stream data it carries.
+    fn exchange_all(
+        sender: &mut impl Peer,
+        receiver: &mut impl Peer,
+        to_sender: Vec<Datagram>,
+        hold_first: bool,
+    ) -> Vec<Datagram> {
+        let mut held = Vec::new();
+        let mut flight = sender.exchange(to_sender);
+        while !flight.is_empty() {
+            if hold_first {
+                held.push(flight.remove(0));
+            }
+            flight = sender.exchange(receiver.exchange(flight));
+        }
+        held
+    }
+
+    /// Establishes a session that carries datagrams in capsules.
+    fn capsule_session() -> (Http3Client, Http3Server, ServerSession) {
+        let params = Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(ConnectionParameters::default().datagram_size(0));
+        let (mut client, mut server) = connect(params.clone(), params);
+        let session_id = client
+            .connect_udp_create_session(now(), ("https", "something.com", "/"), &[])
+            .unwrap();
+        exchange_all(&mut client, &mut server, Vec::new(), false);
+        let session = server
+            .events()
+            .find_map(|e| match e {
+                Http3ServerEvent::ConnectUdp(ServerEvent::NewSession { session, .. }) => {
+                    Some(session)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(session.stream_id(), session_id);
+        session
+            .response(&SessionAcceptAction::Accept, now())
+            .unwrap();
+        exchange_all(&mut server, &mut client, Vec::new(), false);
+        (client, server, session)
+    }
+
+    /// Makes more empty datagram capsules than the per-read budget readable at once, then
+    /// checks that the session still delivers a later datagram.
+    fn flood<S: Peer>(
+        sender: &mut S,
+        receiver: &mut impl Peer,
+        send: impl Fn(&mut S) -> Res<DatagramQueueOutcome>,
+    ) {
+        let budgeted = MAX_DATAGRAM_BYTES_PER_READ / PER_DATAGRAM_OVERHEAD;
+        for _ in 0..=budgeted {
+            assert_eq!(send(sender), Ok(DatagramQueueOutcome::Ok));
+        }
+        let held = exchange_all(sender, receiver, Vec::new(), true);
+        assert_eq!(receiver.datagram_events(), 0);
+        let acks = receiver.exchange(held);
+        assert_eq!(receiver.datagram_events(), budgeted);
+        assert_eq!(send(sender), Ok(DatagramQueueOutcome::Ok));
+        exchange_all(sender, receiver, acks, false);
+        assert_eq!(receiver.datagram_events(), 1);
+    }
+
+    #[test]
+    fn proxy_capsule_flood_is_bounded_per_read() {
+        let (mut client, mut server, session) = capsule_session();
+        flood(&mut server, &mut client, |_| {
+            session.send_datagram(&[], None, now())
+        });
+    }
+
+    #[test]
+    fn client_capsule_flood_is_bounded_per_read() {
+        let (mut client, mut server, session) = capsule_session();
+        let session_id = session.stream_id();
+        flood(&mut client, &mut server, |client| {
+            client.connect_udp_send_datagram(session_id, &[], None, now())
+        });
+    }
+
+    #[test]
+    fn datagram_one_byte_over_remaining_budget_is_dropped() {
+        let (mut client, mut server, session) = capsule_session();
+        let send = |payload: &[u8]| session.send_datagram(payload, None, now());
+        let budgeted = MAX_DATAGRAM_BYTES_PER_READ / PER_DATAGRAM_OVERHEAD;
+        for _ in 1..budgeted {
+            assert_eq!(send(&[]), Ok(DatagramQueueOutcome::Ok));
+        }
+        // Costs one byte more than the remaining `PER_DATAGRAM_OVERHEAD`.
+        assert_eq!(send(&[0]), Ok(DatagramQueueOutcome::Ok));
+        let held = exchange_all(&mut server, &mut client, Vec::new(), true);
+        _ = client.exchange(held);
+        assert_eq!(client.datagram_events(), budgeted - 1);
+    }
 
     #[test]
     fn varint_0_context_id() {
