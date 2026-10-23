@@ -28,6 +28,7 @@ use super::{
     super::{Connection, Output, State, StreamType},
     CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
     default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
+    stream::Writer,
     zero_len_cid_client,
 };
 use crate::{
@@ -466,18 +467,22 @@ fn path_forwarding_attack() {
     server.stream_close_send(stream_id).unwrap();
     assert!(server.process_output(now).dgram().is_none());
 
-    // The client should respond to the challenge on the new path.
-    // The server couldn't pad, so the client is also amplification limited.
-    let new_resp = client.process(Some(new_probe), now).dgram().unwrap();
+    // The attacker forwards the challenge to the client on the old path,
+    // and forwards the response to the server on the new path.
+    let new_resp = client
+        .process(Some(change_path(&new_probe, DEFAULT_ADDR)), now)
+        .dgram()
+        .unwrap();
     assert_eq!(client.stats().frame_rx.path_challenge, 1);
-    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
     assert_eq!(client.stats().frame_tx.path_response, 1);
-    assert_v4_path(&new_resp, false);
+    assert_v6_path(&new_resp, true);
+    let new_resp = change_path(&new_resp, DEFAULT_ADDR_V4);
 
     // The client also responds to probes on the old path.
     let old_resp = client.process(Some(old_probe), now).dgram().unwrap();
     assert_eq!(client.stats().frame_rx.path_challenge, 2);
-    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
     assert_eq!(client.stats().frame_tx.path_response, 2);
     assert_v6_path(&old_resp, true);
 
@@ -493,15 +498,14 @@ fn path_forwarding_attack() {
     assert_eq!(server.stats().frame_tx.path_challenge, 3);
     assert_path_challenge_min_len(&server, &server_data1, now);
 
-    // The client responds to this probe on the new path.
-    client.process_input(server_data1, now);
-    let stream_before = client.stats().frame_tx.stream;
-    let padded_resp = send_something(&mut client, now);
-    assert_eq!(stream_before, client.stats().frame_tx.stream);
-    assert_v4_path(&padded_resp, true); // This is padded!
+    // The client responds to this probe, forwarded on the old path.
+    client.process_input(change_path(&server_data1, DEFAULT_ADDR), now);
+    let padded_resp = client.process_output(now).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.path_response, 3);
+    assert_v6_path(&padded_resp, true); // This is padded!
 
-    // But new data from the client stays on the old path.
-    let client_data2 = client.process_output(now).dgram().unwrap();
+    // New data from the client is on the old path.
+    let client_data2 = send_something(&mut client, now);
     assert_v6_path(&client_data2, false);
 
     // The server keeps sending on the new path.
@@ -1085,6 +1089,55 @@ fn preferred_address_client() {
     );
 }
 
+/// Writes a `NEW_CONNECTION_ID` and a `PATH_CHALLENGE`, which would make the path permanent.
+struct PathChallengeWriter {
+    seqno: u8,
+}
+
+impl crate::connection::test_internal::FrameWriter for PathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder
+            .encode_varint(FrameType::NewConnectionId)
+            .encode_varint(self.seqno)
+            .encode_varint(0_u64) // Retire Prior To
+            .encode_vec(1, &[self.seqno; 8])
+            .encode([self.seqno; 16]);
+        builder
+            .encode_varint(FrameType::PathChallenge)
+            .encode([self.seqno; 8]);
+    }
+}
+
+/// A client discards packets from unknown server addresses, so a server cannot fill `Paths`
+/// and have the preferred address path evict the path that `HANDSHAKE_DONE` arrived on.
+#[test]
+fn client_drops_packets_from_unknown_server_address() {
+    const EXTRA_PATHS: u8 = 14; // Fills `Paths` together with the primary path.
+    const FIRST_SEQNO: u8 = 100; // Clear of those the server issues itself.
+
+    let mut client = default_client();
+    let spa = PreferredAddress::new_any(None, Some(new_port(DEFAULT_ADDR)));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+    drop(fast_handshake(&mut client, &mut server));
+    assert_eq!(*client.state(), State::Connected);
+    let dropped = client.stats().dropped_rx;
+
+    for i in 0..EXTRA_PATHS {
+        let seqno = FIRST_SEQNO + i;
+        let challenge = send_with_extra(&mut server, PathChallengeWriter { seqno }, now());
+        client.process_input(change_source_port(&challenge, usize::from(i) + 1), now());
+        while client.process_output(now()).dgram().is_some() {}
+    }
+
+    let done = Writer(vec![FrameType::HandshakeDone.into()]);
+    let done = send_with_extra(&mut server, done, now());
+    client.process_input(change_source_port(&done, 1), now());
+    assert_eq!(*client.state(), State::Connected);
+    let stats = client.stats();
+    assert_eq!(stats.frame_tx.path_response, 0);
+    assert_eq!(stats.dropped_rx, dropped + usize::from(EXTRA_PATHS + 1));
+}
+
 /// Test that migration isn't permitted if the connection isn't in the right state.
 #[test]
 fn migration_invalid_state() {
@@ -1380,17 +1433,13 @@ fn retire_prior_to_migration_failure() {
 
     // Have the client receive the NEW_CONNECTION_ID with Retire Prior To.
     client.process_input(retire_all, now());
-    // This packet contains the probe response, which should be fine, but it
-    // also includes PATH_CHALLENGE for the new path, and the client can't
-    // respond without a connection ID.  We treat this as a connection error.
+    // That removed the new path, so the client discards the probe response
+    // and stays on the old path.
+    let dropped = client.stats().dropped_rx;
     client.process_input(resp, now());
-    assert!(matches!(
-        client.state(),
-        State::Closing {
-            error: CloseReason::Transport(Error::InvalidMigration),
-            ..
-        }
-    ));
+    assert_eq!(client.stats().dropped_rx, dropped + 1);
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_v6_path(&send_something(&mut client, now()), false);
 }
 
 /// The timing of when frames arrive can mean that the migration path can
@@ -1470,7 +1519,9 @@ fn error_on_new_path_with_no_connection_id() {
 
     let garbage = send_with_extra(&mut server, GarbageWriter {}, now());
 
-    let dgram = change_path(&garbage, DEFAULT_ADDR_V4);
+    // The client receives this on a new local address.
+    let local = new_port(garbage.destination());
+    let dgram = Datagram::new(garbage.source(), local, garbage.tos(), &garbage[..]);
     client.process_input(dgram, now());
 
     // See issue #1697. We had a crash when the client had a temporary path and
