@@ -726,6 +726,7 @@ pub struct TransportParametersHandler {
     local: TransportParameters,
     remote_handshake: Option<TransportParameters>,
     remote_0rtt: Option<TransportParameters>,
+    error: Option<Error>,
 }
 
 impl TransportParametersHandler {
@@ -740,6 +741,7 @@ impl TransportParametersHandler {
             local,
             remote_handshake: None,
             remote_0rtt: None,
+            error: None,
         }
     }
 
@@ -794,7 +796,7 @@ impl TransportParametersHandler {
                     "Chosen version {current:x} is not compatible with initial version {:x}",
                     self.versions.initial().wire_version(),
                 );
-                Err(Error::TransportParameter)
+                Err(Error::VersionNegotiation)
             }
         } else {
             if current != self.versions.initial().wire_version() {
@@ -802,7 +804,7 @@ impl TransportParametersHandler {
                     "Current version {current:x} != own version {:x}",
                     self.versions.initial().wire_version(),
                 );
-                return Err(Error::TransportParameter);
+                return Err(Error::VersionNegotiation);
             }
 
             if let Some(preferred) = self.versions.preferred_compatible(other) {
@@ -845,6 +847,10 @@ impl TransportParametersHandler {
     #[must_use]
     pub const fn remote_handshake(&self) -> Option<&TransportParameters> {
         self.remote_handshake.as_ref()
+    }
+
+    pub(crate) const fn take_error(&mut self) -> Option<Error> {
+        self.error.take()
     }
 
     /// Filter to retain only those transport parameters that are necessary for an outer
@@ -917,16 +923,19 @@ impl ExtensionHandler for TransportParametersHandler {
         }
 
         let mut dec = Decoder::from(d);
-        match TransportParameters::decode(self.role, &mut dec) {
-            Ok(tp) => {
-                if self.compatible_upgrade(&tp).is_ok() {
-                    self.remote_handshake = Some(tp);
-                    ExtensionHandlerResult::Ok
-                } else {
-                    ExtensionHandlerResult::Alert(47)
-                }
+        let Ok(tp) = TransportParameters::decode(self.role, &mut dec) else {
+            self.error = Some(Error::TransportParameter);
+            return ExtensionHandlerResult::Alert(47); // illegal_parameter
+        };
+        match self.compatible_upgrade(&tp) {
+            Ok(()) => {
+                self.remote_handshake = Some(tp);
+                ExtensionHandlerResult::Ok
             }
-            _ => ExtensionHandlerResult::Alert(47), // illegal_parameter
+            Err(e) => {
+                self.error = Some(e);
+                ExtensionHandlerResult::Alert(47) // illegal_parameter
+            }
         }
     }
 }
