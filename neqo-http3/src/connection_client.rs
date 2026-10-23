@@ -4068,7 +4068,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4086,7 +4086,7 @@ mod tests {
                 HSetting::new(HSettingType::MaxTableCapacity, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4123,7 +4123,9 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(514)),
+            &Http3State::Closing(CloseReason::Application(
+                Error::Qpack(qpack::Error::DecoderStream).code(),
+            )),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4142,7 +4144,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4180,7 +4182,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 50),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4218,7 +4220,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 5000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4238,7 +4240,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4279,7 +4281,7 @@ mod tests {
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
                 HSetting::new(HSettingType::EnableWebTransport, 0),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4299,7 +4301,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }
@@ -4356,7 +4358,7 @@ mod tests {
                 HSetting::new(HSettingType::BlockedStreams, 100),
                 HSetting::new(HSettingType::MaxHeaderListSize, 10000),
             ],
-            &Http3State::Closing(CloseReason::Application(265)),
+            &Http3State::Closing(CloseReason::Application(Error::HttpSettings.code())),
             ENCODER_STREAM_DATA_WITH_CAP_INSTRUCTION,
         );
     }

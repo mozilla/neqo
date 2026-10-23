@@ -304,12 +304,12 @@ fn handshake(
     handshake_with_modifier(client, server, now, rtt, Some)
 }
 
-fn connect_fail(
-    client: &mut Connection,
-    server: &mut Connection,
-    client_error: Error,
-    server_error: Error,
-) {
+fn connect_fail_at(client: &mut Connection, server: &mut Connection, role: Role, error: Error) {
+    let peer_error = Error::Peer(error.code());
+    let (client_error, server_error) = match role {
+        Role::Client => (error, peer_error),
+        Role::Server => (peer_error, error),
+    };
     handshake(client, server, now(), Duration::new(0, 0));
     assert_error(client, &CloseReason::Transport(client_error));
     assert_error(server, &CloseReason::Transport(server_error));

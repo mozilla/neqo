@@ -17,7 +17,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug, to_u64};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, qdebug, to_u64};
+use nss::constants::TLS_ALERT_ILLEGAL_PARAMETER;
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
@@ -26,7 +27,7 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
+    CountingConnectionIdGenerator, connect_fail_at, connect_force_idle, connect_rtt_idle,
     default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
     zero_len_cid_client,
 };
@@ -1055,11 +1056,11 @@ fn preferred_address_server_empty_cid() {
         )
         .unwrap();
 
-    connect_fail(
+    connect_fail_at(
         &mut client,
         &mut server,
+        Role::Client,
         Error::TransportParameter,
-        Error::Peer(Error::TransportParameter.code()),
     );
 }
 
@@ -1077,11 +1078,11 @@ fn preferred_address_client() {
         .unwrap();
 
     // Errors in transport parameters manifest as TLS alerts.
-    connect_fail(
+    connect_fail_at(
         &mut client,
         &mut server,
-        Error::Peer(256 + 47),  // 256 is a TLS alert and...
-        Error::CryptoAlert(47), // ...47 is `illegal_parameter`.
+        Role::Server,
+        Error::CryptoAlert(TLS_ALERT_ILLEGAL_PARAMETER),
     );
 }
 
