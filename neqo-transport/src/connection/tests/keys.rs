@@ -5,6 +5,7 @@
 // except according to those terms.
 
 use neqo_common::Datagram;
+use nss::{Agent, TLS_HS_KEY_UDPATE};
 use test_fixture::{
     assertions::{is_handshake, is_initial},
     now, split_datagram,
@@ -16,13 +17,14 @@ use super::{
         super::{CloseReason, ERROR_AEAD_LIMIT_REACHED},
         Connection, ConnectionParameters, Error, Output, State, StreamType,
     },
-    AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
-    send_and_receive, send_something,
+    AT_LEAST_PTO, assert_error, connect, connect_force_idle, default_client, default_server,
+    exchange_ticket, flush_to, maybe_authenticate, send_and_receive, send_something,
 };
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
     crypto::{OVERWRITE_INVOCATIONS, UPDATE_WRITE_KEYS_AT},
     packet,
+    tracking::PacketNumberSpace,
 };
 
 fn check_discarded(
@@ -418,6 +420,103 @@ fn automatic_update_write_keys_blocked() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::KeysExhausted))
     ));
+}
+
+/// Have `sender` send a TLS `KeyUpdate`, which `receiver` must reject with `unexpected_message`.
+///
+/// See RFC 9001 6 <https://www.rfc-editor.org/rfc/rfc9001.html#section-6-3>.
+fn tls_key_update(sender: &mut Connection, receiver: &mut Connection, update_requested: u8) {
+    send_tls_key_update(sender, PacketNumberSpace::ApplicationData, update_requested);
+    let dgram = sender.process_output(now()).dgram();
+    receiver.process_input(dgram.unwrap(), now());
+    assert_error(receiver, &CloseReason::Transport(Error::CryptoAlert(10)));
+}
+
+fn send_tls_key_update(sender: &mut Connection, space: PacketNumberSpace, update_requested: u8) {
+    let msg = [TLS_HS_KEY_UDPATE, 0, 0, 1, update_requested];
+    sender.crypto.streams_mut().send(space, &msg).unwrap();
+}
+
+#[test]
+fn tls_key_update_to_client() {
+    for update_requested in [0, 1] {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect_force_idle(&mut client, &mut server);
+        tls_key_update(&mut server, &mut client, update_requested);
+    }
+}
+
+#[test]
+fn tls_key_update_to_server() {
+    for update_requested in [0, 1] {
+        let mut client = default_client();
+        let mut server = default_server();
+        connect_force_idle(&mut client, &mut server);
+        tls_key_update(&mut client, &mut server, update_requested);
+    }
+}
+
+/// A `KeyUpdate` is found after other messages, in the same packet or not.
+#[test]
+fn tls_key_update_after_ticket() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    exchange_ticket(&mut client, &mut server, now());
+    server.send_ticket(now(), &[]).unwrap();
+    tls_key_update(&mut server, &mut client, 1);
+}
+
+/// A `KeyUpdate` is found in any packet number space.
+#[test]
+fn tls_key_update_after_finished() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+    flush_to(&mut client, &mut server, &mut now);
+    send_tls_key_update(&mut server, PacketNumberSpace::Handshake, 1);
+    flush_to(&mut server, &mut client, &mut now);
+    assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(10)));
+}
+
+/// A partial header at the end of Handshake CRYPTO doesn't hide a 1-RTT `KeyUpdate`.
+#[test]
+fn tls_key_update_after_partial_handshake_header() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+    flush_to(&mut client, &mut server, &mut now);
+    server
+        .crypto
+        .streams_mut()
+        .send(PacketNumberSpace::Handshake, &[4, 0, 0xff])
+        .unwrap();
+    flush_to(&mut server, &mut client, &mut now);
+    assert!(maybe_authenticate(&mut client));
+    flush_to(&mut client, &mut server, &mut now);
+    send_tls_key_update(&mut server, PacketNumberSpace::ApplicationData, 1);
+    flush_to(&mut server, &mut client, &mut now);
+    assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(10)));
+}
+
+/// A `KeyUpdate` is found after a message with a header split across packets.
+#[test]
+fn tls_key_update_after_split_header() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let Agent::Server(s) = server.crypto.tls_mut() else {
+        unreachable!();
+    };
+    let ticket = s.send_ticket(now(), &[]).unwrap();
+    let (head, tail) = ticket[0].data.split_at(2);
+    let space = PacketNumberSpace::ApplicationData;
+    server.crypto.streams_mut().send(space, head).unwrap();
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+    server.crypto.streams_mut().send(space, tail).unwrap();
+    tls_key_update(&mut server, &mut client, 1);
 }
 
 /// Test that when both Initial and Handshake packets are sent together due to PTO,
