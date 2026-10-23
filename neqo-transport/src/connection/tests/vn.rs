@@ -378,7 +378,7 @@ fn invalid_server_version() {
     // The server effectively hasn't reacted here.
     match server.state() {
         State::Closed(err) => {
-            assert_eq!(*err, CloseReason::Transport(Error::CryptoAlert(47)));
+            assert_eq!(*err, CloseReason::Transport(Error::VersionNegotiation));
         }
         _ => panic!("invalid server state"),
     }
@@ -409,8 +409,8 @@ fn invalid_current_version_client() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::Peer(Error::CryptoAlert(47).code()),
-        Error::CryptoAlert(47),
+        Error::Peer(Error::VersionNegotiation.code()),
+        Error::VersionNegotiation,
     );
 }
 
@@ -441,8 +441,33 @@ fn invalid_current_version_server() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::CryptoAlert(47),
-        Error::Peer(Error::CryptoAlert(47).code()),
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// The server chooses a version that the client knows but did not offer.
+#[test]
+fn chosen_version_not_offered_by_client() {
+    let just_v1 =
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]);
+    let mut client = new_client(just_v1.clone());
+    let mut server = new_server(just_v1);
+    server
+        .set_local_tparam(
+            VersionInformation,
+            TransportParameter::Versions {
+                current: Version::Version2.wire_version(),
+                other: vec![Version::Version2.wire_version()],
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
     );
 }
 
@@ -467,8 +492,8 @@ fn no_compatible_version() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::Peer(Error::CryptoAlert(47).code()),
-        Error::CryptoAlert(47),
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
     );
 }
 

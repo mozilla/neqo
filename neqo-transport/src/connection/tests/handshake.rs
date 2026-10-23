@@ -17,22 +17,24 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, qdebug, to_u64};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, qdebug, to_u64};
 use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
     DEFAULT_ADDR,
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
-    damage_ech_config, fixture_init, now, split_datagram, strip_padding,
+    damage_ech_config, fixture_init,
+    header_protection::{decode_initial_header, rewrite_initial},
+    now, split_datagram, strip_padding,
 };
 
 use super::{
     super::{Connection, Output, State},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
-    send_something, zero_len_cid_client,
+    assert_error, connect, connect_fail, connect_force_idle, connect_with_rtt, default_client,
+    default_server, drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram,
+    resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
@@ -44,7 +46,7 @@ use crate::{
     events::ConnectionEvent,
     server::ValidateAddress,
     stats::FrameStats,
-    tparams::{TransportParameter, TransportParameterId::*},
+    tparams::{TransportParameter, TransportParameterId, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
 
@@ -1264,6 +1266,114 @@ fn bad_min_ack_delay() {
             Error::TransportParameter.code()
         )))
     );
+}
+
+/// The server closes with `TRANSPORT_PARAMETER_ERROR` when the client sends `tp` with `value`.
+fn bad_client_tp(tp: TransportParameterId, value: TransportParameter) {
+    let mut client = default_client();
+    let mut server = default_server();
+    client.set_local_tparam(tp, value).unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
+    );
+}
+
+/// The client closes with `TRANSPORT_PARAMETER_ERROR` when the server sends `tp` with `value`.
+fn bad_server_tp(tp: TransportParameterId, value: TransportParameter) {
+    let mut client = default_client();
+    // No compatible upgrade, which needs a well-formed local `version_information`.
+    let mut server = new_server(
+        ConnectionParameters::default().versions(Version::default(), vec![Version::default()]),
+    );
+    server.set_local_tparam(tp, value).unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
+    );
+}
+
+/// Both endpoints close with `TRANSPORT_PARAMETER_ERROR` when the peer sends `tp` with `value`.
+fn bad_tp(tp: TransportParameterId, value: &TransportParameter) {
+    bad_client_tp(tp, value.clone());
+    bad_server_tp(tp, value.clone());
+}
+
+#[test]
+fn initial_max_streams_too_large() {
+    bad_tp(
+        InitialMaxStreamsBidi,
+        &TransportParameter::Integer((1 << 60) + 1),
+    );
+}
+
+#[test]
+fn active_connection_id_limit_too_small() {
+    bad_tp(ActiveConnectionIdLimit, &TransportParameter::Integer(1));
+}
+
+#[test]
+fn truncated_tp() {
+    bad_tp(MaxAckDelay, &TransportParameter::Bytes(vec![0x40]));
+}
+
+#[test]
+fn trailing_bytes_tp() {
+    bad_tp(InitialMaxData, &TransportParameter::Bytes(vec![0x01, 0x00]));
+}
+
+#[test]
+fn stateless_reset_token_from_client() {
+    bad_client_tp(StatelessResetToken, TransportParameter::Bytes(vec![1; 16]));
+}
+
+#[test]
+fn malformed_version_information() {
+    bad_tp(
+        VersionInformation,
+        &TransportParameter::Bytes(vec![0, 0, 0]),
+    );
+}
+
+/// RFC 9000, Section 7.4: a duplicate transport parameter is a `TRANSPORT_PARAMETER_ERROR`.
+#[test]
+fn duplicate_tp_client() {
+    // `TestTransportParameter` (four-byte varint ID), length 1, value 1.
+    const TEST_TP: &[u8] = &[0x80, 0x00, 0xce, 0x16, 0x01, 0x01];
+    // `InitialMaxData` as a four-byte varint, so the rewrite keeps all lengths.
+    const INITIAL_MAX_DATA: &[u8] = &[0x80, 0x00, 0x00, 0x04];
+
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .versions(Version::Version1, vec![Version::Version1])
+            .mlkem(false)
+            .sni_slicing(false),
+    );
+    let mut server = default_server();
+    client
+        .set_local_tparam(TestTransportParameter, TransportParameter::Bytes(vec![1]))
+        .unwrap();
+
+    let ci = client.process_output(now()).dgram().unwrap();
+    let (_, dcid, _, _) = decode_initial_header(&ci, Role::Client).unwrap();
+    let ci = rewrite_initial(&ci, dcid, Role::Client, |plaintext| {
+        let pos = plaintext
+            .windows(TEST_TP.len())
+            .position(|w| w == TEST_TP)
+            .unwrap();
+        plaintext[pos..pos + INITIAL_MAX_DATA.len()].copy_from_slice(INITIAL_MAX_DATA);
+    });
+
+    server.process_input(ci, now());
+    assert_error(&server, &CloseReason::Transport(Error::TransportParameter));
+    let close = server.process_output(now()).dgram();
+    client.process_input(close.unwrap(), now());
+    let peer_error = Error::Peer(Error::TransportParameter.code());
+    assert_error(&client, &CloseReason::Transport(peer_error));
 }
 
 /// Ensure that the client probes correctly if it only receives Initial packets
