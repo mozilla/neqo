@@ -468,20 +468,15 @@ fn chosen_version_not_offered_by_client() {
     );
 }
 
-#[test]
-fn no_compatible_version() {
-    const OTHER_VERSION: Version = Version::Draft29;
-
-    let mut client = default_client();
+/// Sets the client's Version Information to `current` and `other`; the server rejects it.
+fn client_versions_fail(mut client: Connection, current: Version, other: Version) {
     let mut server = default_server();
-
-    assert_ne!(OTHER_VERSION, client.version());
     client
         .set_local_tparam(
             VersionInformation,
             TransportParameter::Versions {
-                current: Version::default().wire_version(),
-                other: vec![OTHER_VERSION.wire_version()],
+                current: current.wire_version(),
+                other: vec![other.wire_version()],
             },
         )
         .unwrap();
@@ -494,29 +489,20 @@ fn no_compatible_version() {
     );
 }
 
+#[test]
+fn no_compatible_version() {
+    const OTHER_VERSION: Version = Version::Draft29;
+
+    let client = default_client();
+    assert_ne!(OTHER_VERSION, client.version());
+    client_versions_fail(client, Version::default(), OTHER_VERSION);
+}
+
 /// A server treats a client Chosen Version that is not in its Available Versions as a parsing
 /// failure, even if Available Versions lists another compatible version.
 #[test]
 fn chosen_version_not_available() {
-    let mut client = default_client();
-    let mut server = default_server();
-
-    client
-        .set_local_tparam(
-            VersionInformation,
-            TransportParameter::Versions {
-                current: Version::Version1.wire_version(),
-                other: vec![Version::Version2.wire_version()],
-            },
-        )
-        .unwrap();
-
-    connect_fail(
-        &mut client,
-        &mut server,
-        Error::Peer(Error::TransportParameter.code()),
-        Error::TransportParameter,
-    );
+    client_versions_fail(default_client(), Version::Version1, Version::Version2);
 }
 
 /// Answers the next client Initial with a Version Negotiation packet listing `versions`.
