@@ -1163,8 +1163,9 @@ mod tests {
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
+        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamId,
+        StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -1826,6 +1827,46 @@ mod tests {
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
         assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    /// Send `data` on a server QPACK stream, reliably reset it with `RESET_STREAM_AT` covering
+    /// `data`, and check that both ends see `H3_CLOSED_CRITICAL_STREAM`.
+    fn reliable_reset_server_qpack_stream(
+        stream: fn(&TestServer) -> Option<StreamId>,
+        data: &[u8],
+    ) {
+        let (mut client, mut server) = connect();
+        let stream_id = stream(&server).unwrap();
+        let sent = server.conn.stream_send(stream_id, data).unwrap();
+        assert_eq!(sent, data.len());
+        server.conn.stream_commit(stream_id).unwrap();
+        server
+            .conn
+            .stream_reset_send(stream_id, Error::HttpNone.code())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        assert_eq!(server.conn.stats().frame_tx.reset_stream_at, 1);
+        let out = client.process(out.dgram(), now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let State::Draining { error, .. } = server.conn.state() else {
+            panic!("Wrong state {:?}", server.conn.state());
+        };
+        let peer = TransportError::PeerApplication(Error::HttpClosedCriticalStream.code());
+        assert_eq!(error, &CloseReason::Transport(peer));
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: a reliable reset of the server encoder stream closes a critical stream.
+    #[test]
+    fn client_reliable_reset_server_side_encoder_stream() {
+        reliable_reset_server_qpack_stream(|s| s.encoder_stream_id, ENCODER_STREAM_CAP_INSTRUCTION);
+    }
+
+    // Client: a reliable reset of the server decoder stream closes a critical stream.
+    #[test]
+    fn client_reliable_reset_server_side_decoder_stream() {
+        // A Stream Cancellation instruction for stream 0.
+        reliable_reset_server_qpack_stream(|s| s.decoder_stream_id, &[0x40]);
     }
 
     // Client: Test that the connection will be closed if the local control stream
