@@ -293,8 +293,10 @@ impl Http3ServerHandler {
                 | ConnectionEvent::EchFallbackAuthenticationNeeded { .. }
                 | ConnectionEvent::ZeroRttRejected
                 | ConnectionEvent::ResumptionToken(..) => return Err(Error::HttpInternal(4)),
-                ConnectionEvent::SendStreamComplete { .. }
-                | ConnectionEvent::SendStreamCreatable { .. }
+                ConnectionEvent::SendStreamComplete { stream_id } => {
+                    self.base_handler.handle_send_stream_complete(stream_id);
+                }
+                ConnectionEvent::SendStreamCreatable { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
                 | ConnectionEvent::SconeUpdated(_)
                 | ConnectionEvent::PathMigrated { .. } => {}

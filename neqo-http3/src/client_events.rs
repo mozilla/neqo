@@ -8,7 +8,7 @@ use neqo_common::{
     Bytes, Header,
     event::{Provider as EventProvider, Queue as EventQueue},
 };
-use neqo_transport::{AppError, StreamId, StreamType};
+use neqo_transport::{AppError, StreamId, StreamType, send_stream};
 use nss::ResumptionToken;
 use tracing::trace;
 
@@ -46,6 +46,12 @@ pub enum WebTransportEvent {
     Datagram {
         session_id: StreamId,
         datagram: Bytes,
+    },
+    /// All data written to a send stream closed with a FIN, and the FIN
+    /// itself, has been acknowledged by the peer.
+    SendStreamComplete {
+        stream_id: StreamId,
+        stats: send_stream::Stats,
     },
 }
 
@@ -299,6 +305,16 @@ impl ExtendedConnectEvents for Http3ClientEvents {
 }
 
 impl Http3ClientEvents {
+    pub(crate) fn webtransport_send_stream_complete(
+        &self,
+        stream_id: StreamId,
+        stats: send_stream::Stats,
+    ) {
+        self.events.push(Http3ClientEvent::WebTransport(
+            WebTransportEvent::SendStreamComplete { stream_id, stats },
+        ));
+    }
+
     /// Add a new `RequestCreatable` event
     pub(crate) fn new_requests_creatable(&self, stream_type: StreamType) {
         if stream_type == StreamType::BiDi {

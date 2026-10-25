@@ -678,7 +678,7 @@ impl State {
 }
 
 // See https://www.w3.org/TR/webtransport/#send-stream-stats.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Stats {
     // The total number of bytes the consumer has successfully written to
     // this stream. This number can only increase.
