@@ -704,6 +704,28 @@ fn wt_goaway_repeated_no_duplicate_draining() {
     );
 }
 
+#[test]
+fn wt_lower_goaway_rejects_drained_session() {
+    let (mut wt, session_id) = wt_with_session();
+    let first = StreamId::new(session_id.as_u64() + 4);
+    wt.server.send_goaway(first);
+    wt.exchange_packets();
+    wt.client.events().for_each(drop);
+
+    wt.server.send_goaway(session_id);
+    wt.exchange_packets();
+    assert_eq!(
+        wt.client.events().collect::<Vec<_>>(),
+        [Http3ClientEvent::WebTransport(
+            WebTransportEvent::SessionClosed {
+                stream_id: session_id,
+                reason: CloseReason::Error(Error::HttpRequestRejected.code()),
+                headers: None
+            }
+        )]
+    );
+}
+
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
 /// "a signal to applications to initiate shutdown for all WebTransport sessions":
 /// <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#name-interaction-with-the-http-3>
