@@ -6,7 +6,7 @@
 
 use neqo_common::{Bytes, Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
-    StreamId, StreamType,
+    CloseReason as TransportCloseReason, Error as TransportError, StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
@@ -15,7 +15,7 @@ use crate::{
     ConnectUdpEvent, Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
     Http3ServerEvent, Http3State, Http3StreamInfo, Http3StreamType, Priority, SessionAcceptAction,
     WebTransportEvent,
-    connect_udp::ClientSession as _,
+    connect_udp::{self, ClientSession as _},
     features::extended_connect::{
         CloseReason,
         stats::SessionStats,
@@ -23,7 +23,11 @@ use crate::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
     },
-    frames::{WebTransportFrame, capsule::Capsule},
+    frames::{
+        HFrameType, WebTransportFrame,
+        capsule::{CAPSULE_TYPE_DATAGRAM, Capsule, MAX_DATAGRAM_BYTES},
+        hframe::MAX_HEADER_BYTES,
+    },
     server_events::StreamHandler,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
@@ -1248,4 +1252,182 @@ fn wt_session_stats_initial() {
 
     let stats = wt.client.webtransport_session_stats(session_id).unwrap();
     assert_eq!(stats, SessionStats::default());
+}
+
+/// A frame with type `frame_type`, length `len` and `payload`, after a DATA frame if `data`.
+fn connect_stream_frames(
+    data: bool,
+    frame_type: HFrameType,
+    len: usize,
+    payload: &[u8],
+) -> Encoder {
+    let mut enc = Encoder::default();
+    if data {
+        enc.encode_varint(HFrameType::DATA.0);
+        enc.encode_vvec(&[0x17, 0x00]); // A reserved capsule type without payload.
+    }
+    enc.encode_varint(frame_type.0);
+    enc.encode_len(len);
+    enc.encode(payload);
+    enc
+}
+
+/// Sends `frames` on an established CONNECT stream; returns (receiver, sender) close reasons.
+fn send_on_connect_stream(
+    udp: bool,
+    client_sends: bool,
+    frames: &[u8],
+) -> (Option<TransportCloseReason>, Option<TransportCloseReason>) {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = if udp {
+        let id = wt
+            .client
+            .connect_udp_create_session(now(), ("https", "something.com", "/"), &[])
+            .unwrap();
+        wt.exchange_packets();
+        while let Some(event) = wt.server.next_event() {
+            if let Http3ServerEvent::ConnectUdp(connect_udp::ServerEvent::NewSession {
+                session,
+                ..
+            }) = event
+            {
+                session
+                    .response(&SessionAcceptAction::Accept, now())
+                    .unwrap();
+            }
+        }
+        wt.exchange_packets();
+        id
+    } else {
+        wt_session.stream_id()
+    };
+    let sent = if client_sends {
+        wt.client.connection_mut().stream_send(session_id, frames)
+    } else {
+        wt_session.conn.borrow_mut().stream_send(session_id, frames)
+    };
+    assert_eq!(sent, Ok(frames.len()));
+    wt.exchange_packets();
+
+    let client = wt.client.connection().state().error().cloned();
+    let server = wt_session.conn.borrow().state().error().cloned();
+    if client_sends {
+        (server, client)
+    } else {
+        (client, server)
+    }
+}
+
+fn frame_unexpected_close() -> (Option<TransportCloseReason>, Option<TransportCloseReason>) {
+    let code = Error::HttpFrameUnexpected.code();
+    (
+        Some(TransportCloseReason::Application(code)),
+        Some(TransportCloseReason::Transport(
+            TransportError::PeerApplication(code),
+        )),
+    )
+}
+
+/// Small and oversized HEADERS, each without and with DATA before them.
+fn headers_on_connect_stream(udp: bool, client_sends: bool) {
+    let small = |data| connect_stream_frames(data, HFrameType::HEADERS, 2, &[0, 0]);
+    let oversized =
+        |data| connect_stream_frames(data, HFrameType::HEADERS, MAX_HEADER_BYTES + 1, &[]);
+    let closes: Vec<_> = [small(false), small(true), oversized(false), oversized(true)]
+        .iter()
+        .map(|frames| send_on_connect_stream(udp, client_sends, frames.as_ref()))
+        .collect();
+    assert_eq!(closes, vec![frame_unexpected_close(); 4]);
+}
+
+#[test]
+fn wt_headers_on_connect_stream_client() {
+    headers_on_connect_stream(false, true);
+}
+
+#[test]
+fn wt_headers_on_connect_stream_server() {
+    headers_on_connect_stream(false, false);
+}
+
+#[test]
+fn connect_udp_headers_on_connect_stream_client() {
+    headers_on_connect_stream(true, true);
+}
+
+#[test]
+fn connect_udp_headers_on_connect_stream_server() {
+    headers_on_connect_stream(true, false);
+}
+
+#[test]
+fn connect_udp_oversized_datagram_capsule_keeps_connection_client() {
+    let mut capsule = Encoder::default();
+    capsule.encode_varint(CAPSULE_TYPE_DATAGRAM.0);
+    capsule.encode_len(MAX_DATAGRAM_BYTES + 1);
+    let frames = connect_stream_frames(false, HFrameType::DATA, capsule.len(), capsule.as_ref());
+    let close = send_on_connect_stream(true, true, frames.as_ref());
+    assert_eq!(close, (None, None));
+}
+
+#[test]
+fn wt_truncated_frame_on_connect_stream_server() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let frames = connect_stream_frames(false, HFrameType::HEADERS, 2, &[0]);
+    let id = wt_session.stream_id();
+    let mut conn = wt_session.conn.borrow_mut();
+    assert_eq!(conn.stream_send(id, frames.as_ref()), Ok(frames.len()));
+    conn.stream_close_send(id).unwrap();
+    drop(conn);
+    wt.exchange_packets();
+
+    let closing = Http3State::Closing(TransportCloseReason::Application(Error::HttpFrame.code()));
+    assert_eq!(wt.client.state(), closing);
+}
+
+#[test]
+fn wt_settings_after_data_on_connect_stream_server() {
+    let frames = connect_stream_frames(true, HFrameType::SETTINGS, 0, &[]);
+    let close = send_on_connect_stream(false, false, frames.as_ref());
+    assert_eq!(close, frame_unexpected_close());
+}
+
+fn session_reject_with_trailers(status: u16) {
+    let mut wt = WtTest::new();
+    let session_id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+    let headers = vec![Header::new(":status", status.to_string())];
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+            session.send_headers(&headers).unwrap();
+            session
+                .send_headers(&[Header::new("trailer", "x")])
+                .unwrap();
+            session.stream_close_send(now()).unwrap();
+        }
+    }
+    wt.exchange_packets();
+
+    wt.check_session_closed_event_client(session_id, &CloseReason::Status(status), Some(&headers));
+    assert_eq!(wt.client.state(), Http3State::Connected);
+}
+
+#[test]
+fn wt_session_reject_with_trailers() {
+    session_reject_with_trailers(404);
+}
+
+#[test]
+fn wt_session_redirect_with_trailers() {
+    session_reject_with_trailers(300);
+}
+
+#[test]
+fn wt_session_four_digit_status_with_trailers() {
+    session_reject_with_trailers(2000);
 }
