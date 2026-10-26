@@ -824,7 +824,7 @@ impl Http3Client {
                 info!("[{self}] Connection error: goaway stream_id increased");
                 self.close(
                     now,
-                    Error::HttpGeneralProtocol.code(),
+                    Error::HttpId.code(),
                     "Connection error: goaway stream_id increased",
                 );
                 true
@@ -993,6 +993,7 @@ impl Http3Client {
             return Err(Error::HttpId);
         }
 
+        let first_goaway = matches!(self.base_handler.state(), Http3State::Connected);
         match self.base_handler.state_mut() {
             Http3State::Connected => {
                 self.base_handler
@@ -1059,7 +1060,9 @@ impl Http3Client {
             ));
         }
 
-        self.events.goaway_received();
+        if first_goaway {
+            self.events.goaway_received();
+        }
 
         Ok(())
     }
@@ -1162,8 +1165,9 @@ mod tests {
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
+        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamId,
+        StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -3180,6 +3184,24 @@ mod tests {
     }
 
     #[test]
+    fn multiple_goaways_single_event() {
+        let (mut client, mut server) = connect();
+        _ = server
+            .conn
+            .stream_send(
+                server.control_stream_id.unwrap(),
+                &[0x7, 0x1, 0x8, 0x7, 0x1, 0x4, 0x7, 0x1, 0x0],
+            )
+            .unwrap();
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+
+        let goaway_received = |e: &_| matches!(e, Http3ClientEvent::GoawayReceived);
+        assert_eq!(client.events().filter(goaway_received).count(), 1);
+        assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(0)));
+    }
+
+    #[test]
     fn multiple_goaways_stream_id_increased() {
         let (mut client, mut server) = connect();
         let request_stream_id_1 = make_request(&mut client, false, &[]);
@@ -3207,9 +3229,13 @@ mod tests {
             .unwrap();
 
         let out = server.conn.process_output(now());
-        client.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
 
-        assert_closed(&client, &Error::HttpGeneralProtocol);
+        assert_closed(&client, &Error::HttpId);
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let expected =
+            CloseReason::Transport(TransportError::PeerApplication(Error::HttpId.code()));
+        assert_eq!(server.conn.state().error(), Some(&expected));
     }
 
     #[test]
