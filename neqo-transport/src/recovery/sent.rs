@@ -260,6 +260,19 @@ impl Packets {
         self.packets.push_back(packet);
     }
 
+    /// Stop tracking the oldest `count` packets that are neither ack-eliciting nor in flight.
+    #[cold]
+    #[inline(never)]
+    pub fn remove_oldest_ack_only(&mut self, mut count: usize) {
+        self.packets.retain(|p| {
+            if p.ack_eliciting() || p.cc_in_flight() || count == 0 {
+                return true;
+            }
+            count -= 1;
+            false
+        });
+    }
+
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
         self.packets.iter_mut()
     }
