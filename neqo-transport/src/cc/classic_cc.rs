@@ -8,12 +8,13 @@
 
 use std::{
     cmp::{max, min},
+    collections::VecDeque,
     fmt::{Debug, Display},
     time::{Duration, Instant},
 };
 
+use enum_map::EnumMap;
 use neqo_common::{const_max, const_min, qlog::Qlog};
-use rustc_hash::FxHashMap as HashMap;
 use tracing::{debug, info, trace};
 
 use super::CongestionController;
@@ -148,7 +149,98 @@ pub trait SlowStart: Display + Debug {
 
 #[derive(Debug)]
 struct MaybeLostPacket {
+    pn: packet::Number,
     time_sent: Instant,
+    acked: bool,
+}
+
+/// Per packet type, in packet number order and, unless `unordered`, also in `time_sent` order.
+#[derive(Debug, Default)]
+struct MaybeLostPackets {
+    packets: EnumMap<packet::Type, VecDeque<MaybeLostPacket>>,
+    len: usize,
+    earliest: Option<Instant>,
+    unordered: bool,
+}
+
+impl MaybeLostPackets {
+    const fn len(&self) -> usize {
+        self.len
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn insert(&mut self, pn: packet::Number, pt: packet::Type, time_sent: Instant) {
+        let packets = &mut self.packets[pt];
+        let i = if packets.back().is_none_or(|p| p.pn < pn) {
+            packets.len()
+        } else {
+            packets.partition_point(|p| p.pn < pn)
+        };
+        debug_assert!(packets.get(i).is_none_or(|p| p.pn != pn));
+        self.unordered |= i
+            .checked_sub(1)
+            .is_some_and(|j| packets[j].time_sent > time_sent)
+            || packets.get(i).is_some_and(|p| p.time_sent < time_sent);
+        packets.insert(
+            i,
+            MaybeLostPacket {
+                pn,
+                time_sent,
+                acked: false,
+            },
+        );
+        self.len += 1;
+        self.earliest = Some(self.earliest.map_or(time_sent, |t| min(t, time_sent)));
+    }
+
+    fn remove(&mut self, pn: packet::Number, pt: packet::Type) -> bool {
+        let packets = &mut self.packets[pt];
+        if packets.back().is_none_or(|p| p.pn < pn) {
+            return false;
+        }
+        let i = packets.partition_point(|p| p.pn < pn);
+        let Some(p) = packets.get_mut(i).filter(|p| p.pn == pn && !p.acked) else {
+            return false;
+        };
+        p.acked = true;
+        self.len -= 1;
+        true
+    }
+
+    fn remove_expired(&mut self, now: Instant, max_age: Duration) {
+        let expired = |t: Instant| now.saturating_duration_since(t) > max_age;
+        if !self.earliest.is_some_and(expired) {
+            return;
+        }
+        self.earliest = None;
+        for (pt, packets) in &mut self.packets {
+            let mut remove = |p: &MaybeLostPacket| {
+                let remove = p.acked || expired(p.time_sent);
+                if !remove {
+                    self.earliest =
+                        Some(self.earliest.map_or(p.time_sent, |t| min(t, p.time_sent)));
+                } else if !p.acked {
+                    debug!(
+                        "Spurious detection: cleaned up old MaybeLostPacket with pn {}, type {pt:?}",
+                        p.pn
+                    );
+                    self.len -= 1;
+                }
+                remove
+            };
+            if self.unordered {
+                packets.retain(|p| !remove(p));
+            } else {
+                while packets.front().is_some_and(&mut remove) {
+                    packets.pop_front();
+                }
+            }
+        }
+        self.unordered &= self.len > 0;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -193,7 +285,7 @@ pub struct ClassicCongestionController<S, T> {
     /// detection. Gets drained when the same packets are later acked and regularly purged from too
     /// old packets in [`Self::cleanup_maybe_lost_packets`]. Needs a tuple of `(packet::Number,
     /// packet::Type)` to identify packets across packet number spaces.
-    maybe_lost_packets: HashMap<(packet::Number, packet::Type), MaybeLostPacket>,
+    maybe_lost_packets: MaybeLostPackets,
     /// `first_app_limited` indicates the packet number after which the application might be
     /// underutilizing the congestion window. When underutilizing the congestion window due to not
     /// sending out enough data, we SHOULD NOT increase the congestion window.[1] Packets sent
@@ -298,7 +390,9 @@ where
         // Supplying `true` for `rtt_est.pto(true)` here is best effort not to have to track
         // `recovery::Loss::confirmed()` all the way down to the congestion controller. Having too
         // big a PTO does no harm here.
-        self.cleanup_maybe_lost_packets(now, rtt_est.pto(true));
+        if !self.maybe_lost_packets.is_empty() {
+            self.cleanup_maybe_lost_packets(now, rtt_est.pto(true));
+        }
 
         self.detect_spurious_congestion_event(acked_pkts, cc_stats);
 
@@ -469,19 +563,14 @@ where
                 // were sent before the rebinding.
                 self.bytes_in_flight = self.bytes_in_flight.saturating_sub(pkt.len());
                 if !pkt.is_pmtud_probe() {
-                    let present = self.maybe_lost_packets.insert(
-                        (pkt.pn(), pkt.packet_type()),
-                        MaybeLostPacket {
-                            time_sent: pkt.time_sent(),
-                        },
-                    );
+                    self.maybe_lost_packets
+                        .insert(pkt.pn(), pkt.packet_type(), pkt.time_sent());
                     debug!(
                         "Spurious detection: added MaybeLostPacket: pn {}, type {:?}, time_sent {:?}",
                         pkt.pn(),
                         pkt.packet_type(),
                         pkt.time_sent()
                     );
-                    debug_assert!(present.is_none());
                 }
             }
         }
@@ -628,7 +717,7 @@ where
             slow_start,
             congestion_control,
             bytes_in_flight: 0,
-            maybe_lost_packets: HashMap::default(),
+            maybe_lost_packets: MaybeLostPackets::default(),
             qlog: Qlog::disabled(),
             first_app_limited: None,
             pmtud,
@@ -710,8 +799,7 @@ where
         for acked_packet in acked_packets {
             if self
                 .maybe_lost_packets
-                .remove(&(acked_packet.pn(), acked_packet.packet_type()))
-                .is_some()
+                .remove(acked_packet.pn(), acked_packet.packet_type())
             {
                 debug!(
                     "Spurious detection: removed MaybeLostPacket with pn {}, type {:?}",
@@ -735,16 +823,7 @@ where
     fn cleanup_maybe_lost_packets(&mut self, now: Instant, pto: Duration) {
         // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation:
         // <https://github.com/microsoft/msquic/blob/2623c07df62b4bd171f469fb29c2714b6735b676/src/core/loss_detection.c#L939-L943>
-        let max_age = pto * 2;
-        self.maybe_lost_packets.retain(|(pn, pt), packet| {
-            let keep = now.saturating_duration_since(packet.time_sent) <= max_age;
-            if !keep {
-                debug!(
-                    "Spurious detection: cleaned up old MaybeLostPacket with pn {pn}, type {pt:?}"
-                );
-            }
-            keep
-        });
+        self.maybe_lost_packets.remove_expired(now, pto * 2);
     }
 
     fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {
@@ -1990,6 +2069,158 @@ mod tests {
 
         // Now the packet should be removed.
         assert!(cc.maybe_lost_packets.is_empty());
+    }
+
+    /// Lost packets expire by `time_sent`, regardless of loss order, packet type or late ACKs.
+    #[test]
+    fn spurious_congestion_event_detection_cleanup_order() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let rtt_estimate = RttEstimate::new(RTT);
+        let max_age = 2 * rtt_estimate.pto(true);
+        let pkt = |pt, pn, t| sent::Packet::new(pt, pn, t, true, recovery::Tokens::new(), 1000);
+        let lost = [
+            pkt(packet::Type::Initial, 1, now()),
+            pkt(packet::Type::Handshake, 1, now()),
+            pkt(packet::Type::Short, 2, now()),
+            pkt(packet::Type::Short, 3, now() + RTT),
+        ];
+        let t = lost[3].time_sent();
+        for p in &lost {
+            cc.on_packet_sent(p, p.time_sent());
+        }
+
+        // The last packet is declared lost first and `lost[1]` is acked late.
+        cc.on_packets_lost(None, None, PTO, &lost[3..], t, &mut cc_stats);
+        cc.on_packets_lost(None, None, PTO, &lost[..3], t, &mut cc_stats);
+        cc.on_packets_acked(&lost[1..2], &rtt_estimate, t, &mut cc_stats);
+
+        let expiry = now() + max_age;
+        for (pn, t_ack, remaining) in [(10, expiry, 3), (11, expiry + EPSILON, 1)] {
+            let ack = pkt(packet::Type::Short, pn, t_ack);
+            cc.on_packet_sent(&ack, t_ack);
+            cc.on_packets_acked(&[ack], &rtt_estimate, t_ack, &mut cc_stats);
+            assert_eq!(cc.maybe_lost_packets.len(), remaining);
+        }
+        assert_eq!(cc_stats.congestion_events.spurious, 0);
+
+        // Only `lost[3]` is left, so its late ACK empties the map.
+        cc.on_packets_acked(&lost[3..], &rtt_estimate, t + max_age, &mut cc_stats);
+        assert_eq!(cc_stats.congestion_events.spurious, 1);
+    }
+
+    /// A late ACK for a lost packet older than the maximum age is not a spurious congestion event.
+    #[test]
+    fn spurious_congestion_event_detection_late_ack_after_max_age() {
+        let rtt_estimate = RttEstimate::new(RTT);
+        let max_age = 2 * rtt_estimate.pto(true);
+        for (age, spurious) in [(max_age, 1), (max_age + EPSILON, 0)] {
+            let mut cc = make_cc_newreno();
+            let mut cc_stats = CongestionControlStats::default();
+            let lost = [sent::make_packet(1, now(), 1000)];
+            cc.on_packet_sent(&lost[0], now());
+            cc.on_packets_lost(None, None, PTO, &lost, now(), &mut cc_stats);
+            cc.on_packets_acked(&lost, &rtt_estimate, now() + age, &mut cc_stats);
+            assert_eq!(cc_stats.congestion_events.spurious, spurious);
+        }
+    }
+
+    /// The maximum age of lost packets follows the PTO passed with each ACK.
+    #[test]
+    fn spurious_congestion_event_detection_cleanup_max_age_change() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let small = RttEstimate::new(RTT);
+        let large = RttEstimate::new(2 * RTT);
+        let lost = [sent::make_packet(1, now(), 1000)];
+        cc.on_packet_sent(&lost[0], now());
+        cc.on_packets_lost(None, None, PTO, &lost, now(), &mut cc_stats);
+        for (pn, rtt_estimate, age, remaining) in [
+            (2, &small, 2 * small.pto(true), 1),
+            (3, &large, 2 * large.pto(true), 1),
+            (4, &small, 2 * large.pto(true), 0),
+        ] {
+            let ack = sent::make_packet(pn, now() + age, 1000);
+            cc.on_packet_sent(&ack, now() + age);
+            cc.on_packets_acked(&[ack], rtt_estimate, now() + age, &mut cc_stats);
+            assert_eq!(cc.maybe_lost_packets.len(), remaining);
+        }
+    }
+
+    /// Lost packets expire by `time_sent`, also when it is not in packet number order.
+    #[test]
+    fn spurious_congestion_event_detection_cleanup_time_order() {
+        let rtt_estimate = RttEstimate::new(RTT);
+        let t_ack = now() + 2 * rtt_estimate.pto(true) + EPSILON;
+        let lost = [
+            sent::make_packet(1, now() + RTT, 1000),
+            sent::make_packet(2, now(), 1000),
+            sent::make_packet(3, now(), 1000),
+        ];
+        for (first, second, remaining) in [
+            (&lost[..1], &lost[1..], 1),
+            (&lost[1..], &lost[..1], 1),
+            (&lost[1..], &[][..], 0),
+        ] {
+            let mut cc = make_cc_newreno();
+            let mut cc_stats = CongestionControlStats::default();
+            for p in &lost {
+                cc.on_packet_sent(p, p.time_sent());
+            }
+            cc.on_packets_lost(None, None, PTO, first, now(), &mut cc_stats);
+            cc.on_packets_lost(None, None, PTO, second, now(), &mut cc_stats);
+            let ack = sent::make_packet(4, t_ack, 1000);
+            cc.on_packet_sent(&ack, t_ack);
+            cc.on_packets_acked(&[ack], &rtt_estimate, t_ack, &mut cc_stats);
+            assert_eq!(cc.maybe_lost_packets.len(), remaining);
+        }
+    }
+
+    /// Lost packets that outlive one cleanup expire in a later one.
+    #[test]
+    fn spurious_congestion_event_detection_cleanup_repeated() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let rtt_estimate = RttEstimate::new(RTT);
+        let max_age = 2 * rtt_estimate.pto(true);
+        let pkt = |pt, pn, t| sent::Packet::new(pt, pn, t, true, recovery::Tokens::new(), 1000);
+        let lost = [
+            pkt(packet::Type::Short, 1, now()),
+            pkt(packet::Type::Initial, 1, now() + RTT),
+            pkt(packet::Type::Handshake, 1, now() + 2 * RTT),
+        ];
+        for p in &lost {
+            cc.on_packet_sent(p, p.time_sent());
+        }
+        cc.on_packets_lost(None, None, PTO, &lost, lost[2].time_sent(), &mut cc_stats);
+        for (pn, p, remaining) in [(2, &lost[0], 2), (3, &lost[1], 1), (4, &lost[2], 0)] {
+            let t_ack = p.time_sent() + max_age + EPSILON;
+            let ack = pkt(packet::Type::Short, pn, t_ack);
+            cc.on_packet_sent(&ack, t_ack);
+            cc.on_packets_acked(&[ack], &rtt_estimate, t_ack, &mut cc_stats);
+            assert_eq!(cc.maybe_lost_packets.len(), remaining);
+        }
+    }
+
+    /// Late ACKs match lost packets by packet number, regardless of loss order or duplicate ACKs.
+    #[test]
+    fn spurious_congestion_event_detection_loss_order() {
+        let mut cc = make_cc_newreno();
+        let mut cc_stats = CongestionControlStats::default();
+        let rtt_estimate = RttEstimate::new(RTT);
+        let lost = [
+            sent::make_packet(2, now(), 1000),
+            sent::make_packet(3, now(), 1000),
+        ];
+        for p in &lost {
+            cc.on_packet_sent(p, now());
+        }
+        cc.on_packets_lost(None, None, PTO, &lost[1..], now(), &mut cc_stats);
+        cc.on_packets_lost(None, None, PTO, &lost[..1], now(), &mut cc_stats);
+        for (acked, spurious) in [(&lost[1..], 0), (&lost[1..], 0), (&lost[..1], 1)] {
+            cc.on_packets_acked(acked, &rtt_estimate, now(), &mut cc_stats);
+            assert_eq!(cc_stats.congestion_events.spurious, spurious);
+        }
     }
 
     fn slow_start_exit_stats(congestion_trigger: CongestionTrigger) {
