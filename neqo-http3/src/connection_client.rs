@@ -10,6 +10,7 @@ use std::{
     iter,
     net::SocketAddr,
     num::NonZeroUsize,
+    ops::Deref,
     rc::Rc,
     time::Instant,
 };
@@ -29,7 +30,8 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, cert::Certific
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    Error, Http3Parameters, NewStreamType, Priority, ReceiveOutput, Res, SendGroupId,
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, ReceiveOutput, Res,
+    SendGroupId, Stream,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -38,13 +40,21 @@ use crate::{
     settings::HSettings,
 };
 
-// This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal
-// a given id. Only the same type (bidirectional or unidirectional) streams are filtered.
+// Filters send_streams and recv_streams for request streams (Http or ExtendedConnect) with an ID
+// greater than or equal to a given ID of the same directionality.
 fn id_gte<U>(base: StreamId) -> impl FnMut((&StreamId, &U)) -> Option<StreamId> + 'static
 where
-    U: ?Sized,
+    U: Deref<Target: Stream>,
 {
-    move |(id, _)| (*id >= base && !(id.is_bidi() ^ base.is_bidi())).then_some(*id)
+    move |(id, s)| {
+        (*id >= base
+            && !(id.is_bidi() ^ base.is_bidi())
+            && matches!(
+                s.stream_type(),
+                Http3StreamType::Http | Http3StreamType::ExtendedConnect
+            ))
+        .then_some(*id)
+    }
 }
 
 const fn alpn_from_quic_version(version: Version) -> &'static str {
