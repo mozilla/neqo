@@ -6,9 +6,10 @@
 
 use std::time::Duration;
 
-use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
+use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _, to_u64};
 use neqo_transport::{
-    ConnectionEvent, ConnectionParameters, Error as TransportError, StreamId, StreamType,
+    ConnectionEvent, ConnectionParameters, Error as TransportError, StreamDataLimit, StreamId,
+    StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
@@ -24,7 +25,7 @@ use crate::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
     },
-    frames::WebTransportFrame,
+    frames::{HFrame, WebTransportFrame},
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
@@ -150,6 +151,7 @@ fn assert_session_stream_released(wt: &mut WtTest, wt_session: &ServerSession) {
     let mut handler = wt_session.handler.borrow_mut();
     let session = handler.base_handler_mut().webtransport_session(id);
     assert_eq!(session.unwrap_err(), Error::InvalidStreamId);
+    assert!(!handler.base_handler_mut().send_streams().contains_key(&id));
 }
 
 #[test]
@@ -393,6 +395,69 @@ fn wt_session_fin_server_frees_stream() {
     };
     wt.check_session_closed_event_server(&wt_session, &clean);
     assert_session_stream_released(&mut wt, &wt_session);
+}
+
+/// Read the CONNECT stream to FIN via the server transport, bypassing `Http3Server`.
+fn server_recv_to_fin(wt: &mut WtTest, wt_session: &ServerSession) -> Vec<u8> {
+    let mut received = Vec::new();
+    let mut buf = [0; 1024];
+    let mut t = now() + Duration::from_secs(1);
+    for _ in 0..10 {
+        let mut conn = wt_session.conn.borrow_mut();
+        let (n, fin) = conn.stream_recv(wt_session.stream_id(), &mut buf).unwrap();
+        received.extend_from_slice(&buf[..n]);
+        if fin {
+            return received;
+        }
+        let out = conn.process_output(t).dgram();
+        if let Some(out) = wt.client.process(out, t).dgram() {
+            conn.process_input(out, t);
+        }
+        t += Duration::from_secs(1);
+    }
+    panic!("no FIN on the CONNECT stream");
+}
+
+/// A server close during a flow-control-blocked client close sends FIN after the whole capsule.
+#[test]
+fn wt_session_close_server_while_client_close_blocked() {
+    let conn_params = wt_default_parameters()
+        .get_connection_parameters()
+        .clone()
+        .max_stream_data(StreamDataLimit::BiDiRemote, 256);
+    let server_params = wt_default_parameters().connection_parameters(conn_params);
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let message = "a".repeat(1000);
+    wt.session_close_frame_client(session_id, 23, &message);
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+    WtTest::session_close_frame_server(&wt_session, 5, "server");
+
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, []);
+    let mut capsule = Encoder::default();
+    WebTransportFrame::CloseSession { error: 23, message }.encode(&mut capsule);
+    let mut expected = Encoder::default();
+    HFrame::Data {
+        len: to_u64(capsule.len()),
+    }
+    .encode(&mut expected);
+    expected.encode(capsule.as_ref());
+    assert_eq!(server_recv_to_fin(&mut wt, &wt_session), expected.as_ref());
+    let stats = wt.client.webtransport_session_stats(session_id);
+    assert_eq!(stats, Err(Error::InvalidStreamId));
+    let reason = CloseReason::Clean {
+        error: 5,
+        message: "server".to_string(),
+    };
+    let closed = WebTransportEvent::SessionClosed {
+        stream_id: session_id,
+        reason,
+        headers: None,
+    };
+    let events: Vec<_> = wt.client.events().collect();
+    assert_eq!(events, [Http3ClientEvent::WebTransport(closed)]);
 }
 
 #[test]

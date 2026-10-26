@@ -1982,7 +1982,7 @@ impl Http3Connection {
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
         {
-            self.send_streams.remove(&stream_id)?;
+            let send = self.send_streams.remove(&stream_id)?;
             drop(match close_type {
                 // draft-ietf-webtrans-http3 defines no code for this reset.
                 CloseType::ResetRemote(_) => {
@@ -1990,6 +1990,10 @@ impl Http3Connection {
                 }
                 CloseType::ResetApp(e) | CloseType::LocalError(e) => {
                     conn.stream_reset_send(stream_id, e)
+                }
+                CloseType::Done if !send.done() => {
+                    self.send_streams.insert(stream_id, send); // Sends its FIN after the buffered data.
+                    Ok(())
                 }
                 CloseType::Done => conn.stream_close_send(stream_id),
             });
