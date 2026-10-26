@@ -9,17 +9,18 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 use neqo_common::{Datagram, Decoder, Role};
 use nss::{AuthenticationStatus, RecordProtectionOps as _};
 use test_fixture::{
-    assertions,
+    DEFAULT_ALPN, DEFAULT_KEYS, assertions,
     header_protection::{self, decode_initial_header, initial_aead_and_hp},
     now, split_datagram,
 };
 
 use super::{
-    AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
-    get_tokens, new_client, resumed_server, send_something,
+    AT_LEAST_PTO, CountingConnectionIdGenerator, connect, connect_with_rtt, default_client,
+    default_server, exchange_ticket, get_tokens, new_client, resumed_server, send_something,
 };
 use crate::{
-    ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State, Version,
+    Connection, ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State,
+    StreamType, Version, ZeroRttState,
     addr_valid::{AddressValidation, ValidateAddress},
     frame::FrameType,
 };
@@ -313,6 +314,45 @@ fn take_token() {
     // But we should be able to get the token directly, and use it.
     let token = client.take_resumption_token(now()).unwrap();
     can_resume(token, false);
+}
+
+/// Without 0-RTT, the limits from the handshake apply, not the remembered ones.
+#[test]
+fn resume_without_0rtt_uses_handshake_limits() {
+    const LOW: u64 = 2;
+    let server_without_0rtt = |params| {
+        Connection::new_server(
+            DEFAULT_KEYS,
+            DEFAULT_ALPN,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            params,
+        )
+        .unwrap()
+    };
+
+    let mut client = default_client();
+    let mut server = server_without_0rtt(ConnectionParameters::default());
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Init);
+    assert!(!client.peer_supports_reliable_stream_reset());
+    let mut server = server_without_0rtt(
+        ConnectionParameters::default()
+            .max_streams(StreamType::BiDi, LOW)
+            .versions(client.version(), Version::all()),
+    );
+    connect(&mut client, &mut server);
+
+    for _ in 0..LOW {
+        client.stream_create(StreamType::BiDi).unwrap();
+    }
+    assert_eq!(
+        client.stream_create(StreamType::BiDi),
+        Err(Error::StreamLimit)
+    );
 }
 
 /// If a version is selected and subsequently disabled, resumption fails.
