@@ -4,20 +4,29 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
-use neqo_common::{event::Provider as _, to_u64};
+use neqo_common::{Encoder, event::Provider as _, to_u64};
 use nss::{AllowZeroRtt, AntiReplay};
-use test_fixture::{assertions, now};
+use test_fixture::{
+    assertions::{self, is_handshake, is_initial},
+    datagram, now, split_datagram,
+};
 use tracing::debug;
 
 use super::{
-    super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
-    default_server, exchange_ticket, migration::NewConnectionIds, new_server, resumed_server,
+    super::Connection, CountingConnectionIdGenerator, DEFAULT_RTT, Output, assert_error, connect,
+    connect_with_rtt, default_client, default_server, drop_flight, exchange_ticket, fill_stream,
+    migration::NewConnectionIds, new_client, new_server, resumed_server,
 };
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamDataLimit, StreamType,
-    Version, events::ConnectionEvent,
+    CloseReason, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, SlowStart, State,
+    StreamDataLimit, StreamType, Version, events::ConnectionEvent, frame::FrameType, packet,
+    tracking::PacketNumberSpace,
 };
 
 #[test]
@@ -562,4 +571,194 @@ fn zero_rtt_retire_handshake_cid() {
         server.stats().frame_tx.retire_connection_id,
         retire_cid_before + 2 // The handshake CID and the client's first NEW_CONNECTION_ID.
     );
+}
+
+/// A packet from `server` with one frame: ACK `0..=largest`.
+fn ack_packet(
+    server: &mut Connection,
+    space: PacketNumberSpace,
+    largest: packet::Number,
+) -> Vec<u8> {
+    server_packet(
+        server,
+        space,
+        &[FrameType::Ack.into(), largest, 0, 0, largest],
+    )
+}
+
+/// A packet from `server` with `frames`.
+fn server_packet(server: &mut Connection, space: PacketNumberSpace, frames: &[u64]) -> Vec<u8> {
+    let path = server.paths.primary().unwrap();
+    let dcid = path.borrow().remote_cid().unwrap().clone();
+    let scid = path.borrow().local_cid().unwrap().clone();
+    let (_, tx) = server
+        .crypto
+        .states_mut()
+        .select_tx_mut(server.version, space)
+        .unwrap();
+    let long = |t| {
+        packet::Builder::long(
+            Encoder::default(),
+            t,
+            server.version,
+            Some(&dcid[..]),
+            Some(&scid[..]),
+            packet::LIMIT,
+        )
+    };
+    let mut builder = match space {
+        PacketNumberSpace::Initial => {
+            let mut builder = long(packet::Type::Initial);
+            builder.initial_token(&[]);
+            builder
+        }
+        PacketNumberSpace::Handshake => long(packet::Type::Handshake),
+        PacketNumberSpace::ApplicationData => packet::Builder::short(
+            Encoder::default(),
+            tx.key_phase(),
+            Some(&dcid[..]),
+            packet::LIMIT,
+        ),
+    };
+    builder.pn(tx.next_pn(), 4);
+    builder.write_varint_frame(frames);
+    builder.build(tx).unwrap().into()
+}
+
+/// A client resuming with `params` with a full 0-RTT stream, a server that accepts its 0-RTT,
+/// and the time.
+fn resumed_pair_with_0rtt(params: ConnectionParameters) -> (Connection, Connection, Instant) {
+    let mut client = new_client(params.clone());
+    let mut server = default_server();
+    let now = connect_with_rtt(&mut client, &mut server, now(), DEFAULT_RTT);
+    let token = exchange_ticket(&mut client, &mut server, now);
+    let mut client = new_client(params);
+    client.enable_resumption(now, token).unwrap();
+    let server = resumed_server(&client);
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream);
+    (client, server, now)
+}
+
+/// The server's Initial and Handshake packets in answer to the client's paced first flight.
+fn server_flight(
+    client: &mut Connection,
+    server: &mut Connection,
+    now: Instant,
+) -> (Vec<u8>, Vec<u8>) {
+    let mut initial = Vec::new();
+    let mut handshake = Vec::new();
+    while let Some(c) = client.process_output(now).dgram() {
+        let mut s = server.process(Some(c), now).dgram();
+        while let Some(d) = s {
+            let (p, rest) = split_datagram(&d);
+            if is_handshake(&p) {
+                handshake.extend_from_slice(&p);
+            } else if is_initial(&p, false) {
+                initial.extend_from_slice(&p);
+            }
+            s = rest.or_else(|| server.process_output(now).dgram());
+        }
+    }
+    (initial, handshake)
+}
+
+/// The RTT of the saved ACK that `saved_ack` delivers.
+const SAVED_ACK_RTT: Duration = Duration::from_millis(2);
+
+/// Delivers a saved 1-RTT ACK for `largest(next_pn)` `SAVED_ACK_RTT` after the client's first
+/// 0-RTT flight. Returns the client.
+fn saved_ack(largest: impl FnOnce(packet::Number) -> packet::Number) -> Connection {
+    let params = ConnectionParameters::default().slow_start(SlowStart::Search);
+    let (mut client, mut server, now) = resumed_pair_with_0rtt(params);
+    deliver_saved_ack(&mut client, &mut server, now, SAVED_ACK_RTT, largest);
+    client
+}
+
+/// Delivers the server's Initial packets and a 1-RTT ACK for `largest(next_pn)` `rtt` after the
+/// client's first flight, then the server's Handshake packets.
+fn deliver_saved_ack(
+    client: &mut Connection,
+    server: &mut Connection,
+    mut now: Instant,
+    rtt: Duration,
+    largest: impl FnOnce(packet::Number) -> packet::Number,
+) {
+    let (mut initial, handshake) = server_flight(client, server, now);
+    now += rtt;
+    let space = PacketNumberSpace::ApplicationData;
+    initial.extend(ack_packet(server, space, largest(client.next_pn(space))));
+    _ = client.process(Some(datagram(initial)), now);
+    assert_eq!(client.stats().saved_datagrams, 1);
+    drop_flight(client, &mut now);
+    client.process_input(datagram(handshake), now);
+}
+
+/// An ACK in a saved 1-RTT packet for a 0-RTT packet that was sent after that packet arrived
+/// acknowledges an unsent packet.
+#[test]
+fn zero_rtt_saved_ack_for_later_packet() {
+    let client = saved_ack(|pn| pn);
+    assert_error(&client, &CloseReason::Transport(Error::AckedUnsentPacket));
+}
+
+/// An ACK in a saved 1-RTT packet for 0-RTT packets that were sent before that packet arrived
+/// produces an RTT sample.
+#[test]
+fn zero_rtt_saved_ack_for_earlier_packet() {
+    let client = saved_ack(|pn| pn - 1);
+    assert!(client.state().connected());
+    assert_eq!(client.stats().min_rtt, SAVED_ACK_RTT);
+    assert_eq!(client.stats().cc.search_first_rtt, Some(SAVED_ACK_RTT));
+}
+
+/// An ACK in a saved 1-RTT packet for a 0-RTT packet acknowledges an unsent packet if 0-RTT is
+/// rejected.
+#[test]
+fn zero_rtt_saved_ack_after_reject() {
+    let (mut client, mut server) = resumed_pair_that_rejects_0rtt(0);
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream);
+    deliver_saved_ack(&mut client, &mut server, now(), DEFAULT_RTT, |pn| pn - 1);
+    assert_error(&client, &CloseReason::Transport(Error::AckedUnsentPacket));
+}
+
+/// An ACK in a 1-RTT packet that is saved behind a Handshake packet and saved again after that
+/// is processed, for a 0-RTT packet that was sent after the first save, acknowledges an unsent
+/// packet.
+#[test]
+fn zero_rtt_saved_twice_ack_for_later_packet() {
+    let (mut client, mut server, mut now) = resumed_pair_with_0rtt(ConnectionParameters::default());
+    let (initial, handshake) = server_flight(&mut client, &mut server, now);
+    let space = PacketNumberSpace::ApplicationData;
+    let mut saved = server_packet(
+        &mut server,
+        PacketNumberSpace::Handshake,
+        &[FrameType::Ping.into()],
+    );
+    saved.extend(ack_packet(&mut server, space, client.next_pn(space)));
+    _ = client.process(Some(datagram(saved)), now);
+    drop_flight(&mut client, &mut now);
+    _ = client.process(Some(datagram(initial)), now);
+    assert_eq!(client.stats().saved_datagrams, 2);
+    client.process_input(datagram(handshake), now);
+    assert_error(&client, &CloseReason::Transport(Error::AckedUnsentPacket));
+}
+
+/// An ACK in a saved Initial packet for an Initial packet that was sent after that packet arrived
+/// acknowledges an unsent packet.
+#[test]
+fn zero_rtt_saved_initial_ack_for_later_packet() {
+    let params = ConnectionParameters::default().randomize_first_pn(false);
+    let (mut client, mut server, mut now) = resumed_pair_with_0rtt(params);
+    let (initial, mut handshake) = server_flight(&mut client, &mut server, now);
+    // Send the rest of the paced 0-RTT packets, so that only application data packet numbers grow.
+    drop_flight(&mut client, &mut now);
+    let space = PacketNumberSpace::Initial;
+    handshake.extend(ack_packet(&mut server, space, client.next_pn(space)));
+    _ = client.process(Some(datagram(handshake)), now);
+    assert_eq!(client.stats().saved_datagrams, 1);
+    drop_flight(&mut client, &mut now);
+    client.process_input(datagram(initial), now);
+    assert_error(&client, &CloseReason::Transport(Error::AckedUnsentPacket));
 }

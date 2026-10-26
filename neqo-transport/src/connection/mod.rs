@@ -55,7 +55,7 @@ use crate::{
     recovery::{self, SendProfile, sent},
     recv_stream,
     rtt::{DEFAULT_INITIAL_RTT, GRANULARITY, RttEstimate},
-    saved::SavedDatagrams,
+    saved::{NextPn, SavedDatagrams},
     send_stream::{self, SendStream},
     stateless_reset::Token as Srt,
     stats::{Stats, StatsCell},
@@ -1163,7 +1163,7 @@ impl Connection {
             self.loss_recovery.note_timeout_type(&path.borrow(), now);
         }
         for d in dgrams {
-            self.input(d, now, now);
+            self.input(d, now, now, None);
         }
         self.process_saved(now);
         self.streams.cleanup_closed_streams();
@@ -1332,7 +1332,7 @@ impl Connection {
             if let Some(path) = self.paths.primary() {
                 self.loss_recovery.note_timeout_type(&path.borrow(), now);
             }
-            self.input(d, now, now);
+            self.input(d, now, now, None);
             self.process_saved(now);
         }
         let output = self.process_multiple_output(now, max_datagrams);
@@ -1469,9 +1469,9 @@ impl Connection {
                     .rx_hp(self.version, epoch)
                     .is_some()
             );
-            for saved in self.saved_datagrams.take_saved() {
+            for (saved, next_pn) in self.saved_datagrams.take_saved() {
                 trace!("[{self}] input saved @{:?}: {:?}", saved.t, saved.d);
-                self.input(saved.d, saved.t, now);
+                self.input(saved.d, saved.t, now, Some(next_pn));
             }
         }
     }
@@ -1488,6 +1488,7 @@ impl Connection {
         d: Datagram<impl AsRef<[u8]>>,
         remaining: usize,
         now: Instant,
+        saved_next_pn: Option<NextPn>,
     ) {
         let d = Datagram::new(
             d.source(),
@@ -1495,7 +1496,8 @@ impl Connection {
             d.tos(),
             d[d.len() - remaining..].to_vec(),
         );
-        self.saved_datagrams.save(epoch, d, now);
+        let next_pn = saved_next_pn.unwrap_or_else(|| NextPn::from_fn(|s| self.next_pn(s)));
+        self.saved_datagrams.save(epoch, d, now, next_pn);
         self.stats.borrow_mut().saved_datagrams += 1;
         // We already counted the datagram as received in [`input_path`]. We
         // will do so again when we (re-)process it, so reduce the count now.
@@ -1785,6 +1787,7 @@ impl Connection {
         d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         received: Instant,
         now: Instant,
+        saved_next_pn: Option<NextPn>,
     ) {
         if self.state < State::Confirmed
             && self
@@ -1802,7 +1805,7 @@ impl Connection {
             .paths
             .find_path(d.destination(), d.source(), &self.conn_params, now);
         path.borrow_mut().add_received(d.len());
-        let res = self.input_path(&path, d, received);
+        let res = self.input_path(&path, d, received, saved_next_pn);
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
     }
 
@@ -1811,6 +1814,7 @@ impl Connection {
         path: &PathRef,
         mut d: Datagram<impl AsRef<[u8]> + AsMut<[u8]>>,
         now: Instant,
+        saved_next_pn: Option<NextPn>,
     ) -> Res<()> {
         trace!("[{self}] {} input {}", path.borrow(), Hex::new(&d));
         let tos = d.tos();
@@ -1872,7 +1876,7 @@ impl Connection {
                             debug!("Duplicate packet {space}-{pn}");
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
-                            match self.process_packet(path, tos, &payload, now) {
+                            match self.process_packet(path, tos, &payload, now, saved_next_pn) {
                                 Ok(migrate) => {
                                     self.idle_timeout.on_packet_received(now);
                                     self.postprocess_packet(
@@ -1900,7 +1904,7 @@ impl Connection {
                             // This packet can't be decrypted because we don't have the keys yet.
                             // Don't check this packet for a stateless reset, just return.
                             let remaining = slc_len;
-                            self.save_datagram(epoch, d, remaining, now);
+                            self.save_datagram(epoch, d, remaining, now, saved_next_pn);
                             return Ok(());
                         }
                         // Exhausting read keys is fatal. So is a packet that
@@ -1941,6 +1945,13 @@ impl Connection {
         }
     }
 
+    fn next_pn(&self, space: PacketNumberSpace) -> packet::Number {
+        self.crypto
+            .states()
+            .select_tx(self.version, space)
+            .map_or(0, |(_, tx)| tx.next_pn())
+    }
+
     /// Process a packet.  Returns true if the packet might initiate migration.
     fn process_packet(
         &mut self,
@@ -1948,6 +1959,7 @@ impl Connection {
         tos: Tos,
         packet: &packet::Decrypted,
         now: Instant,
+        saved_next_pn: Option<NextPn>,
     ) -> Res<bool> {
         (!packet.is_empty())
             .then_some(())
@@ -1958,13 +1970,11 @@ impl Connection {
         // on the assert for doesn't exist.
         // OK, we have a valid packet.
 
-        // Get the next packet number we'll send, for ACK verification.
-        // This is used by `input_frame` to verify that ACKs don't acknowledge unsent packets.
-        let next_pn = self
-            .crypto
-            .states()
-            .select_tx(self.version, PacketNumberSpace::from(packet.packet_type()))
-            .map_or(0, |(_, tx)| tx.next_pn());
+        // Get the next packet number we'll send, for ACK verification. For saved datagrams,
+        // packets sent after the datagram arrived count as unsent (RFC 9000 Section 13.1).
+        let space = PacketNumberSpace::from(packet.packet_type());
+        let next_pn = self.next_pn(space);
+        let next_pn = saved_next_pn.map_or(next_pn, |saved| min(saved[space], next_pn));
 
         let mut ack_eliciting = false;
         let mut probing = true;
