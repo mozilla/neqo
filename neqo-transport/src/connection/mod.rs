@@ -3332,7 +3332,7 @@ impl Connection {
         // conditions right is a little tricky, so call whenever CRYPTO data is used.
         if try_update {
             // We have transport parameters, it's go time.
-            if self.tps.borrow().remote_handshake().is_some() {
+            if self.state < State::Connected && self.tps.borrow().remote_handshake().is_some() {
                 self.set_initial_limits();
             }
             if self.crypto.tls().has_secret(Epoch::Handshake) {
