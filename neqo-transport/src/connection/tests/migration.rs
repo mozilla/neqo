@@ -30,7 +30,7 @@ use super::{
     CountingConnectionIdGenerator, assert_error, connect_fail, connect_force_idle,
     connect_rtt_idle, cwnd_avail, default_client, default_server, exchange_ticket, fill_stream,
     maybe_authenticate, new_client, new_server, resumed_server, send_something,
-    zero_len_cid_client,
+    zero_len_cid_client, zero_len_cid_server,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1040,13 +1040,7 @@ fn preferred_address_empty_cid() {
 #[test]
 fn preferred_address_server_empty_cid() {
     let mut client = default_client();
-    let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
-    )
-    .unwrap();
+    let mut server = zero_len_cid_server();
 
     server
         .set_local_tparam(
@@ -1278,30 +1272,26 @@ fn send_new_connection_id(sender: &mut Connection) -> Datagram {
     send_with_extra(sender, NewConnectionIds::new(1, cid_gen), now())
 }
 
+/// Delivers `dgram` from `sender` to `receiver` and checks that both close with
+/// `PROTOCOL_VIOLATION`.
+fn assert_protocol_violation(sender: &mut Connection, receiver: &mut Connection, dgram: Datagram) {
+    let close = receiver.process(Some(dgram), now()).dgram();
+    assert_error(receiver, &CloseReason::Transport(Error::ProtocolViolation));
+    sender.process_input(close.unwrap(), now());
+    let peer_error = Error::Peer(Error::ProtocolViolation.code());
+    assert_error(sender, &CloseReason::Transport(peer_error));
+}
+
 /// RFC 9000, Section 19.15: an endpoint that is sending packets with a zero-length
 /// Destination Connection ID treats receipt of a `NEW_CONNECTION_ID` frame as a
 /// connection error of type `PROTOCOL_VIOLATION`.
-fn assert_new_connection_id_rejected(peer: &mut Connection, endpoint: &mut Connection) {
-    let ncid = send_new_connection_id(peer);
-    let close = endpoint.process(Some(ncid), now()).dgram();
-    assert_error(endpoint, &CloseReason::Transport(Error::ProtocolViolation));
-    peer.process_input(close.unwrap(), now());
-    let peer_error = Error::Peer(Error::ProtocolViolation.code());
-    assert_error(peer, &CloseReason::Transport(peer_error));
-}
-
 #[test]
 fn new_connection_id_to_zero_len_cid_client() {
     let mut client = default_client();
-    let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
-    )
-    .unwrap();
+    let mut server = zero_len_cid_server();
     connect_force_idle(&mut client, &mut server);
-    assert_new_connection_id_rejected(&mut server, &mut client);
+    let ncid = send_new_connection_id(&mut server);
+    assert_protocol_violation(&mut server, &mut client, ncid);
 }
 
 #[test]
@@ -1309,7 +1299,8 @@ fn new_connection_id_to_zero_len_cid_server() {
     let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
-    assert_new_connection_id_rejected(&mut client, &mut server);
+    let ncid = send_new_connection_id(&mut client);
+    assert_protocol_violation(&mut client, &mut server, ncid);
 }
 
 /// An endpoint that provides a zero-length connection ID still sends a non-empty
@@ -1364,10 +1355,10 @@ fn retire_cid_queue_bounded() {
     ));
 }
 
-/// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
-struct RetireUnissued(u64);
+/// Injects a `RETIRE_CONNECTION_ID` frame for a given sequence number.
+struct RetireConnectionId(u64);
 
-impl test_internal::FrameWriter for RetireUnissued {
+impl test_internal::FrameWriter for RetireConnectionId {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::RetireConnectionId)
@@ -1385,7 +1376,7 @@ fn retire_unissued_connection_id() {
 
     // The largest sequence number the client could have issued is far below this,
     // so it has never been sent to the server.
-    let retire = send_with_extra(&mut server, RetireUnissued(1000), now());
+    let retire = send_with_extra(&mut server, RetireConnectionId(1000), now());
     client.process_input(retire, now());
     assert!(matches!(
         client.state(),
@@ -1394,6 +1385,27 @@ fn retire_unissued_connection_id() {
             ..
         }
     ));
+}
+
+/// RFC 9000, Section 19.16: an endpoint that provides a zero-length connection ID
+/// treats receipt of a `RETIRE_CONNECTION_ID` frame as a connection error.
+#[test]
+fn retire_zero_len_connection_id() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let retire = send_with_extra(&mut server, RetireConnectionId(0), now()); // Sequence number of the zero-length ID.
+    assert_protocol_violation(&mut server, &mut client, retire);
+}
+
+/// As `retire_zero_len_connection_id`, for a server that uses zero-length connection IDs.
+#[test]
+fn retire_zero_len_connection_id_server() {
+    let mut client = default_client();
+    let mut server = zero_len_cid_server();
+    connect_force_idle(&mut client, &mut server);
+    let retire = send_with_extra(&mut client, RetireConnectionId(0), now()); // Sequence number of the zero-length ID.
+    assert_protocol_violation(&mut client, &mut server, retire);
 }
 
 /// During a graceful migration, if the probed path can't get a new connection ID due
