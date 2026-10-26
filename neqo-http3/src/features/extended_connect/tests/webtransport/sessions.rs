@@ -4,25 +4,28 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Duration;
+
 use neqo_common::{Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
-    StreamId, StreamType,
+    ConnectionEvent, ConnectionParameters, Error as TransportError, StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
 
 use crate::{
-    Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Server, Http3ServerEvent,
-    Http3State, Priority, SessionAcceptAction, WebTransportEvent,
+    Error, Header, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
+    Http3ServerEvent, Http3State, Priority, SessionAcceptAction, WebTransportEvent,
+    connect_udp::{self, ClientSession as _},
     features::extended_connect::{
-        CloseReason,
+        CloseReason, WT_SESSION_GONE,
         stats::SessionStats,
         tests::webtransport::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
         },
     },
     frames::WebTransportFrame,
-    webtransport::{ClientSession as _, ServerEvent},
+    webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
 
 fn wt_with_session() -> (WtTest, StreamId) {
@@ -119,6 +122,277 @@ fn wt_session_close_server_close_send() {
         },
         None,
     );
+}
+
+/// A server that allows a single bidi stream, with one session open.
+fn wt_session_one_bidi_stream() -> (WtTest, ServerSession) {
+    let mut wt = WtTest::new_with_params(
+        wt_default_parameters(),
+        Http3Parameters::default()
+            .webtransport(true)
+            .connection_parameters(
+                ConnectionParameters::default().max_streams(StreamType::BiDi, 1),
+            ),
+    );
+    let wt_session = wt.create_wt_session();
+    (wt, wt_session)
+}
+
+/// A closed session releases its stream on both endpoints, so a new session can use its credit.
+fn assert_session_stream_released(wt: &mut WtTest, wt_session: &ServerSession) {
+    let id = wt_session.stream_id();
+    wt.exchange_packets();
+    wt.create_wt_session();
+    let recv = wt.client.connection_mut().stream_recv(id, &mut []);
+    assert_eq!(recv, Err(TransportError::InvalidStreamId));
+    let stats = wt.client.webtransport_session_stats(id);
+    assert_eq!(stats.unwrap_err(), Error::InvalidStreamId);
+    let mut handler = wt_session.handler.borrow_mut();
+    let session = handler.base_handler_mut().webtransport_session(id);
+    assert_eq!(session.unwrap_err(), Error::InvalidStreamId);
+}
+
+#[test]
+fn wt_session_close_server_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    wt_session.close_session(0, "", now()).unwrap();
+    assert_session_stream_released(&mut wt, &wt_session);
+}
+
+#[test]
+fn wt_session_close_client_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    wt.session_close_frame_client(wt_session.stream_id(), 0, "");
+    assert_session_stream_released(&mut wt, &wt_session);
+}
+
+#[test]
+fn wt_session_reset_server_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    wt_session
+        .stream_reset_send(Error::HttpNone.code())
+        .unwrap();
+    assert_session_stream_released(&mut wt, &wt_session);
+}
+
+#[test]
+fn wt_session_reset_client_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    let stop_sending = wt.client.transport_stats().frame_tx.stop_sending;
+    wt.client
+        .stream_reset_send(wt_session.stream_id(), Error::HttpNone.code())
+        .unwrap();
+    assert_session_stream_released(&mut wt, &wt_session);
+    let stats = wt.client.transport_stats();
+    assert_eq!(stats.frame_tx.stop_sending, stop_sending + 1);
+}
+
+/// Run one round trip from the server and return the stream stop and reset events that the server
+/// transport gets, which `Http3Server` drops for streams it does not know.
+fn server_stream_events_after_round_trip(
+    wt: &mut WtTest,
+    wt_session: &ServerSession,
+) -> Vec<ConnectionEvent> {
+    let t = now() + Duration::from_secs(1); // Past the pacing of earlier exchanges.
+    let out = wt.server.process_output(t).dgram();
+    let out = wt.client.process(out, t).dgram();
+    let mut conn = wt_session.conn.borrow_mut();
+    conn.process_input(out.unwrap(), t);
+    let mut events: Vec<_> = conn
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                ConnectionEvent::SendStreamStopSending { .. }
+                    | ConnectionEvent::RecvStreamReset { .. }
+            )
+        })
+        .collect();
+    events.sort();
+    events
+}
+
+#[test]
+fn wt_session_reset_client_stops_connect_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    let stream_id = wt_session.stream_id();
+    let app_error = Error::HttpNone.code();
+    wt.client.stream_reset_send(stream_id, app_error).unwrap();
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id,
+        app_error,
+    };
+    let stopped = ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset, stopped]);
+}
+
+#[test]
+fn wt_session_stop_sending_client_resets_connect_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    let stream_id = wt_session.stream_id();
+    let app_error = Error::HttpNone.code();
+    wt.client.stream_stop_sending(stream_id, app_error).unwrap();
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id,
+        app_error,
+    };
+    let stopped = ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset, stopped]);
+}
+
+/// The client stops a connect-udp stream with `H3_REQUEST_CANCELLED` when the server only stops it.
+#[test]
+fn connect_udp_transport_stop_sending_server_stops_connect_stream() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session(); // For the server transport.
+    let target = ("https", "something.com", "/");
+    let stream_id = wt
+        .client
+        .connect_udp_create_session(now(), target, &[])
+        .unwrap();
+    wt.exchange_packets();
+    let session = wt
+        .server
+        .events()
+        .find_map(|e| match e {
+            Http3ServerEvent::ConnectUdp(connect_udp::ServerEvent::NewSession {
+                session, ..
+            }) => Some(session),
+            _ => None,
+        })
+        .unwrap();
+    session
+        .response(&SessionAcceptAction::Accept, now())
+        .unwrap();
+    wt.exchange_packets();
+    let app_error = Error::HttpNone.code();
+    wt_session
+        .conn
+        .borrow_mut()
+        .stream_stop_sending(stream_id, app_error)
+        .unwrap();
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id,
+        app_error,
+    };
+    let stopped = ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error: Error::HttpRequestCancelled.code(),
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset, stopped]);
+}
+
+/// The client stops the CONNECT stream with `WT_SESSION_GONE` when the server only stops it.
+#[test]
+fn wt_session_transport_stop_sending_server_stops_connect_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    let stream_id = wt_session.stream_id();
+    let app_error = Error::HttpNone.code();
+    wt_session
+        .conn
+        .borrow_mut()
+        .stream_stop_sending(stream_id, app_error)
+        .unwrap();
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id,
+        app_error,
+    };
+    let stopped = ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error: WT_SESSION_GONE,
+    };
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    assert_eq!(events, [reset, stopped]);
+}
+
+/// The client resets its send half when the server only resets its own.
+#[test]
+fn wt_session_transport_reset_server_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    let error = Error::HttpNone.code();
+    wt_session
+        .conn
+        .borrow_mut()
+        .stream_reset_send(wt_session.stream_id(), error)
+        .unwrap();
+    wt.exchange_packets();
+    let cancelled = CloseReason::Error(Error::HttpRequestCancelled.code());
+    wt.check_session_closed_event_server(&wt_session, &cancelled);
+    assert_session_stream_released(&mut wt, &wt_session);
+}
+
+/// Data the client sent before it learned of the close is discarded.
+#[test]
+fn wt_session_close_server_data_in_flight_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    wt_session.close_session(0, "", now()).unwrap();
+    wt.client
+        .send_data(wt_session.stream_id(), &[0; 4], now())
+        .unwrap();
+    assert_session_stream_released(&mut wt, &wt_session);
+}
+
+/// A rejection that arrives after a local close ends the session.
+#[test]
+fn wt_session_close_client_then_reject() {
+    let mut wt = WtTest::new();
+    let id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+    let session = wt
+        .server
+        .events()
+        .find_map(|e| match e {
+            Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) => {
+                Some(session)
+            }
+            _ => None,
+        })
+        .unwrap();
+    wt.session_close_frame_client(id, 0, "");
+    let reject = SessionAcceptAction::Reject(vec![Header::new(":status", "404")]);
+    session.response(&reject, now()).unwrap();
+    wt.exchange_packets();
+    let stats = wt.client.webtransport_session_stats(id);
+    assert_eq!(stats.unwrap_err(), Error::InvalidStreamId);
+}
+
+#[test]
+fn wt_session_stop_sending_server_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    wt_session
+        .stream_stop_sending(Error::HttpNone.code())
+        .unwrap();
+    assert_session_stream_released(&mut wt, &wt_session);
+}
+
+/// A FIN without a close capsule is a clean close with error code 0 and an empty message.
+#[test]
+fn wt_session_fin_server_frees_stream() {
+    let (mut wt, wt_session) = wt_session_one_bidi_stream();
+    wt_session
+        .conn
+        .borrow_mut()
+        .stream_close_send(wt_session.stream_id())
+        .unwrap();
+    wt.exchange_packets();
+    let clean = CloseReason::Clean {
+        error: 0,
+        message: String::new(),
+    };
+    wt.check_session_closed_event_server(&wt_session, &clean);
+    assert_session_stream_released(&mut wt, &wt_session);
 }
 
 #[test]
