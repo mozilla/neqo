@@ -8,14 +8,17 @@
 
 mod common;
 
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use neqo_common::{Datagram, event::Provider as _, expect_usize};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority,
 };
-use neqo_transport::{CloseReason, ConnectionParameters, Error, Output, StreamDataLimit};
+use neqo_transport::{AppError, CloseReason, ConnectionParameters, Error, Output, StreamDataLimit};
 use nss::{AuthenticationStatus, ResumptionToken};
 use test_fixture::*;
 use tracing::trace;
@@ -704,4 +707,181 @@ fn server_reliable_reset_with_body() {
         }
     }
     assert!(got_reset);
+}
+
+/// The response bytes the client read, whether it saw FIN, and its `Reset` code and `local` flag.
+type Response = (Vec<u8>, bool, Option<(AppError, bool)>);
+
+/// Sends one `method` request per entry of `responses`, answers each with the entry's headers and
+/// one DATA frame per body item, and returns what the client got for each.
+fn content_length_responses(method: &str, responses: &[(&[Header], &[&[u8]])]) -> Vec<Response> {
+    let mut client = default_http3_client();
+    let mut server = default_http3_server();
+    let out = connect_peers(&mut client, &mut server);
+    let stream_ids: Vec<_> = responses
+        .iter()
+        .map(|_| {
+            let target = ("https", "something.com", "/");
+            let id = client
+                .fetch(now(), method, target, &[], Priority::default())
+                .unwrap();
+            client.stream_close_send(id, now()).unwrap();
+            id
+        })
+        .collect();
+    exchange_packets(&mut client, &mut server, false, out);
+
+    let mut requests = HashMap::new();
+    while let Some(event) = server.next_event() {
+        if let Http3ServerEvent::Headers { stream, .. } = event {
+            requests.insert(stream.stream_id(), stream);
+        }
+    }
+    for (id, (headers, body)) in stream_ids.iter().zip(responses) {
+        let request = &requests[id];
+        request.send_headers(headers).unwrap();
+        for data in *body {
+            request.send_data(data, now()).unwrap();
+        }
+        request.stream_close_send(now()).unwrap();
+    }
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let mut received: HashMap<_, Response> = HashMap::new();
+    while let Some(event) = client.next_event() {
+        match event {
+            Http3ClientEvent::HeaderReady { stream_id, fin, .. } => {
+                received.entry(stream_id).or_default().1 |= fin;
+            }
+            Http3ClientEvent::DataReadable { stream_id } => {
+                let mut buf = [0; 100];
+                let (amount, fin) = client.read_data(now(), stream_id, &mut buf).unwrap();
+                let response = received.entry(stream_id).or_default();
+                response.0.extend_from_slice(&buf[..amount]);
+                response.1 |= fin;
+            }
+            Http3ClientEvent::Reset {
+                stream_id,
+                error,
+                local,
+            } => received.entry(stream_id).or_default().2 = Some((error, local)),
+            _ => {}
+        }
+    }
+    assert_eq!(client.state(), Http3State::Connected);
+    stream_ids
+        .iter()
+        .map(|id| received.remove(id).unwrap_or_default())
+        .collect()
+}
+
+fn content_length_response(method: &str, headers: &[Header], body: &[&[u8]]) -> Response {
+    content_length_responses(method, &[(headers, body)]).remove(0)
+}
+
+fn status_and_content_length(status: &str, content_length: usize) -> [Header; 2] {
+    [
+        Header::new(":status", status),
+        Header::new("content-length", content_length.to_string()),
+    ]
+}
+
+fn message_error() -> Response {
+    let error = neqo_http3::Error::HttpMessage.code();
+    (Vec::new(), false, Some((error, true)))
+}
+
+/// RFC 9114 Section 4.1.2: a content-length that differs from the DATA total is malformed.
+#[test]
+fn response_content_length_mismatch_resets_stream() {
+    for len in [RESPONSE_DATA.len() - 1, RESPONSE_DATA.len() + 1] {
+        let headers = status_and_content_length("200", len);
+        let response = content_length_response("GET", &headers, &[RESPONSE_DATA]);
+        assert_eq!(response, message_error());
+    }
+}
+
+#[test]
+fn response_content_length_excess_not_delivered() {
+    let headers = status_and_content_length("200", RESPONSE_DATA.len());
+    let body = [RESPONSE_DATA, RESPONSE_DATA];
+    let response = content_length_response("GET", &headers, &body);
+    assert_eq!(response, message_error());
+}
+
+/// RFC 9110 Section 8.6: identical values may be collapsed into one.
+#[test]
+fn response_content_length_duplicates_collapse() {
+    let len = RESPONSE_DATA.len().to_string();
+    let lists = [
+        vec![Header::new("content-length", len.clone()); 2],
+        vec![Header::new("content-length", format!("{len}, {len}"))],
+        vec![Header::new("content-length", format!("{len},\t{len}"))],
+    ];
+    for list in lists {
+        let headers = [vec![Header::new(":status", "200")], list].concat();
+        let response = content_length_response("GET", &headers, &[RESPONSE_DATA]);
+        assert_eq!(response, (RESPONSE_DATA.to_vec(), true, None));
+    }
+}
+
+/// RFC 9110 Section 6.4.1: these responses never have content.
+#[test]
+fn response_without_content_ignores_content_length() {
+    for (method, status) in [("HEAD", "200"), ("GET", "204"), ("GET", "304")] {
+        let headers = status_and_content_length(status, RESPONSE_DATA.len());
+        let response = content_length_response(method, &headers, &[]);
+        assert_eq!(response, (Vec::new(), true, None));
+    }
+}
+
+#[test]
+fn content_length_mismatch_resets_only_its_stream() {
+    let mismatch = status_and_content_length("200", RESPONSE_DATA.len() + 1);
+    let matching = status_and_content_length("200", RESPONSE_DATA.len());
+    let body: &[&[u8]] = &[RESPONSE_DATA];
+    let responses = content_length_responses("GET", &[(&mismatch, body), (&matching, body)]);
+    let complete = (RESPONSE_DATA.to_vec(), true, None);
+    assert_eq!(responses, [message_error(), complete]);
+}
+
+fn request_content_length_mismatch(content_length: usize) {
+    let mut client = default_http3_client();
+    let mut server = default_http3_server();
+    let out = connect_peers(&mut client, &mut server);
+    let stream_id = client
+        .fetch(
+            now(),
+            "POST",
+            ("https", "something.com", "/"),
+            &[Header::new("content-length", content_length.to_string())],
+            Priority::default(),
+        )
+        .unwrap();
+    client.send_data(stream_id, RESPONSE_DATA, now()).unwrap();
+    client.stream_close_send(stream_id, now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, out);
+
+    let mut fin = false;
+    let mut reset = None;
+    while let Some(event) = server.next_event() {
+        match event {
+            Http3ServerEvent::Data { fin: end, .. } => fin |= end,
+            Http3ServerEvent::StreamReset { stream, error } => {
+                reset = Some((stream.stream_id(), error));
+            }
+            _ => {}
+        }
+    }
+    assert!(!fin);
+    let error = neqo_http3::Error::HttpMessage.code();
+    assert_eq!(reset, Some((stream_id, error)));
+    assert_eq!(client.state(), Http3State::Connected);
+}
+
+/// RFC 9114 Section 4.1.2: a content-length that differs from the DATA total is malformed.
+#[test]
+fn request_content_length_mismatch_resets_stream() {
+    request_content_length_mismatch(RESPONSE_DATA.len() - 1);
+    request_content_length_mismatch(RESPONSE_DATA.len() + 1);
 }

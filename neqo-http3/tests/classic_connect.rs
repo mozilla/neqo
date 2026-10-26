@@ -4,57 +4,56 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![cfg(test)]
+
 use neqo_common::{event::Provider as _, header::HeadersExt as _};
-use neqo_http3::{Error, Header, Http3ClientEvent, Http3ServerEvent, Priority};
+use neqo_http3::{
+    Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Server,
+    Http3ServerEvent, Priority,
+};
 use test_fixture::{default_http3_client, default_http3_server, exchange_packets, now};
 
 const AUTHORITY: &str = "something.com";
 
 #[test]
 fn classic_connect() {
-    // Connect a client and a server.
-    let mut client = default_http3_client();
-    let mut server = default_http3_server();
-    let out = test_fixture::connect_peers(&mut client, &mut server);
-    assert_eq!(server.process(out, now()).dgram(), None);
+    classic_connect_with(&[]);
+}
 
-    // Ignore all events so far.
-    drop(server.events());
-    client.events();
+/// RFC 9110 Section 6.4.1 and 9.3.6: neither a CONNECT request nor a 2xx response has content.
+#[test]
+fn classic_connect_ignores_content_length() {
+    classic_connect_with(&[Header::new("content-length", "1")]);
+}
 
-    // Have client send a CONNECT request.
-    let stream_id = client
-        .connect(now(), AUTHORITY, &[], Priority::default())
+/// RFC 9114 Section 4.1.2: a non-2xx response to CONNECT has content.
+#[test]
+fn classic_connect_error_response_content_length_mismatch() {
+    let (mut client, mut server, stream) = send_connect(&[]);
+    stream
+        .send_headers(&[
+            Header::new(":status", "404"),
+            Header::new("content-length", "1"),
+        ])
         .unwrap();
-    client.send_data(stream_id, b"ping", now()).unwrap();
+    stream.send_data(b"pong", now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
 
-    let Some(Http3ServerEvent::Headers { headers, .. }) = server.next_event() else {
-        panic!("Expected Headers event");
+    let reset = Http3ClientEvent::Reset {
+        stream_id: stream.stream_id(),
+        error: Error::HttpMessage.code(),
+        local: true,
     };
-    assert_eq!(
-        headers.find_header(":method").map(Header::value),
-        Some(b"CONNECT".as_ref())
-    );
-    assert_eq!(
-        headers.find_header(":authority").map(Header::value),
-        Some(AUTHORITY.as_bytes())
-    );
-    // > The :scheme and :path pseudo-header fields are omitted
-    //
-    // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
-    assert_eq!(headers.find_header(":scheme"), None);
-    assert_eq!(headers.find_header(":path"), None);
+    assert!(client.events().any(|e| e == reset));
+}
 
-    let Some(Http3ServerEvent::Data { stream, data, .. }) = server.next_event() else {
-        panic!("Expected Data event");
-    };
-    assert_eq!(stream.stream_id(), stream_id);
-    assert_eq!(data, b"ping");
+/// Sends `extra_headers` in both the CONNECT request and its response.
+fn classic_connect_with(extra_headers: &[Header]) {
+    let (mut client, mut server, stream) = send_connect(extra_headers);
 
     // Have server respond.
     stream
-        .send_headers(&[Header::new(":status", "200")])
+        .send_headers(&[&[Header::new(":status", "200")], extra_headers].concat())
         .unwrap();
     stream.send_data(b"pong", now()).unwrap();
     exchange_packets(&mut client, &mut server, false, None);
@@ -93,6 +92,50 @@ fn classic_connect() {
     let mut data = vec![0; 4];
     let (amount, _fin) = client.read_data(now(), stream_id, &mut data).unwrap();
     assert_eq!(&data[..amount], b"pong");
+}
+
+/// Sends a CONNECT request with `extra_headers` and "ping", and returns the server's stream.
+fn send_connect(extra_headers: &[Header]) -> (Http3Client, Http3Server, Http3OrWebTransportStream) {
+    // Connect a client and a server.
+    let mut client = default_http3_client();
+    let mut server = default_http3_server();
+    let out = test_fixture::connect_peers(&mut client, &mut server);
+    assert_eq!(server.process(out, now()).dgram(), None);
+
+    // Ignore all events so far.
+    drop(server.events());
+    client.events();
+
+    // Have client send a CONNECT request.
+    let stream_id = client
+        .connect(now(), AUTHORITY, extra_headers, Priority::default())
+        .unwrap();
+    client.send_data(stream_id, b"ping", now()).unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+
+    let Some(Http3ServerEvent::Headers { headers, .. }) = server.next_event() else {
+        panic!("Expected Headers event");
+    };
+    assert_eq!(
+        headers.find_header(":method").map(Header::value),
+        Some(b"CONNECT".as_ref())
+    );
+    assert_eq!(
+        headers.find_header(":authority").map(Header::value),
+        Some(AUTHORITY.as_bytes())
+    );
+    // > The :scheme and :path pseudo-header fields are omitted
+    //
+    // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+    assert_eq!(headers.find_header(":scheme"), None);
+    assert_eq!(headers.find_header(":path"), None);
+
+    let Some(Http3ServerEvent::Data { stream, data, .. }) = server.next_event() else {
+        panic!("Expected Data event");
+    };
+    assert_eq!(stream.stream_id(), stream_id);
+    assert_eq!(data, b"ping");
+    (client, server, stream)
 }
 
 #[test]

@@ -42,13 +42,13 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
     }
 }
 
-/// Check whether the response is informational(1xx).
+/// Get the status code of a response.
 ///
 /// # Errors
 ///
 /// Returns an error if response headers do not contain
 /// a status header or if the value of the header is 101 or cannot be parsed.
-pub fn is_interim(headers: &[Header]) -> Res<bool> {
+pub fn status(headers: &[Header]) -> Res<u16> {
     if let Some(h) = headers.iter().take(1).find_header(":status") {
         let status_code = std::str::from_utf8(h.value())
             .map_err(|_| Error::InvalidHeader)?
@@ -58,11 +58,36 @@ pub fn is_interim(headers: &[Header]) -> Res<bool> {
             // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
             Err(Error::InvalidHeader)
         } else {
-            Ok((100..200).contains(&status_code))
+            Ok(status_code)
         }
     } else {
         Err(Error::InvalidHeader)
     }
+}
+
+/// Check whether the response is informational(1xx).
+///
+/// # Errors
+///
+/// Returns an error if response headers do not contain
+/// a status header or if the value of the header is 101 or cannot be parsed.
+pub fn is_interim(headers: &[Header]) -> Res<bool> {
+    Ok((100..200).contains(&status(headers)?))
+}
+
+/// Merge `content-length` values into `length`; identical ones collapse (RFC 9110, Section 8.6).
+fn parse_content_length(value: &[u8], length: &mut Option<u64>) -> Res<()> {
+    let value = std::str::from_utf8(value).map_err(|_| Error::HttpMessage)?;
+    for v in value.split(',').map(|v| v.trim_matches([' ', '\t'])) {
+        if !v.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(Error::HttpMessage);
+        }
+        let v = v.parse().map_err(|_| Error::HttpMessage)?;
+        if length.replace(v).is_some_and(|l| l != v) {
+            return Err(Error::HttpMessage);
+        }
+    }
+    Ok(())
 }
 
 fn track_pseudo(
@@ -90,11 +115,13 @@ fn track_pseudo(
 
 /// Checks if request/response headers are well formed, i.e. contain
 /// allowed pseudo headers and in a right order, etc.
+/// Returns the value of the `content-length` field, if any.
 ///
 /// # Errors
 ///
 /// Returns an error if headers are not well formed.
-pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
+pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<Option<u64>> {
+    let mut content_length = None;
     let mut method_value: Option<&[u8]> = None;
     let mut protocol_value: Option<&[u8]> = None;
     let mut scheme_value: Option<&[u8]> = None;
@@ -133,6 +160,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 return Err(Error::InvalidHeader);
             }
             "te" if header.value() != b"trailers" => return Err(Error::InvalidHeader),
+            "content-length" => parse_content_length(header.value(), &mut content_length)?,
             _ => {}
         }
     }
@@ -171,7 +199,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         return Err(Error::InvalidHeader);
     }
 
-    Ok(())
+    Ok(content_length)
 }
 
 /// Checks if trailers are well formed, i.e. pseudo headers are not
