@@ -537,10 +537,22 @@ impl Http3Client {
     }
 
     /// The function establishes a classic HTTP CONNECT tunnel on top of this
-    /// connection using `target` and `headers`. Data can be send into the
+    /// connection using `authority` and `headers`. Data can be sent into the
     /// tunnel via [`Http3Client::send_data`] and received from the tunnel via
-    /// [`Http3Client::read_data`]. The tunnel can be closed via
-    /// [`Http3Client::stream_close_send`].
+    /// [`Http3Client::read_data`].
+    ///
+    /// The two directions of a tunnel end independently, and its stream is
+    /// only released once both have ended. The sending direction ends with
+    /// [`Http3Client::stream_close_send`], the receiving direction once
+    /// [`Http3Client::read_data`] has returned `fin`.
+    /// [`Http3Client::cancel_fetch`] aborts both directions.
+    ///
+    /// When the proxy ends one direction, the other one stays open:
+    ///
+    /// - After [`Http3ClientEvent::StopSending`], no more data can be sent. Read until `fin` or
+    ///   call [`Http3Client::cancel_fetch`].
+    /// - After [`Http3ClientEvent::Reset`], no more data can be received. Close the sending
+    ///   direction with [`Http3Client::stream_close_send`].
     ///
     /// # Errors
     ///
