@@ -1196,7 +1196,7 @@ fn migration_invalid_address() {
 
 /// Writes `count` `NEW_CONNECTION_ID` frames with consecutive sequence numbers,
 /// each retiring every previously issued connection ID.
-struct NewConnectionIds {
+pub struct NewConnectionIds {
     count: u64,
     cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>,
 }
@@ -1212,13 +1212,16 @@ impl NewConnectionIds {
 
     /// A single `NEW_CONNECTION_ID` frame that retires every previously issued
     /// connection ID.
-    fn retire_all(cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
+    pub fn retire_all(cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
         Self::new(1, cid_gen)
     }
 }
 
 impl test_internal::FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        if builder.packet_empty() {
+            return; // E.g., the Initial ahead of 0-RTT, which can't carry NEW_CONNECTION_ID.
+        }
         for i in 0..self.count {
             let seqno = Self::SEQNO + i;
             let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
