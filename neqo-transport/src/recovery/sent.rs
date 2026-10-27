@@ -239,6 +239,8 @@ impl Packet {
 pub struct Packets {
     /// The collection.
     packets: VecDeque<Packet>,
+    /// The number of packets declared lost, which are the first `lost` entries of `packets`.
+    lost: usize,
 }
 
 impl Packets {
@@ -250,6 +252,12 @@ impl Packets {
     #[must_use]
     pub fn len(&self) -> usize {
         self.packets.len()
+    }
+
+    #[cfg(test)]
+    #[must_use]
+    pub const fn lost(&self) -> usize {
+        self.lost
     }
 
     pub fn track(&mut self, packet: Packet) {
@@ -269,12 +277,49 @@ impl Packets {
                 return true;
             }
             count -= 1;
+            self.lost -= usize::from(p.lost());
             false
         });
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
         self.packets.iter_mut()
+    }
+
+    /// Declare packets below `largest_acked` lost, in order, until `trigger` returns `None`.
+    /// Returns the send time of the packet it stopped at, if any.
+    /// `trigger` must return `Some` for a prefix of the packets.
+    pub fn detect_lost<F>(
+        &mut self,
+        now: Instant,
+        largest_acked: packet::Number,
+        trigger: F,
+        lost_packets: &mut Vec<Packet>,
+    ) -> Option<Instant>
+    where
+        F: Fn(&Packet) -> Option<LossTrigger>,
+    {
+        let start = match self.lost.checked_sub(1).and_then(|i| self.packets.get(i)) {
+            Some(p) if trigger(p).is_none() => {
+                self.packets.partition_point(|p| trigger(p).is_some())
+            }
+            _ => self.lost,
+        };
+        for p in self
+            .packets
+            .range_mut(start..)
+            .take_while(|p| p.pn < largest_acked)
+        {
+            let Some(t) = trigger(p) else {
+                // No more packets can be declared lost after this one.
+                return Some(p.time_sent);
+            };
+            if p.declare_lost(now, t) {
+                self.lost += 1;
+                lost_packets.push(p.clone());
+            }
+        }
+        None
     }
 
     /// Take values from specified ranges of packet numbers.
@@ -309,6 +354,7 @@ impl Packets {
             }
             result.extend(self.packets.drain(start_idx..end_idx).rev());
         }
+        self.lost -= result.iter().filter(|p| p.lost()).count();
         result
     }
 
@@ -325,6 +371,7 @@ impl Packets {
         }
         let keep_from = self.packets.partition_point(|p| p.expired(now, cd));
         debug_assert!(self.packets.range(keep_from..).all(|p| !p.expired(now, cd)));
+        self.lost -= keep_from;
         self.packets
             .drain(..keep_from)
             .filter(Packet::ack_eliciting)
@@ -355,7 +402,7 @@ pub const fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> 
 )]
 mod tests {
     use std::{
-        cell::OnceCell,
+        cell::{Cell, OnceCell},
         time::{Duration, Instant},
     };
 
@@ -442,19 +489,45 @@ mod tests {
         assert_eq!(pkts.len(), 0);
     }
 
+    const LOSE_ALL: fn(&Packet) -> Option<LossTrigger> = |_| Some(LossTrigger::TimeThreshold);
+
     #[test]
     fn remove_expired() {
         let mut pkts = pkts();
         remove_one(&mut pkts, 0);
 
-        for p in pkts.iter_mut() {
-            p.declare_lost(p.time_sent, LossTrigger::TimeThreshold); // just to keep things simple.
-        }
+        let mut lost = Vec::new();
+        pkts.detect_lost(start_time() + PACKET_GAP, 2, LOSE_ALL, &mut lost);
+        pkts.detect_lost(start_time() + PACKET_GAP * 2, 3, LOSE_ALL, &mut lost);
 
         // Expire up to pkt(1).
         let count = pkts.remove_expired(start_time() + PACKET_GAP, Duration::new(0, 0));
         assert_eq!(count, 1);
         assert_eq!(pkts.len(), 1);
+    }
+
+    /// Loss detection does not scan all lost packets when the last of them no longer triggers.
+    #[test]
+    fn detect_lost_resume_logarithmic() {
+        const N: u32 = 1024;
+        let mut pkts = Packets::default();
+        for n in 0..N {
+            pkts.track(pkt(n));
+        }
+        let now = start_time() + PACKET_GAP * N;
+        let mut lost = Vec::new();
+        assert_eq!(pkts.detect_lost(now, N.into(), LOSE_ALL, &mut lost), None);
+        assert_eq!(pkts.lost(), usize::try_from(N).unwrap());
+
+        let calls = Cell::new(0);
+        let all_but_last = |p: &Packet| {
+            calls.set(calls.get() + 1);
+            (p.pn < u64::from(N - 1)).then_some(LossTrigger::TimeThreshold)
+        };
+        let stop = pkts.detect_lost(now, N.into(), all_but_last, &mut lost);
+        assert_eq!(stop, Some(start_time() + PACKET_GAP * (N - 1)));
+        let calls = calls.get();
+        assert!(calls <= N.ilog2() + 4, "{calls} trigger calls");
     }
 
     #[test]

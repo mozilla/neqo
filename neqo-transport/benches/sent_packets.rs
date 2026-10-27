@@ -34,12 +34,6 @@ fn make_packet(i: u64, now: Instant) -> sent::Packet {
     )
 }
 
-fn make_lost_packet(i: u64, now: Instant) -> sent::Packet {
-    let mut p = make_packet(i, now);
-    p.declare_lost(now, LossTrigger::TimeThreshold);
-    p
-}
-
 fn collect_packets(iter: impl IntoIterator<Item = sent::Packet>) -> sent::Packets {
     let mut pkts = sent::Packets::default();
     iter.into_iter().for_each(|p| pkts.track(p));
@@ -94,11 +88,16 @@ fn remove_expired(c: &mut Criterion) {
     c.bench_function("sent::Packets::remove_expired half-expired", |b| {
         b.iter_batched_ref(
             || {
-                collect_packets(
+                let mut pkts = collect_packets(
                     (0..PACKETS / 2)
-                        .map(|i| make_lost_packet(i, old))
-                        .chain((PACKETS / 2..PACKETS).map(|i| make_lost_packet(i, now))),
-                )
+                        .map(|i| make_packet(i, old))
+                        .chain((PACKETS / 2..PACKETS).map(|i| make_packet(i, now))),
+                );
+                let trigger = |_: &sent::Packet| Some(LossTrigger::TimeThreshold);
+                let mut lost = Vec::new();
+                pkts.detect_lost(old, PACKETS / 2, trigger, &mut lost);
+                pkts.detect_lost(now, PACKETS, trigger, &mut lost);
+                pkts
             },
             |pkts| black_box(pkts.remove_expired(now, cd)),
             BatchSize::SmallInput,
