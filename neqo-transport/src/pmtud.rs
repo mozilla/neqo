@@ -391,7 +391,7 @@ mod tests {
         let stats_before = stats.clone();
 
         // Fake a packet number, so the builder logic works.
-        let profile = SendProfile::new_limited(pmtud.plpmtu());
+        let profile = SendProfile::new_limited(pmtud.plpmtu(), pmtud.plpmtu());
         let expansion = prot.expansion();
         let limit = if pmtud.needs_probe() {
             pmtud.probe_size() - expansion

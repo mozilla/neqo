@@ -26,7 +26,7 @@ use test_fixture::{
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
+    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle, cwnd_avail,
     default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
     zero_len_cid_client,
 };
@@ -35,8 +35,9 @@ use crate::{
     ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
     MIN_INITIAL_PACKET_SIZE,
     cid::ConnectionIdManager,
-    connection::tests::{
-        assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
+    connection::{
+        test_internal,
+        tests::{assert_path_challenge_min_len, connect, send_something_paced, send_with_extra},
     },
     frame::FrameType,
     packet,
@@ -1216,7 +1217,7 @@ impl NewConnectionIds {
     }
 }
 
-impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
+impl test_internal::FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         for i in 0..self.count {
             let seqno = Self::SEQNO + i;
@@ -1309,7 +1310,7 @@ fn retire_cid_queue_bounded() {
 /// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
 struct RetireUnissued(u64);
 
-impl crate::connection::test_internal::FrameWriter for RetireUnissued {
+impl test_internal::FrameWriter for RetireUnissued {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::RetireConnectionId)
@@ -1447,7 +1448,7 @@ fn retire_prior_to_migration_success() {
 
 struct GarbageWriter {}
 
-impl crate::connection::test_internal::FrameWriter for GarbageWriter {
+impl test_internal::FrameWriter for GarbageWriter {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);
@@ -1494,4 +1495,37 @@ fn error_on_new_path_with_no_connection_id() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::UnknownFrameType))
     ));
+}
+
+struct PathChallengeWriter {}
+
+impl test_internal::FrameWriter for PathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::PathChallenge);
+        builder.encode([0; 8]);
+    }
+}
+
+/// A `PATH_RESPONSE` does not cause padding in a packet limited by the congestion window.
+#[test]
+fn path_response_not_padded_when_cwnd_limited() {
+    let mut client = new_client(ConnectionParameters::default().pacing(false));
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // Leave less than a full MTU of congestion window, with nothing left to send.
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    while cwnd_avail(&client) >= client.plpmtu() {
+        client.stream_send(id, &[0; 500]).unwrap();
+        while client.process_output(now()).dgram().is_some() {}
+    }
+
+    let challenge = send_with_extra(&mut server, PathChallengeWriter {}, now());
+    client.process_input(challenge, now());
+    let before = client.stats().frame_tx;
+    client.stream_send(id, &[0; 10]).unwrap();
+    assert!(client.process_output(now()).dgram().is_some());
+    let after = client.stats().frame_tx;
+    assert_eq!(after.path_response, before.path_response + 1);
+    assert_eq!(after.padding, before.padding);
 }

@@ -138,6 +138,8 @@ pub struct Builder<B> {
     limit: usize,
     /// Whether to pad the packet before construction.
     padding: bool,
+    /// Whether the packet contains padding.
+    padded: bool,
 }
 
 impl Builder<Vec<u8>> {
@@ -257,6 +259,7 @@ impl<B: Buffer> Builder<B> {
             },
             limit,
             padding: false,
+            padded: false,
         }
     }
 
@@ -303,6 +306,7 @@ impl<B: Buffer> Builder<B> {
             },
             limit,
             padding: false,
+            padded: false,
         }
     }
 
@@ -348,17 +352,23 @@ impl<B: Buffer> Builder<B> {
 
     /// Maybe pad with "PADDING" frames.
     /// Only does so if padding was needed and this is a short packet.
-    /// Returns true if padding was added.
+    /// Returns true if the packet contains padding.
     ///
     /// # Panics
     ///
     /// Cannot happen.
     pub fn pad(&mut self) -> bool {
-        if self.padding && !self.is_long() {
-            self.encoder.pad_to(self.limit, FrameType::Padding.into());
-            true
-        } else {
-            false
+        self.pad_before(0);
+        self.padded
+    }
+
+    /// Maybe pad with "PADDING" frames, so that a final frame of `len` bytes ends at the limit.
+    /// Only does so if padding was needed and this is a short packet.
+    pub fn pad_before(&mut self, len: usize) {
+        if self.padding && !self.is_long() && len < self.remaining() {
+            self.encoder
+                .pad_to(self.limit - len, FrameType::Padding.into());
+            self.padded = true;
         }
     }
 
@@ -1556,6 +1566,22 @@ mod tests {
         );
         assert_eq!(builder.remaining(), 0);
         assert_eq!(builder.abort(), encoder_copy);
+    }
+
+    #[test]
+    fn pad_full() {
+        let mut builder = Builder::short(
+            Encoder::default(),
+            true,
+            Some(ConnectionId::from(SERVER_CID)),
+            100,
+        );
+        builder.pn(0, 1);
+        builder.enable_padding(true);
+        builder.mark_full();
+        let len = builder.len();
+        assert!(!builder.pad());
+        assert_eq!(builder.len(), len);
     }
 
     /// Given an encoder that already contains some QUIC packet(s), i.e. is

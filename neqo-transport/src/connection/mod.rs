@@ -2535,8 +2535,7 @@ impl Connection {
     }
 
     /// Write frames to the provided builder.  Returns a list of tokens used for
-    /// tracking loss or acknowledgment, whether any frame was ACK eliciting, and
-    /// whether the packet was padded.
+    /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
     fn write_frames(
         &mut self,
         path: &PathRef,
@@ -2545,7 +2544,7 @@ impl Connection {
         builder: &mut packet::Builder<&mut Vec<u8>>,
         pmtud_probe: bool,
         now: Instant,
-    ) -> (recovery::Tokens, bool, bool) {
+    ) -> (recovery::Tokens, bool) {
         let mut tokens = recovery::Tokens::new();
         let primary = path.borrow().is_primary();
         let mut ack_eliciting = false;
@@ -2565,7 +2564,7 @@ impl Connection {
 
         // Avoid sending path validation probes until the handshake completes,
         // but send them even when we don't have space.
-        let full_mtu = profile.permits_full_mtu(path.borrow().plpmtu());
+        let full_mtu = profile.full_mtu();
         // PMTUD must not record a success for a packet that was never probe-sized.
         debug_assert!(
             !pmtud_probe || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
@@ -2578,14 +2577,15 @@ impl Connection {
                 &mut self.stats.borrow_mut().frame_tx,
                 full_mtu,
                 now,
-            ) {
+            ) && full_mtu
+            {
                 builder.enable_padding(true);
             }
         }
 
         if profile.ack_only() {
             // If we are CC limited we can only send ACKs!
-            return (tokens, false, false);
+            return (tokens, false);
         }
 
         if primary {
@@ -2623,19 +2623,7 @@ impl Connection {
         // If this is not the primary path, this should be ack-eliciting.
         debug_assert!(primary || ack_eliciting);
 
-        // Add padding.  Only pad 1-RTT packets so that we don't prevent coalescing.
-        // And avoid padding packets that otherwise only contain ACK because adding PADDING
-        // causes those packets to consume congestion window, which is not tracked (yet).
-        // And avoid padding if we don't have a full MTU available.
-        let stats = &mut self.stats.borrow_mut().frame_tx;
-        let padded = if ack_eliciting && full_mtu && builder.pad() {
-            stats.padding += 1;
-            true
-        } else {
-            false
-        };
-
-        (tokens, ack_eliciting, padded)
+        (tokens, ack_eliciting)
     }
 
     fn write_closing_frames<B: Buffer>(
@@ -2847,12 +2835,11 @@ impl Connection {
 
             // Add frames to the packet.
             let payload_start = builder.len();
-            let (mut tokens, mut ack_eliciting, mut padded) =
-                (recovery::Tokens::new(), false, false);
+            let (mut tokens, mut ack_eliciting) = (recovery::Tokens::new(), false);
             if let Some(close) = closing_frame {
                 self.write_closing_frames(close, &mut builder, space, now, path, &mut tokens);
             } else {
-                (tokens, ack_eliciting, padded) =
+                (tokens, ack_eliciting) =
                     self.write_frames(path, space, &profile, &mut builder, pmtud_probe, now);
             }
             if builder.packet_empty() {
@@ -2861,6 +2848,9 @@ impl Connection {
 
                 continue;
             }
+
+            // Padding is only enabled for full MTU packets or after an Initial.
+            let padded = (ack_eliciting || initial_sent.is_some()) && builder.pad();
 
             if packet_tos.is_ecn_marked() {
                 tokens.push(recovery::Token::EcnEct0);
@@ -2903,8 +2893,13 @@ impl Connection {
                 ack_eliciting,
                 tokens,
                 encoder.len() - header_start,
-            );
-            if padded {
+            )
+            .with_padding(padded);
+            if !pt.is_long() {
+                if padded {
+                    self.stats.borrow_mut().frame_tx.padding += 1;
+                }
+                // Padding after a short header packet would join its ciphertext.
                 needs_padding = false;
                 self.loss_recovery.on_packet_sent(path, sent, now);
             } else if pt == packet::Type::Initial && (self.role == Role::Client || ack_eliciting) {
