@@ -2419,6 +2419,8 @@ impl ExtensionHandler for OmitExtension {
     }
 }
 
+/// Overwrite the QUIC transport parameters extension handler in TLS
+/// with one that does not write an extension.
 /// Must be called before the client writes its `ClientHello`.
 fn omit_transport_parameters(client: &mut Connection) {
     client
