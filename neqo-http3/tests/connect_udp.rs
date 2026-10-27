@@ -46,10 +46,18 @@ fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
 fn initiate_new_session_with_client_params(
     client_conn_params: ConnectionParameters,
 ) -> (Http3Client, Http3Server, neqo_http3::StreamId) {
-    let proxy_conn_params = ConnectionParameters::default()
-        .pmtud(true)
-        .datagram_size(1500);
+    initiate_new_session_with_params(
+        client_conn_params,
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(1500),
+    )
+}
 
+fn initiate_new_session_with_params(
+    client_conn_params: ConnectionParameters,
+    proxy_conn_params: ConnectionParameters,
+) -> (Http3Client, Http3Server, neqo_http3::StreamId) {
     let mut client = http3_client_with_params(
         Http3Parameters::default()
             .connect(true)
@@ -70,15 +78,15 @@ fn initiate_new_session_with_client_params(
 
     // Establish connect-udp session.
     let connect_udp_session_id = client
-        .connect_udp_create_session(
-            now(),
-            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
-                .parse::<Uri>()
-                .unwrap(),
-            &[],
-        )
+        .connect_udp_create_session(now(), &target(), &[])
         .unwrap();
     (client, proxy, connect_udp_session_id)
+}
+
+fn target() -> Uri {
+    format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
+        .parse()
+        .unwrap()
 }
 
 fn establish_new_session() -> (Http3Client, Http3Server, ServerSession) {
@@ -92,8 +100,20 @@ fn establish_new_session() -> (Http3Client, Http3Server, ServerSession) {
 fn establish_new_session_with_client_params(
     client_conn_params: ConnectionParameters,
 ) -> (Http3Client, Http3Server, ServerSession) {
+    establish_new_session_with_params(
+        client_conn_params,
+        ConnectionParameters::default()
+            .pmtud(true)
+            .datagram_size(1500),
+    )
+}
+
+fn establish_new_session_with_params(
+    client_conn_params: ConnectionParameters,
+    proxy_conn_params: ConnectionParameters,
+) -> (Http3Client, Http3Server, ServerSession) {
     let (mut client, mut proxy, connect_udp_session_id) =
-        initiate_new_session_with_client_params(client_conn_params);
+        initiate_new_session_with_params(client_conn_params, proxy_conn_params);
     exchange_packets(&mut client, &mut proxy, false, None);
     let proxy_session = proxy
         .events()
@@ -311,6 +331,41 @@ fn session_lifecycle(client_closes: bool) {
             })
             .unwrap();
     }
+}
+
+/// A closed session releases its stream, so a single-stream proxy accepts the next session.
+fn session_close_frees_stream(client_closes: bool) {
+    let conn_params = ConnectionParameters::default()
+        .pmtud(true)
+        .datagram_size(1500);
+    let (mut client, mut proxy, proxy_session) = establish_new_session_with_params(
+        conn_params.clone(),
+        conn_params.max_streams(StreamType::BiDi, 1),
+    );
+    let session_id = proxy_session.stream_id();
+
+    if client_closes {
+        client
+            .connect_udp_close_session(session_id, 0, "", now())
+            .unwrap();
+    } else {
+        proxy_session.close_session(0, "", now()).unwrap();
+    }
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    let next_id = neqo_http3::StreamId::new(session_id.as_u64() + 4);
+    let next = client.connect_udp_create_session(now(), &target(), &[]);
+    assert_eq!(next, Ok(next_id));
+}
+
+#[test]
+fn session_close_client_frees_stream() {
+    session_close_frees_stream(true);
+}
+
+#[test]
+fn session_close_server_frees_stream() {
+    session_close_frees_stream(false);
 }
 
 #[test]

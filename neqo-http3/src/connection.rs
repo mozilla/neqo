@@ -36,7 +36,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            TransportPrerequisites,
+            TransportPrerequisites, WT_SESSION_GONE,
             send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
@@ -434,7 +434,7 @@ impl Http3Connection {
                 false
             };
             if done {
-                self.remove_send_stream(stream_id, conn);
+                self.remove_send_stream(stream_id, CloseType::Done, conn);
             }
         }
         Ok(())
@@ -830,7 +830,7 @@ impl Http3Connection {
     {
         match &output {
             Ok((_, true)) => {
-                self.remove_recv_stream(stream_id, conn);
+                self.remove_recv_stream(stream_id, CloseType::Done, conn);
             }
             Ok((_, false)) => {}
             Err(e) => {
@@ -950,17 +950,18 @@ impl Http3Connection {
     where
         T: RequestTarget,
     {
+        // Extended CONNECT sessions are set up by `extended_connect_create_session`.
+        // Every stream created here, including a classic CONNECT tunnel, is a
+        // regular HTTP stream whose two directions are closed independently.
+        debug_assert!(
+            !matches!(request.connect_type, Some(ConnectType::Extended(_))),
+            "extended CONNECT must use extended_connect_create_session"
+        );
         let final_headers = Self::create_request_headers(request)?;
-
-        let stream_type = if request.connect_type.is_some() {
-            Http3StreamType::ExtendedConnect
-        } else {
-            Http3StreamType::Http
-        };
 
         let mut send_message = SendMessage::new(
             MessageType::Request,
-            stream_type,
+            Http3StreamType::Http,
             stream_id,
             Rc::clone(&self.qpack_encoder),
             send_events,
@@ -977,7 +978,7 @@ impl Http3Connection {
             Box::new(RecvMessage::new(
                 &RecvMessageInfo {
                     message_type: MessageType::Response,
-                    stream_type,
+                    stream_type: Http3StreamType::Http,
                     stream_id,
                     first_frame_type: None,
                 },
@@ -1204,7 +1205,7 @@ impl Http3Connection {
         // has been closed already. It is ok to ignore it here.
         drop(send_stream.close(conn, now));
         if send_stream.done() {
-            self.remove_send_stream(stream_id, conn);
+            self.remove_send_stream(stream_id, CloseType::Done, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
         }
@@ -1520,7 +1521,7 @@ impl Http3Connection {
 
         send_stream.close_with_message(conn, error, message, now)?;
         if send_stream.done() {
-            self.remove_send_stream(session_id, conn);
+            self.remove_send_stream(session_id, CloseType::Done, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
         }
@@ -1919,7 +1920,7 @@ impl Http3Connection {
     }
 
     fn close_send(&mut self, stream_id: StreamId, close_type: CloseType, conn: &mut Connection) {
-        if let Some(mut s) = self.remove_send_stream(stream_id, conn) {
+        if let Some(mut s) = self.remove_send_stream(stream_id, close_type, conn) {
             s.handle_stop_sending(close_type);
         }
     }
@@ -1930,7 +1931,7 @@ impl Http3Connection {
         close_type: CloseType,
         conn: &mut Connection,
     ) -> Res<()> {
-        if let Some(mut s) = self.remove_recv_stream(stream_id, conn) {
+        if let Some(mut s) = self.remove_recv_stream(stream_id, close_type, conn) {
             s.reset(close_type)?;
         }
         Ok(())
@@ -1974,13 +1975,28 @@ impl Http3Connection {
     fn remove_recv_stream(
         &mut self,
         stream_id: StreamId,
+        close_type: CloseType,
         conn: &mut Connection,
     ) -> Option<Box<dyn RecvStream>> {
         let stream = self.recv_streams.remove(&stream_id);
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
         {
-            self.send_streams.remove(&stream_id)?;
+            let send = self.send_streams.remove(&stream_id)?;
+            drop(match close_type {
+                // draft-ietf-webtrans-http3 defines no code for this reset.
+                CloseType::ResetRemote(_) => {
+                    conn.stream_reset_send(stream_id, Error::HttpRequestCancelled.code())
+                }
+                CloseType::ResetApp(e) | CloseType::LocalError(e) => {
+                    conn.stream_reset_send(stream_id, e)
+                }
+                CloseType::Done if !send.done() => {
+                    self.send_streams.insert(stream_id, send); // Sends its FIN after the buffered data.
+                    Ok(())
+                }
+                CloseType::Done => conn.stream_close_send(stream_id),
+            });
             if let Some(wt) = s.extended_connect_session() {
                 self.remove_extended_connect(&wt, conn);
             }
@@ -1991,17 +2007,36 @@ impl Http3Connection {
     fn remove_send_stream(
         &mut self,
         stream_id: StreamId,
+        close_type: CloseType,
         conn: &mut Connection,
     ) -> Option<Box<dyn SendStream>> {
         let stream = self.send_streams.remove(&stream_id);
         if let Some(s) = &stream
             && s.stream_type() == Http3StreamType::ExtendedConnect
-            && let Some(wt) = self
-                .recv_streams
-                .remove(&stream_id)?
-                .extended_connect_session()
         {
-            self.remove_extended_connect(&wt, conn);
+            // After a clean close, the session reads the peer's FIN or reset.
+            let wt = if let Some(e) = close_type.error() {
+                let wt = self
+                    .recv_streams
+                    .remove(&stream_id)
+                    .and_then(|r| r.extended_connect_session());
+                let error = match (close_type, wt.as_ref().map(|s| s.borrow().connect_type())) {
+                    (CloseType::ResetRemote(_), Some(ExtendedConnectType::WebTransport)) => {
+                        WT_SESSION_GONE
+                    }
+                    (CloseType::ResetRemote(_), _) => Error::HttpRequestCancelled.code(),
+                    _ => e,
+                };
+                drop(conn.stream_stop_sending(stream_id, error));
+                wt
+            } else {
+                self.recv_streams
+                    .get(&stream_id)
+                    .and_then(|r| r.extended_connect_session())
+            };
+            if let Some(wt) = wt {
+                self.remove_extended_connect(&wt, conn);
+            }
         }
         stream
     }

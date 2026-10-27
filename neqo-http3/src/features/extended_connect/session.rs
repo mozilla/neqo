@@ -213,11 +213,27 @@ impl Session {
 
     fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
         qtrace!("[{self}] receive control data");
-        let (out, _) = self.control_stream_recv.receive(conn, now)?;
+        let (out, closed) = self.control_stream_recv.receive(conn, now)?;
         debug_assert_eq!(out, ReceiveOutput::NoOutput);
+        if self.state == State::Done {
+            // Closed locally: discard the peer's data up to its FIN.
+            let done = closed || self.discard_to_fin(conn, now)?;
+            return Ok((ReceiveOutput::NoOutput, done));
+        }
         self.maybe_check_headers()?;
-        self.read_control_stream(conn, now)?;
-        Ok((ReceiveOutput::NoOutput, self.state == State::Done))
+        let ended = self.read_control_stream(conn, now)?;
+        Ok((ReceiveOutput::NoOutput, ended || self.state == State::Done))
+    }
+
+    fn discard_to_fin(&mut self, conn: &mut Connection, now: Instant) -> Res<bool> {
+        let mut buf = [0; 64];
+        loop {
+            match self.control_stream_recv.read_data(conn, &mut buf, now)? {
+                (_, true) => return Ok(true),
+                (0, false) => return Ok(false),
+                _ => {}
+            }
+        }
     }
 
     fn header_unblocked(
@@ -392,10 +408,12 @@ impl Session {
         self.protocol.take_sub_streams()
     }
 
+    /// Returns whether the peer ended the session cleanly.
+    ///
     /// # Errors
     ///
     /// It may return an error if the frame is not correctly decoded.
-    pub(crate) fn read_control_stream(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
+    pub(crate) fn read_control_stream(&mut self, conn: &mut Connection, now: Instant) -> Res<bool> {
         qdebug!("[{self}]: read_control_stream");
         if let Some(new_state) = self.protocol.read_control_stream(
             conn,
@@ -404,8 +422,16 @@ impl Session {
             now,
         )? {
             self.enter_state(new_state, conn, now);
+            if new_state == State::Done {
+                // FIN after any buffered data; this fails if a local close already queued it.
+                drop(self.control_stream_send.close(conn, now));
+                if !self.control_stream_send.done() {
+                    self.state = State::FinPending;
+                }
+                return Ok(true);
+            }
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Change state; on the first move into a closing state, expire and drop
