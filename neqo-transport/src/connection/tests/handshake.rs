@@ -18,7 +18,12 @@ use std::{
 };
 
 use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, qdebug, to_u64};
-use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
+use nss::{
+    AuthenticationStatus, HandshakeMessage,
+    constants::TLS_CHACHA20_POLY1305_SHA256,
+    ext::{ExtensionHandler, ExtensionWriterResult},
+    generate_ech_keys,
+};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
@@ -30,9 +35,9 @@ use test_fixture::{
 use super::{
     super::{Connection, Output, State, test_internal},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
-    send_something, zero_len_cid_client,
+    assert_error, connect, connect_fail, connect_force_idle, connect_with_rtt, default_client,
+    default_server, drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram,
+    resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamId,
@@ -2404,4 +2409,52 @@ fn expand_datagram_that_ends_in_short_datagram_frame() {
     assert_decrypts(&mut server, c3, t);
     assert_eq!(server.stats().frame_rx.datagram, received + 1);
     assert_eq!(client.stats().frame_tx.padding, 1);
+}
+
+struct OmitExtension;
+
+impl ExtensionHandler for OmitExtension {
+    fn write(&mut self, _: HandshakeMessage, _: bool, _: &mut [u8]) -> ExtensionWriterResult {
+        ExtensionWriterResult::Skip
+    }
+}
+
+/// Overwrite the QUIC transport parameters extension handler in TLS
+/// with one that does not write an extension.
+/// Must be called before the client writes its `ClientHello`.
+fn omit_transport_parameters(client: &mut Connection) {
+    client
+        .crypto
+        .tls_mut()
+        .extension_handler(0x39, Rc::new(RefCell::new(OmitExtension)))
+        .unwrap();
+}
+
+#[test]
+fn client_omits_transport_parameters() {
+    let mut client = default_client();
+    omit_transport_parameters(&mut client);
+    let mut server = default_server();
+    let alert = Error::CryptoAlert(109); // missing_extension
+    connect_fail(&mut client, &mut server, Error::Peer(alert.code()), alert);
+}
+
+#[test]
+fn client_omits_transport_parameters_0rtt() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    omit_transport_parameters(&mut client);
+    client.enable_resumption(now(), token).unwrap();
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    let mut server = resumed_server(&client);
+    while let Some(d) = client.process_output(now()).dgram() {
+        server.process_input(d, now());
+    }
+    assert_eq!(server.stats().frame_rx.stream, 0);
+    assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(109)));
 }
