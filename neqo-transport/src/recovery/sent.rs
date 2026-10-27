@@ -7,12 +7,19 @@
 // A collection for sent packets.
 
 use std::{
+    cmp::min,
     collections::VecDeque,
-    ops::RangeInclusive,
+    ops::{Range, RangeInclusive},
     time::{Duration, Instant},
 };
 
+use smallvec::{SmallVec, smallvec};
+
 use crate::{packet, recovery, tracking::PacketNumberSpace};
+
+/// [`Packets::take_ranges`] drains acknowledged ranges one by one until the packets they move
+/// would exceed this many times the number of tracked packets, then takes the rest in one pass.
+const ACK_RANGE_DRAIN_FACTOR: usize = 4;
 
 /// The reason a packet was declared lost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,8 +310,10 @@ impl Packets {
         //
         // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
         let mut previous_range_start: Option<packet::Number> = None;
+        let mut moved = 0;
+        let mut ranges = acked_ranges.into_iter();
 
-        for range in acked_ranges {
+        while let Some(range) = ranges.next() {
             debug_assert!(
                 previous_range_start.is_none_or(|s| s > *range.end()),
                 "ACK ranges must be in descending order per RFC 9000 \u{a7}19.3.1"
@@ -316,9 +325,73 @@ impl Packets {
             if start_idx == end_idx {
                 continue;
             }
+            let len = self.packets.len();
+            moved += min(start_idx, len - end_idx);
+            if moved > ACK_RANGE_DRAIN_FACTOR * len {
+                self.take_rest(start_idx..end_idx, ranges, &mut result);
+                break;
+            }
             result.extend(self.packets.drain(start_idx..end_idx).rev());
         }
         result
+    }
+
+    /// Append the packets at `first` and in the remaining `ranges` to `result`.
+    #[cold]
+    #[inline(never)]
+    fn take_rest(
+        &mut self,
+        first: Range<usize>,
+        ranges: impl Iterator<Item = RangeInclusive<packet::Number>>,
+        result: &mut Vec<Packet>,
+    ) {
+        let mut hits: SmallVec<[_; 8]> = smallvec![first];
+        for range in ranges {
+            let start_idx = self.packets.partition_point(|p| p.pn < *range.start());
+            let end_idx = self.packets.partition_point(|p| p.pn <= *range.end());
+            if start_idx != end_idx {
+                hits.push(start_idx..end_idx);
+            }
+        }
+        self.take_hits(&hits, result);
+    }
+
+    /// Append the packets at `hits`, which are disjoint and in descending order, to `result`.
+    #[cold]
+    #[inline(never)]
+    fn take_hits(&mut self, hits: &[Range<usize>], result: &mut Vec<Packet>) {
+        debug_assert!(hits.windows(2).all(|w| w[1].end <= w[0].start));
+        let (Some(first), Some(last)) = (hits.first(), hits.last()) else {
+            return;
+        };
+        // One pass from the hits to the nearer end, putting back unacknowledged packets.
+        let (lo, hi) = (last.start, first.end);
+        if hi <= self.packets.len() - lo {
+            let mut hits = hits.iter().peekable();
+            let mut head: Vec<_> = self.packets.drain(..hi).collect();
+            while let Some(p) = head.pop() {
+                let i = head.len();
+                while hits.next_if(|r| r.start > i).is_some() {}
+                if hits.peek().is_some_and(|r| r.contains(&i)) {
+                    result.push(p);
+                } else {
+                    self.packets.push_front(p);
+                }
+            }
+        } else {
+            let mut hits = hits.iter().rev().peekable();
+            let tail: Vec<_> = self.packets.drain(lo..).collect();
+            let taken = result.len();
+            for (i, p) in (lo..).zip(tail) {
+                while hits.next_if(|r| r.end <= i).is_some() {}
+                if hits.peek().is_some_and(|r| r.contains(&i)) {
+                    result.push(p);
+                } else {
+                    self.packets.push_back(p);
+                }
+            }
+            result[taken..].reverse();
+        }
     }
 
     /// Empty out all tracked packets.
@@ -365,10 +438,11 @@ pub const fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> 
 mod tests {
     use std::{
         cell::OnceCell,
+        ops::RangeInclusive,
         time::{Duration, Instant},
     };
 
-    use super::{LossTrigger, Packet, Packets};
+    use super::{ACK_RANGE_DRAIN_FACTOR, LossTrigger, Packet, Packets};
     use crate::{packet, recovery};
 
     const PACKET_GAP: Duration = Duration::from_secs(1);
@@ -504,6 +578,77 @@ mod tests {
             .map(|p| u32::try_from(p.pn).unwrap())
             .collect();
         assert_eq!(remaining, [0, 3]);
+    }
+
+    /// `take_ranges` with ranges that are adjacent in the queue, near either end of it.
+    #[test]
+    fn take_ranges_adjacent() {
+        let check = |ranges: [RangeInclusive<packet::Number>; 2],
+                     acked: [packet::Number; 4],
+                     remaining: [packet::Number; 6]| {
+            let mut pkts = Packets::default();
+            for i in [0, 1, 3, 4, 5, 6, 7, 8, 10, 11] {
+                pkts.track(pkt(i));
+            }
+            let taken: Vec<_> = pkts.take_ranges(ranges).iter().map(|p| p.pn).collect();
+            assert_eq!(taken, acked);
+            assert!(pkts.iter_mut().map(|p| p.pn).eq(remaining));
+        };
+        check([10..=11, 7..=8], [11, 10, 8, 7], [0, 1, 3, 4, 5, 6]);
+        check([3..=4, 0..=1], [4, 3, 1, 0], [5, 6, 7, 8, 10, 11]);
+    }
+
+    /// Track `tracked`, take `ranges` and check the packets taken and the packets left.
+    fn assert_take_ranges(tracked: &[u32], ranges: Vec<RangeInclusive<packet::Number>>) {
+        let mut pkts = Packets::default();
+        for &i in tracked {
+            pkts.track(pkt(i));
+        }
+        let all = tracked.iter().map(|&i| packet::Number::from(i));
+        let (acked, remaining): (Vec<_>, Vec<_>) =
+            all.partition(|pn| ranges.iter().any(|r| r.contains(pn)));
+        let taken = pkts.take_ranges(ranges).into_iter().map(|p| p.pn);
+        assert!(taken.eq(acked.into_iter().rev()));
+        assert!(pkts.iter_mut().map(|p| p.pn).eq(remaining));
+    }
+
+    /// `take_ranges` with many single-packet ranges over many packets, near either end of them.
+    #[test]
+    fn take_ranges_many() {
+        let count = u32::try_from(recovery::MAX_TRACKED_ACK_ONLY).unwrap();
+        let tracked: Vec<_> = (0..count).collect();
+        let check = |largest: packet::Number| {
+            let ranges = (0..570).map(|i| largest - 2 * i).map(|pn| pn..=pn);
+            assert_take_ranges(&tracked, ranges.collect());
+        };
+        check(packet::Number::from(count / 4));
+        check(packet::Number::from(count / 4 * 3));
+    }
+
+    /// `take_ranges` with many ranges that are adjacent in the queue, near either end of it.
+    #[test]
+    fn take_ranges_many_adjacent() {
+        let ranges = 570;
+        // Track packets 3k and 3k + 1, so that ranges of such pairs are adjacent in the queue.
+        let tracked: Vec<_> = (0..6 * ranges).filter(|i| i % 3 != 2).collect();
+        let pair = |k| packet::Number::from(3 * k)..=packet::Number::from(3 * k + 1);
+        assert_take_ranges(&tracked, (ranges..2 * ranges).rev().map(pair).collect());
+        assert_take_ranges(&tracked, (0..ranges).rev().map(pair).collect());
+    }
+
+    /// `take_ranges` with adjacent ranges in the middle of the queue, which move enough packets to
+    /// take the rest in one pass, and with as many ranges at the back of it, which don't.
+    #[test]
+    fn take_ranges_moved() {
+        let pairs = 1000;
+        let tracked: Vec<_> = (0..3 * pairs).filter(|i| i % 3 != 2).collect();
+        let pair = |k| packet::Number::from(3 * k)..=packet::Number::from(3 * k + 1);
+        let ranges = 4 * u32::try_from(ACK_RANGE_DRAIN_FACTOR).unwrap();
+        for top in [pairs * 3 / 8, pairs * 5 / 8] {
+            assert_take_ranges(&tracked, (top - ranges..top).rev().map(pair).collect());
+        }
+        let back = (0..ranges).map(|i| pair(pairs - 1 - 2 * i));
+        assert_take_ranges(&tracked, back.collect());
     }
 
     #[test]
