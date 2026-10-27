@@ -598,6 +598,39 @@ fn unfit_probe_does_not_block_primary_path() {
     }
 }
 
+/// A `PATH_RESPONSE` that does not fit the anti-amplification limit of a new path is dropped.
+#[test]
+fn unfit_path_response_is_dropped() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    // Two small datagrams with only a PATH_CHALLENGE, from a new server address.
+    let mut challenge = || {
+        let mut frame = vec![FrameType::PathChallenge.into()];
+        frame.resize(9, 0);
+        let d = server
+            .test_write_frames(Writer(frame), now)
+            .dgram()
+            .unwrap();
+        Datagram::new(new_port(DEFAULT_ADDR), d.destination(), d.tos(), &d[..])
+    };
+    let (first, second) = (challenge(), challenge());
+
+    // The first challenge arrives when the new path has no budget left.
+    client.process_input(first, now);
+    let path = client.paths.select_path().unwrap();
+    let limit = path.borrow().amplification_limit();
+    path.borrow_mut().add_sent(limit);
+    drain(&mut client, now);
+
+    // The second brings budget, but only it gets a response.
+    client.process_input(second, now);
+    drain(&mut client, now);
+    assert_eq!(client.stats().frame_tx.path_response, 1);
+}
+
 /// A delayed ACK that the anti-amplification limit holds back on an unvalidated primary path
 /// leaves no overdue timer.
 #[test]
