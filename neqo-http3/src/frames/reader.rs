@@ -127,6 +127,10 @@ impl Debug for FrameReader {
 
 impl FrameReader {
     #[must_use]
+    #[cfg_attr(
+        fuzzing,
+        expect(clippy::new_without_default, reason = "OK for fuzzing.")
+    )]
     pub fn new() -> Self {
         Self {
             state: FrameReaderState::GetType {

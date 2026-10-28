@@ -11,7 +11,7 @@ fuzz_target!(|data: &[u8]| {
 
     static DECODER: LazyLock<RandomConnectionIdGenerator> =
         LazyLock::new(|| RandomConnectionIdGenerator::new(20));
-    nss::init().unwrap();
+    nss::init().expect("NSS init");
 
     // Run the fuzzer
     _ = packet::Public::decode(&mut data.to_vec(), &*DECODER);

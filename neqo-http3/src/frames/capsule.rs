@@ -23,6 +23,7 @@ pub enum Capsule {
 }
 
 impl Capsule {
+    #[must_use]
     pub const fn capsule_type(&self) -> u64 {
         match self {
             Self::Datagram { .. } => CAPSULE_TYPE_DATAGRAM.0,

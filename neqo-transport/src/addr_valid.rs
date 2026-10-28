@@ -6,6 +6,16 @@
 
 // This file implements functions necessary for address validation.
 
+#![cfg_attr(
+    fuzzing,
+    expect(
+        clippy::missing_errors_doc,
+        clippy::missing_panics_doc,
+        clippy::must_use_candidate,
+        reason = "`addr_valid` is only public API when fuzzing."
+    )
+)]
+
 use std::{
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
