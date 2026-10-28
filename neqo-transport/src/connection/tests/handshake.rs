@@ -19,8 +19,8 @@ use std::{
 
 use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, to_u64};
 use nss::{
-    AuthenticationStatus, HandshakeMessage,
-    constants::TLS_CHACHA20_POLY1305_SHA256,
+    Agent, AuthenticationStatus, Client, HandshakeMessage, Server,
+    constants::{TLS_CHACHA20_POLY1305_SHA256, TLS_VERSION_1_3},
     ext::{ExtensionHandler, ExtensionWriterResult},
     generate_ech_keys,
 };
@@ -56,7 +56,7 @@ use crate::{
     stats::FrameStats,
     streams::SendGroupId,
     tparams::{TransportParameter, TransportParameterId::*},
-    tracking::DEFAULT_LOCAL_ACK_DELAY,
+    tracking::{DEFAULT_LOCAL_ACK_DELAY, PacketNumberSpace},
 };
 
 const ECH_CONFIG_ID: u8 = 7;
@@ -172,6 +172,59 @@ fn no_alpn() {
     handshake(&mut client, &mut server, now(), Duration::new(0, 0));
     assert_error(&client, &CloseReason::Transport(Error::Peer(376)));
     assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(120)));
+}
+
+#[test]
+fn no_alpn_from_server() {
+    let mut client = default_client();
+    let mut server = default_server();
+    // Like `Crypto::new`, without ALPN.
+    let mut tls = Agent::from(Server::new(test_fixture::DEFAULT_KEYS).unwrap());
+    tls.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)
+        .unwrap();
+    tls.disable_end_of_early_data().unwrap();
+    tls.extension_handler(0x39, Rc::clone(&server.tps) as _)
+        .unwrap();
+    *server.crypto.tls_mut() = tls;
+
+    let alert = Error::CryptoAlert(120); // no_application_protocol
+    let peer = Error::Peer(alert.code());
+    connect_fail(&mut client, &mut server, alert, peer);
+}
+
+/// A server closes with `no_application_protocol` when the client offers no ALPN.
+#[test]
+fn no_alpn_from_client() {
+    let mut client = default_client();
+    let mut server = default_server();
+    // Like `Crypto::new`, without ALPN.
+    let mut tls = Agent::from(Client::new(test_fixture::DEFAULT_SERVER_NAME, false).unwrap());
+    tls.set_version_range(TLS_VERSION_1_3, TLS_VERSION_1_3)
+        .unwrap();
+    tls.disable_end_of_early_data().unwrap();
+    tls.extension_handler(0x39, Rc::clone(&client.tps) as _)
+        .unwrap();
+    *client.crypto.tls_mut() = tls;
+
+    let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+    let mut dgram = client.process_output(now()).dgram();
+    while !client.events().any(authentication_needed) {
+        dgram = server.process(dgram, now()).dgram();
+        dgram = client.process(dgram, now()).dgram();
+    }
+    // Finish the client's TLS handshake without its own ALPN check in `set_connected`.
+    client
+        .crypto
+        .tls_mut()
+        .authenticated(AuthenticationStatus::Ok);
+    client
+        .crypto
+        .handshake(now(), PacketNumberSpace::Handshake, None)
+        .unwrap();
+
+    let alert = Error::CryptoAlert(120); // no_application_protocol
+    let peer = Error::Peer(alert.code());
+    connect_fail(&mut client, &mut server, peer, alert);
 }
 
 #[test]
