@@ -90,8 +90,7 @@ pub const fn to_u64(v: usize) -> u64 {
 #[track_caller]
 pub fn expect_usize<T>(v: T) -> usize
 where
-    usize: TryFrom<T>,
-    <usize as TryFrom<T>>::Error: std::fmt::Debug,
+    usize: TryFrom<T, Error: std::fmt::Debug>,
 {
     usize::try_from(v).expect("usize should be large enough for this value")
 }

@@ -736,15 +736,12 @@ where
         // The `pto * 2` maximum age of the lost packets is taken from msquic's implementation:
         // <https://github.com/microsoft/msquic/blob/2623c07df62b4bd171f469fb29c2714b6735b676/src/core/loss_detection.c#L939-L943>
         let max_age = pto * 2;
-        self.maybe_lost_packets.retain(|(pn, pt), packet| {
-            let keep = now.saturating_duration_since(packet.time_sent) <= max_age;
-            if !keep {
-                debug!(
-                    "Spurious detection: cleaned up old MaybeLostPacket with pn {pn}, type {pt:?}"
-                );
-            }
-            keep
-        });
+        for ((pn, pt), _) in self
+            .maybe_lost_packets
+            .extract_if(|_, packet| now.saturating_duration_since(packet.time_sent) > max_age)
+        {
+            debug!("Spurious detection: cleaned up old MaybeLostPacket with pn {pn}, type {pt:?}");
+        }
     }
 
     fn on_spurious_congestion_event(&mut self, cc_stats: &mut CongestionControlStats) {

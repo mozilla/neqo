@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     rc::Rc,
-    slice, str,
+    slice,
     time::Instant,
 };
 

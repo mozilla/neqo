@@ -582,7 +582,7 @@ impl Server {
         dgrams: I,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgrams, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgrams, now, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }

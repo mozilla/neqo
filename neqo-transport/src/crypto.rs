@@ -601,12 +601,10 @@ impl CryptoDxState {
 
     fn invoked(&mut self) -> Res<()> {
         #[cfg(test)]
-        OVERWRITE_INVOCATIONS.with(|v| {
-            if let Some(i) = v.borrow_mut().take() {
-                tracing::warn!("Setting {:?} invocations to {i}", self.direction);
-                self.invocations = i;
-            }
-        });
+        if let Some(i) = OVERWRITE_INVOCATIONS.take() {
+            tracing::warn!("Setting {:?} invocations to {i}", self.direction);
+            self.invocations = i;
+        }
         self.invocations = self
             .invocations
             .checked_sub(1)
@@ -1766,7 +1764,7 @@ impl CryptoStreams {
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let mid = sni.start.midpoint(sni.end);
                     let (left, right) = data.split_at(mid);
 
                     // Truncate the chunks so we can fit them into roughly evenly-filled packets.

@@ -570,8 +570,7 @@ fn increase_cwnd(
 /// no ACK frame is generated.
 fn ack_bytes<D>(dest: &mut Connection, stream: StreamId, in_dgrams: D, now: Instant) -> Datagram
 where
-    D: IntoIterator<Item = Datagram>,
-    D::IntoIter: ExactSizeIterator,
+    D: IntoIterator<Item = Datagram, IntoIter: ExactSizeIterator>,
 {
     let mut srv_buf = [0; 4_096];
 

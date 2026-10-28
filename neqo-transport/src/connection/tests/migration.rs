@@ -343,10 +343,10 @@ fn inc_port(port: u16, i: usize) -> u16 {
 fn inc_addr(ip: IpAddr, i: usize) -> IpAddr {
     let inc: u8 = i.overflowing_mul(11).0.try_into().unwrap();
     match ip {
-        IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from(
+        IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from_octets(
             ip.octets().map(|b| b.overflowing_add(inc).0),
         )),
-        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from(
+        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from_octets(
             ip.octets().map(|b| b.overflowing_add(inc).0),
         )),
     }

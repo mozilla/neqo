@@ -2097,7 +2097,11 @@ impl SendStreams {
                 // fall back to binary-search insertion.
                 let null_grp = self.per_group.entry(NULL_GROUP_ID).or_default();
                 let grp = null_grp.group_mut(sendorder);
-                if matches!(grp.stream_ids().last(), Some(last) if stream_id > *last) {
+                if grp
+                    .stream_ids()
+                    .last()
+                    .is_some_and(|last| stream_id > *last)
+                {
                     grp.push(stream_id);
                 } else {
                     grp.insert(stream_id);

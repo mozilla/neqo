@@ -9,7 +9,6 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     num::NonZeroUsize,
     rc::Rc,
-    str::from_utf8,
     time::{Duration, Instant},
 };
 
@@ -321,7 +320,7 @@ impl Session {
                     .iter()
                     .find_map(|h| {
                         if h.name() == ":status" {
-                            from_utf8(h.value()).ok()?.parse::<u16>().ok()
+                            str::from_utf8(h.value()).ok()?.parse::<u16>().ok()
                         } else {
                             None
                         }

@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::sync::OnceLock;
+use std::sync::LazyLock;
 
 use neqo_common::expect_usize;
 
@@ -18,10 +18,8 @@ pub struct HuffmanDecoderNode {
     pub value: Option<u16>,
 }
 
-pub fn huffman_decoder_root() -> &'static HuffmanDecoderNode {
-    static ROOT: OnceLock<HuffmanDecoderNode> = OnceLock::new();
-    ROOT.get_or_init(|| make_huffman_tree(0, 0))
-}
+pub static HUFFMAN_DECODER_ROOT: LazyLock<HuffmanDecoderNode> =
+    LazyLock::new(|| make_huffman_tree(0, 0));
 
 fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
     let mut found = false;

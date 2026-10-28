@@ -1246,7 +1246,7 @@ impl Connection {
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, 1.try_into().expect(">0"))
+        self.process_multiple_output(now, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -1310,7 +1310,7 @@ impl Connection {
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgram, now, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -2047,24 +2047,18 @@ impl Connection {
                     self.paths.make_permanent(path, None, cid, now);
                     Ok(())
                 }
+                None if self
+                    .paths
+                    .primary()
+                    .is_some_and(|p| p.borrow().remote_cid().is_none_or(|id| id.is_empty())) =>
+                {
+                    self.paths
+                        .make_permanent(path, None, ConnectionIdEntry::empty_remote(), now);
+                    Ok(())
+                }
                 None => {
-                    if let Some(primary) = self.paths.primary() {
-                        if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
-                            self.paths.make_permanent(
-                                path,
-                                None,
-                                ConnectionIdEntry::empty_remote(),
-                                now,
-                            );
-                            Ok(())
-                        } else {
-                            trace!("[{self}] Unable to make path permanent: {}", path.borrow());
-                            Err(Error::InvalidMigration)
-                        }
-                    } else {
-                        trace!("[{self}] Unable to make path permanent: {}", path.borrow());
-                        Err(Error::InvalidMigration)
-                    }
+                    trace!("[{self}] Unable to make path permanent: {}", path.borrow());
+                    Err(Error::InvalidMigration)
                 }
             }
         } else {
@@ -3652,8 +3646,7 @@ impl Connection {
         now: Instant,
     ) -> Res<()>
     where
-        R: IntoIterator<Item = RangeInclusive<packet::Number>> + Debug,
-        R::IntoIter: ExactSizeIterator,
+        R: IntoIterator<Item = RangeInclusive<packet::Number>, IntoIter: ExactSizeIterator> + Debug,
     {
         debug!("[{self}] Rx ACK space={space}, ranges={ack_ranges:?}");
 

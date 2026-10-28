@@ -321,7 +321,7 @@ impl<'b> Handler<'b> {
             } else {
                 debug!(
                     "READ[{stream_id}]: {}",
-                    std::str::from_utf8(read_buffer).map_err(|_| Error::InvalidInput)?
+                    str::from_utf8(read_buffer).map_err(|_| Error::InvalidInput)?
                 );
             }
             if fin {
