@@ -43,7 +43,7 @@ use crate::{
             InitialMaxStreamsBidi, InitialMaxStreamsUni, MaxAckDelay, MaxUdpPayloadSize,
             OriginalDestinationConnectionId, StatelessResetToken,
         },
-        TransportParametersHandler,
+        TransportParameters, TransportParametersHandler,
     },
     tracking::PacketNumberSpace,
     version::{self, Version},
@@ -218,9 +218,24 @@ pub fn server_version_information_failed(
     );
 }
 
-pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
+pub fn packet_io(
+    qlog: &mut Qlog,
+    meta: packet::MetaData,
+    tph: &TransportParametersHandler,
+    now: Instant,
+) {
     qlog.add_event_at(
         || {
+            // Whoever sent the ACK sets the exponent; until the peer's arrives, the default.
+            let ack_delay_exponent = match meta.direction() {
+                Direction::Tx => Some(tph.local()),
+                Direction::Rx => tph.remote_handshake(),
+            }
+            .map_or_else(
+                || TransportParameters::integer_default(AckDelayExponent),
+                |tp| Some(tp.get_integer(AckDelayExponent)),
+            )
+            .expect("AckDelayExponent is an integer transport parameter");
             let mut d = Decoder::from(meta.payload());
             let raw = RawInfo {
                 length: Some(to_u64(meta.length())),
@@ -230,7 +245,10 @@ pub fn packet_io(qlog: &mut Qlog, meta: packet::MetaData, now: Instant) {
 
             let mut frames = Vec::new();
             while d.remaining() > 0 {
-                if let Ok(f) = Frame::decode(&mut d) {
+                if let Ok(mut f) = Frame::decode(&mut d) {
+                    if let Frame::Ack { ack_delay, .. } = &mut f {
+                        *ack_delay = Frame::decode_ack_delay(*ack_delay, ack_delay_exponent);
+                    }
                     frames.push(QuicFrame::from(f));
                 } else {
                     info!("qlog: invalid frame");
@@ -622,7 +640,7 @@ impl From<Frame<'_>> for QuicFrame {
                         .collect::<Vec<_>>()
                 });
                 Self::Ack {
-                    ack_delay: Some(ack_delay as f32 / 1000.0),
+                    ack_delay: Some(ack_delay as f32 / 1000.0), // `packet_io` scaled it to µs.
                     acked_ranges,
                     ect1: ecn_count.map(|c| c[Ecn::Ect1]),
                     ect0: ecn_count.map(|c| c[Ecn::Ect0]),
