@@ -27,9 +27,9 @@ use tracing::debug;
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle, cwnd_avail,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    CountingConnectionIdGenerator, assert_error, connect_fail, connect_force_idle,
+    connect_rtt_idle, cwnd_avail, default_client, default_server, maybe_authenticate, new_client,
+    new_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1311,7 +1311,7 @@ fn retire_cid_queue_bounded() {
     ));
 }
 
-/// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
+/// Injects a `RETIRE_CONNECTION_ID` frame for a given sequence number.
 struct RetireUnissued(u64);
 
 impl test_internal::FrameWriter for RetireUnissued {
@@ -1341,6 +1341,42 @@ fn retire_unissued_connection_id() {
             ..
         }
     ));
+}
+
+/// Sends `RETIRE_CONNECTION_ID` for sequence number 0 to a `receiver` that uses zero-length
+/// connection IDs and checks that both endpoints close with `PROTOCOL_VIOLATION`.
+fn retire_zero_len_cid(sender: &mut Connection, receiver: &mut Connection) {
+    let retire = send_with_extra(sender, RetireUnissued(0), now()); // Sequence number of the zero-length ID.
+    let close = receiver.process(Some(retire), now()).dgram();
+    assert_error(receiver, &CloseReason::Transport(Error::ProtocolViolation));
+    sender.process_input(close.unwrap(), now());
+    let peer_error = Error::Peer(Error::ProtocolViolation.code());
+    assert_error(sender, &CloseReason::Transport(peer_error));
+}
+
+/// RFC 9000, Section 19.16: an endpoint that provides a zero-length connection ID
+/// treats receipt of a `RETIRE_CONNECTION_ID` frame as a connection error.
+#[test]
+fn retire_zero_len_connection_id() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    retire_zero_len_cid(&mut server, &mut client);
+}
+
+/// As `retire_zero_len_connection_id`, for a server that uses zero-length connection IDs.
+#[test]
+fn retire_zero_len_connection_id_server() {
+    let mut client = default_client();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+    retire_zero_len_cid(&mut client, &mut server);
 }
 
 /// During a graceful migration, if the probed path can't get a new connection ID due
