@@ -133,6 +133,7 @@ pub enum Error {
     EchRetry(Vec<u8>),
 
     // All internal errors from here.  Please keep these sorted.
+    /// Reported on the wire as `PROTOCOL_VIOLATION` (RFC 9000 Section 13.1).
     #[error("packet acknowledged but never sent")]
     AckedUnsentPacket,
     #[error("connection ID limit exceeded")]
@@ -223,7 +224,7 @@ impl Error {
             Self::FinalSize => 6,
             Self::FrameEncoding => 7,
             Self::TransportParameter => 8,
-            Self::ProtocolViolation => 10,
+            Self::ProtocolViolation | Self::AckedUnsentPacket => 10,
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::Application => ERROR_APPLICATION_CLOSE,
@@ -296,6 +297,7 @@ mod tests {
             (Error::FrameEncoding, 7),
             (Error::TransportParameter, 8),
             (Error::ProtocolViolation, 10),
+            (Error::AckedUnsentPacket, 10),
             (Error::InvalidToken, 11),
             (Error::KeysExhausted, 15),
             (Error::Application, 12),

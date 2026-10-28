@@ -6,10 +6,11 @@
 
 use std::{mem, time::Instant};
 
+use enum_map::EnumMap;
 use neqo_common::Datagram;
 use tracing::{debug, info};
 
-use crate::crypto::Epoch;
+use crate::{crypto::Epoch, packet, tracking::PacketNumberSpace};
 
 pub struct SavedDatagram {
     /// The datagram.
@@ -18,10 +19,13 @@ pub struct SavedDatagram {
     pub t: Instant,
 }
 
+/// The next packet number to send in each space.
+pub type NextPn = EnumMap<PacketNumberSpace, packet::Number>;
+
 #[derive(Default)]
 pub struct SavedDatagrams {
-    handshake: Vec<SavedDatagram>,
-    application_data: Vec<SavedDatagram>,
+    handshake: Vec<(SavedDatagram, NextPn)>,
+    application_data: Vec<(SavedDatagram, NextPn)>,
     available: Option<Epoch>,
 }
 
@@ -30,7 +34,7 @@ impl SavedDatagrams {
     /// keys to decrypt them are not yet available.
     pub const CAPACITY: usize = 4;
 
-    fn store(&mut self, epoch: Epoch) -> &mut Vec<SavedDatagram> {
+    fn store(&mut self, epoch: Epoch) -> &mut Vec<(SavedDatagram, NextPn)> {
         match epoch {
             Epoch::Handshake => &mut self.handshake,
             Epoch::ApplicationData => &mut self.application_data,
@@ -43,12 +47,12 @@ impl SavedDatagrams {
         self.handshake.len() == Self::CAPACITY || self.application_data.len() == Self::CAPACITY
     }
 
-    pub fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant) {
+    pub fn save(&mut self, epoch: Epoch, d: Datagram, t: Instant, next_pn: NextPn) {
         let store = self.store(epoch);
 
         if store.len() < Self::CAPACITY {
             debug!("saving {epoch:?} datagram of {} bytes", d.len());
-            store.push(SavedDatagram { d, t });
+            store.push((SavedDatagram { d, t }, next_pn));
         } else {
             info!("not saving {epoch:?} datagram of {} bytes", d.len());
         }
@@ -66,7 +70,7 @@ impl SavedDatagrams {
         self.available
     }
 
-    pub fn take_saved(&mut self) -> Vec<SavedDatagram> {
+    pub fn take_saved(&mut self) -> Vec<(SavedDatagram, NextPn)> {
         self.available
             .take()
             .map_or_else(Vec::new, |epoch| mem::take(self.store(epoch)))
@@ -78,6 +82,7 @@ impl SavedDatagrams {
 mod tests {
     use std::net::SocketAddr;
 
+    use enum_map::EnumMap;
     use neqo_common::{Tos, datagram::Datagram};
     use test_fixture::now;
 
@@ -93,7 +98,7 @@ mod tests {
     #[should_panic(expected = "unexpected space")]
     fn save_panics_for_invalid_epoch() {
         let mut saved = SavedDatagrams::default();
-        saved.save(Epoch::Initial, make_dgram(), now());
+        saved.save(Epoch::Initial, make_dgram(), now(), EnumMap::default());
     }
 
     #[test]
@@ -103,12 +108,12 @@ mod tests {
 
         // Fill to exactly CAPACITY.
         for _ in 0..SavedDatagrams::CAPACITY {
-            saved.save(Epoch::ApplicationData, make_dgram(), t);
+            saved.save(Epoch::ApplicationData, make_dgram(), t, EnumMap::default());
         }
         assert!(saved.is_either_full());
 
         // One more should be silently dropped.
-        saved.save(Epoch::ApplicationData, make_dgram(), t);
+        saved.save(Epoch::ApplicationData, make_dgram(), t, EnumMap::default());
 
         saved.make_available(Epoch::ApplicationData);
         let taken = saved.take_saved();

@@ -401,6 +401,12 @@ fn forged_server_initial(
     builder.build(&mut write).unwrap().into()
 }
 
+/// Delivers the `CONNECTION_CLOSE` of `closing` to `peer`, which has to see the code of `error`.
+fn assert_peer_error(closing: &mut Connection, peer: &mut Connection, error: &Error, now: Instant) {
+    peer.process_input(closing.process_output(now).dgram().unwrap(), now);
+    assert_error(peer, &CloseReason::Transport(Error::Peer(error.code())));
+}
+
 /// Pump datagrams between two peers until neither has anything more to send.
 fn exchange(a: &mut Connection, b: &mut Connection) {
     let mut d = a.process_output(now()).dgram();
