@@ -1418,13 +1418,13 @@ impl Connection {
     }
 
     fn is_stateless_reset(&self, path: &PathRef, d: &[u8]) -> bool {
-        // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
-        if d.len() < Srt::LEN || !self.state.connected() {
+        if !self.state.connected() {
             return false;
         }
-        Srt::try_from(&d[d.len() - Srt::LEN..])
-            .is_ok_and(|token| path.borrow().is_stateless_reset(&token))
+        // If the datagram is too small, don't try.
+        d.last_chunk()
+            .is_some_and(|token| path.borrow().is_stateless_reset(&Srt::new(*token)))
     }
 
     fn check_stateless_reset(

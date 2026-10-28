@@ -12,7 +12,7 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
     path::PathBuf,
-    pin::Pin,
+    pin::{Pin, pin},
     process::exit,
     time::Instant,
 };
@@ -358,7 +358,8 @@ async fn ready(
     socket: &crate::udp::Socket,
     mut timeout: Option<&mut Pin<Box<Sleep>>>,
 ) -> Result<Ready, io::Error> {
-    let socket_ready = Box::pin(socket.readable()).map_ok(|()| Ready::Socket);
+    let readable = pin!(socket.readable());
+    let socket_ready = readable.map_ok(|()| Ready::Socket);
     let timeout_ready = timeout
         .as_mut()
         .map_or_else(|| Either::Right(futures::future::pending()), Either::Left)

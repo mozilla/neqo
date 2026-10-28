@@ -170,8 +170,8 @@ impl Pacer {
         self.c = min(
             isize::try_from(self.m).unwrap_or(isize::MAX),
             self.c
-                .saturating_add(isize::try_from(incr).unwrap_or(isize::MAX))
-                .saturating_sub(isize::try_from(count).unwrap_or(isize::MAX)),
+                .saturating_add_unsigned(incr)
+                .saturating_sub_unsigned(count),
         );
         self.t = now;
     }
