@@ -1636,6 +1636,71 @@ fn server_overdue_pto_amplification_limited() {
     );
 }
 
+/// ACK-only packets count against the anti-amplification limit (RFC 9000, Section 8.1).
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn server_ack_only_respects_amplification_limit() {
+    use neqo_common::Encoder;
+
+    use crate::{
+        crypto::{CryptoDxDirection, CryptoDxState},
+        frame::FrameType,
+        packet,
+    };
+
+    // A shortest (8-byte) original Destination CID keeps the forged packets small.
+    let (client, c1) = loop {
+        let mut client = new_client(ConnectionParameters::default().mlkem(false));
+        let c1 = client.process_output(now()).dgram().unwrap();
+        if c1[5] == 8 {
+            break (client, c1);
+        }
+    };
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    // Skip the first byte and version; the original Destination CID seeds the Initial keys.
+    let seed = Decoder::from(&c1[5..]).decode_vec(1).unwrap();
+    let version = client.version();
+    let mut received = c1.len();
+    server.process_input(c1.clone(), now());
+    let mut sent = 0;
+
+    for i in 1..=20 {
+        while let Some(d) = server.process_output(now()).dgram() {
+            sent += d.len();
+        }
+        let limit = server
+            .paths
+            .primary()
+            .unwrap()
+            .borrow()
+            .amplification_limit();
+        assert_eq!(3 * received, sent + limit);
+
+        // A small forged client Initial PING; the packet number gap makes each ACK range large.
+        let pn = i * ((1 << 30) + 2);
+        let mut write =
+            CryptoDxState::new_initial(version, CryptoDxDirection::Write, "client in", seed, pn)
+                .unwrap();
+        let mut builder = packet::Builder::long(
+            Encoder::default(),
+            packet::Type::Initial,
+            version,
+            Some(seed),
+            Some([]),
+            packet::LIMIT,
+        );
+        builder.initial_token(&[]);
+        builder.pn(pn, 4);
+        builder.encode_varint(FrameType::Ping);
+        let ping = builder.build(&mut write).unwrap();
+        received += ping.len();
+        server.process_input(
+            Datagram::new(c1.source(), c1.destination(), c1.tos(), ping),
+            now(),
+        );
+    }
+}
+
 #[test]
 fn grease_quic_bit_transport_parameter() {
     fn get_remote_tp(conn: &Connection) -> bool {

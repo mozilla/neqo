@@ -39,7 +39,10 @@ use crate::{
     connection::{
         state::StateSignaling,
         test_internal,
-        tests::{assert_path_challenge_min_len, connect, send_something_paced, send_with_extra},
+        tests::{
+            assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
+            stream::Writer,
+        },
     },
     frame::FrameType,
     packet,
@@ -550,6 +553,129 @@ fn path_challenges_on_one_path_each_get_a_response() {
 
     while client.process_output(now).dgram().is_some() {}
     assert_eq!(client.stats().frame_tx.path_response, 2);
+}
+
+/// Probes that no longer fit the anti-amplification limit of a new path do not stop the client
+/// from sending on its primary path.
+#[test]
+fn unfit_probe_does_not_block_primary_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+
+    // A small datagram with only a PATH_CHALLENGE, from a new server address.
+    let mut frame = vec![FrameType::PathChallenge.into()];
+    frame.resize(9, 0);
+    let challenge = server
+        .test_write_frames(Writer(frame), now)
+        .dgram()
+        .unwrap();
+    let challenge = Datagram::new(
+        new_port(DEFAULT_ADDR),
+        challenge.destination(),
+        challenge.tos(),
+        &challenge[..],
+    );
+    client.process_input(challenge, now);
+
+    // Each new byte of stream data reaches the server on the primary path.
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    for _ in 0..2 * Path::MAX_PROBES {
+        client.stream_send(stream_id, &[0]).unwrap();
+        let (dgrams, timer) = drain(&mut client, now);
+        for d in dgrams
+            .into_iter()
+            .filter(|d| d.destination() == DEFAULT_ADDR)
+        {
+            server.process_input(d, now);
+        }
+        assert_eq!(
+            server.stream_recv(stream_id, &mut [0; 2]).unwrap(),
+            (1, false)
+        );
+        now += timer;
+    }
+}
+
+/// A `PATH_RESPONSE` that does not fit the anti-amplification limit of a new path is dropped.
+#[test]
+fn unfit_path_response_is_dropped() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    // Two small datagrams with only a PATH_CHALLENGE, from a new server address.
+    let mut challenge = || {
+        let mut frame = vec![FrameType::PathChallenge.into()];
+        frame.resize(9, 0);
+        let d = server
+            .test_write_frames(Writer(frame), now)
+            .dgram()
+            .unwrap();
+        Datagram::new(new_port(DEFAULT_ADDR), d.destination(), d.tos(), &d[..])
+    };
+    let (first, second) = (challenge(), challenge());
+
+    // The first challenge arrives when the new path has no budget left.
+    client.process_input(first, now);
+    let path = client.paths.select_path().unwrap();
+    let limit = path.borrow().amplification_limit();
+    path.borrow_mut().add_sent(limit);
+    drain(&mut client, now);
+
+    // The second brings budget, but only it gets a response.
+    client.process_input(second, now);
+    drain(&mut client, now);
+    assert_eq!(client.stats().frame_tx.path_response, 1);
+}
+
+/// A delayed ACK that the anti-amplification limit holds back on an unvalidated primary path
+/// leaves no overdue timer.
+#[test]
+fn delayed_ack_on_amplification_limited_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+
+    // A full datagram from a new client port, while the server has plenty to send.
+    let stream_id = server.stream_create(StreamType::UniDi).unwrap();
+    server.stream_send(stream_id, &[0; 10_000]).unwrap();
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream_id, &[0; 2_000]).unwrap();
+    let rebound = change_source_port(&client.process_output(now).dgram().unwrap(), 1);
+    let (new_addr, budget) = (rebound.source(), 3 * rebound.len());
+    server.process_input(rebound, now);
+
+    // The server spends the budget of the new path before its ACK is due.
+    let (dgrams, ack_delay) = drain(&mut server, now);
+    let sent = dgrams.iter().filter(|d| d.destination() == new_addr);
+    assert_eq!(sent.map(Datagram::len).sum::<usize>(), budget);
+
+    // When the ACK is due, the next timer is the path probe.
+    now += ack_delay;
+    let pto = server
+        .paths
+        .primary()
+        .unwrap()
+        .borrow()
+        .rtt()
+        .pto(server.confirmed());
+    assert_eq!(Some(drain(&mut server, now).1), pto.checked_sub(ack_delay));
+}
+
+/// The datagrams `c` sends now, and its timer after them.
+fn drain(c: &mut Connection, now: Instant) -> (Vec<Datagram>, Duration) {
+    let mut dgrams = Vec::new();
+    loop {
+        match c.process_output(now) {
+            Output::Datagram(d) => dgrams.push(d),
+            Output::Callback(t) => return (dgrams, t),
+            Output::None => panic!("there should be a timer"),
+        }
+    }
 }
 
 #[test]
