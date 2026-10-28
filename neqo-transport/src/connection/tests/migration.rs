@@ -79,10 +79,6 @@ impl ConnectionIdGenerator for ExhaustibleConnectionIdGenerator {
         self.attempts_left -= 1;
         self.inner.take()?.generate_cid()
     }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
-    }
 }
 
 /// Exhausting either endpoint's generator after its initial CID must not block the handshake

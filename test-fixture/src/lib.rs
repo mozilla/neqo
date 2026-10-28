@@ -152,10 +152,6 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
         self.counter += 1;
         Some(ConnectionId::from(&r[..usize::from(r[0])]))
     }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
-    }
 }
 
 /// The qlog to attach to a fixture connection: none when benchmarking, because

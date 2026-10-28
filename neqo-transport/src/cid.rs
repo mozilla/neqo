@@ -180,7 +180,6 @@ pub trait ConnectionIdGenerator: ConnectionIdDecoder {
     fn generates_empty_cids(&self) -> bool {
         false
     }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
 }
 
 /// An `EmptyConnectionIdGenerator` generates empty connection IDs.
@@ -196,9 +195,6 @@ impl ConnectionIdDecoder for EmptyConnectionIdGenerator {
 impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         Some(ConnectionId::from(&[]))
-    }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
     fn generates_empty_cids(&self) -> bool {
         true
@@ -230,10 +226,6 @@ impl ConnectionIdGenerator for RandomConnectionIdGenerator {
         let mut buf = smallvec![0; self.len];
         randomize(&mut buf);
         Some(ConnectionId::from(buf))
-    }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
 
     fn generates_empty_cids(&self) -> bool {
@@ -666,10 +658,6 @@ mod tests {
                 panic!("unexpected CID generation attempt");
             };
             cid
-        }
-
-        fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-            self
         }
     }
 
