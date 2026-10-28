@@ -147,6 +147,8 @@ pub struct LossRecoverySpace {
     in_flight_outstanding: usize,
     /// The packets that we have sent and are tracking.
     sent_packets: sent::Packets,
+    /// The number of tracked packets that are declared lost, which are always the first ones.
+    lost: usize,
     /// The time that the first out-of-order packet was sent.
     /// This is `None` if there were no out-of-order packets detected.
     /// When set to `Some(T)`, time-based loss detection should be enabled.
@@ -163,6 +165,7 @@ impl LossRecoverySpace {
             last_ack_eliciting: None,
             in_flight_outstanding: 0,
             sent_packets: sent::Packets::default(),
+            lost: 0,
             first_ooo_time: None,
         }
     }
@@ -236,7 +239,8 @@ impl LossRecoverySpace {
         if !ack_eliciting
             && self.sent_packets.len() - self.in_flight_outstanding > MAX_TRACKED_ACK_ONLY
         {
-            self.sent_packets
+            self.lost -= self
+                .sent_packets
                 .remove_oldest_ack_only(MAX_TRACKED_ACK_ONLY / 2);
         }
     }
@@ -288,6 +292,7 @@ impl LossRecoverySpace {
             self.remove_packet(p);
             eliciting |= p.ack_eliciting();
             if p.lost() {
+                self.lost -= 1;
                 stats.late_ack += 1;
                 if let Some(reduced) = stats.lost.checked_sub(1) {
                     stats.lost = reduced;
@@ -315,6 +320,7 @@ impl LossRecoverySpace {
     /// and when keys are dropped.
     fn remove_ignored(&mut self) -> impl Iterator<Item = sent::Packet> + use<> {
         self.in_flight_outstanding = 0;
+        self.lost = 0;
         std::mem::take(&mut self.sent_packets).drain_all()
     }
 
@@ -330,7 +336,12 @@ impl LossRecoverySpace {
     /// important that `cd` is set to at least the current PTO time; otherwise we
     /// might remove all in-flight packets and stop sending probes.
     fn remove_old_lost(&mut self, now: Instant, cd: Duration) {
-        let removed = self.sent_packets.remove_expired(now, cd);
+        let mut removed = 0;
+        if self.lost > 0 {
+            let len = self.sent_packets.len();
+            removed = self.sent_packets.remove_expired(now, cd);
+            self.lost -= len - self.sent_packets.len();
+        }
         self.remove_outstanding(removed);
     }
 
@@ -354,27 +365,33 @@ impl LossRecoverySpace {
         self.first_ooo_time = None;
 
         let largest_acked = self.largest_acked;
-
-        for packet in self
-            .sent_packets
-            .iter_mut()
-            .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
-        {
+        let trigger = |packet: &sent::Packet| {
             // Packets sent before now - loss_delay are deemed lost.
-            let trigger = if packet.time_sent() + loss_delay <= now {
+            if packet.time_sent() + loss_delay <= now {
                 qtrace!(
                     "lost={}, time sent {:?} is before lost_delay {loss_delay:?}",
                     packet.pn(),
                     packet.time_sent()
                 );
-                sent::LossTrigger::TimeThreshold
+                Some(sent::LossTrigger::TimeThreshold)
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
                 qtrace!(
                     "lost={}, is >= {PACKET_THRESHOLD} from largest acked {largest_acked:?}",
                     packet.pn()
                 );
-                sent::LossTrigger::ReorderingThreshold
+                Some(sent::LossTrigger::ReorderingThreshold)
             } else {
+                None
+            }
+        };
+
+        let mut newly_lost = 0;
+        for packet in self
+            .sent_packets
+            .iter_mut_skip_lost(self.lost, |p| trigger(p).is_some())
+            .take_while(|p| largest_acked.is_some_and(|largest_ack| p.pn() < largest_ack))
+        {
+            let Some(trigger) = trigger(packet) else {
                 if largest_acked.is_some() {
                     self.first_ooo_time = Some(packet.time_sent());
                 }
@@ -383,9 +400,11 @@ impl LossRecoverySpace {
             };
 
             if packet.declare_lost(now, trigger) {
+                newly_lost += 1;
                 lost_packets.push(packet.clone());
             }
         }
+        self.lost += newly_lost;
     }
 }
 
@@ -2282,6 +2301,75 @@ mod tests {
         let delay = DEFAULT_REMOTE_ACK_DELAY;
         let (most, acked) = exchange(&mut lr, 2 * N, ms(1), u64::MAX, TEST_RTT, delay, |_| true);
         assert_eq!((most, acked), (MAX_TRACKED_ACK_ONLY, 0));
+    }
+
+    /// Sends packets 0 to 3, acknowledges 3 and declares 0 and 1 lost.
+    fn lose_0_and_1() -> (LossRecoverySpace, Vec<sent::Packet>) {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        add_sent(&mut lrs, 3);
+        lrs.largest_acked = Some(3);
+        let mut lost = Vec::new();
+        lrs.detect_lost_packets(pn_time(2), PACING, TEST_RTT, &mut lost);
+        match_acked(&lost, &[0, 1]);
+        (lrs, lost)
+    }
+
+    /// Packets after those already declared lost can be declared lost.
+    #[test]
+    fn detect_lost_after_lost() {
+        let (mut lrs, mut lost) = lose_0_and_1();
+        lrs.detect_lost_packets(pn_time(3), PACING, TEST_RTT, &mut lost);
+        match_acked(&lost, &[0, 1, 2]);
+        assert_eq!(lrs.lost, lost.len());
+        assert_eq!(lrs.loss_recovery_timer_start(), None);
+    }
+
+    /// A lost packet that is no longer past a loss threshold starts the loss timer.
+    #[test]
+    fn detect_lost_stops_at_lost() {
+        let (mut lrs, mut lost) = lose_0_and_1();
+        lrs.detect_lost_packets(pn_time(2), PACING * 2, TEST_RTT, &mut lost);
+        match_acked(&lost, &[0, 1]);
+        assert_eq!(lrs.loss_recovery_timer_start(), Some(pn_time(1)));
+    }
+
+    /// Packets after a lost packet that was acknowledged late can be declared lost.
+    #[test]
+    fn detect_lost_after_late_ack() {
+        let (mut lrs, mut lost) = lose_0_and_1();
+        let mut stats = Stats {
+            lost: lost.len(),
+            bytes_lost: lost.iter().map(sent::Packet::len).sum(),
+            ..Stats::default()
+        };
+        let (acked, _) = lrs.remove_acked([1..=1], &mut stats);
+        match_acked(&acked, &[1]);
+        lrs.detect_lost_packets(pn_time(3), PACING, TEST_RTT, &mut lost);
+        match_acked(&lost, &[0, 1, 2]);
+    }
+
+    /// Packets after expired lost packets can be declared lost.
+    #[test]
+    fn detect_lost_after_expired() {
+        let (mut lrs, mut lost) = lose_0_and_1();
+        lrs.detect_lost_packets(pn_time(4), PACING, PACING * 2, &mut lost);
+        match_acked(&lost, &[0, 1, 2]);
+        assert_eq!(lrs.sent_packets.len(), 2);
+    }
+
+    /// Packets after lost ACK-only packets that are no longer tracked can be declared lost.
+    #[test]
+    fn detect_lost_after_ack_only_lost_untracked() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        let limit = to_u64(MAX_TRACKED_ACK_ONLY);
+        send_ack_only(&mut lrs, 0..limit / 2);
+        lrs.largest_acked = Some(limit / 2);
+        send_ack_only(&mut lrs, limit / 2..limit + 1);
+        assert_eq!(lrs.sent_packets.len(), MAX_TRACKED_ACK_ONLY / 2 + 1);
+        lrs.largest_acked = Some(limit);
+        let mut lost = Vec::new();
+        lrs.detect_lost_packets(pn_time(limit), Duration::ZERO, NEVER, &mut lost);
+        assert!(lost.iter().map(sent::Packet::pn).eq(limit / 2..limit));
     }
 
     fn app_data_largest_acked_sent_time(lr: &Fixture) -> Option<Instant> {

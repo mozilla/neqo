@@ -263,18 +263,38 @@ impl Packets {
     /// Stop tracking the oldest `count` packets that are not ack-eliciting.
     #[cold]
     #[inline(never)]
-    pub fn remove_oldest_ack_only(&mut self, mut count: usize) {
+    pub fn remove_oldest_ack_only(&mut self, mut count: usize) -> usize {
+        let mut lost = 0;
         self.packets.retain(|p| {
             if p.ack_eliciting() || count == 0 {
                 return true;
             }
             count -= 1;
+            lost += usize::from(p.lost());
             false
         });
+        lost
     }
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Packet> {
         self.packets.iter_mut()
+    }
+
+    /// Iterate over the packets, skipping the first `lost`, which are those declared lost,
+    /// if `skip` holds for the last of them.
+    pub fn iter_mut_skip_lost<F>(
+        &mut self,
+        lost: usize,
+        skip: F,
+    ) -> impl Iterator<Item = &mut Packet>
+    where
+        F: FnOnce(&Packet) -> bool,
+    {
+        let Some(last_lost) = lost.checked_sub(1).and_then(|i| self.packets.get(i)) else {
+            return self.packets.iter_mut();
+        };
+        let start = if skip(last_lost) { lost } else { 0 };
+        self.packets.range_mut(start..)
     }
 
     /// Take values from specified ranges of packet numbers.
