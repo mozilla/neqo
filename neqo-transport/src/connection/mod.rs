@@ -1823,7 +1823,7 @@ impl Connection {
             self.stats.borrow_mut().dscp_rx[tos.into()] += 1;
             let slc_len = slc.len();
             let (packet, remainder) =
-                match packet::Public::decode(slc, self.cid_manager.decoder().as_ref()) {
+                match packet::Public::decode(slc, &*self.cid_manager.decoder()) {
                     Ok((packet, remainder)) => {
                         #[cfg(feature = "build-fuzzing-corpus")]
                         neqo_common::write_item_to_fuzzing_corpus("packet", packet.data());

@@ -427,11 +427,11 @@ pub struct ConnectionIdDecoderRef<'a> {
     generator: Ref<'a, dyn ConnectionIdGenerator>,
 }
 
-// Ideally this would be an implementation of `Deref`, but it doesn't
-// seem to be possible to convince the compiler to build anything useful.
-impl<'a: 'b, 'b> ConnectionIdDecoderRef<'a> {
-    pub fn as_ref(&'a self) -> &'b dyn ConnectionIdDecoder {
-        self.generator.as_decoder()
+impl<'a> Deref for ConnectionIdDecoderRef<'a> {
+    type Target = dyn ConnectionIdDecoder + 'a;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.generator
     }
 }
 
