@@ -6,7 +6,7 @@
 
 use std::{
     fmt::{self, Debug},
-    str::FromStr,
+    str::{FromStr, Utf8Error},
 };
 
 use thiserror::Error;
@@ -67,8 +67,8 @@ impl Header {
     /// # Errors
     ///
     /// Returns an error if the value contains invalid UTF-8.
-    pub fn value_utf8(&self) -> Result<&str, std::str::Utf8Error> {
-        std::str::from_utf8(&self.value)
+    pub fn value_utf8(&self) -> Result<&str, Utf8Error> {
+        str::from_utf8(&self.value)
     }
 }
 
