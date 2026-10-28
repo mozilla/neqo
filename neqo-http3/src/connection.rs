@@ -370,10 +370,14 @@ impl Http3Connection {
     /// streams.
     fn initialize_http3_connection(&mut self, conn: &mut Connection) -> Res<()> {
         debug!("[{self}] Initialize the http3 connection");
-        self.control_stream_local.create(conn)?;
+        let peer_limit = |e| match e {
+            Error::StreamLimit => Error::HttpGeneralProtocol, // RFC 9114, Section 6.2.
+            e => e,
+        };
+        self.control_stream_local.create(conn).map_err(peer_limit)?;
 
         self.send_settings();
-        self.create_qpack_streams(conn)?;
+        self.create_qpack_streams(conn).map_err(peer_limit)?;
         Ok(())
     }
 
@@ -1836,7 +1840,8 @@ impl Http3Connection {
                     match st {
                         HSettingType::MaxTableCapacity => {
                             if zero_rtt_value != 0 {
-                                return Err(Error::Qpack(neqo_qpack::Error::DecoderStream));
+                                // RFC 9114, Section 7.2.4.2, not RFC 9204, Section 3.2.3.
+                                return Err(Error::HttpSettings);
                             }
                             qpack_changed = true;
                         }
