@@ -114,7 +114,7 @@ impl AddressValidation {
         now: Instant,
     ) -> Res<Vec<u8>> {
         const EXPIRATION_RETRY: Duration = Duration::from_secs(5);
-        const EXPIRATION_NEW_TOKEN: Duration = Duration::from_secs(60 * 60 * 24);
+        const EXPIRATION_NEW_TOKEN: Duration = Duration::from_hours(24);
 
         // TODO(mt) rotate keys on a fixed schedule.
         let retry = dcid.is_some();

@@ -858,7 +858,7 @@ impl Loss {
         let pto_count = pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0));
         rtt.pto(confirmed)
             .checked_mul(u32::from(fast_pto) << min(pto_count, u32::BITS - u8::BITS))
-            .map_or(Duration::from_secs(3600), |p| p / u32::from(FAST_PTO_SCALE))
+            .map_or(Duration::from_hours(1), |p| p / u32::from(FAST_PTO_SCALE))
     }
 
     /// Get the current PTO period for the given packet number space.
@@ -1080,7 +1080,7 @@ impl Display for Loss {
 #[allow(
     clippy::allow_attributes,
     clippy::single_range_in_vec_init,
-    reason = "TODO: false positive in clippy 1.98-nightly; re-check when bumping MSRV"
+    reason = "Single-range ACK lists are intended."
 )]
 mod tests {
     use std::{

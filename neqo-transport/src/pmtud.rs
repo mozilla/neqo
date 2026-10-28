@@ -37,7 +37,7 @@ const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
 const MAX_PROBES: usize = 3;
-const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
+const PMTU_RAISE_TIMER: Duration = Duration::from_mins(10);
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
