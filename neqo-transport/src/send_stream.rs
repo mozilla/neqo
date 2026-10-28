@@ -21,7 +21,6 @@ use indexmap::IndexMap;
 use neqo_common::{Buffer, Encoder, Role, expect_usize, to_u64};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
-use static_assertions::const_assert;
 use tracing::{debug, error, trace};
 
 use crate::{
@@ -467,7 +466,7 @@ pub struct TxBuffer {
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
 
-const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
+const _: () = assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
 
 impl TxBuffer {
     /// The maximum stream send buffer size.

@@ -745,7 +745,6 @@ version = "0.4.1"
 dependencies = [
  "cfg_aliases",
  "libc",
- "static_assertions",
  "windows",
 ]
 
@@ -792,7 +791,6 @@ dependencies = [
  "qlog",
  "serde",
  "sha1",
- "static_assertions",
  "strum",
  "test-fixture 0.34.0",
  "thiserror",
@@ -816,7 +814,6 @@ dependencies = [
  "qlog",
  "rustc-hash",
  "sfv",
- "static_assertions",
  "strum",
  "test-fixture 0.34.0",
  "thiserror",
@@ -830,7 +827,6 @@ dependencies = [
  "neqo-common",
  "neqo-transport",
  "rustc-hash",
- "static_assertions",
  "test-fixture 0.34.0",
  "thiserror",
  "tracing",
@@ -854,7 +850,6 @@ dependencies = [
  "serde_json",
  "serde_with",
  "smallvec",
- "static_assertions",
  "strum",
  "test-fixture 0.34.0",
  "thiserror",
@@ -1212,12 +1207,6 @@ dependencies = [
  "libc",
  "windows-sys",
 ]
-
-[[package]]
-name = "static_assertions"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "statrs"

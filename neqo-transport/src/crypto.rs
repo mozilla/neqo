@@ -1897,7 +1897,7 @@ mod buffer_limits {
     const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
 
     // Offsets have to stay inside `BUFFER_LIMIT`.
-    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
+    const _: () = assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
 
     #[test]
     fn crypto_offset_beyond_buffer() {
