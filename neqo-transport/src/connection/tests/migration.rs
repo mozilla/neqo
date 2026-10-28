@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, to_u64};
+use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
@@ -37,15 +37,17 @@ use crate::{
     MIN_INITIAL_PACKET_SIZE,
     cid::ConnectionIdManager,
     connection::{
+        state::StateSignaling,
         test_internal,
         tests::{assert_path_challenge_min_len, connect, send_something_paced, send_with_extra},
     },
     frame::FrameType,
     packet,
-    path::Path,
+    path::{Path, PathRef},
     pmtud::Pmtud,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
+    tracking::PacketNumberSpace::ApplicationData,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -1532,4 +1534,114 @@ fn path_response_not_padded_when_cwnd_limited() {
     let after = client.stats().frame_tx;
     assert_eq!(after.path_response, before.path_response + 1);
     assert_eq!(after.padding, before.padding);
+}
+
+/// Make `client` close on an invalid frame from a new path; return the size of that datagram.
+fn error_on_new_path(client: &mut Connection, server: &mut Connection) -> usize {
+    connect_force_idle(client, server);
+    let garbage = send_with_extra(server, GarbageWriter {}, now());
+    let dgram = change_path(&garbage, DEFAULT_ADDR_V4);
+    let len = dgram.len();
+    client.process_input(dgram, now());
+    len
+}
+
+fn closing_path(c: &Connection) -> PathRef {
+    let (StateSignaling::Closing(close) | StateSignaling::CloseSent(Some(close))) =
+        &c.state_signaling
+    else {
+        panic!("not closing");
+    };
+    Rc::clone(close.path())
+}
+
+/// `CONNECTION_CLOSE` on an unvalidated path counts against the anti-amplification limit
+/// (RFC 9000, Section 10.2.1).
+#[test]
+fn error_on_new_path_amplification_limit() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let budget = 3 * error_on_new_path(&mut client, &mut server);
+
+    let close = client.process_output(now()).dgram().unwrap();
+    assert_eq!(close.destination(), DEFAULT_ADDR_V4);
+    let mut sent = close.len();
+    // Every datagram from the server draws another CONNECTION_CLOSE, until the budget is spent.
+    let trigger = send_something(&mut server, now());
+    for _ in 0..10 {
+        client.process_input(trigger.clone(), now());
+        sent += client.process_output(now()).dgram().map_or(0, |d| d.len());
+    }
+
+    let path = closing_path(&client);
+    assert!(!path.borrow().is_valid());
+    assert!(sent <= budget);
+}
+
+/// A closing budget smaller than the AEAD expansion leaves room for no packet at all.
+#[test]
+fn error_on_new_path_tiny_amplification_limit() {
+    let mut client = default_client();
+    let mut server = default_server();
+    error_on_new_path(&mut client, &mut server);
+
+    let path = closing_path(&client);
+    let (_, tx) = client
+        .crypto
+        .states()
+        .select_tx(client.version, ApplicationData)
+        .unwrap();
+    let left = tx.expansion() - 1;
+    let limit = path.borrow().amplification_limit();
+    path.borrow_mut().add_sent(limit - left);
+    assert!(client.process_output(now()).dgram().is_none());
+    assert_eq!(path.borrow().amplification_limit(), left);
+}
+
+/// A server closing on an unvalidated path stays within the anti-amplification limit
+/// (RFC 9000, Section 10.2.1), however many datagrams for the connection it receives.
+#[test]
+fn server_closing_amplification_limit() {
+    // Without ML-KEM, the server leaves `WaitInitial` after the first Initial.
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = default_server();
+    let c1 = client.process_output(now()).dgram().unwrap();
+    let mut budget = 3 * c1.len();
+    server.process_input(c1, now());
+    let s1 = server.process_output(now()).dgram().unwrap();
+    let mut sent = s1.len();
+    client.process_input(s1, now());
+    client.test_frame_writer = Some(Box::new(GarbageWriter {}));
+    let c2 = client.process_output(now()).dgram().unwrap();
+    budget += 3 * c2.len();
+
+    // An empty Handshake packet for the connection, which needs no keys.
+    let mut trigger = Encoder::default();
+    trigger
+        .encode_byte(0xe0)
+        .encode_uint(4, client.version().wire_version())
+        .encode_vec(1, client.original_destination_cid.as_ref().unwrap())
+        .encode_vec(1, &[])
+        .encode_varint(0_u64);
+    let trigger = Datagram::new(c2.source(), c2.destination(), c2.tos(), trigger);
+
+    server.process_input(c2, now());
+    assert!(matches!(
+        server.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::UnknownFrameType),
+            ..
+        }
+    ));
+    for _ in 0..100 {
+        while let Some(d) = server.process_output(now()).dgram() {
+            sent += d.len();
+        }
+        budget += 3 * trigger.len();
+        server.process_input(trigger.clone(), now());
+    }
+
+    let path = server.paths.primary().unwrap();
+    assert!(!path.borrow().is_valid());
+    assert!(sent <= budget);
 }
