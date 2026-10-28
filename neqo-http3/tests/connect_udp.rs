@@ -775,24 +775,36 @@ fn establish_capsule_session(
     neqo_http3::StreamId,
     ServerSession,
 ) {
-    fixture_init();
-    neqo_common::log::init(None);
-
     // `datagram_size(0)` forces the HTTP DATAGRAM Capsule path.
     let mut proxy_params = ConnectionParameters::default().datagram_size(0);
     if let Some(v) = proxy_max_stream_data {
         proxy_params = proxy_params.max_stream_data(StreamDataLimit::BiDiRemote, v);
     }
-    let mut client = http3_client_with_params(
+    establish_session_with_params(
         Http3Parameters::default()
             .connect(true)
             .connection_parameters(ConnectionParameters::default().datagram_size(0)),
-    );
-    let mut proxy = http3_server_with_params(
         Http3Parameters::default()
             .connect(true)
             .connection_parameters(proxy_params),
-    );
+    )
+}
+
+/// Establish a connect-udp session between a client and a proxy built from the given parameters.
+fn establish_session_with_params(
+    client_params: Http3Parameters,
+    proxy_params: Http3Parameters,
+) -> (
+    Http3Client,
+    Http3Server,
+    neqo_http3::StreamId,
+    ServerSession,
+) {
+    fixture_init();
+    neqo_common::log::init(None);
+
+    let mut client = http3_client_with_params(client_params);
+    let mut proxy = http3_server_with_params(proxy_params);
 
     let out = test_fixture::connect_peers(&mut client, &mut proxy);
     if let Some(dgram) = out
@@ -991,4 +1003,38 @@ fn connect_udp_session_rejected_by_webtransport_datagram_setters() {
         client.webtransport_datagram_queue_capacity(session_id),
         Err(Error::InvalidStreamId)
     );
+}
+
+/// Without `SETTINGS_H3_DATAGRAM = 1` on both sides, datagrams use capsules in both directions.
+#[test]
+fn datagram_capsule_without_h3_datagram_setting() {
+    let (mut client, mut proxy, session_id, proxy_session) = establish_session_with_params(
+        Http3Parameters::default().connect(true),
+        Http3Parameters::default()
+            .connect(true)
+            .http3_datagram(false),
+    );
+
+    assert_eq!(
+        client.connect_udp_send_datagram(session_id, PING, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    assert_eq!(
+        proxy_session.send_datagram(PONG, None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    exchange_packets(&mut client, &mut proxy, false, None);
+
+    assert!(proxy.events().any(|e| matches!(
+        e,
+        Http3ServerEvent::ConnectUdp(ServerEvent::Datagram { session, datagram })
+            if session.stream_id() == session_id && &datagram == PING
+    )));
+    assert!(client.events().any(|e| matches!(
+        e,
+        Http3ClientEvent::ConnectUdp(ConnectUdpEvent::Datagram { session_id: id, datagram })
+            if id == session_id && &datagram == PONG
+    )));
+    assert_eq!(client.transport_stats().frame_tx.datagram, 0);
+    assert_eq!(client.transport_stats().frame_rx.datagram, 0);
 }
