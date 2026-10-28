@@ -70,6 +70,42 @@ pub fn find_sni(buf: &[u8]) -> Option<Range<usize>> {
     None
 }
 
+/// Truncate both halves so that they fill packets of `limit` bytes roughly evenly.
+fn limit_chunks(
+    left: Range<usize>,
+    right: Range<usize>,
+    limit: usize,
+) -> (Range<usize>, Range<usize>) {
+    let (left_len, right_len) = (left.len(), right.len());
+    if left_len + right_len <= limit {
+        (left, right)
+    } else if left_len <= limit {
+        // The SNI is at the start of `right`, so send the end of it.
+        let skip = right_len + left_len - limit;
+        (left, right.start + skip..right.end)
+    } else if right_len <= limit {
+        // The SNI begins at the end of `left`, so send the beginning of it in this packet.
+        (left.start..left.start + limit - right_len, right)
+    } else {
+        // Both chunks are too long to fit into one packet. Just send a part of each.
+        (
+            left.start..left.start + limit / 2,
+            right.start..right.start + limit / 2,
+        )
+    }
+}
+
+/// Cut `data` at the midpoint of the SNI, so that the halves tend to land in different packets.
+/// Returns the halves in the order to write them, or `None` if there is no SNI.
+pub fn slice_sni(data: &[u8], limit: usize) -> Option<(Range<usize>, Range<usize>)> {
+    let sni = find_sni(data)?;
+    let mid = sni.start + sni.len() / 2;
+    let packets_needed = data.len().div_ceil(limit);
+    let (left, right) = limit_chunks(0..mid, mid..data.len(), data.len() / packets_needed);
+    // Second half first, so that packet order does not follow data order.
+    Some((right, left))
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
@@ -182,5 +218,29 @@ mod tests {
         // Buffer starting with `1` but otherwise malformed
         let buf = [1; 1];
         assert!(super::find_sni(&buf).is_none());
+    }
+
+    #[test]
+    fn limit_chunks_branches() {
+        use super::limit_chunks;
+        // Both halves fit: unchanged.
+        assert_eq!(limit_chunks(0..10, 10..20, 20), (0..10, 10..20));
+        // `left` fits: send the tail of `right`.
+        assert_eq!(limit_chunks(0..10, 10..30, 15), (0..10, 25..30));
+        // `right` fits: send the head of `left`.
+        assert_eq!(limit_chunks(0..20, 20..25, 15), (0..10, 20..25));
+        // Neither fits: half of each.
+        assert_eq!(limit_chunks(0..20, 20..40, 10), (0..5, 20..25));
+        // `left` exactly fills the packet, emptying `right`.
+        assert_eq!(limit_chunks(0..500, 500..1000, 500), (0..500, 1000..1000));
+    }
+
+    #[test]
+    fn slice_sni() {
+        // The SNI is at 74..83, so the cut is at 78. The second half comes first.
+        assert_eq!(super::slice_sni(BUF_WITH_SNI, 1000), Some((78..92, 0..78)));
+        // Two packets of 46 bytes: `right` fits, so `left` is truncated.
+        assert_eq!(super::slice_sni(BUF_WITH_SNI, 50), Some((78..92, 0..32)));
+        assert_eq!(super::slice_sni(&[0; 1], 1000), None);
     }
 }
