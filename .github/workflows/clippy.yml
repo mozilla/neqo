@@ -64,6 +64,9 @@ jobs:
 
       # Run clippy across all meaningful feature combinations.
       - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci --mutually-exclusive-features bench,blapi,build-fuzzing-corpus,default,disable-encryption -- -D warnings
+      # Fuzz targets and fuzzing-only APIs only build with `--cfg fuzzing`, and not on Windows.
+      - if: runner.os != 'Windows'
+        run: RUSTFLAGS="--cfg fuzzing $RUSTFLAGS" cargo clippy --locked -p fuzz --bins -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"
