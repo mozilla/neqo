@@ -4,11 +4,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::{Datagram, qdebug};
+use neqo_common::Datagram;
 use test_fixture::{
     assertions::{is_handshake, is_initial},
     now, split_datagram,
 };
+use tracing::debug;
 
 use super::{
     super::{
@@ -57,7 +58,7 @@ fn overwrite_invocations(n: packet::Number) {
 
 #[test]
 fn discarded_initial_keys() {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let c_hs_1 = client.process_output(now()).dgram();
     let c_hs_2 = client.process_output(now()).dgram();
@@ -65,14 +66,14 @@ fn discarded_initial_keys() {
     assert_eq!(c_hs_1.as_ref().unwrap().len(), client.plpmtu());
     assert_eq!(c_hs_2.as_ref().unwrap().len(), client.plpmtu());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     server.process_input(c_hs_1.clone().unwrap(), now());
     let s_hs_1 = server.process(c_hs_2, now()).dgram();
     assert!(s_hs_1.is_some());
     let s_hs_2 = server.process_output(now()).dgram();
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     client.process_input(s_hs_1.clone().unwrap(), now());
     let out = client.process(s_hs_2, now()).dgram();
     assert!(out.is_some());
@@ -92,7 +93,7 @@ fn discarded_initial_keys() {
     let (c_init, _c_hs) = split_datagram(c_hs_1.as_ref().unwrap());
     check_discarded(&mut server, &c_init, false, 0, 1);
 
-    qdebug!("---- client: SH..FIN -> FIN");
+    debug!("---- client: SH..FIN -> FIN");
     let c_fin = client.process_output(now()).dgram();
     assert!(c_fin.is_some());
 

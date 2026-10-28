@@ -13,13 +13,14 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, qtrace};
+use neqo_common::Datagram;
 use neqo_transport::{
     ConnectionIdGenerator, Output, OutputBatch, State,
     server::{ConnectionRef, Server, ValidateAddress},
 };
 use nss::{AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttChecker};
 use rustc_hash::FxHashMap as HashMap;
+use tracing::trace;
 
 use crate::{
     Http3Parameters, Http3StreamInfo, Res,
@@ -143,12 +144,12 @@ impl Http3Server {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
-        qtrace!("[{self}] Process");
+        trace!("[{self}] Process");
         let out = self.server.process_multiple_input(dgrams, now);
         self.process_http3(now);
         // Try again if input processing did not already produce a datagram.
         if let OutputBatch::DatagramBatch(d) = out {
-            qtrace!("[{self}] Send packet: {d:?}");
+            trace!("[{self}] Send packet: {d:?}");
             OutputBatch::DatagramBatch(d)
         } else {
             let out = self
@@ -171,7 +172,7 @@ impl Http3Server {
 
     /// Process HTTP3 layer.
     fn process_http3(&mut self, now: Instant) {
-        qtrace!("[{self}] Process http3 internal");
+        trace!("[{self}] Process http3 internal");
         #[expect(
             clippy::mutable_key_type,
             reason = "ActiveConnectionRef::Hash doesn't access any of the interior mutable types."

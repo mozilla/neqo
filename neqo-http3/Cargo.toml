@@ -20,7 +20,6 @@ workspace = true
 [dependencies]
 enumset = { workspace = true }
 http = { workspace = true }
-log = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
 neqo-qpack = { path = "./../neqo-qpack", default-features = false }
 neqo-transport = { path = "./../neqo-transport", default-features = false }
@@ -31,6 +30,7 @@ sfv = { version = "0.14", default-features = false, features = ["parsed-types"] 
 static_assertions = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "5", package = "codspeed-criterion-compat", default-features = false }
@@ -43,7 +43,6 @@ bench = [
         "neqo-qpack/bench",
         "neqo-transport/bench",
         "test-fixture/bench",
-        "log/release_max_level_warn",
 ]
 build-fuzzing-corpus = [
         "neqo-common/build-fuzzing-corpus",
@@ -56,7 +55,7 @@ disable-encryption = ["neqo-transport/disable-encryption", "nss/disable-encrypti
 draft-29 = ["neqo-transport/draft-29"]
 
 [package.metadata.cargo-machete]
-ignored = ["criterion", "log"]
+ignored = ["criterion"]
 
 [lib]
 # See https://github.com/bheisler/criterion.rs/blob/master/book/src/faq.md#cargo-bench-gives-unrecognized-option-errors-for-valid-command-line-options

@@ -18,9 +18,7 @@ use neqo_common::{
     Datagram, Decoder, Encoder, Header, Role,
     event::Provider as EventProvider,
     hex::{Hex, HexWithLen},
-    qdebug, qinfo,
     qlog::Qlog,
-    qtrace, qwarn,
 };
 use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
@@ -28,6 +26,7 @@ use neqo_transport::{
     OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, cert::CertificateInfo};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     Error, Http3Parameters, NewStreamType, Priority, ReceiveOutput, Res, SendGroupId,
@@ -435,7 +434,7 @@ impl Http3Client {
         let Some(settings_slice) = dec.decode_vvec() else {
             return Err(Error::InvalidResumptionToken);
         };
-        qtrace!("[{self}]   settings {}", HexWithLen::new(settings_slice));
+        trace!("[{self}]   settings {}", HexWithLen::new(settings_slice));
         let mut dec_settings = Decoder::from(settings_slice);
         let mut settings = HSettings::default();
         Error::map_error(
@@ -443,7 +442,7 @@ impl Http3Client {
             Error::InvalidResumptionToken,
         )?;
         let tok = dec.decode_remainder();
-        qtrace!("[{self}]   Transport token {}", Hex::new(tok));
+        trace!("[{self}]   Transport token {}", Hex::new(tok));
         self.conn.enable_resumption(now, tok)?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();
@@ -475,7 +474,7 @@ impl Http3Client {
     where
         S: AsRef<str> + Display,
     {
-        qinfo!("[{self}] Close the connection error={error} msg={msg}");
+        info!("[{self}] Close the connection error={error} msg={msg}");
         if !matches!(
             self.base_handler.state(),
             Http3State::Closing(_) | Http3State::Closed(_)
@@ -512,7 +511,7 @@ impl Http3Client {
         T: RequestTarget,
     {
         if method == "CONNECT" {
-            qwarn!("Invalid method CONNECT in fetch. Use Http3Client::connect instead.");
+            warn!("Invalid method CONNECT in fetch. Use Http3Client::connect instead.");
             return Err(Error::InvalidInput);
         }
         let output = self.base_handler.request(
@@ -596,7 +595,7 @@ impl Http3Client {
     ///
     /// An error will be return if a stream does not exist.
     pub fn cancel_fetch(&mut self, stream_id: StreamId, error: AppError) -> Res<()> {
-        qdebug!("[{self}] reset_stream {stream_id} error={error}");
+        debug!("[{self}] reset_stream {stream_id} error={error}");
         self.base_handler
             .cancel_fetch(stream_id, error, &mut self.conn)
     }
@@ -653,7 +652,7 @@ impl Http3Client {
     /// info that the stream has been closed.) `InvalidInput` if an empty buffer has been
     /// supplied.
     pub fn send_data(&mut self, stream_id: StreamId, buf: &[u8], now: Instant) -> Res<usize> {
-        qinfo!(
+        info!(
             "[{self}] end_data from stream {stream_id} sending {} bytes",
             buf.len()
         );
@@ -677,7 +676,7 @@ impl Http3Client {
         stream_id: StreamId,
         buf: &mut [u8],
     ) -> Res<(usize, bool)> {
-        qdebug!("[{self}] read_data from stream {stream_id}");
+        debug!("[{self}] read_data from stream {stream_id}");
         let res = self
             .base_handler
             .read_data(&mut self.conn, stream_id, buf, now);
@@ -695,7 +694,7 @@ impl Http3Client {
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        qtrace!("[{self}] Process");
+        trace!("[{self}] Process");
         if let Some(d) = dgram {
             self.process_input(d, now);
         }
@@ -729,7 +728,7 @@ impl Http3Client {
         now: Instant,
     ) {
         let mut dgrams = dgrams.into_iter().peekable();
-        qtrace!("[{self}] Process multiple datagrams");
+        trace!("[{self}] Process multiple datagrams");
         if dgrams.peek().is_none() {
             return;
         }
@@ -743,7 +742,7 @@ impl Http3Client {
     /// the QUC layer and calls `Http3Connection::process_sending` to ensure that HTTP/3 layer
     /// data, e.g. control frames, are sent.
     fn process_http3(&mut self, now: Instant) {
-        qtrace!("[{self}] Process http3 internal");
+        trace!("[{self}] Process http3 internal");
         match self.base_handler.state() {
             Http3State::ZeroRtt | Http3State::Connected | Http3State::GoingAway(..) => {
                 self.base_handler
@@ -804,7 +803,7 @@ impl Http3Client {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
-        qtrace!("[{self}] Process output");
+        trace!("[{self}] Process output");
 
         // Maybe send() stuff on http3-managed streams
         self.process_http3(now);
@@ -822,7 +821,7 @@ impl Http3Client {
     fn check_result<ERR>(&mut self, now: Instant, res: &Res<ERR>) -> bool {
         match &res {
             Err(Error::HttpGoaway) => {
-                qinfo!("[{self}] Connection error: goaway stream_id increased");
+                info!("[{self}] Connection error: goaway stream_id increased");
                 self.close(
                     now,
                     Error::HttpGeneralProtocol.code(),
@@ -831,7 +830,7 @@ impl Http3Client {
                 true
             }
             Err(e) => {
-                qinfo!("[{self}] Connection error: {e}");
+                info!("[{self}] Connection error: {e}");
                 self.close(now, e.code(), format!("{e}"));
                 true
             }
@@ -854,9 +853,9 @@ impl Http3Client {
     /// [2]: ../neqo_transport/enum.ConnectionEvent.html
     /// [3]: ../neqo_transport/enum.ConnectionEvent.html#variant.RecvStreamReadable
     fn check_connection_events(&mut self, now: Instant) -> Res<()> {
-        qtrace!("[{self}] Check connection events");
+        trace!("[{self}] Check connection events");
         while let Some(e) = self.conn.next_event() {
-            qdebug!("[{self}] check_connection_events - event {e:?}");
+            debug!("[{self}] check_connection_events - event {e:?}");
             match e {
                 ConnectionEvent::NewStream { stream_id } => {
                     // During this event we only add a new stream to the Http3Connection stream
@@ -988,7 +987,7 @@ impl Http3Client {
     }
 
     fn handle_goaway(&mut self, goaway_stream_id: StreamId) -> Res<()> {
-        qinfo!("[{self}] handle_goaway {goaway_stream_id}");
+        info!("[{self}] handle_goaway {goaway_stream_id}");
 
         if goaway_stream_id.is_uni() || goaway_stream_id.is_server_initiated() {
             return Err(Error::HttpId);
@@ -1160,7 +1159,7 @@ mod tests {
     use std::time::Duration;
 
     use http::Uri;
-    use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, qtrace, to_u64};
+    use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
@@ -1171,6 +1170,7 @@ mod tests {
         CountingConnectionIdGenerator, DEFAULT_ADDR, DEFAULT_ALPN_H3, DEFAULT_KEYS,
         DEFAULT_SERVER_NAME, anti_replay, default_server_h3, fixture_init, new_server, now,
     };
+    use tracing::trace;
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
@@ -1343,7 +1343,7 @@ mod tests {
         pub fn create_control_stream(&mut self) {
             // Create control stream
             let control = self.conn.stream_create(StreamType::UniDi).unwrap();
-            qtrace!("[TestServer] control stream: {control}");
+            trace!("[TestServer] control stream: {control}");
             self.control_stream_id = Some(control);
             // Send stream type on the control stream.
             assert_eq!(
