@@ -78,6 +78,7 @@ allow_attributes_without_reason = "warn"
 assert_is_empty = "allow" # We prefer using is_empty() in asserts.
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
+cognitive_complexity = "allow" # TODO: Remove when MSRV >= 1.91 (lint moved to `restriction`).
 create_dir = "warn"
 dbg_macro = "warn"
 empty_drop = "warn"
