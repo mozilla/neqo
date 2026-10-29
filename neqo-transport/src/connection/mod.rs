@@ -2151,11 +2151,12 @@ impl Connection {
             // Can't mix address families.
             return Err(Error::InvalidMigration);
         }
-        if local.port() == 0 || remote.ip().is_unspecified() || remote.port() == 0 {
+        let (local_ip, remote_ip) = (local.ip().to_canonical(), remote.ip().to_canonical());
+        if local.port() == 0 || remote_ip.is_unspecified() || remote.port() == 0 {
             // All but the local address need to be specified.
             return Err(Error::InvalidMigration);
         }
-        if (local.ip().is_loopback() ^ remote.ip().is_loopback()) && !local.ip().is_unspecified() {
+        if (local_ip.is_loopback() ^ remote_ip.is_loopback()) && !local_ip.is_unspecified() {
             // Block attempts to migrate to a path with loopback on only one end, unless the local
             // address is unspecified.
             return Err(Error::InvalidMigration);
@@ -2222,7 +2223,9 @@ impl Connection {
             if let Some(remote) = remote {
                 // Ignore preferred address that move to loopback from non-loopback.
                 // `migrate` doesn't enforce this rule.
-                if !prev.ip().is_loopback() && remote.ip().is_loopback() {
+                if !prev.ip().to_canonical().is_loopback()
+                    && remote.ip().to_canonical().is_loopback()
+                {
                     warn!("[{self}] Ignoring a move to a loopback address: {remote}");
                     return Ok(());
                 }

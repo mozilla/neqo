@@ -159,6 +159,10 @@ const fn loopback() -> SocketAddr {
     SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 443)
 }
 
+const fn mapped(ip: Ipv4Addr) -> SocketAddr {
+    SocketAddr::new(IpAddr::V6(ip.to_ipv6_mapped()), 443)
+}
+
 fn change_path(d: &Datagram, a: SocketAddr) -> Datagram {
     Datagram::new(a, a, d.tos(), &d[..])
 }
@@ -1005,6 +1009,26 @@ fn preferred_address_ignore_loopback() {
     preferred_address_ignored(PreferredAddress::new_any(None, Some(loopback())));
 }
 
+/// Using an IPv4-mapped loopback address in the preferred address is ignored.
+#[test]
+fn preferred_address_ignore_mapped_loopback() {
+    let spa = PreferredAddress::new_any(None, Some(mapped(Ipv4Addr::LOCALHOST)));
+    preferred_address_ignored(spa);
+}
+
+/// An IPv4-mapped loopback preferred address is ignored with an unspecified local address.
+#[test]
+fn preferred_address_ignore_mapped_loopback_unspecified_local() {
+    let local = SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), DEFAULT_ADDR.port());
+    let mut client = zero_len_cid_client(local, DEFAULT_ADDR);
+    let spa = PreferredAddress::new_any(None, Some(mapped(Ipv4Addr::LOCALHOST)));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+
+    let dgram = fast_handshake(&mut client, &mut server);
+    _ = client.process(dgram, now());
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
+}
+
 /// A preferred address in the wrong address family is ignored.
 #[test]
 fn preferred_address_ignore_different_family() {
@@ -1173,6 +1197,7 @@ fn migration_invalid_address() {
     let mut remote_unspecified = DEFAULT_ADDR;
     remote_unspecified.set_ip(IpAddr::V6(Ipv6Addr::from(0)));
     cant_migrate(None, Some(remote_unspecified));
+    cant_migrate(None, Some(mapped(Ipv4Addr::UNSPECIFIED)));
 
     // Mixed address families is bad.
     cant_migrate(Some(DEFAULT_ADDR), Some(DEFAULT_ADDR_V4));
@@ -1181,6 +1206,8 @@ fn migration_invalid_address() {
     // Loopback to non-loopback is bad.
     cant_migrate(Some(DEFAULT_ADDR), Some(loopback()));
     cant_migrate(Some(loopback()), Some(DEFAULT_ADDR));
+    cant_migrate(Some(DEFAULT_ADDR), Some(mapped(Ipv4Addr::LOCALHOST)));
+    cant_migrate(Some(mapped(Ipv4Addr::LOCALHOST)), Some(DEFAULT_ADDR));
     assert_eq!(
         client
             .migrate(Some(DEFAULT_ADDR), Some(loopback()), true, now())
