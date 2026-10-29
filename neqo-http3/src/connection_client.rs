@@ -1181,6 +1181,7 @@ mod tests {
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
+        stream_type_reader::{WEBTRANSPORT_STREAM, WEBTRANSPORT_UNI_STREAM},
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1966,6 +1967,47 @@ mod tests {
             }
         }
         assert!(stop_sending_event_found);
+        assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    fn receive_wt_stream(stream_type: StreamType, session_id: u64) -> (Http3Client, TestServer) {
+        let (mut client, mut server) = connect();
+        let stream_id = server.conn.stream_create(stream_type).unwrap();
+        let mut enc = Encoder::default();
+        enc.encode_varint(match stream_type {
+            StreamType::UniDi => WEBTRANSPORT_UNI_STREAM,
+            StreamType::BiDi => WEBTRANSPORT_STREAM,
+        });
+        enc.encode_varint(session_id);
+        server.conn.stream_send(stream_id, enc.as_ref()).unwrap();
+        let out = server.conn.process_output(now());
+        let out = client.process(out.dgram(), now());
+        drop(server.conn.process(out.dgram(), now()));
+        (client, server)
+    }
+
+    // A session ID that is not a client-initiated bidirectional stream ID is H3_ID_ERROR.
+    #[test]
+    fn client_received_wt_stream_invalid_session_id() {
+        for (stream_type, session_id) in [
+            (StreamType::UniDi, 1),
+            (StreamType::BiDi, 2),
+            (StreamType::UniDi, 3),
+        ] {
+            let (client, _server) = receive_wt_stream(stream_type, session_id);
+            assert_closed(&client, &Error::HttpId);
+        }
+    }
+
+    // A well-formed session ID without a session gets STOP_SENDING, not a connection error.
+    #[test]
+    fn client_received_wt_stream_unknown_session_id() {
+        let (client, mut server) = receive_wt_stream(StreamType::BiDi, 4);
+        assert!(server.conn.events().any(|e| matches!(
+            e,
+            ConnectionEvent::SendStreamStopSending { app_error, .. }
+                if app_error == Error::HttpStreamCreation.code()
+        )));
         assert_eq!(client.state(), Http3State::Connected);
     }
 
