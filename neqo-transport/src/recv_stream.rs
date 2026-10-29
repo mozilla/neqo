@@ -1154,6 +1154,12 @@ impl RecvStream {
         )
     }
 
+    /// Whether no FIN or reset was received and reading was not stopped.
+    #[must_use]
+    pub const fn is_open(&self) -> bool {
+        matches!(self.state, RecvStreamState::Recv { .. })
+    }
+
     // App got all data but did not get the fin signal.
     const fn needs_to_inform_app_about_fin(&self) -> bool {
         matches!(self.state, RecvStreamState::DataRecvd { .. })
