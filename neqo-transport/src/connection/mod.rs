@@ -823,6 +823,7 @@ impl Connection {
         }
 
         self.version = version;
+        self.crypto.set_version(version);
         self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
         self.tps.borrow_mut().set_remote_0rtt(Some(tp));
