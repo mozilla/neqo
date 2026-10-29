@@ -631,7 +631,6 @@ impl TransportParameters {
                         | TransportParameterId::IdleTimeout
                         | TransportParameterId::AckDelayExponent
                         | TransportParameterId::MaxAckDelay
-                        | TransportParameterId::ActiveConnectionIdLimit
                         | TransportParameterId::PreferredAddress
                         | TransportParameterId::Scone
                 )
@@ -681,6 +680,25 @@ impl TransportParameters {
         true
     }
 
+    /// Return true if these transport parameters, from a server that accepted 0-RTT,
+    /// keep the limits and features that the client remembered.
+    pub(crate) fn upholds_0rtt(&self, remembered: &Self) -> bool {
+        [
+            TransportParameterId::ActiveConnectionIdLimit,
+            TransportParameterId::InitialMaxData,
+            TransportParameterId::InitialMaxStreamDataBidiLocal,
+            TransportParameterId::InitialMaxStreamDataBidiRemote,
+            TransportParameterId::InitialMaxStreamDataUni,
+            TransportParameterId::InitialMaxStreamsBidi,
+            TransportParameterId::InitialMaxStreamsUni,
+            TransportParameterId::MaxDatagramFrameSize,
+        ]
+        .into_iter()
+        .all(|tp| self.get_integer(tp) >= remembered.get_integer(tp))
+            && (self.get_empty(TransportParameterId::ResetStreamAt)
+                || !remembered.get_empty(TransportParameterId::ResetStreamAt))
+    }
+
     /// Get the preferred address in a usable form.
     #[must_use]
     pub fn get_preferred_address(&self) -> Option<(PreferredAddress, ConnectionIdEntry<Srt>)> {
@@ -726,6 +744,7 @@ pub struct TransportParametersHandler {
     local: TransportParameters,
     remote_handshake: Option<TransportParameters>,
     remote_0rtt: Option<TransportParameters>,
+    zero_rtt_pending: bool,
 }
 
 impl TransportParametersHandler {
@@ -740,6 +759,7 @@ impl TransportParametersHandler {
             local,
             remote_handshake: None,
             remote_0rtt: None,
+            zero_rtt_pending: false,
         }
     }
 
@@ -757,6 +777,7 @@ impl TransportParametersHandler {
     #[must_use]
     pub fn remote(&self) -> &TransportParameters {
         match (self.remote_handshake(), self.remote_0rtt()) {
+            (_, Some(tp)) if self.zero_rtt_pending => tp,
             (Some(tp), _) | (_, Some(tp)) => tp,
             _ => panic!("no transport parameters from peer"),
         }
@@ -835,6 +856,10 @@ impl TransportParametersHandler {
 
     pub fn set_remote_0rtt(&mut self, remote_0rtt: Option<TransportParameters>) {
         self.remote_0rtt = remote_0rtt;
+    }
+
+    pub(crate) const fn set_zero_rtt_pending(&mut self, pending: bool) {
+        self.zero_rtt_pending = pending;
     }
 
     #[must_use]
@@ -1258,7 +1283,6 @@ mod tests {
         );
         tps_a.set(IdleTimeout, TransportParameter::Integer(10));
         tps_a.set(MaxAckDelay, TransportParameter::Integer(22));
-        tps_a.set(ActiveConnectionIdLimit, TransportParameter::Integer(33));
 
         let mut tps_b = TransportParameters::default();
         assert!(tps_a.ok_for_0rtt(&tps_b));
@@ -1270,7 +1294,6 @@ mod tests {
         );
         tps_b.set(IdleTimeout, TransportParameter::Integer(100));
         tps_b.set(MaxAckDelay, TransportParameter::Integer(2));
-        tps_b.set(ActiveConnectionIdLimit, TransportParameter::Integer(44));
         assert!(tps_a.ok_for_0rtt(&tps_b));
         assert!(tps_b.ok_for_0rtt(&tps_a));
     }
@@ -1278,6 +1301,7 @@ mod tests {
     #[test]
     fn compatible_0rtt_integers() {
         const INTEGER_KEYS: &[TransportParameterId] = &[
+            ActiveConnectionIdLimit,
             InitialMaxData,
             InitialMaxStreamDataBidiLocal,
             InitialMaxStreamDataBidiRemote,

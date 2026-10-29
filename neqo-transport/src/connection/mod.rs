@@ -3040,6 +3040,7 @@ impl Connection {
         self.set_state(State::WaitInitial, now);
         self.zero_rtt_state = if self.crypto.enable_0rtt(self.version)? {
             debug!("[{self}] Enabled 0-RTT");
+            self.tps.borrow_mut().set_zero_rtt_pending(true);
             ZeroRttState::Sending
         } else {
             ZeroRttState::Init
@@ -3096,6 +3097,14 @@ impl Connection {
         {
             let tps = self.tps.borrow();
             let remote = tps.remote_handshake().ok_or(Error::TransportParameter)?;
+
+            if self.zero_rtt_state == ZeroRttState::AcceptedClient
+                && tps
+                    .remote_0rtt()
+                    .is_some_and(|remembered| !remote.upholds_0rtt(remembered))
+            {
+                return Err(Error::ProtocolViolation);
+            }
 
             // If the peer provided a preferred address, then we have to be a client
             // and they have to be using a non-empty connection ID.
@@ -3328,6 +3337,9 @@ impl Connection {
         if try_update {
             // We have transport parameters, it's go time.
             if self.tps.borrow().remote_handshake().is_some() {
+                if !self.crypto.tls().preinfo()?.early_data() {
+                    self.tps.borrow_mut().set_zero_rtt_pending(false);
+                }
                 self.set_initial_limits();
             } else if self.role == Role::Server && self.crypto.tls().has_secret(Epoch::Handshake) {
                 warn!("[{self}] No transport parameters, closing connection");
@@ -3772,6 +3784,7 @@ impl Connection {
         let pto = self.pto();
         self.crypto
             .install_application_keys(self.version, now + pto)?;
+        self.tps.borrow_mut().set_zero_rtt_pending(false);
         self.process_tps(now)?;
         self.set_state(State::Connected, now);
         self.create_resumption_token(now);
@@ -4080,7 +4093,7 @@ impl Connection {
         let tps = self.tps.borrow();
         tps.remote_handshake()
             .or_else(|| tps.remote_0rtt())
-            .is_some_and(|tp| tp.get_empty(ResetStreamAt))
+            .is_some_and(|_| tps.remote().get_empty(ResetStreamAt))
     }
 
     /// Returns the current max size of a datagram that can fit into a packet.
