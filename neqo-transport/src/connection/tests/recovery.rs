@@ -6,6 +6,7 @@
 
 use std::time::{Duration, Instant};
 
+use neqo_common::Datagram;
 use nss::AuthenticationStatus;
 use test_fixture::{
     assertions::{
@@ -17,7 +18,7 @@ use tracing::debug;
 
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
-    AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND,
+    AT_LEAST_PTO, DEFAULT_ADDR, DEFAULT_RTT, DEFAULT_STREAM_DATA, POST_HANDSHAKE_CWND, PingWriter,
     assert_full_cwnd, connect, connect_force_idle, connect_rtt_idle, connect_with_rtt, cwnd,
     default_client, default_server, fill_cwnd, maybe_authenticate, new_client,
     new_client_with_qlog, new_server, send_and_receive, send_something,
@@ -32,7 +33,7 @@ use crate::{
     },
     rtt::GRANULARITY,
     tparams::{TransportParameter, TransportParameterId::*},
-    tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY},
+    tracking::{DEFAULT_LOCAL_ACK_DELAY, DEFAULT_REMOTE_ACK_DELAY, PacketNumberSpace},
 };
 
 #[test]
@@ -1269,4 +1270,61 @@ fn split_api_loss_timer_type() {
         log.contains(r#""timer_type":"ack""#),
         "Expected loss_timer_expired with timer_type ack in qlog: {log}"
     );
+}
+
+fn next_app_pn(c: &Connection) -> packet::Number {
+    let (_, tx) = c
+        .crypto
+        .states()
+        .select_tx(c.version(), PacketNumberSpace::ApplicationData)
+        .unwrap();
+    tx.next_pn()
+}
+
+fn ping(c: &mut Connection) -> Datagram {
+    c.test_write_frames(PingWriter {}, now()).dgram().unwrap()
+}
+
+/// A late packet that acknowledges the ACK of a packet with a larger number.
+#[test]
+fn late_packet_acks_ack_of_larger() {
+    struct AckThenPingWriter(packet::Number);
+
+    impl FrameWriter for AckThenPingWriter {
+        fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+            builder.encode_varint(FrameType::Ack);
+            builder.encode_varint(self.0); // Largest ACKed
+            builder.encode_varint(0u8); // ACK delay
+            builder.encode_varint(0u8); // ACK block count
+            builder.encode_varint(0u8); // ACK block length
+            builder.encode_varint(FrameType::Ping);
+        }
+    }
+
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let late = server
+        .test_write_frames(AckThenPingWriter(next_app_pn(&client)), now())
+        .dgram()
+        .unwrap();
+    _ = ping(&mut server); // Lost, so `late` does not join the newest range.
+    let ack = client.process(Some(ping(&mut server)), now()).dgram();
+    let largest = next_app_pn(&server) - 1;
+
+    client.process_input(late, now());
+    let late_ack = client.process_output(now()).dgram();
+    server.process_input(ack.unwrap(), now());
+    let rtt = server.stats().rtt;
+    server.process_input(late_ack.unwrap(), now() + DEFAULT_RTT);
+    assert_eq!(server.stats().rtt, rtt);
+    assert_eq!(
+        server
+            .loss_recovery
+            .largest_acknowledged_pn(PacketNumberSpace::ApplicationData),
+        Some(largest)
+    );
+
+    assert_eq!(client.stats().frame_tx.largest_acknowledged, largest);
 }

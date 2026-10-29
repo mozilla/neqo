@@ -479,10 +479,14 @@ impl RecvdPackets {
             return;
         }
 
-        let mut ack_needed = self.ranges.iter().filter(|range| range.ack_needed());
-        let Some(first) = ack_needed.next().cloned() else {
+        if !self.ranges.iter().any(PacketRange::ack_needed) {
+            return;
+        }
+        let mut ranges = self.ranges.iter();
+        let Some(first) = ranges.next().cloned() else {
             return;
         };
+        let ack_needed = ranges.filter(|range| range.ack_needed());
         let Some(largest_pn_time) = self.largest_pn_time else {
             return;
         };
@@ -513,6 +517,9 @@ impl RecvdPackets {
         let Some(space) = builder.remaining().checked_sub(fixed_len) else {
             return;
         };
+        if !first.ack_needed() && space < Self::ASSUMED_ACK_RANGE_LEN {
+            return; // No room for a range that needs acknowledging.
+        }
 
         stats.largest_acknowledged = first.largest;
         stats.ack += 1;
@@ -1496,5 +1503,143 @@ mod tests {
         // Ranges are still tracked for duplicate detection after acknowledgement.
         assert!(rp.is_duplicate(0));
         assert!(rp.is_duplicate(2));
+    }
+
+    /// Writes an ACK frame at `now`, marks it acknowledged, and returns its
+    /// Largest Acknowledged and ACK Delay.
+    fn write_acked_frame_at(rp: &mut RecvdPackets, now: Instant) -> (packet::Number, u64) {
+        let mut builder = ack_builder(packet::LIMIT);
+        let mut stats = FrameStats::default();
+        let mut tokens = recovery::Tokens::new();
+        rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
+        let [recovery::Token::Ack(acked)] = tokens.as_slice() else {
+            panic!("expected one ACK token");
+        };
+        rp.acknowledged(acked);
+        let Frame::Ack {
+            largest_acknowledged,
+            ack_delay,
+            ..
+        } = decode_ack_from_builder(&builder)
+        else {
+            panic!("not an ACK");
+        };
+        (largest_acknowledged, ack_delay)
+    }
+
+    /// Receives `pns` at `now()` and gets their ACK acknowledged, then receives `late`
+    /// one RTT later. Returns the next ACK's Largest Acknowledged and ACK Delay, and
+    /// the ACK Delay for the time since `now()`.
+    fn ack_late_packet(
+        rp: &mut RecvdPackets,
+        pns: &[packet::Number],
+        late: packet::Number,
+    ) -> ((packet::Number, u64), u64) {
+        let mut stats = Stats::default();
+        for &pn in pns {
+            rp.set_received(now(), pn, true, &mut stats).unwrap();
+        }
+        write_acked_frame_at(rp, rp.ack_time().unwrap());
+        rp.set_received(now() + RTT, late, true, &mut stats)
+            .unwrap();
+        let at = rp.ack_time().unwrap();
+        let since_now = u64::try_from((at - now()).as_micros() / 8).unwrap();
+        (write_acked_frame_at(rp, at), since_now)
+    }
+
+    #[test]
+    fn late_packet_ack_includes_largest() {
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        let (ack, since_largest) = ack_late_packet(&mut rp, &[10], 5);
+        assert_eq!(ack, (10, since_largest));
+    }
+
+    #[test]
+    fn late_packet_ack_includes_largest_after_trim() {
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        let pns = (1..=MAX_TRACKED_RANGES)
+            .map(|i| to_u64(i * 4))
+            .collect::<Vec<_>>();
+        let largest = pns[MAX_TRACKED_RANGES - 1];
+        let (ack, since_largest) = ack_late_packet(&mut rp, &pns, largest - 2);
+        assert_eq!(rp.min_tracked, pns[0] + 1);
+        assert_eq!(ack, (largest, since_largest));
+    }
+
+    #[test]
+    fn late_packet_ack_includes_largest_ignore_order() {
+        const DELAY: Duration = Duration::from_millis(7);
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        rp.ack_freq(0, 10, DELAY, true);
+        let (ack, since_largest) = ack_late_packet(&mut rp, &[10], 5);
+        assert_eq!(rp.last_ack_time, Some(now() + RTT + DELAY));
+        assert_eq!(ack, (10, since_largest));
+    }
+
+    #[test]
+    fn late_packet_ack_omits_acknowledged_ranges() {
+        const PNS: [packet::Number; 2] = [2, 10];
+        const LATE: packet::Number = 5;
+        let mut stats = Stats::default();
+        let mut tracker = AckTracker::default();
+        let rp = tracker.get_mut(PacketNumberSpace::Initial).unwrap();
+        for pn in PNS {
+            rp.set_received(now(), pn, true, &mut stats).unwrap();
+        }
+        write_acked_frame_at(rp, now());
+        rp.set_received(now(), LATE, true, &mut stats).unwrap();
+        let (builder, _) = write_initial_ack_frame(&mut tracker, ack_builder(packet::LIMIT));
+        let Frame::Ack {
+            largest_acknowledged,
+            first_ack_range,
+            ack_ranges,
+            ..
+        } = decode_ack_from_builder(&builder)
+        else {
+            panic!("not an ACK");
+        };
+        let acked =
+            Frame::decode_ack_frame(largest_acknowledged, first_ack_range, &ack_ranges).unwrap();
+        assert_eq!(acked, [PNS[1]..=PNS[1], LATE..=LATE]);
+    }
+
+    #[test]
+    fn immediate_ack_without_ack_needed_ranges_writes_nothing() {
+        let mut rp = RecvdPackets::new(PacketNumberSpace::Initial);
+        rp.set_received(now(), 0, true, &mut Stats::default())
+            .unwrap();
+        write_acked_frame_at(&mut rp, now());
+        rp.immediate_ack(now());
+        let mut tokens = recovery::Tokens::new();
+        let mut builder = ack_builder(packet::LIMIT);
+        let mut stats = FrameStats::default();
+        rp.write_frame(now(), RTT, &mut builder, &mut tokens, &mut stats);
+        assert!(tokens.is_empty());
+    }
+
+    /// Without room for the pending range, the ACK stays scheduled.
+    #[test]
+    fn late_packet_ack_tight_budget() {
+        const FIXED_LEN: usize = 5; // Type, Largest, Delay, Range Count, First Range.
+        let mut stats = Stats::default();
+        let mut rp = RecvdPackets::new(PacketNumberSpace::Initial);
+        rp.set_received(now(), 10, true, &mut stats).unwrap();
+        write_acked_frame_at(&mut rp, now());
+        rp.set_received(now(), 5, true, &mut stats).unwrap();
+        let limit = FIXED_LEN + RecvdPackets::ASSUMED_ACK_RANGE_LEN;
+        let mut tokens = recovery::Tokens::new();
+        let mut frame_stats = FrameStats::default();
+        let mut builder = ack_builder(limit - 1);
+        rp.write_frame(now(), RTT, &mut builder, &mut tokens, &mut frame_stats);
+        assert!(tokens.is_empty());
+        assert_eq!(rp.ack_time(), Some(now()));
+
+        let mut builder = ack_builder(limit);
+        rp.write_frame(now(), RTT, &mut builder, &mut tokens, &mut frame_stats);
+        let [recovery::Token::Ack(acked)] = tokens.as_slice() else {
+            panic!("expected one ACK token");
+        };
+        assert_eq!(acked.iter().map(|r| r.largest).collect::<Vec<_>>(), [10, 5]);
+        assert_eq!(rp.ack_time(), None);
     }
 }
