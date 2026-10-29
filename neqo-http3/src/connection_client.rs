@@ -1162,8 +1162,9 @@ mod tests {
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
+        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamId,
+        StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -1797,6 +1798,31 @@ mod tests {
             .unwrap();
         let out = server.conn.process_output(now());
         client.process(out.dgram(), now());
+        assert_closed(&client, &Error::HttpClosedCriticalStream);
+    }
+
+    // Client: a reliable reset of the server control stream closes a critical stream.
+    #[test]
+    fn client_reliable_reset_control_stream() {
+        let (mut client, mut server) = connect();
+        let stream_id = server.control_stream_id.unwrap();
+        // A reserved frame type (RFC 9114 Section 7.2.8) with zero length.
+        let data = [0x21, 0x00];
+        assert_eq!(server.conn.stream_send(stream_id, &data), Ok(data.len()));
+        server.conn.stream_commit(stream_id).unwrap();
+        server
+            .conn
+            .stream_reset_send(stream_id, Error::HttpNone.code())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        assert_eq!(server.conn.stats().frame_tx.reset_stream_at, 1);
+        let out = client.process(out.dgram(), now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let State::Draining { error, .. } = server.conn.state() else {
+            panic!("Wrong state {:?}", server.conn.state());
+        };
+        let peer = TransportError::PeerApplication(Error::HttpClosedCriticalStream.code());
+        assert_eq!(error, &CloseReason::Transport(peer));
         assert_closed(&client, &Error::HttpClosedCriticalStream);
     }
 
