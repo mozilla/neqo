@@ -603,7 +603,10 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                true,
+            )),
             true,
         );
 
@@ -619,7 +622,10 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                true,
+            )),
             true,
         );
 
@@ -635,7 +641,10 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                true,
+            )),
             true,
         );
 
@@ -651,7 +660,10 @@ mod tests {
         t.decode(
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             true,
-            &Err(Error::HttpGeneralProtocol),
+            &Ok((
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                true,
+            )),
             true,
         );
 
