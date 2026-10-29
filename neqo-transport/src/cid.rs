@@ -10,7 +10,7 @@ use std::{
     borrow::Borrow,
     cell::{Ref, RefCell},
     cmp::{max, min},
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fmt::{self, Debug, Display, Formatter},
     ops::Deref,
     rc::Rc,
@@ -358,6 +358,12 @@ pub type RemoteConnectionIdEntry = ConnectionIdEntry<Srt>;
 #[derive(Debug, Default)]
 pub struct ConnectionIdStore<SRT: Clone + PartialEq> {
     cids: SmallVec<[ConnectionIdEntry<SRT>; 8]>,
+    /// The largest sequence number received.
+    max_seqno: u64,
+    /// Sequence numbers below `max_seqno` that weren't received yet.
+    unseen: SmallVec<[u64; 8]>,
+    /// The largest Retire Prior To received.
+    retire_prior: u64,
 }
 
 impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
@@ -383,38 +389,69 @@ impl<SRT: Clone + PartialEq> ConnectionIdStore<SRT> {
 }
 
 impl ConnectionIdStore<Srt> {
-    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>) -> Res<()> {
+    /// The number of active connection IDs that no path uses: stored and unseen.
+    pub fn active_len(&self) -> usize {
+        self.cids.len() + self.unseen.len()
+    }
+
+    /// Returns `true` if the connection ID can be kept.
+    /// A value of `false` means that this CID has been (or should be) retired.
+    pub fn add_remote(&mut self, entry: ConnectionIdEntry<Srt>, retire_prior: u64) -> Res<bool> {
+        if entry.seqno == ConnectionIdEntry::<Srt>::SEQNO_INITIAL {
+            return Err(Error::ProtocolViolation);
+        }
+        let retire_prior = max(self.retire_prior, retire_prior);
+        if entry.seqno < retire_prior {
+            return Ok(false);
+        }
         // It's OK if this perfectly matches an existing entry.
         if self.cids.iter().any(|c| c == &entry) {
-            return Ok(());
+            return Ok(true);
         }
         // It's not OK if any individual piece matches though.
         if self.cids.iter().any(|c| c.any_part_equal(&entry)) {
             info!("ConnectionIdStore found reused part in NEW_CONNECTION_ID");
             return Err(Error::ProtocolViolation);
         }
+        // A sequence number that was received before, but isn't stored, was used.
+        if entry.seqno <= self.max_seqno && !self.unseen.contains(&entry.seqno) {
+            return Ok(false);
+        }
+
+        self.unseen
+            .retain(|s| *s >= retire_prior && *s != entry.seqno);
+        if entry.seqno > self.max_seqno {
+            let first = max(self.max_seqno + 1, retire_prior);
+            // Unseen sequence numbers are active, so they count against the limit.
+            if to_u64(self.unseen.len()) + entry.seqno - first
+                >= to_u64(ConnectionIdManager::ACTIVE_LIMIT)
+            {
+                return Err(Error::ConnectionIdLimitExceeded);
+            }
+            self.unseen.extend(first..entry.seqno);
+            self.max_seqno = entry.seqno;
+        }
 
         // Insert in order so that we use them in order where possible.
         if let Err(idx) = self.cids.binary_search_by_key(&entry.seqno, |e| e.seqno) {
             self.cids.insert(idx, entry);
-            Ok(())
+            Ok(true)
         } else {
             Err(Error::ProtocolViolation)
         }
     }
 
-    // Retire connection IDs and return the sequence numbers of those that were retired.
-    pub fn retire_prior_to(&mut self, retire_prior: u64) -> Vec<u64> {
-        let mut retired = Vec::new();
+    // Retire connection IDs and add the sequence numbers of those that were retired to `retired`.
+    pub fn retire_prior_to(&mut self, retire_prior: u64, retired: &mut BTreeSet<u64>) {
+        self.retire_prior = max(self.retire_prior, retire_prior);
         self.cids.retain(|e| {
             if !e.is_empty() && e.seqno < retire_prior {
-                retired.push(e.seqno);
+                retired.insert(e.seqno);
                 false
             } else {
                 true
             }
         });
-        retired
     }
 }
 

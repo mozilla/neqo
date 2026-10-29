@@ -1487,6 +1487,394 @@ fn retire_prior_to_migration_success() {
     assert_ne!(get_cid(&dgram), probe_cid);
 }
 
+fn counting_server() -> (Connection, Rc<RefCell<dyn ConnectionIdGenerator>>) {
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    (server, cid_gen)
+}
+
+/// Complete the handshake without the server receiving an acknowledgment
+/// for its `NEW_CONNECTION_ID` frames.
+fn handshake_unacked_new_connection_ids() -> (
+    Connection,
+    Connection,
+    Rc<RefCell<dyn ConnectionIdGenerator>>,
+) {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    let dgram = fast_handshake(&mut client, &mut server);
+    client.process_input(dgram.unwrap(), now());
+    (client, server, cid_gen)
+}
+
+/// Have the server retransmit its `NEW_CONNECTION_ID` frames on PTO.
+/// The client's PTO doesn't fire, so it doesn't retransmit anything.
+fn repeat_new_connection_ids(client: &mut Connection, server: &mut Connection) {
+    let before = client.stats().frame_rx.new_connection_id;
+    let pto = server.process_output(now() + AT_LEAST_PTO).dgram().unwrap();
+    client.process_input(pto, now());
+    let repeated = ConnectionIdManager::ACTIVE_LIMIT - 1;
+    assert_eq!(client.stats().frame_rx.new_connection_id, before + repeated);
+}
+
+/// RFC 9000, Section 9.5: a repeated `NEW_CONNECTION_ID` frame doesn't
+/// make a connection ID that a path used available to another path.
+#[test]
+fn new_connection_id_repeated_after_use() {
+    let (mut client, mut server, _) = handshake_unacked_new_connection_ids();
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now())
+        .unwrap();
+    let first_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
+
+    repeat_new_connection_ids(&mut client, &mut server);
+
+    let second_addr = new_port(DEFAULT_ADDR_V4);
+    client
+        .migrate(Some(second_addr), Some(second_addr), true, now())
+        .unwrap();
+    assert_ne!(get_cid(&send_something(&mut client, now())), first_cid);
+}
+
+/// RFC 9000, Section 19.15: a `NEW_CONNECTION_ID` frame with a sequence number
+/// below an earlier Retire Prior To value is retired, not used.
+#[test]
+fn new_connection_id_repeated_after_retire_prior_to() {
+    let (mut client, mut server, cid_gen) = handshake_unacked_new_connection_ids();
+    let ncid = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
+    client.process_input(ncid, now());
+    drop(send_something(&mut client, now()));
+    let retired = client.stats().frame_tx.retire_connection_id;
+
+    repeat_new_connection_ids(&mut client, &mut server);
+    assert_eq!(*client.state(), State::Confirmed);
+
+    // Only the primary path has a connection ID.
+    assert_eq!(
+        client.migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now()),
+        Err(Error::InvalidMigration)
+    );
+    drop(send_something(&mut client, now()));
+    let expected = retired + ConnectionIdManager::ACTIVE_LIMIT - 1;
+    assert_eq!(client.stats().frame_tx.retire_connection_id, expected);
+}
+
+/// Writes a `NEW_CONNECTION_ID` frame with the given sequence number and Retire Prior To.
+struct NewConnectionId(u64, u64, Rc<RefCell<dyn ConnectionIdGenerator>>);
+
+impl test_internal::FrameWriter for NewConnectionId {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        let cid = self.2.borrow_mut().generate_cid().unwrap();
+        let mut srt = [0; 16];
+        srt[..8].copy_from_slice(&self.0.to_be_bytes());
+        builder
+            .encode_varint(FrameType::NewConnectionId)
+            .encode_varint(self.0)
+            .encode_varint(self.1)
+            .encode_vec(1, &cid)
+            .encode(srt);
+    }
+}
+
+/// RFC 9000, Section 19.15: a `NEW_CONNECTION_ID` frame that arrives after a higher
+/// sequence number was used, but increases Retire Prior To, is applied and used.
+#[test]
+fn new_connection_id_late_with_retire_prior_to() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let writer = NewConnectionId(seqno + 2, 0, Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let primary_cid = ConnectionId::from(get_cid(&send_something(&mut client, now())));
+    let retired = client.stats().frame_tx.retire_connection_id;
+
+    // The probe uses `seqno + 2`.
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now())
+        .unwrap();
+    drop(client.process_output(now()).dgram().unwrap());
+
+    let writer = NewConnectionId(seqno + 1, seqno + 1, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let dgram = send_something(&mut client, now());
+    assert_v6_path(&dgram, false);
+    assert_ne!(get_cid(&dgram), primary_cid);
+    assert_eq!(client.stats().frame_tx.retire_connection_id, retired + 1);
+}
+
+/// RFC 9000, Section 19.15: a first `NEW_CONNECTION_ID` frame with a sequence
+/// number below an earlier Retire Prior To value is retired.
+#[test]
+fn new_connection_id_late_below_retire_prior_to() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    drop(send_something(&mut client, now()));
+    let retired = client.stats().frame_tx.retire_connection_id;
+
+    let writer = NewConnectionId(seqno - 1, 0, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    drop(send_something(&mut client, now()));
+    assert_eq!(client.stats().frame_tx.retire_connection_id, retired + 1);
+}
+
+/// Writes a `NEW_CONNECTION_ID` frame for a given connection ID.
+struct FixedNewConnectionId(u64, u64, ConnectionId);
+
+impl test_internal::FrameWriter for FixedNewConnectionId {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        let mut srt = [0; 16];
+        srt[..8].copy_from_slice(&self.0.to_be_bytes());
+        builder
+            .encode_varint(FrameType::NewConnectionId)
+            .encode_varint(self.0)
+            .encode_varint(self.1)
+            .encode_vec(1, &self.2)
+            .encode(srt);
+    }
+}
+
+/// Gives the client connection IDs `seqno + 1` and, if `spare`, `seqno + 2`, and
+/// starts a probe on `seqno + 1`.  Returns the connection ID of the probe.
+fn probe_with_repeated_cid(
+    client: &mut Connection,
+    server: &mut Connection,
+    cid_gen: &Rc<RefCell<dyn ConnectionIdGenerator>>,
+    spare: bool,
+) -> ConnectionId {
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(cid_gen));
+    client.process_input(send_with_extra(server, writer, now()), now());
+    let probe_cid = cid_gen.borrow_mut().generate_cid().unwrap();
+    let writer = FixedNewConnectionId(seqno + 1, seqno, probe_cid.clone());
+    client.process_input(send_with_extra(server, writer, now()), now());
+    if spare {
+        let writer = NewConnectionId(seqno + 2, seqno, Rc::clone(cid_gen));
+        client.process_input(send_with_extra(server, writer, now()), now());
+    }
+
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now())
+        .unwrap();
+    let probe = client.process_output(now()).dgram().unwrap();
+    assert_v4_path(&probe, true);
+    assert_eq!(get_cid(&probe), probe_cid);
+    probe_cid
+}
+
+/// RFC 9000, Section 13.3: a retransmitted `NEW_CONNECTION_ID` frame with a higher
+/// Retire Prior To doesn't give the connection ID of one path to another.
+#[test]
+fn new_connection_id_repeated_in_use_with_retire_prior_to() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let probe_cid = probe_with_repeated_cid(&mut client, &mut server, &cid_gen, true);
+
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = FixedNewConnectionId(seqno + 1, seqno + 1, probe_cid.clone());
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let dgram = send_something(&mut client, now());
+    assert_v6_path(&dgram, false);
+    assert_ne!(get_cid(&dgram), probe_cid);
+    let retired = ConnectionIdManager::ACTIVE_LIMIT + 1;
+    assert_eq!(client.stats().frame_tx.retire_connection_id, retired);
+}
+
+/// Without a spare connection ID, the primary path can't replace one that
+/// Retire Prior To retires while another path uses the frame's connection ID.
+#[test]
+fn new_connection_id_repeated_in_use_no_spare() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let probe_cid = probe_with_repeated_cid(&mut client, &mut server, &cid_gen, false);
+    let primary = client.paths.primary().unwrap();
+    let primary_cid = primary.borrow().remote_cid().cloned().unwrap();
+
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = FixedNewConnectionId(seqno + 1, seqno + 1, probe_cid);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::Internal),
+            ..
+        }
+    ));
+    let close = client.process_output(now()).dgram().unwrap();
+    assert_eq!(get_cid(&close), primary_cid);
+}
+
+/// A `NEW_CONNECTION_ID` frame that arrives after a higher sequence number was
+/// used is kept, and used when Retire Prior To retires the primary's connection ID.
+#[test]
+fn new_connection_id_reordered() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let writer = NewConnectionId(seqno + 2, seqno, Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    drop(send_something(&mut client, now()));
+    let retired = client.stats().frame_tx.retire_connection_id;
+
+    // The probe uses `seqno + 2`.
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now())
+        .unwrap();
+    drop(client.process_output(now()).dgram().unwrap());
+
+    let late_cid = cid_gen.borrow_mut().generate_cid().unwrap();
+    let writer = FixedNewConnectionId(seqno + 1, seqno, late_cid.clone());
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let writer = NewConnectionId(seqno + 3, seqno + 1, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let dgram = send_something(&mut client, now());
+    assert_v6_path(&dgram, false);
+    assert_eq!(get_cid(&dgram), late_cid);
+    assert_eq!(client.stats().frame_tx.retire_connection_id, retired + 1);
+}
+
+/// RFC 9000, Section 5.1.1: sequence numbers that were skipped are active
+/// connection IDs, so they count against the limit.
+#[test]
+fn new_connection_id_too_many_skipped() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+
+    let skipped = to_u64(ConnectionIdManager::ACTIVE_LIMIT);
+    let writer = NewConnectionId(seqno + skipped + 1, seqno, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ConnectionIdLimitExceeded),
+            ..
+        }
+    ));
+}
+
+/// RFC 9000, Section 5.1.1: stored and skipped connection IDs together
+/// count against the limit.
+#[test]
+fn new_connection_id_too_many_stored_and_skipped() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let seqno = NewConnectionIds::SEQNO;
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let writer = NewConnectionId(seqno + 1, seqno, Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+
+    // In use, stored, skipped, and the new one: one more than the limit.
+    let skipped = to_u64(ConnectionIdManager::ACTIVE_LIMIT) - 2;
+    let writer = NewConnectionId(seqno + skipped + 2, seqno, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ConnectionIdLimitExceeded),
+            ..
+        }
+    ));
+}
+
+/// RFC 9000, Section 5.1.1: sequence number 0 is the initial connection ID,
+/// which a `NEW_CONNECTION_ID` frame can't carry, even after it was retired.
+#[test]
+fn new_connection_id_seqno_zero() {
+    let mut client = default_client();
+    let (mut server, cid_gen) = counting_server();
+    connect_force_idle(&mut client, &mut server);
+    let writer = NewConnectionIds::retire_all(Rc::clone(&cid_gen));
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    let writer = NewConnectionId(0, 0, cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ProtocolViolation),
+            ..
+        }
+    ));
+}
+
+/// RFC 9000, Section 19.15: a `NEW_CONNECTION_ID` frame that uses the sequence
+/// number of the in-use preferred address connection ID for another connection ID.
+#[test]
+fn new_connection_id_repeated_preferred_address_seqno() {
+    let mut client = default_client();
+    let SocketAddr::V6(spa) = new_port(DEFAULT_ADDR) else {
+        panic!();
+    };
+    let mut server = new_server(
+        ConnectionParameters::default().preferred_address(PreferredAddress::new(None, Some(spa))),
+    );
+    let handshake_done = fast_handshake(&mut client, &mut server);
+    let probe = client.process(handshake_done, now()).dgram().unwrap();
+    assert_eq!(probe.destination(), SocketAddr::V6(spa));
+
+    let cid = ConnectionId::from(&[0xa5; 8][..]);
+    let writer = FixedNewConnectionId(ConnectionIdManager::SEQNO_PREFERRED, 0, cid);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+    assert!(matches!(
+        client.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ProtocolViolation),
+            ..
+        }
+    ));
+}
+
+/// A Retire Prior To that arrives before `HANDSHAKE_DONE` also retires the
+/// connection ID from the preferred address.
+#[test]
+fn preferred_address_cid_retired_before_handshake_done() {
+    let mut client = default_client();
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let SocketAddr::V6(spa) = new_port(DEFAULT_ADDR) else {
+        panic!();
+    };
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::clone(&cid_gen),
+        ConnectionParameters::default().preferred_address(PreferredAddress::new(None, Some(spa))),
+    )
+    .unwrap();
+    let handshake_done = fast_handshake(&mut client, &mut server);
+    let writer = NewConnectionIds::retire_all(cid_gen);
+    client.process_input(send_with_extra(&mut server, writer, now()), now());
+
+    client.process_input(handshake_done.unwrap(), now());
+    drop(send_something(&mut client, now()));
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
+    let retired = ConnectionIdManager::ACTIVE_LIMIT;
+    assert_eq!(client.stats().frame_tx.retire_connection_id, retired);
+}
+
 struct GarbageWriter {}
 
 impl test_internal::FrameWriter for GarbageWriter {

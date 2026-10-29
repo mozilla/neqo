@@ -560,6 +560,6 @@ fn zero_rtt_retire_handshake_cid() {
     assert!(server.process_output(now()).dgram().is_some());
     assert_eq!(
         server.stats().frame_tx.retire_connection_id,
-        retire_cid_before + 2 // The handshake CID and the client's first NEW_CONNECTION_ID.
+        retire_cid_before + 8 // Sequence numbers 0-7, which are all below Retire Prior To.
     );
 }

@@ -19,7 +19,7 @@ use nss::random;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ConnectionParameters, Stats,
+    ConnectionParameters, Error, Res, Stats,
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
@@ -359,12 +359,17 @@ impl Paths {
     /// Keep active paths if possible by pulling new connection IDs from the provided store.
     /// One slightly non-obvious consequence of this is that if migration is being attempted
     /// and the new path cannot obtain a new connection ID, the migration attempt will fail.
-    pub fn retire_cids(&mut self, retire_prior: u64, store: &mut ConnectionIdStore<Srt>) {
+    pub fn retire_cids(
+        &mut self,
+        retire_prior: u64,
+        store: &mut ConnectionIdStore<Srt>,
+    ) -> Res<()> {
         let to_retire = &mut self.to_retire;
         let migration_target = &mut self.migration_target;
+        let mut primary_lost = false;
 
         // First, tell the store to release any connection IDs that are too old.
-        to_retire.extend(store.retire_prior_to(retire_prior));
+        store.retire_prior_to(retire_prior, to_retire);
 
         self.paths.retain(|p| {
             let mut path = p.borrow_mut();
@@ -372,12 +377,13 @@ impl Paths {
                 return true;
             };
             if current.sequence_number() < retire_prior && !current.connection_id().is_empty() {
-                to_retire.insert(current.sequence_number());
                 let new_cid = store.next();
                 let has_replacement = new_cid.is_some();
-                // There must be a connection ID available for the primary path as we
-                // keep that path at the first index.
-                debug_assert!(!path.is_primary() || has_replacement);
+                if path.is_primary() && !has_replacement {
+                    primary_lost = true; // Keep the connection ID for CONNECTION_CLOSE.
+                    return true;
+                }
+                to_retire.insert(current.sequence_number());
                 path.remote_cid = new_cid;
                 if !has_replacement
                     && migration_target
@@ -394,6 +400,32 @@ impl Paths {
                 true
             }
         });
+        if primary_lost {
+            info!(
+                "NEW_CONNECTION_ID with Retire Prior To left the primary path without a connection ID"
+            );
+            return Err(Error::Internal);
+        }
+        Ok(())
+    }
+
+    /// Retire a connection ID that was used or retired already, unless a path uses it.
+    /// A path using a different connection ID with the same sequence number is an error.
+    pub fn retire_old_cid(&mut self, entry: &RemoteConnectionIdEntry) -> Res<()> {
+        let seqno = entry.sequence_number();
+        let in_use = self.paths.iter().find_map(|p| {
+            p.borrow()
+                .remote_cid
+                .as_ref()
+                .filter(|cid| cid.sequence_number() == seqno)
+                .map(|cid| cid == entry)
+        });
+        match in_use {
+            Some(false) => return Err(Error::ProtocolViolation),
+            None => _ = self.to_retire.insert(seqno),
+            _ => {}
+        }
+        Ok(())
     }
 
     /// The number of connection IDs that have been retired locally but whose
@@ -1279,8 +1311,9 @@ mod tests {
         let mut store = ConnectionIdStore::default();
         let entry = RemoteConnectionIdEntry::new(1, ConnectionId::from(&[1]), Srt::random());
         for _ in 0..2 {
-            store.add_remote(entry.clone()).unwrap();
-            paths.retire_cids(2, &mut store);
+            assert!(!store.add_remote(entry.clone(), 2).unwrap());
+            paths.retire_cids(2, &mut store).unwrap();
+            paths.retire_old_cid(&entry).unwrap();
         }
         assert_eq!(paths.retire_queue_len(), 1);
     }
