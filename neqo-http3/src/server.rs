@@ -921,6 +921,11 @@ mod tests {
         assert_not_closed(&hconn);
     }
 
+    #[test]
+    fn server_data_frame_after_max_push_id_on_control_stream() {
+        test_wrong_frame_on_control_stream(&[0x0d, 0x01, 0x05, 0x0, 0x2, 0x1, 0x2]);
+    }
+
     // Server: receive unknown stream type
     // also test getting stream id that does not fit into a single byte.
     #[test]
