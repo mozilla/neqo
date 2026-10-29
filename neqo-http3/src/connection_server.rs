@@ -29,6 +29,7 @@ pub struct Http3ServerHandler {
     base_handler: Http3Connection,
     events: Http3ServerConnEvents,
     needs_processing: bool,
+    goaway_push_id: Option<u64>,
 }
 
 impl Display for Http3ServerHandler {
@@ -43,6 +44,7 @@ impl Http3ServerHandler {
             base_handler: Http3Connection::new(http3_parameters, Role::Server),
             events: Http3ServerConnEvents::default(),
             needs_processing: false,
+            goaway_push_id: None,
         }
     }
 
@@ -357,7 +359,14 @@ impl Http3ServerHandler {
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
-                        HFrame::Goaway { .. } => Err(Error::HttpFrameUnexpected),
+                        HFrame::Goaway { stream_id } => {
+                            let push_id = stream_id.as_u64(); // A client GOAWAY carries a push ID.
+                            if self.goaway_push_id.is_some_and(|last| push_id > last) {
+                                return Err(Error::HttpId);
+                            }
+                            self.goaway_push_id = Some(push_id);
+                            Ok(())
+                        }
                         // Server push is not supported. A server that does not push ignores
                         // MAX_PUSH_ID (RFC 9114, Section 7.2.7); any other push frame is
                         // unexpected.
