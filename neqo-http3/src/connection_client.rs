@@ -409,7 +409,11 @@ impl Http3Client {
             let mut enc = Encoder::default();
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            ResumptionToken::new(enc.into(), token.expiration_time())
+            ResumptionToken::new_with_early_data(
+                enc.into(),
+                token.expiration_time(),
+                token.max_early_data_size(),
+            )
         })
     }
 
