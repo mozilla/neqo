@@ -949,12 +949,13 @@ impl Http3Client {
             .handle_stream_readable(&mut self.conn, stream_id, now)?
         {
             ReceiveOutput::NewStream(NewStreamType::Http(_)) => Err(Error::HttpStreamCreation),
-            ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
+            ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id, fin)) => {
                 self.base_handler.webtransport_create_stream_remote(
                     StreamId::from(session_id),
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    fin,
                 )?;
                 let res =
                     self.base_handler

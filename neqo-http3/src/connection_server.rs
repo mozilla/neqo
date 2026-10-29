@@ -341,12 +341,13 @@ impl Http3ServerHandler {
                 assert_eq!(ReceiveOutput::NoOutput, res);
                 Ok(())
             }
-            ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
+            ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id, fin)) => {
                 self.base_handler.webtransport_create_stream_remote(
                     StreamId::from(session_id),
                     stream_id,
                     Box::new(self.events.clone()),
                     Box::new(self.events.clone()),
+                    fin,
                 )?;
                 let res = self
                     .base_handler

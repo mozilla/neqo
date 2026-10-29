@@ -28,7 +28,8 @@ pub enum NewStreamType {
     Control,
     Decoder,
     Encoder,
-    WebTransportStream(u64),
+    /// Session ID, and whether the stream FIN was read together with the header.
+    WebTransportStream(u64, bool),
     Http(u64),
     Unknown,
 }
@@ -191,10 +192,7 @@ impl NewStreamHeadReader {
                 Self::ReadId { .. } => {
                     *self = Self::Done;
                     trace!("New Stream stream session_id={output}");
-                    if fin {
-                        return Err(Error::HttpGeneralProtocol);
-                    }
-                    return Ok(Some(NewStreamType::WebTransportStream(output)));
+                    return Ok(Some(NewStreamType::WebTransportStream(output, fin)));
                 }
                 Self::Done => {
                     unreachable!("Cannot be in state NewStreamHeadReader::Done");
@@ -211,7 +209,7 @@ impl NewStreamHeadReader {
             None => Err(Error::HttpStreamCreation),
             Some(NewStreamType::Http(_)) => Err(Error::HttpFrame),
             Some(NewStreamType::Unknown) => Ok(decoded),
-            Some(NewStreamType::WebTransportStream(_)) => {
+            Some(NewStreamType::WebTransportStream(..)) => {
                 unreachable!("WebTransport streams are mapped to None at this stage")
             }
         }
@@ -451,7 +449,7 @@ mod tests {
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, false)),
                 true,
             )),
             true,
@@ -470,7 +468,7 @@ mod tests {
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, false)),
                 true,
             )),
             true,
@@ -492,7 +490,7 @@ mod tests {
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, false)),
                 true,
             )),
             true,
@@ -512,7 +510,7 @@ mod tests {
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             false,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, false)),
                 true,
             )),
             true,
@@ -604,7 +602,7 @@ mod tests {
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             true,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, true)),
                 true,
             )),
             true,
@@ -623,7 +621,7 @@ mod tests {
             &[WEBTRANSPORT_UNI_STREAM, 0xaaaa_aaaa],
             true,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, true)),
                 true,
             )),
             true,
@@ -642,7 +640,7 @@ mod tests {
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             true,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, true)),
                 true,
             )),
             true,
@@ -661,7 +659,7 @@ mod tests {
             &[WEBTRANSPORT_STREAM, 0xaaaa_aaaa],
             true,
             &Ok((
-                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa)),
+                ReceiveOutput::NewStream(NewStreamType::WebTransportStream(0xaaaa_aaaa, true)),
                 true,
             )),
             true,

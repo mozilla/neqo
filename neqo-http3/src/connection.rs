@@ -565,7 +565,7 @@ impl Http3Connection {
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(
-                NewStreamType::Http(_) | NewStreamType::WebTransportStream(_),
+                NewStreamType::Http(_) | NewStreamType::WebTransportStream(..),
             )
             | ReceiveOutput::NoOutput => Ok(output),
             ReceiveOutput::NewStream(_) => {
@@ -758,7 +758,7 @@ impl Http3Connection {
             NewStreamType::Http(_) => {
                 info!("[{self}] A new http stream {stream_id}");
             }
-            NewStreamType::WebTransportStream(session_id) => {
+            NewStreamType::WebTransportStream(session_id, _) => {
                 let session_exists = self
                     .send_streams
                     .get(&StreamId::from(session_id))
@@ -784,7 +784,7 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id, now)
             }
-            NewStreamType::Http(_) | NewStreamType::WebTransportStream(_) => {
+            NewStreamType::Http(_) | NewStreamType::WebTransportStream(..) => {
                 Ok(ReceiveOutput::NewStream(stream_type))
             }
             NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
@@ -1600,6 +1600,7 @@ impl Http3Connection {
             (send_events, recv_events),
             true,
             send_group,
+            false,
         )?;
         Ok(stream_id)
     }
@@ -1610,6 +1611,7 @@ impl Http3Connection {
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
+        fin: bool,
     ) -> Res<()> {
         trace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
@@ -1621,6 +1623,7 @@ impl Http3Connection {
             (send_events, recv_events),
             false,
             None,
+            fin,
         )?;
         Ok(())
     }
@@ -1632,6 +1635,7 @@ impl Http3Connection {
         events: (Box<dyn SendStreamEvents>, Box<dyn RecvStreamEvents>),
         local: bool,
         send_group: Option<SendGroupId>,
+        fin: bool,
     ) -> Res<()> {
         if webtransport_session.borrow().connect_type() != ExtendedConnectType::WebTransport {
             return Err(Error::InvalidStreamId);
@@ -1657,6 +1661,7 @@ impl Http3Connection {
                         stream_id,
                         recv_events,
                         webtransport_session,
+                        fin,
                     )),
                 );
             }
@@ -1674,6 +1679,7 @@ impl Http3Connection {
                     stream_id,
                     recv_events,
                     webtransport_session,
+                    fin,
                 )),
             );
         }

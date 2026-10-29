@@ -42,6 +42,8 @@ pub struct WebTransportRecvStream {
     stream_info: Http3StreamInfo,
     events: Box<dyn RecvStreamEvents>,
     session: Rc<RefCell<Session>>,
+    /// The transport FIN was already read together with the stream header.
+    fin_read: bool,
 }
 
 impl WebTransportRecvStream {
@@ -49,12 +51,14 @@ impl WebTransportRecvStream {
         stream_id: StreamId,
         events: Box<dyn RecvStreamEvents>,
         session: Rc<RefCell<Session>>,
+        fin_read: bool,
     ) -> Self {
         let session_id = session.borrow().id();
         Self {
             stream_info: Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(session_id)),
             events,
             session,
+            fin_read,
         }
     }
 }
@@ -90,7 +94,11 @@ impl RecvStream for WebTransportRecvStream {
         _now: Instant,
     ) -> Res<(usize, bool)> {
         let stream_id = self.stream_info.stream_id();
-        let (amount, fin) = conn.stream_recv(stream_id, buf)?;
+        let (amount, fin) = if self.fin_read {
+            (0, true)
+        } else {
+            conn.stream_recv(stream_id, buf)?
+        };
         if fin {
             self.session.borrow_mut().remove_recv_stream(stream_id);
         }
