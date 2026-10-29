@@ -835,11 +835,15 @@ impl Connection {
             .borrow_mut()
             .rtt_mut()
             .set_initial(rtt);
-        self.set_initial_limits();
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
         let res = self.client_start(now);
         self.absorb_error(now, res);
+        if self.zero_rtt_state == ZeroRttState::Sending {
+            self.set_initial_limits();
+        } else {
+            self.tps.borrow_mut().set_remote_0rtt(None);
+        }
         Ok(())
     }
 
