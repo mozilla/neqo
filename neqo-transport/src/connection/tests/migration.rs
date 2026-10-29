@@ -1078,12 +1078,11 @@ fn preferred_address_client() {
         )
         .unwrap();
 
-    // Errors in transport parameters manifest as TLS alerts.
     connect_fail(
         &mut client,
         &mut server,
-        Error::Peer(256 + 47),  // 256 is a TLS alert and...
-        Error::CryptoAlert(47), // ...47 is `illegal_parameter`.
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
     );
 }
 
