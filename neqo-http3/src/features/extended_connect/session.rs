@@ -6,7 +6,9 @@
 
 use std::{
     cell::RefCell,
+    collections::VecDeque,
     fmt::{self, Debug, Display, Formatter},
+    mem,
     num::NonZeroUsize,
     rc::Rc,
     str::from_utf8,
@@ -72,7 +74,12 @@ pub(crate) struct Session {
     datagram_capsule_blocked: bool,
     anticipated_incoming_uni: u16,
     anticipated_incoming_bidi: u16,
+    /// Datagrams received while `Negotiating`.
+    pending_datagrams: VecDeque<Bytes>,
 }
+
+/// See draft-ietf-webtrans-http3-16 Section 4.6 and RFC 9298 Section 5.
+const MAX_PENDING_DATAGRAMS: usize = 16;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub(crate) enum State {
@@ -134,6 +141,7 @@ impl Session {
             datagram_capsule_blocked: false,
             anticipated_incoming_uni: 0,
             anticipated_incoming_bidi: 0,
+            pending_datagrams: VecDeque::new(),
         }
     }
 
@@ -167,6 +175,7 @@ impl Session {
             datagram_capsule_blocked: false,
             anticipated_incoming_uni: 0,
             anticipated_incoming_bidi: 0,
+            pending_datagrams: VecDeque::new(),
         })
     }
 
@@ -198,7 +207,7 @@ impl Session {
     /// Mark session as draining. Returns `true` if this was the first call
     /// (i.e. the session was not already draining).
     pub(crate) const fn set_draining(&mut self) -> bool {
-        !std::mem::replace(&mut self.draining, true)
+        !mem::replace(&mut self.draining, true)
     }
 
     /// # Errors
@@ -350,6 +359,13 @@ impl Session {
                             headers,
                         );
                         self.protocol.session_start(&mut self.events)?;
+                        for datagram in mem::take(&mut self.pending_datagrams) {
+                            self.events.new_datagram(
+                                self.id,
+                                datagram,
+                                self.protocol.connect_type(),
+                            );
+                        }
                         State::Active
                     }
                 } else {
@@ -369,6 +385,11 @@ impl Session {
     pub(crate) fn add_stream(&mut self, stream_id: StreamId) -> Res<()> {
         self.protocol
             .add_stream(stream_id, &mut self.events, self.state)
+    }
+
+    /// Whether a new stream cannot be buffered until the session is established.
+    pub(crate) fn pending_streams_full(&self) -> bool {
+        self.state == State::Negotiating && self.protocol.pending_streams_full()
     }
 
     pub(crate) fn remove_recv_stream(&mut self, stream_id: StreamId) {
@@ -630,17 +651,23 @@ impl Session {
         self.protocol.record_dropped_outgoing_datagrams(too_big);
     }
 
-    pub(crate) fn datagram(&self, datagram: Bytes) {
-        if self.state != State::Active {
+    pub(crate) fn datagram(&mut self, datagram: Bytes) {
+        if self.state.closing_state() {
             debug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
         }
 
         // dgram_context_id returns the payload after stripping any context ID
         match self.protocol.dgram_context_id(datagram) {
-            Ok(slice) => {
+            Ok(slice) if self.state == State::Active => {
                 self.events
                     .new_datagram(self.id, slice, self.protocol.connect_type());
+            }
+            Ok(slice) if self.pending_datagrams.len() < MAX_PENDING_DATAGRAMS => {
+                self.pending_datagrams.push_back(slice);
+            }
+            Ok(_) => {
+                debug!("[{self}]: dropping datagram, too many buffered");
             }
             Err(e) => {
                 debug!("[{self}]: received datagram with invalid context identifier: {e}");
@@ -818,6 +845,10 @@ pub(crate) trait Protocol: Debug + Display {
     }
 
     fn process_response_headers(&mut self, _headers: &[Header]) {}
+
+    fn pending_streams_full(&self) -> bool {
+        false
+    }
 
     /// Per-session statistics, for protocols that expose them.
     ///
