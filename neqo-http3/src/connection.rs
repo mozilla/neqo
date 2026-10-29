@@ -583,6 +583,7 @@ impl Http3Connection {
     ) -> Res<()> {
         info!("[{self}] Handle a stream reset stream_id={stream_id} app_err={app_error}");
 
+        // TODO: A client could also reset the request's send side here (RFC 9114 Section 4.1.1).
         self.close_recv(stream_id, CloseType::ResetRemote(app_error), conn)
     }
 
@@ -815,7 +816,7 @@ impl Http3Connection {
     ///  - in case of an error:
     ///    - if it is only a stream error and the stream is not critical, send `STOP_SENDING` frame,
     ///      remove the stream from `recv_streams` and inform the listener that the stream has been
-    ///      reset.
+    ///      reset. Both roles also reset the sending side and remove it from `send_streams`.
     ///    - otherwise this is a connection error. In this case, propagate the error to the caller
     ///      that will handle it properly.
     fn handle_stream_manipulation_output<U>(
@@ -836,6 +837,8 @@ impl Http3Connection {
                 if e.stream_reset_error() && !self.recv_stream_is_critical(stream_id) {
                     drop(conn.stream_stop_sending(stream_id, e.code()));
                     self.close_recv(stream_id, CloseType::LocalError(e.code()), conn)?;
+                    self.close_send(stream_id, CloseType::LocalError(e.code()), conn);
+                    drop(conn.stream_reset_send(stream_id, e.code()));
                     return Ok((U::default(), false));
                 }
             }
