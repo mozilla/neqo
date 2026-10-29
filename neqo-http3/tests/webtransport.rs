@@ -496,11 +496,26 @@ fn wt_server_stream_closed_before_confirmation() {
                     }
                 ))
             );
-            if !reset {
+            let stream_id = wt_server_stream.stream_id();
+            if reset {
                 assert_eq!(
                     events.next(),
-                    Some(Http3ClientEvent::DataReadable {
-                        stream_id: wt_server_stream.stream_id()
+                    Some(Http3ClientEvent::Reset {
+                        stream_id,
+                        error: 0,
+                        local: false
+                    })
+                );
+            } else {
+                assert_eq!(
+                    events.next(),
+                    Some(Http3ClientEvent::DataReadable { stream_id })
+                );
+                assert_eq!(
+                    events.next(),
+                    Some(Http3ClientEvent::StopSending {
+                        stream_id,
+                        error: 0
                     })
                 );
             }
