@@ -1195,6 +1195,28 @@ mod tests {
     }
 
     #[test]
+    fn server_request_stop_sending_before_headers() {
+        let (mut hconn, mut peer_conn) = connect();
+
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        peer_conn.stream_send(stream_id, REQUEST_WITH_BODY).unwrap();
+        peer_conn
+            .stream_stop_sending(stream_id, Error::HttpNone.code())
+            .unwrap();
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+
+        let stop_sending = |e| {
+            matches!(
+                e,
+                Http3ServerEvent::StreamStopSending { stream, error }
+                    if stream.stream_id() == stream_id && error == Error::HttpNone.code()
+            )
+        };
+        assert!(hconn.events().any(stop_sending));
+    }
+
+    #[test]
     fn server_request_with_body_server_reset() {
         let (mut hconn, mut peer_conn) = connect();
 

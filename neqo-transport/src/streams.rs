@@ -200,6 +200,7 @@ impl Streams {
                 if stream_id.is_recv_only(self.role) {
                     return Err(Error::StreamState);
                 }
+                self.ensure_created_if_remote(*stream_id)?;
                 self.events
                     .send_stream_stop_sending(*stream_id, *application_error_code);
                 if let (Some(ss), _) = self.obtain_stream(*stream_id)? {

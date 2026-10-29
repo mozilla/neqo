@@ -311,6 +311,7 @@ pub struct Http3Connection {
     streams_with_pending_data: HashSet<StreamId>,
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
+    stopped_new_streams: HashMap<StreamId, AppError>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
     send_group_generator: SendGroupGenerator,
@@ -350,6 +351,7 @@ impl Http3Connection {
             streams_with_pending_data: HashSet::default(),
             send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
+            stopped_new_streams: HashMap::default(),
             send_group_generator: SendGroupGenerator::default(),
             role,
         }
@@ -598,6 +600,15 @@ impl Http3Connection {
             return Err(Error::HttpClosedCriticalStream);
         }
 
+        if self
+            .recv_streams
+            .get(&stream_id)
+            .is_some_and(|r| r.stream_type() == Http3StreamType::NewStream)
+        {
+            self.stopped_new_streams.insert(stream_id, app_error);
+            return Ok(());
+        }
+
         self.close_send(stream_id, CloseType::ResetRemote(app_error), conn);
         Ok(())
     }
@@ -675,6 +686,7 @@ impl Http3Connection {
             // them), and creating a session fails with `Unavailable` until one is.
             self.send_streams.clear();
             self.recv_streams.clear();
+            self.stopped_new_streams.clear();
             Ok(())
         } else {
             debug_assert!(false, "Zero rtt rejected in the wrong state");
@@ -764,6 +776,7 @@ impl Http3Connection {
                     .get(&StreamId::from(session_id))
                     .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
                 if !session_exists {
+                    self.stopped_new_streams.remove(&stream_id);
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
                     return Ok(ReceiveOutput::NoOutput);
                 }
@@ -800,6 +813,7 @@ impl Http3Connection {
         }
         self.send_streams.clear();
         self.recv_streams.clear();
+        self.stopped_new_streams.clear();
     }
 
     /// This function will not handle the output of the function completely, but only
@@ -1862,14 +1876,18 @@ impl Http3Connection {
     pub(crate) fn add_streams(
         &mut self,
         stream_id: StreamId,
-        send_stream: Box<dyn SendStream>,
+        mut send_stream: Box<dyn SendStream>,
         recv_stream: Box<dyn RecvStream>,
     ) {
+        self.recv_streams.insert(stream_id, recv_stream);
+        if let Some(app_error) = self.stopped_new_streams.remove(&stream_id) {
+            send_stream.handle_stop_sending(CloseType::ResetRemote(app_error));
+            return;
+        }
         if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
         }
         self.send_streams.insert(stream_id, send_stream);
-        self.recv_streams.insert(stream_id, recv_stream);
     }
 
     pub(crate) fn queue_control_frame(&mut self, frame: &HFrame) {
@@ -1927,6 +1945,7 @@ impl Http3Connection {
         close_type: CloseType,
         conn: &mut Connection,
     ) -> Res<()> {
+        self.stopped_new_streams.remove(&stream_id);
         if let Some(mut s) = self.remove_recv_stream(stream_id, conn) {
             s.reset(close_type)?;
         }
@@ -2060,12 +2079,66 @@ impl Http3Connection {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use http::Uri;
+    use neqo_common::{Encoder, Role};
+    use neqo_transport::{StreamId, StreamType};
 
     use crate::{
-        Error, Priority,
+        Error, Http3Parameters, Priority, ReceiveOutput,
         connection::{Http3Connection, RequestDescription},
         features::ConnectType,
+        settings::HSettings,
+        stream_type_reader::WEBTRANSPORT_STREAM,
     };
+
+    #[test]
+    fn stopped_new_streams_cleared() {
+        let (mut client, mut conn) = test_fixture::connect();
+        let mut server = Http3Connection::new(Http3Parameters::default(), Role::Server);
+        let stream_id = StreamId::new(0);
+        server.add_new_stream(stream_id);
+        server
+            .handle_stream_stop_sending(stream_id, 0, &mut conn)
+            .unwrap();
+        assert_eq!(server.stopped_new_streams.len(), 1);
+        server.handle_stream_reset(stream_id, 0, &mut conn).unwrap();
+        assert!(server.stopped_new_streams.is_empty());
+
+        let wt_stream = client.stream_create(StreamType::BiDi).unwrap();
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_STREAM).encode_varint(4u64); // No such session.
+        client.stream_send(wt_stream, enc.as_ref()).unwrap();
+        let dgram = client.process_output(test_fixture::now()).dgram();
+        conn.process_input(dgram.unwrap(), test_fixture::now());
+        server.add_new_stream(wt_stream);
+        server
+            .handle_stream_stop_sending(wt_stream, 0, &mut conn)
+            .unwrap();
+        assert_eq!(server.stopped_new_streams.len(), 1);
+        let output = server.handle_stream_readable(&mut conn, wt_stream, test_fixture::now());
+        assert_eq!(output, Ok(ReceiveOutput::NoOutput));
+        assert!(server.stopped_new_streams.is_empty());
+
+        server.add_new_stream(stream_id);
+        server
+            .handle_stream_stop_sending(stream_id, 0, &mut conn)
+            .unwrap();
+        assert_eq!(server.stopped_new_streams.len(), 1);
+        server.close(0);
+        assert!(server.stopped_new_streams.is_empty());
+
+        let mut h3_client = Http3Connection::new(Http3Parameters::default(), Role::Client);
+        h3_client
+            .set_0rtt_settings(&mut client, HSettings::new(&[]))
+            .unwrap();
+        let server_stream = StreamId::new(1);
+        h3_client.add_new_stream(server_stream);
+        h3_client
+            .handle_stream_stop_sending(server_stream, 0, &mut client)
+            .unwrap();
+        assert_eq!(h3_client.stopped_new_streams.len(), 1);
+        h3_client.handle_zero_rtt_rejected().unwrap();
+        assert!(h3_client.stopped_new_streams.is_empty());
+    }
 
     #[test]
     fn create_request_headers_connect_without_connect_type() {
