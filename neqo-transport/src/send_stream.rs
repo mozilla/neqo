@@ -585,7 +585,8 @@ impl TxBuffer {
         Self::MAX_SIZE - self.buffered()
     }
 
-    fn used(&self) -> u64 {
+    #[must_use]
+    pub fn used(&self) -> u64 {
         self.retired() + to_u64(self.buffered())
     }
 }
