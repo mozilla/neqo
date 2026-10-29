@@ -11,15 +11,15 @@ use test_fixture::now;
 use tracing::debug;
 
 use super::{
-    super::State, DEFAULT_STREAM_DATA, assert_error, connect, connect_force_idle, default_client,
-    default_server, maybe_authenticate, new_client, new_server, send_something, send_with_extra,
+    super::State, DEFAULT_STREAM_DATA, VarintFrameWriter, assert_error, connect,
+    connect_force_idle, default_client, default_server, maybe_authenticate, new_client, new_server,
+    send_something, send_with_extra,
 };
 use crate::{
     CloseReason, Connection, ConnectionParameters, Error, StreamDataLimit, StreamId, StreamType,
     connection::params::INITIAL_LOCAL_MAX_STREAM_DATA,
     events::ConnectionEvent,
     frame::FrameType,
-    packet,
     send_stream::{self, OrderGroup},
     streams::SendOrder,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -528,14 +528,6 @@ fn do_not_accept_data_after_stop_sending() {
     );
 }
 
-struct Writer(Vec<u64>);
-
-impl crate::connection::test_internal::FrameWriter for Writer {
-    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
-        builder.write_varint_frame(&self.0);
-    }
-}
-
 #[test]
 /// Server sends a number of stream-related frames for a client-initiated stream that is not yet
 /// created. This should cause the client to close the connection.
@@ -544,7 +536,7 @@ fn illegal_stream_related_frames() {
         let mut client = default_client();
         let mut server = default_server();
         connect(&mut client, &mut server);
-        let dgram = send_with_extra(&mut server, Writer(frame.to_vec()), now());
+        let dgram = send_with_extra(&mut server, VarintFrameWriter(frame.to_vec()), now());
         client.process_input(dgram, now());
         assert!(client.state().closed());
     }
@@ -584,7 +576,7 @@ fn wrong_directional_stream_frames() {
         // The trailing 0s are PADDING for the frames that don't need them.
         let dgram = send_with_extra(
             &mut server,
-            Writer(vec![frame_type.into(), stream_id, 0, 0, 0]),
+            VarintFrameWriter(vec![frame_type.into(), stream_id, 0, 0, 0]),
             now(),
         );
         client.process_input(dgram, now());
@@ -637,7 +629,7 @@ fn legal_out_of_order_frame_on_remote_initiated_closed_stream() {
     // Deliver an out-of-order `FRAME_TYPE_MAX_STREAM_DATA` on forgotten stream.
     let dgram = send_with_extra(
         &mut client,
-        Writer(vec![
+        VarintFrameWriter(vec![
             u64::from(FrameType::MaxStreamData),
             stream_id.as_u64(),
             0,

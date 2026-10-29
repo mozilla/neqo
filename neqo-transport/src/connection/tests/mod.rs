@@ -751,6 +751,14 @@ where
     res
 }
 
+struct VarintFrameWriter(Vec<u64>);
+
+impl test_internal::FrameWriter for VarintFrameWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.write_varint_frame(&self.0);
+    }
+}
+
 /// Send something on a stream from `sender` through a modifier to `receiver`.
 /// Return any ACK that might result.
 fn send_with_modifier_and_receive(
