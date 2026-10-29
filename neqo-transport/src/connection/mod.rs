@@ -1870,7 +1870,7 @@ impl Connection {
                             debug!("Duplicate packet {space}-{pn}");
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
-                            match self.process_packet(path, &payload, now) {
+                            match self.process_packet(path, tos, &payload, now) {
                                 Ok(migrate) => {
                                     self.postprocess_packet(
                                         path, tos, remote, &payload, migrate, now,
@@ -1942,6 +1942,7 @@ impl Connection {
     fn process_packet(
         &mut self,
         path: &PathRef,
+        tos: Tos,
         packet: &packet::Decrypted,
         now: Instant,
     ) -> Res<bool> {
@@ -1990,12 +1991,16 @@ impl Connection {
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
         {
-            space.set_received(
+            let largest = space.set_received(
                 now,
                 packet.pn(),
                 ack_eliciting,
                 &mut self.stats.borrow_mut(),
-            )?
+            )?;
+            if ack_eliciting && Ecn::from(tos) == Ecn::Ce {
+                space.immediate_ack(now);
+            }
+            largest
         } else {
             debug!(
                 "[{self}] processed a {:?} packet without tracking it",
