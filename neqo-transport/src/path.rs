@@ -66,11 +66,14 @@ pub struct Paths {
 
     /// Whether PMTUD is enabled for this connection.
     pmtud: bool,
+
+    /// Whether PMTUD is limited to the local interface MTU.
+    pmtud_iface_mtu: bool,
 }
 
 impl Paths {
     #[must_use]
-    pub fn new(pmtud: bool) -> Self {
+    pub fn new(pmtud: bool, pmtud_iface_mtu: bool) -> Self {
         Self {
             paths: Vec::new(),
             primary: None,
@@ -78,6 +81,7 @@ impl Paths {
             to_retire: Vec::new(),
             qlog: Qlog::disabled(),
             pmtud,
+            pmtud_iface_mtu,
         }
     }
 
@@ -89,14 +93,12 @@ impl Paths {
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
         now: Instant,
-        stats: &mut Stats,
     ) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
-                let mut p =
-                    Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
+                let mut p = Path::temporary(local, remote, conn_params, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                     if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
@@ -137,6 +139,7 @@ impl Paths {
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
         now: Instant,
+        stats: &mut Stats,
     ) {
         debug_assert!(self.is_temporary(path));
 
@@ -162,6 +165,19 @@ impl Paths {
 
         debug!("[{}] Make permanent", path.borrow());
         path.borrow_mut().make_permanent(local_cid, remote_cid);
+        if self.pmtud_iface_mtu {
+            let ip = path.borrow().remote.ip();
+            match mtu::interface_and_mtu(ip) {
+                Ok((name, mtu)) => {
+                    debug!("Outbound interface {name} for destination {ip} has MTU {mtu}");
+                    stats.pmtud_iface_mtu = mtu;
+                    path.borrow_mut().pmtud_mut().set_iface_mtu(mtu);
+                }
+                Err(e) => {
+                    warn!("Failed to determine outbound interface for destination {ip}: {e}");
+                }
+            }
+        }
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
             assert!(self.select_primary(path, now).is_none());
@@ -597,30 +613,8 @@ impl Path {
         conn_params: &ConnectionParameters,
         qlog: Qlog,
         now: Instant,
-        stats: &mut Stats,
     ) -> Self {
-        let iface_mtu = if conn_params.pmtud_iface_mtu_enabled() {
-            match mtu::interface_and_mtu(remote.ip()) {
-                Ok((name, mtu)) => {
-                    debug!(
-                        "Outbound interface {name} for destination {ip} has MTU {mtu}",
-                        ip = remote.ip()
-                    );
-                    stats.pmtud_iface_mtu = mtu;
-                    Some(mtu)
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to determine outbound interface for destination {ip}: {e}",
-                        ip = remote.ip()
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), None), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -1220,9 +1214,7 @@ mod tests {
     use test_fixture::{DEFAULT_ADDR, now};
 
     use super::Path;
-    use crate::{
-        ConnectionParameters, Stats, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
-    };
+    use crate::{ConnectionParameters, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats};
 
     fn path() -> Path {
         Path::temporary(
@@ -1231,7 +1223,6 @@ mod tests {
             &ConnectionParameters::default().pmtud_iface_mtu(false),
             Qlog::disabled(),
             now(),
-            &mut Stats::default(),
         )
     }
 

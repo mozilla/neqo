@@ -114,6 +114,11 @@ impl Pmtud {
         }
     }
 
+    /// Set the local interface MTU as an upper bound for probing.
+    pub const fn set_iface_mtu(&mut self, iface_mtu: usize) {
+        self.iface_mtu = iface_mtu;
+    }
+
     /// Set the peer's `max_udp_payload_size` transport parameter as an upper bound for probing.
     pub const fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize) {
         self.peer_max_udp_payload = Some(peer_max_udp_payload);
