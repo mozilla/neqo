@@ -285,6 +285,8 @@ pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
     events: Http3ClientEvents,
+    /// A later GOAWAY with this or a higher stream ID rejects no request, if known.
+    goaway_noop_from: Option<StreamId>,
 }
 
 impl Display for Http3Client {
@@ -338,6 +340,7 @@ impl Http3Client {
             conn: c,
             events,
             base_handler,
+            goaway_noop_from: None,
         }
     }
 
@@ -996,6 +999,28 @@ impl Http3Client {
         }
     }
 
+    #[cold]
+    fn goaway_rejects_nothing(&mut self, goaway_stream_id: StreamId) -> bool {
+        let noop_from = *self.goaway_noop_from.get_or_insert_with(|| {
+            let h = &self.base_handler;
+            let all = StreamId::new(0);
+            h.send_streams()
+                .iter()
+                .filter_map(id_gte(all))
+                .chain(h.recv_streams().iter().filter_map(id_gte(all)))
+                .max()
+                .map_or(all, |mut max| {
+                    max.next();
+                    max
+                })
+        });
+        if goaway_stream_id >= noop_from {
+            return true;
+        }
+        self.goaway_noop_from = None;
+        false
+    }
+
     fn handle_goaway(&mut self, goaway_stream_id: StreamId) -> Res<()> {
         info!("[{self}] handle_goaway {goaway_stream_id}");
 
@@ -1026,17 +1051,18 @@ impl Http3Client {
         // Emit Draining BEFORE resetting streams, because handle_stream_reset below
         // removes sessions with IDs >= goaway_stream_id from the stream tables.
         // Those sessions will also receive a SessionClosed event via the reset path.
-        if !matches!(
-            self.base_handler.state(),
-            Http3State::Closing(..) | Http3State::Closed(..)
-        ) {
-            for session_id in self.base_handler.drain_webtransport_sessions() {
-                self.events.push(Http3ClientEvent::WebTransport(
-                    WebTransportEvent::Draining {
-                        stream_id: session_id,
-                    },
-                ));
-            }
+        if first_goaway {
+            self.base_handler
+                .drain_webtransport_sessions()
+                .for_each(|session_id| {
+                    self.events.push(Http3ClientEvent::WebTransport(
+                        WebTransportEvent::Draining {
+                            stream_id: session_id,
+                        },
+                    ));
+                });
+        } else if self.goaway_rejects_nothing(goaway_stream_id) {
+            return Ok(());
         }
 
         // Issue reset events for streams >= goaway stream id
@@ -1169,7 +1195,7 @@ impl EventProvider for Http3Client {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Duration;
+    use std::{iter, time::Duration};
 
     use http::Uri;
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
@@ -3209,6 +3235,134 @@ mod tests {
         let goaway_received = |e: &_| matches!(e, Http3ClientEvent::GoawayReceived);
         assert_eq!(client.events().filter(goaway_received).count(), 1);
         assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(0)));
+    }
+
+    /// Sends a GOAWAY to the client and returns the client events.
+    fn send_goaway(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: StreamId,
+    ) -> Vec<Http3ClientEvent> {
+        let mut enc = Encoder::default();
+        HFrame::Goaway { stream_id }.encode(&mut enc);
+        let control_stream_id = server.control_stream_id.unwrap();
+        _ = server
+            .conn
+            .stream_send(control_stream_id, enc.as_ref())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+        client.events().collect()
+    }
+
+    /// The bidi stream IDs >= `base` in `send_streams` and `recv_streams`, in table order.
+    fn bidi_ids_from(client: &Http3Client, base: StreamId) -> (Vec<StreamId>, Vec<StreamId>) {
+        fn from<'a>(ids: impl Iterator<Item = &'a StreamId>, base: StreamId) -> Vec<StreamId> {
+            ids.filter(|id| id.is_bidi() && **id >= base)
+                .copied()
+                .collect()
+        }
+        let h = &client.base_handler;
+        (
+            from(h.send_streams().keys(), base),
+            from(h.recv_streams().keys(), base),
+        )
+    }
+
+    /// The events a GOAWAY raises for rejected requests, in table order.
+    fn rejected_events(send: Vec<StreamId>, recv: Vec<StreamId>) -> Vec<Http3ClientEvent> {
+        let error = Error::HttpRequestRejected.code();
+        send.into_iter()
+            .map(|stream_id| Http3ClientEvent::StopSending { stream_id, error })
+            .chain(recv.into_iter().map(|stream_id| Http3ClientEvent::Reset {
+                stream_id,
+                error,
+                local: false,
+            }))
+            .collect()
+    }
+
+    fn sorted(mut ids: Vec<StreamId>) -> Vec<StreamId> {
+        ids.sort_unstable();
+        ids
+    }
+
+    #[test]
+    fn lower_goaway_rejects_only_new_requests() {
+        let (mut client, mut server) = connect();
+        let ids: Vec<_> = iter::repeat_with(|| make_request(&mut client, false, &[]))
+            .take(20)
+            .collect();
+        send_goaway(&mut client, &mut server, ids[15]);
+
+        let (send, recv) = bidi_ids_from(&client, ids[5]);
+        assert_eq!(sorted(send.clone()), ids[5..15]);
+        assert_eq!(sorted(recv.clone()), ids[5..15]);
+        let events = send_goaway(&mut client, &mut server, ids[5]);
+        assert_eq!(events, rejected_events(send, recv));
+        let (send, recv) = bidi_ids_from(&client, ids[0]);
+        assert_eq!(sorted(send), ids[..5]);
+        assert_eq!(sorted(recv), ids[..5]);
+        assert_eq!(client.state(), Http3State::GoingAway(ids[5]));
+    }
+
+    #[test]
+    fn lower_goaway_skips_ended_requests() {
+        let (mut client, mut server) = connect();
+        let ids: Vec<_> = iter::repeat_with(|| make_request(&mut client, true, &[]))
+            .take(5)
+            .collect();
+        let out = client.process_output(now());
+        drop(server.conn.process(out.dgram(), now()));
+        send_goaway(&mut client, &mut server, ids[4]);
+        send_goaway(&mut client, &mut server, ids[4]);
+
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            ids[3],
+            HTTP_RESPONSE_1,
+            true,
+        );
+        let mut buf = [0_u8; 100];
+        let read = client.read_data(now(), ids[3], &mut buf).unwrap();
+        assert_eq!(read, (EXPECTED_RESPONSE_DATA_1.len(), true));
+        client.events().for_each(drop);
+        assert_eq!(bidi_ids_from(&client, ids[3]), (vec![], vec![]));
+
+        assert_eq!(send_goaway(&mut client, &mut server, ids[3]), []);
+
+        let (send, recv) = bidi_ids_from(&client, ids[1]);
+        assert_eq!(sorted(recv.clone()), ids[1..3]);
+        let events = send_goaway(&mut client, &mut server, ids[1]);
+        assert_eq!(events, rejected_events(send, recv));
+        assert_eq!(bidi_ids_from(&client, ids[0]), (vec![], vec![ids[0]]));
+    }
+
+    #[test]
+    fn lower_goaway_rejects_request_still_sending() {
+        let (mut client, mut server) = connect();
+        let ids: Vec<_> = iter::repeat_with(|| make_request(&mut client, false, &[]))
+            .take(3)
+            .collect();
+        let out = client.process_output(now());
+        drop(server.conn.process(out.dgram(), now()));
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            ids[2],
+            HTTP_RESPONSE_1,
+            true,
+        );
+        let mut buf = [0_u8; 100];
+        let read = client.read_data(now(), ids[2], &mut buf).unwrap();
+        assert_eq!(read, (EXPECTED_RESPONSE_DATA_1.len(), true));
+        send_goaway(&mut client, &mut server, StreamId::new(ids[2].as_u64() + 4));
+
+        let (send, recv) = bidi_ids_from(&client, ids[2]);
+        assert_eq!((send.clone(), recv.clone()), (vec![ids[2]], vec![]));
+        let events = send_goaway(&mut client, &mut server, ids[2]);
+        assert_eq!(events, rejected_events(send, recv));
     }
 
     #[test]
