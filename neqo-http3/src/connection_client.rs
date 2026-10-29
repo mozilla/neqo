@@ -1672,11 +1672,6 @@ mod tests {
         0x0, 0x3, 0x61, 0x62, 0x63,
     ];
 
-    const HTTP_RESPONSE_HEADER_ONLY_2: &[u8] = &[
-        // headers
-        0x01, 0x06, 0x00, 0x00, 0xd9, 0x54, 0x01, 0x33,
-    ];
-
     const HTTP_RESPONSE_DATA_FRAME_ONLY_2: &[u8] = &[
         // the data frame
         0x0, 0x3, 0x61, 0x62, 0x63,
@@ -3265,7 +3260,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            HTTP_RESPONSE_HEADER_ONLY_2,
+            HTTP_HEADER_FRAME_0,
             true,
         );
 
@@ -3279,7 +3274,7 @@ mod tests {
         } = e
         {
             assert_eq!(stream_id, request_stream_id);
-            check_response_header_2(&headers);
+            check_response_header_0(&headers);
             assert!(fin);
             assert!(!interim);
         } else {
@@ -3304,7 +3299,7 @@ mod tests {
             &mut client,
             &mut server,
             request_stream_id,
-            HTTP_RESPONSE_HEADER_ONLY_2,
+            HTTP_HEADER_FRAME_0,
             false,
         );
 
@@ -3318,7 +3313,7 @@ mod tests {
                     fin,
                 } => {
                     assert_eq!(stream_id, request_stream_id);
-                    check_response_header_2(&headers);
+                    check_response_header_0(&headers);
                     assert!(!fin);
                     assert!(!interim);
                 }
@@ -3369,7 +3364,7 @@ mod tests {
         // Send headers.
         _ = server
             .conn
-            .stream_send(request_stream_id, HTTP_RESPONSE_HEADER_ONLY_2)
+            .stream_send(request_stream_id, HTTP_HEADER_FRAME_0)
             .unwrap();
         // Send an empty data frame.
         _ = server
@@ -3392,7 +3387,7 @@ mod tests {
                     fin,
                 } => {
                     assert_eq!(stream_id, request_stream_id);
-                    check_response_header_2(&headers);
+                    check_response_header_0(&headers);
                     assert!(!fin);
                     assert!(!interim);
                 }
@@ -3422,7 +3417,7 @@ mod tests {
         // Send headers.
         _ = server
             .conn
-            .stream_send(request_stream_id, HTTP_RESPONSE_HEADER_ONLY_2)
+            .stream_send(request_stream_id, HTTP_HEADER_FRAME_0)
             .unwrap();
         // Send an empty data frame.
         _ = server
@@ -3443,7 +3438,7 @@ mod tests {
                     fin,
                 } => {
                     assert_eq!(stream_id, request_stream_id);
-                    check_response_header_2(&headers);
+                    check_response_header_0(&headers);
                     assert!(!fin);
                     assert!(!interim);
                 }
@@ -5112,7 +5107,7 @@ mod tests {
             &[
                 Header::new(":status", "200"),
                 Header::new("my-header", "my-header"),
-                Header::new("content-length", "3"),
+                Header::new("content-length", "0"),
             ],
             &[],
         );
@@ -5402,6 +5397,10 @@ mod tests {
     }
 
     fn do_malformed_response_test(headers: &[Header]) {
+        malformed_response_resets(headers, &Error::InvalidHeader);
+    }
+
+    fn malformed_response_resets(headers: &[Header], error: &Error) {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
         setup_server_side_encoder(&mut client, &mut server);
@@ -5424,10 +5423,128 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: error.code(),
                 local: true,
             }
         );
+    }
+
+    /// RFC 9110 Section 8.6: `Content-Length = 1*DIGIT`; differing values are not collapsed.
+    #[test]
+    fn malformed_response_content_length() {
+        let lists: [&[&str]; 8] = [
+            &["abc"],
+            &["+3"],
+            &["3a"],
+            &[""],
+            &["3,"],
+            &["18446744073709551616"],
+            &["3", "4"],
+            &["3, 4"],
+        ];
+        for list in lists {
+            let mut headers = vec![Header::new(":status", "200")];
+            headers.extend(list.iter().map(|v| Header::new("content-length", *v)));
+            malformed_response_resets(&headers, &Error::HttpMessage);
+        }
+        let headers = [
+            Header::new(":status", "200"),
+            Header::new("content-length", [0xff]),
+        ];
+        malformed_response_resets(&headers, &Error::HttpMessage);
+    }
+
+    /// Response headers declaring the length of `EXPECTED_RESPONSE_DATA_2_FRAME_1`.
+    fn content_length_response(request_stream_id: StreamId, server: &mut TestServer) -> Encoder {
+        let mut d = Encoder::default();
+        let len = EXPECTED_RESPONSE_DATA_2_FRAME_1.len().to_string();
+        let headers = [
+            Header::new(":status", "200"),
+            Header::new("content-length", len),
+        ];
+        server.encode_headers(request_stream_id, &headers, &mut d);
+        d
+    }
+
+    fn assert_message_error_reset(client: &mut Http3Client, request_stream_id: StreamId) {
+        let reset = Http3ClientEvent::Reset {
+            stream_id: request_stream_id,
+            error: Error::HttpMessage.code(),
+            local: true,
+        };
+        assert!(client.events().any(|e| e == reset));
+    }
+
+    /// DATA beyond the content-length is rejected before it is read, without waiting for FIN.
+    #[test]
+    fn response_content_length_excess_without_fin() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+        setup_server_side_encoder(&mut client, &mut server);
+        let mut d = content_length_response(request_stream_id, &mut server);
+        d.encode(HTTP_RESPONSE_DATA_FRAME_ONLY_2);
+        d.encode(HTTP_RESPONSE_DATA_FRAME_ONLY_2);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        let mut buf = [0; 100];
+        let read = client.read_data(now(), request_stream_id, &mut buf);
+        assert_eq!(read, Ok((0, false)));
+        assert_message_error_reset(&mut client, request_stream_id);
+    }
+
+    /// A response without DATA is checked whether FIN arrives with its headers or after them.
+    #[test]
+    fn response_content_length_without_data() {
+        for fin_with_headers in [true, false] {
+            let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+            setup_server_side_encoder(&mut client, &mut server);
+            let d = content_length_response(request_stream_id, &mut server);
+            server_send_response_and_exchange_packet(
+                &mut client,
+                &mut server,
+                request_stream_id,
+                &d,
+                fin_with_headers,
+            );
+            if !fin_with_headers {
+                server.conn.stream_close_send(request_stream_id).unwrap();
+                let out = server.conn.process(None::<Datagram>, now());
+                client.process_input(out.dgram().unwrap(), now());
+            }
+            assert_message_error_reset(&mut client, request_stream_id);
+        }
+    }
+
+    /// The content-length of an interim response does not apply to the final one.
+    #[test]
+    fn interim_response_content_length_ignored() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        let headers1xx = &[
+            Header::new(":status", "103"),
+            Header::new("content-length", "5"),
+        ];
+        server.encode_headers(request_stream_id, headers1xx, &mut d);
+        server.encode_headers(request_stream_id, &[Header::new(":status", "200")], &mut d);
+        d.encode(HTTP_RESPONSE_DATA_FRAME_ONLY_2);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            true,
+        );
+
+        let mut buf = [0; 100];
+        let read = client.read_data(now(), request_stream_id, &mut buf);
+        assert_eq!(read, Ok((EXPECTED_RESPONSE_DATA_2_FRAME_1.len(), true)));
     }
 
     #[test]

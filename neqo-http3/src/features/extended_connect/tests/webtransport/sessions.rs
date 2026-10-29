@@ -488,6 +488,37 @@ fn wt_unknown_session_frame_client() {
     );
 }
 
+/// RFC 9110 Section 9.3.6: a CONNECT request does not have content.
+#[test]
+fn wt_session_ignores_request_content_length() {
+    let mut wt = WtTest::new();
+    let headers = [Header::new("content-length", "0")];
+    let wt_session_id = wt
+        .client
+        .webtransport_create_session(now(), ("https", "something.com", "/"), &headers)
+        .unwrap();
+    wt.exchange_packets();
+    let mut wt_server_session = None;
+    while let Some(event) = wt.server.next_event() {
+        if let Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) = event {
+            wt_server_session = Some(session);
+        }
+    }
+    let wt_server_session = wt_server_session.unwrap();
+    wt_server_session
+        .response(&SessionAcceptAction::Accept, now())
+        .unwrap();
+    wt.exchange_packets();
+
+    wt.session_close_frame_client(wt_session_id, 5, "Hello");
+    wt.exchange_packets();
+    let reason = CloseReason::Clean {
+        error: 5,
+        message: "Hello".to_string(),
+    };
+    wt.check_session_closed_event_server(&wt_server_session, &reason);
+}
+
 #[test]
 fn wt_close_session_frame_broken_client() {
     let mut wt = WtTest::new();
