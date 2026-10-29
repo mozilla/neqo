@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::to_u64;
+use neqo_common::{Encoder, to_u64};
 use neqo_transport::{ConnectionParameters, StreamType};
 use test_fixture::now;
 
@@ -14,6 +14,8 @@ use crate::{
         CloseReason,
         tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
     },
+    frames::WebTransportFrame,
+    stream_type_reader::WEBTRANSPORT_UNI_STREAM,
     webtransport::ClientSession as _,
 };
 
@@ -163,6 +165,99 @@ fn wt_server_stream_bidi_close() {
     wt.send_data_server(&wt_server_stream, BUF_SERVER);
     wt.close_stream_sending_server(&wt_server_stream);
     wt.receive_data_client(wt_server_stream.stream_id(), true, BUF_SERVER, true);
+    wt.send_data_client(wt_server_stream.stream_id(), BUF_CLIENT);
+    wt.close_stream_sending_client(wt_server_stream.stream_id());
+    drop(wt.receive_data_server(wt_server_stream.stream_id(), false, BUF_CLIENT, true));
+}
+
+#[test]
+fn wt_client_stream_uni_close_empty() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.close_stream_sending_client(wt_stream);
+    wt.receive_data_server(wt_stream, true, &[], true);
+}
+
+#[test]
+fn wt_client_stream_bidi_close_empty() {
+    const BUF_SERVER: &[u8] = &[1; 20];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_client_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    wt.close_stream_sending_client(wt_client_stream);
+    let wt_server_stream = wt.receive_data_server(wt_client_stream, true, &[], true);
+    wt.send_data_server(&wt_server_stream, BUF_SERVER);
+    wt.close_stream_sending_server(&wt_server_stream);
+    wt.receive_data_client(wt_client_stream, false, BUF_SERVER, true);
+}
+
+#[test]
+fn wt_server_stream_uni_close_empty() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.close_stream_sending_server(&wt_server_stream);
+    wt.receive_data_client(wt_server_stream.stream_id(), true, &[], true);
+}
+
+#[test]
+fn wt_server_stream_uni_close_empty_stats() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.close_stream_sending_server(&wt_server_stream);
+    let recv_stats = wt.recv_stream_stats(wt_server_stream.stream_id()).unwrap();
+    assert_eq!(recv_stats.bytes_received(), 0);
+    assert_eq!(recv_stats.bytes_read(), 0);
+    wt.receive_data_client(wt_server_stream.stream_id(), true, &[], true);
+}
+
+/// A header+FIN stream that arrives after a close capsule without FIN is not kept.
+#[test]
+fn wt_server_stream_uni_close_empty_after_close_capsule() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error: 0,
+        message: String::new(),
+    }
+    .encode(&mut enc);
+    assert_eq!(wt_session.send_data(enc.as_ref(), now()), Ok(enc.len()));
+    wt.exchange_packets();
+
+    let mut conn = wt_session.conn.borrow_mut();
+    let stream_id = conn.stream_create(StreamType::UniDi).unwrap();
+    let mut header = Encoder::default();
+    header.encode_varint(WEBTRANSPORT_UNI_STREAM);
+    header.encode_varint(session_id.as_u64());
+    let sent = conn.stream_send(stream_id, header.as_ref());
+    assert_eq!(sent, Ok(header.len()));
+    conn.stream_close_send(stream_id).unwrap();
+    drop(conn);
+    wt.exchange_packets();
+    let fin = wt_session.conn.borrow_mut().stream_close_send(session_id);
+    assert_eq!(fin, Ok(()));
+    wt.exchange_packets();
+
+    let session = wt.client.webtransport_session_stats(session_id);
+    assert_eq!(session.err(), Some(Error::InvalidStreamId));
+    let stream = wt.recv_stream_stats(stream_id);
+    assert_eq!(stream.err(), Some(Error::InvalidStreamId));
+}
+
+#[test]
+fn wt_server_stream_bidi_close_empty() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    wt.close_stream_sending_server(&wt_server_stream);
+    wt.receive_data_client(wt_server_stream.stream_id(), true, &[], true);
     wt.send_data_client(wt_server_stream.stream_id(), BUF_CLIENT);
     wt.close_stream_sending_client(wt_server_stream.stream_id());
     drop(wt.receive_data_server(wt_server_stream.stream_id(), false, BUF_CLIENT, true));
