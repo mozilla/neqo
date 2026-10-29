@@ -12,12 +12,12 @@ use std::{
 
 use neqo_common::{Bytes, Encoder, Header, Role};
 use neqo_transport::{Connection, StreamId, streams::SendGroupId};
-use rustc_hash::FxHashSet as HashSet;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use sfv::{BareItem, Item, Parser};
 use tracing::trace;
 
 use crate::{
-    Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
+    CloseType, Error, Http3StreamInfo, Http3StreamType, RecvStream, Res, SendStream,
     features::extended_connect::{
         CloseReason, ExtendedConnectEvents, ExtendedConnectType,
         session::{DgramContextIdError, Protocol, State},
@@ -37,6 +37,8 @@ pub struct Session {
     ///
     /// [`HashSet`] size limited by QUIC connection stream limit.
     pending_streams: HashSet<StreamId>,
+    /// Closes of half-closed pending streams, keyed by stream and whether the receive side closed.
+    pending_closes: HashMap<(StreamId, bool), CloseType>,
     /// The negotiated protocol from server response headers.
     negotiated_protocol: Option<String>,
     /// Send groups registered for this session.
@@ -60,6 +62,7 @@ impl Session {
             recv_streams: HashSet::default(),
             role,
             pending_streams: HashSet::default(),
+            pending_closes: HashMap::default(),
             negotiated_protocol: None,
             send_groups: HashSet::default(),
             stats: SessionStats::default(),
@@ -83,6 +86,8 @@ impl Session {
     fn remove_pending_stream_if_closed(&mut self, stream_id: StreamId) {
         if !self.recv_streams.contains(&stream_id) && !self.send_streams.contains(&stream_id) {
             self.pending_streams.remove(&stream_id);
+            self.pending_closes.remove(&(stream_id, true));
+            self.pending_closes.remove(&(stream_id, false));
         }
     }
 }
@@ -100,13 +105,20 @@ impl Protocol for Session {
         // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-16.html#section-4.6>
         #[expect(clippy::iter_over_hash_type, reason = "no defined order necessary")]
         for stream_id in self.pending_streams.drain() {
+            let info = Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(self.id));
             events.extended_connect_new_stream(
-                Http3StreamInfo::new(stream_id, Http3StreamType::WebTransport(self.id)),
+                info,
                 // Explicitly emit a stream readable event. Such
                 // event was previously suppressed as the
                 // session was still negotiating.
                 self.recv_streams.contains(&stream_id),
             )?;
+            if let Some(close_type) = self.pending_closes.remove(&(stream_id, true)) {
+                events.recv_closed(&info, close_type);
+            }
+            if let Some(close_type) = self.pending_closes.remove(&(stream_id, false)) {
+                events.send_closed(&info, close_type);
+            }
         }
 
         Ok(())
@@ -228,8 +240,12 @@ impl Protocol for Session {
         self.remove_pending_stream_if_closed(stream_id);
     }
 
-    fn is_pending_stream(&self, stream_id: StreamId) -> bool {
-        self.pending_streams.contains(&stream_id)
+    fn defer_close(&mut self, stream_id: StreamId, recv: bool, close_type: CloseType) -> bool {
+        if !self.pending_streams.contains(&stream_id) {
+            return false;
+        }
+        self.pending_closes.insert((stream_id, recv), close_type);
+        true
     }
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {

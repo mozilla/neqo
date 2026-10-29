@@ -384,8 +384,13 @@ impl Session {
         matches!(self.state, State::Active)
     }
 
-    pub(crate) fn is_pending_stream(&self, stream_id: StreamId) -> bool {
-        self.protocol.is_pending_stream(stream_id)
+    pub(crate) fn defer_close(
+        &mut self,
+        stream_id: StreamId,
+        recv: bool,
+        close_type: CloseType,
+    ) -> bool {
+        self.protocol.defer_close(stream_id, recv, close_type)
     }
 
     #[must_use]
@@ -818,7 +823,8 @@ pub(crate) trait Protocol: Debug + Display {
         debug_assert!(false, "{msg}");
     }
 
-    fn is_pending_stream(&self, _stream_id: StreamId) -> bool {
+    /// Returns `true` if `stream_id` is pending; its close is then reported once it is announced.
+    fn defer_close(&mut self, _stream_id: StreamId, _recv: bool, _close_type: CloseType) -> bool {
         false
     }
 
