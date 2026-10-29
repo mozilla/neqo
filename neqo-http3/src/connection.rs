@@ -759,9 +759,13 @@ impl Http3Connection {
                 info!("[{self}] A new http stream {stream_id}");
             }
             NewStreamType::WebTransportStream(session_id) => {
+                let session_id = StreamId::from(session_id);
+                if session_id.is_uni() || session_id.is_server_initiated() {
+                    return Err(Error::HttpId);
+                }
                 let session_exists = self
                     .send_streams
-                    .get(&StreamId::from(session_id))
+                    .get(&session_id)
                     .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
                 if !session_exists {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
