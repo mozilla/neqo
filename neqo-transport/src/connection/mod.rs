@@ -3460,6 +3460,13 @@ impl Connection {
                 retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
+                if self
+                    .paths
+                    .primary()
+                    .is_some_and(|p| p.borrow().remote_cid().is_some_and(|c| c.is_empty()))
+                {
+                    return Err(Error::ProtocolViolation);
+                }
                 self.cids.add_remote(ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
