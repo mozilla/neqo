@@ -18,7 +18,7 @@ mod tests;
 use std::{cell::RefCell, fmt::Debug, mem, rc::Rc};
 
 use neqo_common::{Bytes, Header, Role};
-use neqo_transport::StreamId;
+use neqo_transport::{AppError, StreamId};
 use tracing::debug;
 
 use crate::{
@@ -30,6 +30,8 @@ use crate::{
     },
     settings::{HSettingType, HSettings},
 };
+
+pub(crate) const WT_SESSION_GONE: AppError = 0x170d_7b68;
 
 pub(crate) trait ExtendedConnectEvents: Debug {
     fn session_start(

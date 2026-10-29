@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Duration;
+
 use neqo_common::{Bytes, Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
-    StreamId, StreamType,
+    ConnectionEvent, StreamDataLimit, StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
@@ -17,7 +19,7 @@ use crate::{
     WebTransportEvent,
     connect_udp::ClientSession as _,
     features::extended_connect::{
-        CloseReason,
+        CloseReason, WT_SESSION_GONE,
         stats::SessionStats,
         tests::webtransport::{
             WtTest, assert_wt, default_http3_client, default_http3_server, wt_default_parameters,
@@ -467,7 +469,7 @@ fn wt_unknown_session_frame_client() {
 
     wt.check_events_after_closing_session_client(
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         &[],
         None,
         false,
@@ -477,7 +479,7 @@ fn wt_unknown_session_frame_client() {
         &[],
         None,
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         Some(&(
             wt_session.stream_id(),
             CloseReason::Clean {
@@ -511,17 +513,52 @@ fn wt_close_session_frame_broken_client() {
     // check that the webtransport session is closed.
     wt.check_session_closed_event_client(
         wt_session.stream_id(),
-        &CloseReason::Error(Error::HttpGeneralProtocolStream.code()),
+        &CloseReason::Error(Error::HttpMessage.code()),
         None,
     );
     wt.check_session_closed_event_server(
         &wt_session,
-        &CloseReason::Error(Error::HttpGeneralProtocolStream.code()),
+        &CloseReason::Error(Error::HttpMessage.code()),
     );
 
     // The Http3 session is still working.
     assert_eq!(wt.client.state(), Http3State::Connected);
     assert_eq!(wt_session.state(), Http3State::Connected);
+}
+
+#[test]
+fn wt_close_session_frame_too_long_client() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error: 5,
+        message: "a".repeat(1025),
+    }
+    .encode(&mut enc);
+    wt.client
+        .send_data(wt_session.stream_id(), enc.as_ref(), now())
+        .unwrap();
+    wt.exchange_packets();
+
+    let reason = CloseReason::Error(Error::HttpMessage.code());
+    wt.check_session_closed_event_client(wt_session.stream_id(), &reason, None);
+    wt.check_session_closed_event_server(&wt_session, &reason);
+    assert_eq!(wt.client.state(), Http3State::Connected);
+}
+
+/// A close message over 1024 bytes is truncated at a UTF-8 character boundary.
+#[test]
+fn wt_close_session_message_truncated() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+
+    let message = "a".repeat(1023);
+    wt.session_close_frame_client(wt_session.stream_id(), 23, &format!("{message}\u{e9}"));
+    wt.exchange_packets();
+
+    wt.check_session_closed_event_server(&wt_session, &CloseReason::Clean { error: 23, message });
 }
 
 fn receive_request(server: &Http3Server) -> Option<Http3OrWebTransportStream> {
@@ -592,7 +629,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
         &[],
         None,
         &[unidi_client],
-        Some(Error::HttpRequestCancelled.code()),
+        Some(WT_SESSION_GONE),
         false,
         Some(&(
             wt_session.stream_id(),
@@ -603,6 +640,334 @@ fn wt_close_session_cannot_be_sent_at_once() {
         )),
     );
     wt.check_events_after_closing_session_server(&[], None, &[], None, None);
+}
+
+/// A session whose CONNECT stream has 256 bytes of credit, with one stream from each side.
+fn wt_session_with_little_credit() -> (WtTest, StreamId, StreamId, Http3OrWebTransportStream) {
+    let conn_params = wt_default_parameters()
+        .get_connection_parameters()
+        .clone()
+        .max_stream_data(StreamDataLimit::BiDiRemote, 256);
+    let server_params = wt_default_parameters().connection_parameters(conn_params);
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let unidi_client = wt.create_wt_stream_client(session_id, StreamType::UniDi);
+    wt.send_data_client(unidi_client, &[0; 5]);
+    let unidi_server = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&unidi_server, &[0; 5]);
+    drop(wt.server.events());
+    (wt, session_id, unidi_client, unidi_server)
+}
+
+/// Assert that the client has cancelled both streams of a closed session.
+fn assert_wt_streams_cancelled_client(
+    wt: &mut WtTest,
+    unidi_client: StreamId,
+    unidi_server: &Http3OrWebTransportStream,
+) {
+    wt.check_events_after_closing_session_client(
+        &[unidi_server.stream_id()],
+        Some(WT_SESSION_GONE),
+        &[unidi_client],
+        Some(WT_SESSION_GONE),
+        false,
+        None,
+    );
+    assert_eq!(
+        wt.client.send_data(unidi_client, &[0; 5], now()),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// A local close that flow control holds back still cancels the session's streams.
+#[test]
+fn wt_close_session_blocked_by_flow_control_cancels_streams() {
+    const ERROR_NUM: u32 = 23;
+    let error_message = "a".repeat(1000);
+    let (mut wt, session_id, unidi_client, unidi_server) = wt_session_with_little_credit();
+
+    wt.session_close_frame_client(session_id, ERROR_NUM, &error_message);
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+    assert_wt_streams_cancelled_client(&mut wt, unidi_client, &unidi_server);
+
+    wt.exchange_packets();
+    wt.check_events_after_closing_session_server(
+        &[unidi_client],
+        Some(WT_SESSION_GONE),
+        &[unidi_server.stream_id()],
+        Some(WT_SESSION_GONE),
+        Some(&(
+            session_id,
+            CloseReason::Clean {
+                error: ERROR_NUM,
+                message: error_message,
+            },
+        )),
+    );
+    assert_eq!(
+        wt.client.webtransport_session_stats(session_id),
+        Err(Error::InvalidStreamId)
+    );
+}
+
+/// Closing the CONNECT stream when flow control holds back the FIN still cancels the session's
+/// streams.
+#[test]
+fn wt_stream_close_send_blocked_by_flow_control_cancels_streams() {
+    let (mut wt, session_id, unidi_client, unidi_server) = wt_session_with_little_credit();
+    while wt.client.send_data(session_id, &[0; 256], now()).unwrap() > 0 {}
+
+    wt.client.stream_close_send(session_id, now()).unwrap();
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+    assert_wt_streams_cancelled_client(&mut wt, unidi_client, &unidi_server);
+}
+
+/// Send a close capsule and `extra` as session data, without a FIN and without closing the session.
+fn send_close_capsule_without_fin(
+    wt: &mut WtTest,
+    wt_session: &ServerSession,
+    error: u32,
+    message: &str,
+    extra: &[u8],
+) {
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error,
+        message: message.to_string(),
+    }
+    .encode(&mut enc);
+    enc.encode(extra);
+    assert_eq!(wt_session.send_data(enc.as_ref(), now()), Ok(enc.len()));
+    wt.exchange_packets();
+}
+
+/// Streams the peer opens for a closing session are refused, not announced.
+#[test]
+fn wt_streams_for_closing_session_refused() {
+    let conn_params = wt_default_parameters()
+        .get_connection_parameters()
+        .clone()
+        .max_stream_data(StreamDataLimit::BiDiRemote, 256);
+    let server_params = wt_default_parameters().connection_parameters(conn_params);
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+    wt.session_close_frame_client(wt_session.stream_id(), 0, &"a".repeat(1000));
+
+    let unidi = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    assert_eq!(unidi.send_data(&[0; 5], now()), Ok(5));
+    let bidi = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    assert_eq!(bidi.send_data(&[0; 5], now()), Ok(5));
+    let t = now() + Duration::from_secs(1); // Past the pacing of earlier exchanges.
+    let out = wt.server.process_output(t).dgram();
+    let out = wt.client.process(out, t).dgram();
+    drop(wt.server.process(out, t)); // One round trip, before the close capsule completes.
+
+    let ids = [unidi.stream_id(), bidi.stream_id()];
+    assert!(!wt.client.events().any(|e| matches!(
+        e,
+        Http3ClientEvent::DataReadable { stream_id }
+            | Http3ClientEvent::WebTransport(WebTransportEvent::NewStream { stream_id, .. })
+            if ids.contains(&stream_id)
+    )));
+    wt.check_events_after_closing_session_server(
+        &[bidi.stream_id()],
+        Some(WT_SESSION_GONE),
+        &ids,
+        Some(WT_SESSION_GONE),
+        None,
+    );
+}
+
+/// A close capsule without FIN cancels the session's streams.
+#[test]
+fn wt_close_capsule_without_fin_cancels_streams() {
+    const ERROR_NUM: u32 = 23;
+    const ERROR_MESSAGE: &str = "Something went wrong";
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let unidi_client = wt.create_wt_stream_client(session_id, StreamType::UniDi);
+    wt.send_data_client(unidi_client, &[0; 5]);
+    let unidi_server = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&unidi_server, &[0; 5]);
+
+    send_close_capsule_without_fin(&mut wt, &wt_session, ERROR_NUM, ERROR_MESSAGE, &[]);
+    wt.check_events_after_closing_session_client(
+        &[unidi_server.stream_id()],
+        Some(WT_SESSION_GONE),
+        &[unidi_client],
+        Some(WT_SESSION_GONE),
+        false,
+        Some(&(
+            session_id,
+            CloseReason::Clean {
+                error: ERROR_NUM,
+                message: ERROR_MESSAGE.to_string(),
+            },
+        )),
+    );
+}
+
+/// The recipient of a close capsule without FIN resets the CONNECT stream and removes the session.
+#[test]
+fn wt_close_capsule_without_fin_ends_connect_stream() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    send_close_capsule_without_fin(&mut wt, &wt_session, 0, "", &[]);
+
+    let stats = wt.client.webtransport_session_stats(session_id);
+    assert_eq!(stats, Err(Error::InvalidStreamId));
+    wt.check_session_closed_event_server(&wt_session, &CloseReason::Error(WT_SESSION_GONE));
+}
+
+/// Data after a close capsule resets the CONNECT stream with `H3_MESSAGE_ERROR`.
+#[test]
+fn wt_data_after_close_capsule_resets_connect_stream() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    send_close_capsule_without_fin(&mut wt, &wt_session, 0, "", &[0; 5]);
+
+    let reason = CloseReason::Error(Error::HttpMessage.code());
+    assert!(wt.server.events().any(|e| matches!(
+        e,
+        Http3ServerEvent::WebTransport(ServerEvent::SessionClosed { reason: r, .. }) if r == reason
+    )));
+}
+
+/// Check that the client resets and stops the CONNECT stream after a close capsule and `extra`.
+fn assert_connect_stream_reset_and_stopped(message: &str, extra: &[u8], reset_error: u64) {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let stream_id = wt_session.stream_id();
+    let mut enc = Encoder::default();
+    WebTransportFrame::CloseSession {
+        error: 0,
+        message: message.to_string(),
+    }
+    .encode(&mut enc);
+    enc.encode(extra);
+    assert_eq!(wt_session.send_data(enc.as_ref(), now()), Ok(enc.len()));
+    let before = wt.client.transport_stats().frame_tx;
+    let events = server_stream_events_after_round_trip(&mut wt, &wt_session);
+    let after = wt.client.transport_stats().frame_tx;
+
+    assert_eq!(after.reset_stream, before.reset_stream + 1);
+    assert_eq!(after.stop_sending, before.stop_sending + 1);
+    let reset = ConnectionEvent::RecvStreamReset {
+        stream_id,
+        app_error: reset_error,
+    };
+    let stopped = ConnectionEvent::SendStreamStopSending {
+        stream_id,
+        app_error: WT_SESSION_GONE,
+    };
+    assert_eq!(events, [reset, stopped]);
+}
+
+/// The recipient of a close capsule without FIN stops the CONNECT stream.
+#[test]
+fn wt_close_capsule_without_fin_stops_connect_stream() {
+    assert_connect_stream_reset_and_stopped("", &[], WT_SESSION_GONE);
+}
+
+/// The recipient of data after a close capsule stops the CONNECT stream.
+#[test]
+fn wt_data_after_close_capsule_stops_connect_stream() {
+    assert_connect_stream_reset_and_stopped("", &[0; 5], Error::HttpMessage.code());
+}
+
+/// The recipient of an oversized close capsule stops the CONNECT stream.
+#[test]
+fn wt_close_capsule_too_long_stops_connect_stream() {
+    assert_connect_stream_reset_and_stopped(&"a".repeat(1025), &[], Error::HttpMessage.code());
+}
+
+/// Run one round trip from the server and return the stream stop and reset events that the server
+/// transport gets, which `Http3Server` drops for streams it does not know.
+fn server_stream_events_after_round_trip(
+    wt: &mut WtTest,
+    wt_session: &ServerSession,
+) -> Vec<ConnectionEvent> {
+    let t = now() + Duration::from_secs(1); // Past the pacing of earlier exchanges.
+    let out = wt.server.process_output(t).dgram();
+    let out = wt.client.process(out, t).dgram();
+    let mut conn = wt_session.conn.borrow_mut();
+    conn.process_input(out.unwrap(), t);
+    let mut events: Vec<_> = conn
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                ConnectionEvent::SendStreamStopSending { .. }
+                    | ConnectionEvent::RecvStreamReset { .. }
+            )
+        })
+        .collect();
+    events.sort();
+    events
+}
+
+/// A FIN after a close capsule does not report the session closed again.
+#[test]
+fn wt_close_capsule_then_fin_reports_one_session_closed() {
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    send_close_capsule_without_fin(&mut wt, &wt_session, 23, "Something went wrong", &[]);
+    drop(wt_session.conn.borrow_mut().stream_close_send(session_id));
+    wt.exchange_packets();
+
+    let closed = wt
+        .client
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed { .. })
+            )
+        })
+        .count();
+    assert_eq!(closed, 1);
+}
+
+/// A close capsule without FIN that arrives while the local close is held back by flow control
+/// resets the CONNECT stream, so the peer never gets the local close capsule.
+#[test]
+fn wt_close_capsule_while_local_close_blocked() {
+    let conn_params = wt_default_parameters()
+        .get_connection_parameters()
+        .clone()
+        .max_stream_data(StreamDataLimit::BiDiRemote, 256);
+    let server_params = wt_default_parameters().connection_parameters(conn_params);
+    let mut wt = WtTest::new_with_params(wt_default_parameters(), server_params);
+    let wt_session = wt.create_wt_session();
+    let session_id = wt_session.stream_id();
+    let before = wt.client.transport_stats().frame_tx;
+    wt.session_close_frame_client(session_id, 23, &"a".repeat(1000));
+    assert!(wt.client.webtransport_session_stats(session_id).is_ok());
+
+    send_close_capsule_without_fin(&mut wt, &wt_session, 5, "server", &[]);
+    let after = wt.client.transport_stats().frame_tx;
+    assert_eq!(after.reset_stream, before.reset_stream + 1);
+    assert_eq!(after.stop_sending, before.stop_sending + 1);
+    let reason = CloseReason::Clean {
+        error: 5,
+        message: "server".to_string(),
+    };
+    let closed = WebTransportEvent::SessionClosed {
+        stream_id: session_id,
+        reason,
+        headers: None,
+    };
+    let events: Vec<_> = wt.client.events().collect();
+    let creatable = Http3ClientEvent::RequestsCreatable; // The closed CONNECT stream frees a slot.
+    assert_eq!(events, [Http3ClientEvent::WebTransport(closed), creatable]);
+    let stats = wt.client.webtransport_session_stats(session_id);
+    assert_eq!(stats, Err(Error::InvalidStreamId));
+    wt.check_session_closed_event_server(&wt_session, &CloseReason::Error(WT_SESSION_GONE));
+    assert!(wt.server.next_event().is_none());
 }
 
 /// Per §4.6 of the WebTransport over HTTP/3 spec, a GOAWAY from the server is
