@@ -36,8 +36,8 @@ use nss::{
     Record, RecordList, RecordProtection as Aead, RecordProtectionOps as _, ResumptionToken,
     SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
     TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
-    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp,
-    random,
+    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_HS_KEY_UDPATE, TLS_VERSION_1_3,
+    ZeroRttChecker, hkdf, hp, random,
 };
 use tracing::{debug, info, trace};
 
@@ -78,6 +78,7 @@ pub struct Crypto {
     states: CryptoStates,
     /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
     early_resend_used: bool,
+    handshake_message_filters: EnumMap<PacketNumberSpace, HandshakeMessageFilter>,
 }
 
 type TpHandler = Rc<RefCell<TransportParametersHandler>>;
@@ -136,6 +137,7 @@ impl Crypto {
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
             early_resend_used: false,
+            handshake_message_filters: EnumMap::default(),
         })
     }
 
@@ -210,6 +212,9 @@ impl Crypto {
         space: PacketNumberSpace,
         data: Option<&[u8]>,
     ) -> Res<&HandshakeState> {
+        if let Some(d) = data {
+            self.handshake_message_filters[space].check(d)?;
+        }
         let input = data.map(|d| {
             #[cfg(feature = "build-fuzzing-corpus")]
             if space == PacketNumberSpace::Initial && self.is_server() {
@@ -1814,6 +1819,39 @@ impl Default for CryptoStreams {
     }
 }
 
+/// Follows TLS handshake message framing to reject a `KeyUpdate` (RFC 9001 6) before NSS sees it.
+#[derive(Debug, Default)]
+struct HandshakeMessageFilter {
+    header_len: usize,
+    body_remaining: usize,
+}
+
+impl HandshakeMessageFilter {
+    const HEADER_LEN: usize = 4;
+
+    fn check(&mut self, mut data: &[u8]) -> Res<()> {
+        while let Some((&b, rest)) = data.split_first() {
+            if self.header_len < Self::HEADER_LEN {
+                if self.header_len > 0 {
+                    self.body_remaining = (self.body_remaining << 8) | usize::from(b);
+                } else if b == TLS_HS_KEY_UDPATE {
+                    return Err(Error::CryptoAlert(10)); // unexpected_message
+                }
+                self.header_len += 1;
+                data = rest;
+            } else {
+                let skip = min(self.body_remaining, data.len());
+                self.body_remaining -= skip;
+                data = &data[skip..];
+            }
+            if self.header_len == Self::HEADER_LEN && self.body_remaining == 0 {
+                self.header_len = 0;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The packet number space is not recorded because it can be derived from the carrying packet's
 /// type.
 #[derive(Debug, Clone)]
@@ -1930,5 +1968,35 @@ mod buffer_limits {
                 .err()
         });
         assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod handshake_message_filter {
+    use std::iter;
+
+    use super::HandshakeMessageFilter;
+    use crate::Error;
+
+    const KEY_UPDATE: [u8; 5] = [0x18, 0, 0, 1, 1];
+
+    /// Header and body bytes that look like a `KeyUpdate` type are skipped.
+    #[test]
+    fn byte_by_byte() {
+        let mut f = HandshakeMessageFilter::default();
+        let header = [0x04, 0x01, 0x01, 0x18];
+        for b in header.into_iter().chain(iter::repeat_n(0x18, 0x01_0118)) {
+            assert_eq!(f.check(&[b]), Ok(()));
+        }
+        assert_eq!(f.check(&KEY_UPDATE[..1]), Err(Error::CryptoAlert(10)));
+    }
+
+    /// A message with an empty body is followed by the next header.
+    #[test]
+    fn empty_body() {
+        let mut f = HandshakeMessageFilter::default();
+        assert_eq!(f.check(&[0x04, 0, 0, 0, 0x14, 0, 0, 1, 0x18]), Ok(()));
+        assert_eq!(f.check(&KEY_UPDATE), Err(Error::CryptoAlert(10)));
     }
 }
