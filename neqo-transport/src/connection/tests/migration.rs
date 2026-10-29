@@ -1238,6 +1238,26 @@ impl test_internal::FrameWriter for NewConnectionIds {
     }
 }
 
+/// RFC 9000, Section 19.15: an endpoint that sends packets with a zero-length
+/// Destination Connection ID can't receive a `NEW_CONNECTION_ID` frame.
+#[test]
+fn new_connection_id_zero_len_cid() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let cid_gen = Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    let writer = NewConnectionIds::retire_all(cid_gen);
+    server.process_input(send_with_extra(&mut client, writer, now()), now());
+    assert!(matches!(
+        server.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::ProtocolViolation),
+            ..
+        }
+    ));
+}
+
 /// Test that forcing retirement of connection IDs forces retirement of all active
 /// connection IDs and the use of of newer one.
 #[test]
