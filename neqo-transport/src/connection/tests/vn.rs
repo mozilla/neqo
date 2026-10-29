@@ -6,7 +6,8 @@
 
 use std::time::Duration;
 
-use neqo_common::{Decoder, Dscp, Encoder, event::Provider as _};
+use neqo_common::{Decoder, Dscp, Encoder, Role, event::Provider as _};
+use nss::constants::TLS_ALERT_ILLEGAL_PARAMETER;
 use test_fixture::{
     assertions::{self, assert_initial, assert_version},
     datagram, now, split_datagram, strip_padding,
@@ -16,7 +17,7 @@ use test_fixture::{
 use super::{super::Connection, assert_error, forged_server_initial};
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
-    CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
+    CryptoWriter, connect, connect_fail_at, default_client, default_server, exchange_ticket,
     new_client, new_server, send_something,
 };
 #[cfg(not(feature = "disable-encryption"))]
@@ -352,11 +353,11 @@ fn version_negotiation_downgrade() {
     let dgram = datagram(vn);
     client.process_input(dgram, now());
 
-    connect_fail(
+    connect_fail_at(
         &mut client,
         &mut server,
+        Role::Client,
         Error::VersionNegotiation,
-        Error::Peer(Error::VersionNegotiation.code()),
     );
 }
 
@@ -382,7 +383,10 @@ fn invalid_server_version() {
     // The server effectively hasn't reacted here.
     match server.state() {
         State::Closed(err) => {
-            assert_eq!(*err, CloseReason::Transport(Error::CryptoAlert(47)));
+            assert_eq!(
+                *err,
+                CloseReason::Transport(Error::CryptoAlert(TLS_ALERT_ILLEGAL_PARAMETER))
+            );
         }
         _ => panic!("invalid server state"),
     }
@@ -410,11 +414,11 @@ fn invalid_current_version_client() {
         )
         .unwrap();
 
-    connect_fail(
+    connect_fail_at(
         &mut client,
         &mut server,
-        Error::Peer(Error::CryptoAlert(47).code()),
-        Error::CryptoAlert(47),
+        Role::Server,
+        Error::CryptoAlert(TLS_ALERT_ILLEGAL_PARAMETER),
     );
 }
 
@@ -442,11 +446,11 @@ fn invalid_current_version_server() {
         )
         .unwrap();
 
-    connect_fail(
+    connect_fail_at(
         &mut client,
         &mut server,
-        Error::CryptoAlert(47),
-        Error::Peer(Error::CryptoAlert(47).code()),
+        Role::Client,
+        Error::CryptoAlert(TLS_ALERT_ILLEGAL_PARAMETER),
     );
 }
 
@@ -468,11 +472,11 @@ fn no_compatible_version() {
         )
         .unwrap();
 
-    connect_fail(
+    connect_fail_at(
         &mut client,
         &mut server,
-        Error::Peer(Error::CryptoAlert(47).code()),
-        Error::CryptoAlert(47),
+        Role::Server,
+        Error::CryptoAlert(TLS_ALERT_ILLEGAL_PARAMETER),
     );
 }
 

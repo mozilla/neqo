@@ -17,10 +17,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, to_u64};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, to_u64};
 use nss::{
     AuthenticationStatus, HandshakeMessage,
-    constants::TLS_CHACHA20_POLY1305_SHA256,
+    constants::{
+        TLS_ALERT_BAD_CERTIFICATE, TLS_ALERT_CERTIFICATE_REVOKED,
+        TLS_ALERT_NO_APPLICATION_PROTOCOL, TLS_CHACHA20_POLY1305_SHA256,
+    },
     ext::{ExtensionHandler, ExtensionWriterResult},
     generate_ech_keys,
 };
@@ -36,8 +39,8 @@ use tracing::debug;
 use super::{
     super::{Connection, Output, State, test_internal},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    assert_error, connect, connect_fail, connect_force_idle, connect_with_rtt, default_client,
-    default_server, drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram,
+    assert_error, connect, connect_fail_at, connect_force_idle, connect_with_rtt, default_client,
+    default_server, drop_flight, flush_to, get_tokens, maybe_authenticate, next_dgram,
     resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
@@ -159,8 +162,16 @@ fn handshake_failed_authentication() {
     debug!("---- server: Alert(certificate_revoked)");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
-    assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(44)));
-    assert_error(&server, &CloseReason::Transport(Error::Peer(300)));
+    assert_error(
+        &client,
+        &CloseReason::Transport(Error::CryptoAlert(TLS_ALERT_CERTIFICATE_REVOKED)),
+    );
+    assert_error(
+        &server,
+        &CloseReason::Transport(Error::Peer(
+            Error::CryptoAlert(TLS_ALERT_CERTIFICATE_REVOKED).code(),
+        )),
+    );
 }
 
 #[test]
@@ -169,9 +180,12 @@ fn no_alpn() {
     client.set_alpn(&["bad-alpn"]).unwrap();
     let mut server = default_server();
 
-    handshake(&mut client, &mut server, now(), Duration::new(0, 0));
-    assert_error(&client, &CloseReason::Transport(Error::Peer(376)));
-    assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(120)));
+    connect_fail_at(
+        &mut client,
+        &mut server,
+        Role::Server,
+        Error::CryptoAlert(TLS_ALERT_NO_APPLICATION_PROTOCOL),
+    );
 }
 
 #[test]
@@ -1180,7 +1194,9 @@ fn ech_retry() {
     server.process_input(dgram.unwrap(), now());
     assert_eq!(
         server.state().error(),
-        Some(&CloseReason::Transport(Error::Peer(0x100 + 121)))
+        Some(&CloseReason::Transport(Error::Peer(
+            Error::EchRetry(vec![]).code()
+        )))
     );
 
     let Some(CloseReason::Transport(Error::EchRetry(updated_config))) = client.state().error()
@@ -1243,8 +1259,10 @@ fn ech_retry_fallback_rejected() {
     server.process_input(dgram.unwrap(), now());
     assert_eq!(
         server.state().error(),
-        Some(&CloseReason::Transport(Error::Peer(298)))
-    ); // A bad_certificate alert.
+        Some(&CloseReason::Transport(Error::Peer(
+            Error::CryptoAlert(TLS_ALERT_BAD_CERTIFICATE).code()
+        )))
+    );
 }
 
 #[test]
@@ -2414,7 +2432,7 @@ fn client_omits_transport_parameters() {
     omit_transport_parameters(&mut client);
     let mut server = default_server();
     let alert = Error::CryptoAlert(109); // missing_extension
-    connect_fail(&mut client, &mut server, Error::Peer(alert.code()), alert);
+    connect_fail_at(&mut client, &mut server, Role::Server, alert);
 }
 
 #[test]
