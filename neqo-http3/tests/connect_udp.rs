@@ -12,6 +12,7 @@ use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
+    features::extended_connect::session::CloseReason,
     webtransport::ClientSession as _,
 };
 use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamDataLimit, StreamType};
@@ -483,12 +484,12 @@ fn server_stream_reset_results_in_client_session_close() {
     proxy_session.reset_send().unwrap();
     exchange_packets(&mut client, &mut proxy, false, None);
 
-    assert!(matches!(
-        client.next_event(),
-        Some(Http3ClientEvent::ConnectUdp(
-            ConnectUdpEvent::SessionClosed { .. }
-        ))
-    ));
+    let Some(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::SessionClosed { reason, .. })) =
+        client.next_event()
+    else {
+        panic!("expected SessionClosed");
+    };
+    assert_eq!(reason, CloseReason::Error(Error::HttpNone.code()));
 }
 
 #[test]

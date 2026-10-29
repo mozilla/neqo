@@ -382,6 +382,8 @@ enum CloseState {
 
 /// Network client, e.g. [`neqo_transport::Connection`] or [`neqo_http3::Http3Client`].
 trait Client {
+    const NO_ERROR: AppError;
+
     fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
     -> OutputBatch;
     fn process_multiple_input<'a>(
@@ -445,7 +447,7 @@ impl<'a, H: Handler> Runner<'a, H> {
                 (true, CloseState::Closing) | (false, _) => {}
                 // no more work, close and stop
                 (true, CloseState::NotClosing) => {
-                    self.client.close(now(), 0, "kthxbye!");
+                    self.client.close(now(), H::Client::NO_ERROR, "kthxbye!");
                     // Skip the closing period (RFC 9000 Section 10.2) after flushing.
                     self.process_output().await?;
                     break;
