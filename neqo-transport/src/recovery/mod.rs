@@ -44,6 +44,8 @@ pub const MAX_PTO_PACKET_COUNT: usize = 2;
 pub const MAX_OUTSTANDING_UNACK: usize = 200;
 /// Disable PING until this many packets are outstanding.
 pub const MIN_OUTSTANDING_UNACK: usize = 16;
+/// The limit on tracked packets that are not ack-eliciting, see RFC 9000 Section 13.2.4.
+pub const MAX_TRACKED_ACK_ONLY: usize = 1 << 16;
 /// The scale we use for the fast PTO feature.
 pub const FAST_PTO_SCALE: u8 = 100;
 
@@ -220,7 +222,8 @@ impl LossRecoverySpace {
     }
 
     pub fn on_packet_sent(&mut self, sent_packet: sent::Packet) {
-        if sent_packet.ack_eliciting() {
+        let ack_eliciting = sent_packet.ack_eliciting();
+        if ack_eliciting {
             self.last_ack_eliciting = Some(sent_packet.time_sent());
             self.in_flight_outstanding += 1;
         } else if self.space != PacketNumberSpace::ApplicationData
@@ -231,6 +234,12 @@ impl LossRecoverySpace {
             self.last_ack_eliciting = Some(sent_packet.time_sent());
         }
         self.sent_packets.track(sent_packet);
+        if !ack_eliciting
+            && self.sent_packets.len() - self.in_flight_outstanding > MAX_TRACKED_ACK_ONLY
+        {
+            self.sent_packets
+                .remove_oldest_ack_only(MAX_TRACKED_ACK_ONLY / 2);
+        }
     }
 
     /// If we are only sending ACK frames, send a PING frame after 2 PTOs so that
@@ -1085,7 +1094,10 @@ impl Display for Loss {
 mod tests {
     use std::{
         cell::RefCell,
-        ops::{Deref, DerefMut, RangeInclusive},
+        cmp::{max, min},
+        collections::VecDeque,
+        iter,
+        ops::{Deref, DerefMut, Range, RangeInclusive},
         rc::Rc,
         time::{Duration, Instant},
     };
@@ -1094,17 +1106,20 @@ mod tests {
     use test_fixture::{DEFAULT_ADDR, now};
 
     use super::{
-        ACK_ONLY_SIZE_LIMIT, FAST_PTO_SCALE, LossRecoverySpace, MIN_OUTSTANDING_UNACK,
-        PacketNumberSpace, PtoState, SendProfile,
+        ACK_ONLY_SIZE_LIMIT, FAST_PTO_SCALE, LossRecoverySpace, MAX_TRACKED_ACK_ONLY,
+        MIN_OUTSTANDING_UNACK, PacketNumberSpace, PtoState, SendProfile,
     };
     use crate::{
         ConnectionParameters, Token as Srt,
         cid::{ConnectionId, ConnectionIdEntry},
-        ecn, packet,
+        connection::params::MAX_LOCAL_MAX_DATA,
+        ecn,
+        fc::WINDOW_UPDATE_FRACTION,
+        packet,
         path::{Path, PathRef},
         recovery::{self, MAX_PTO_PACKET_COUNT, sent},
         stats::{Stats, StatsCell},
-        tracking::PacketNumberSpaceSet,
+        tracking::{DEFAULT_REMOTE_ACK_DELAY, PacketNumberSpaceSet},
     };
 
     // Shorthand for a time in milliseconds.
@@ -2061,6 +2076,213 @@ mod tests {
             lrs_app.last_ack_eliciting.is_none(),
             "ApplicationData must not set PTO baseline for non-ack-eliciting packet"
         );
+    }
+
+    /// More ACK-only packets than are tracked.
+    const N: packet::Number = 2 * to_u64(MAX_TRACKED_ACK_ONLY);
+    /// A cleanup delay that outlasts every test.
+    const NEVER: Duration = Duration::from_secs(3600);
+
+    /// Sends ACK-only packets `pns`, each after the housekeeping that precedes sending,
+    /// and returns the most ACK-only packets tracked after housekeeping.
+    fn send_ack_only(lrs: &mut LossRecoverySpace, pns: Range<packet::Number>) -> usize {
+        let mut most = 0;
+        for pn in pns {
+            lrs.detect_lost_packets(pn_time(pn), Duration::ZERO, NEVER, &mut Vec::new());
+            most = max(most, lrs.sent_packets.len() - lrs.in_flight_outstanding);
+            lrs.on_packet_sent(sent::Packet::new(
+                packet::Type::Short,
+                pn,
+                pn_time(pn),
+                false,
+                recovery::Tokens::new(),
+                ON_SENT_SIZE,
+            ));
+        }
+        most
+    }
+
+    /// A peer that never acknowledges ACK-only packets can't make us track them without bound.
+    #[test]
+    fn ack_only_tracking_bounded() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        assert_eq!(send_ack_only(&mut lrs, 0..N), MAX_TRACKED_ACK_ONLY);
+        assert_eq!(send_ack_only(&mut lrs, N..2 * N), MAX_TRACKED_ACK_ONLY);
+    }
+
+    /// Acknowledged ACK-only packets no longer count towards the limit.
+    #[test]
+    fn ack_only_tracking_after_ack() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        send_ack_only(&mut lrs, 0..N);
+        lrs.remove_acked(vec![0..=N], &mut Stats::default());
+        let refill = N..N + to_u64(MAX_TRACKED_ACK_ONLY) + 1;
+        assert_eq!(send_ack_only(&mut lrs, refill), MAX_TRACKED_ACK_ONLY);
+    }
+
+    /// Expired lost ACK-only packets no longer count towards the limit.
+    #[test]
+    fn ack_only_tracking_after_expiry() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        send_ack_only(&mut lrs, 0..N);
+        lrs.largest_acked = Some(N);
+        lrs.detect_lost_packets(pn_time(N), Duration::ZERO, Duration::ZERO, &mut Vec::new());
+        lrs.remove_old_lost(pn_time(N), Duration::ZERO);
+        let refill = N..N + to_u64(MAX_TRACKED_ACK_ONLY) + 1;
+        assert_eq!(send_ack_only(&mut lrs, refill), MAX_TRACKED_ACK_ONLY);
+    }
+
+    /// Ack-eliciting packets stay tracked when ACK-only packets are no longer tracked.
+    #[test]
+    fn ack_only_tracking_keeps_ack_eliciting() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        add_sent(&mut lrs, N - 1);
+        assert_eq!(send_ack_only(&mut lrs, N..3 * N), MAX_TRACKED_ACK_ONLY);
+        let pkts = lrs.sent_packets.iter_mut();
+        let eliciting = pkts.filter(|p| p.ack_eliciting()).count();
+        assert_eq!(to_u64(eliciting), N);
+    }
+
+    /// The oldest ACK-only packets are the ones no longer tracked.
+    #[test]
+    fn ack_only_tracking_drops_oldest() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        add_sent(&mut lrs, 0);
+        assert_eq!(send_ack_only(&mut lrs, 1..2 * N), MAX_TRACKED_ACK_ONLY);
+        let tracked = lrs.sent_packets.len() - lrs.in_flight_outstanding;
+        let kept = (2 * N - to_u64(tracked))..2 * N;
+        let pns = lrs.sent_packets.iter_mut().map(|p| p.pn());
+        assert!(pns.eq(iter::once(0).chain(kept)));
+    }
+
+    /// At the limit, only the newest half of the ACK-only packets stay tracked.
+    #[test]
+    fn ack_only_tracking_halves() {
+        let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
+        let limit = to_u64(MAX_TRACKED_ACK_ONLY);
+        send_ack_only(&mut lrs, 0..limit + 1);
+        let pns = lrs.sent_packets.iter_mut().map(|p| p.pn());
+        assert!(pns.eq(limit / 2..=limit));
+    }
+
+    /// An ACK of the newest ACK-only packet still makes it the largest acknowledged
+    /// and the source of the RTT sample.
+    #[test]
+    fn ack_only_tracking_newest_acked() {
+        let app = PacketNumberSpace::ApplicationData;
+        let mut lr = Fixture::default();
+        pace(&mut lr, 1);
+        let lrs = lr.spaces.get_mut(app).unwrap();
+        assert_eq!(send_ack_only(lrs, 1..2 * N), MAX_TRACKED_ACK_ONLY);
+        let newest = 2 * N - 1;
+        let ack_time = pn_time(newest) + TEST_RTT;
+        lr.on_ack_received(app, vec![0..=newest], None, Duration::ZERO, ack_time);
+        assert_eq!(lr.spaces.get(app).unwrap().largest_acked, Some(newest));
+        assert_eq!(lr.path.borrow().rtt().latest_rtt(), TEST_RTT);
+    }
+
+    /// A confirmed connection with a peer that has a `max_ack_delay` of `delay`.
+    fn confirmed(delay: Duration) -> Fixture {
+        let mut lr = Fixture::default();
+        lr.path.borrow_mut().set_ack_delay(delay, None, 0);
+        lr.discard(PacketNumberSpace::Initial, now());
+        lr.discard(PacketNumberSpace::Handshake, now());
+        lr
+    }
+
+    /// Sends `count` packets, one every `interval`, each after `Loss::timeout`, as a connection
+    /// does.  The first packet, a packet after a PTO, a packet that `should_probe` asks for and
+    /// every `every`-th packet are ack-eliciting; the others only carry an ACK.
+    /// The peer is `rtt` away.  An ack-eliciting packet that arrives while no ACK is pending
+    /// makes it acknowledge all packets received `delay` later, unless `lost` says that
+    /// this `i`-th ACK is lost.
+    /// Returns the most ACK-only packets tracked after `Loss::timeout`
+    /// and the number of packets acknowledged.
+    fn exchange(
+        lr: &mut Fixture,
+        count: u64,
+        interval: Duration,
+        every: u64,
+        rtt: Duration,
+        delay: Duration,
+        lost: impl Fn(usize) -> bool,
+    ) -> (usize, usize) {
+        let app = PacketNumberSpace::ApplicationData;
+        let mut acks = VecDeque::new();
+        let (mut most, mut acked, mut frames, mut pending) = (0, 0, 0, None);
+        for pn in 0..count {
+            let now = now() + interval * u32::try_from(pn).unwrap();
+            while acks.front().is_some_and(|(t, _, _)| *t <= now) {
+                let (t, range, held) = acks.pop_front().unwrap();
+                acked += lr.on_ack_received(app, vec![range], None, held, t).0.len();
+            }
+            let ptos = lr.pto_count();
+            lr.timeout(now);
+            let lrs = lr.spaces.get_mut(app).unwrap();
+            most = max(most, lrs.sent_packets.len() - lrs.in_flight_outstanding);
+            let pto = lr.path.borrow().rtt().pto(true);
+            let probe = pn == 0 || lr.pto_count() > ptos || lr.should_probe(pto, now);
+            let eliciting = probe || pn % every == 0;
+            let t = recovery::Tokens::new();
+            let p = sent::Packet::new(packet::Type::Short, pn, now, eliciting, t, ON_SENT_SIZE);
+            lr.on_packet_sent(p, now);
+            let arrival = now + rtt / 2;
+            if eliciting && pending.is_none_or(|sent| sent <= arrival) {
+                pending = Some(arrival + delay);
+                let later = u64::try_from(delay.as_nanos() / interval.as_nanos()).unwrap();
+                let later = min(count - 1 - pn, later);
+                let held = delay
+                    .checked_sub(interval * u32::try_from(later).unwrap())
+                    .unwrap();
+                if !lost(frames) {
+                    acks.push_back((arrival + delay + rtt / 2, 0..=pn + later, held));
+                }
+                frames += 1;
+            }
+        }
+        (most, acked)
+    }
+
+    /// An honest peer acknowledges every PING, using all of its `max_ack_delay`, and two
+    /// of its ACK frames are lost.  All ACK-only packets are still tracked when acknowledged.
+    #[test]
+    fn ack_only_tracking_honest_peer() {
+        for delay in [DEFAULT_REMOTE_ACK_DELAY, ms((1 << 14) - 1)] {
+            let mut lr = confirmed(delay);
+            let lost = |i| i == 3 || i == 4;
+            let (_, acked) = exchange(&mut lr, N, ms(100), u64::MAX, TEST_RTT, delay, lost);
+            let largest = lr.largest_acknowledged_pn(PacketNumberSpace::ApplicationData);
+            assert_eq!(Some(to_u64(acked)), largest.map(|pn| pn + 1));
+        }
+    }
+
+    /// An honest receiver that is as fast as the largest connection flow control window allows
+    /// over 20 ms acknowledges every second 1200-byte packet and sends `MAX_DATA` every
+    /// `WINDOW_UPDATE_FRACTION` of the window.  One ACK frame of the peer, which uses all of its
+    /// `max_ack_delay`, is lost.  All ACK-only packets are still tracked when acknowledged.
+    #[test]
+    fn ack_only_tracking_honest_fast_receiver() {
+        const ACKED_BYTES: u64 = 2 * 1200;
+        let rtt = ms(20);
+        let interval =
+            rtt * u32::try_from(ACKED_BYTES).unwrap() / u32::try_from(MAX_LOCAL_MAX_DATA).unwrap();
+        let every = MAX_LOCAL_MAX_DATA / WINDOW_UPDATE_FRACTION / ACKED_BYTES;
+        let delay = DEFAULT_REMOTE_ACK_DELAY;
+        let mut lr = confirmed(delay);
+        let count = u64::try_from(((rtt + delay) * 8).as_nanos() / interval.as_nanos()).unwrap();
+        let (most, acked) = exchange(&mut lr, count, interval, every, rtt, delay, |i| i == 3);
+        let largest = lr.largest_acknowledged_pn(PacketNumberSpace::ApplicationData);
+        assert_eq!(Some(to_u64(acked)), largest.map(|pn| pn + 1));
+        assert_eq!(most.next_power_of_two(), MAX_TRACKED_ACK_ONLY);
+    }
+
+    /// A peer that never sends an ACK frame can't make us track ACK-only packets without bound.
+    #[test]
+    fn ack_only_tracking_no_ack() {
+        let mut lr = confirmed(DEFAULT_REMOTE_ACK_DELAY);
+        let delay = DEFAULT_REMOTE_ACK_DELAY;
+        let (most, acked) = exchange(&mut lr, 2 * N, ms(1), u64::MAX, TEST_RTT, delay, |_| true);
+        assert_eq!((most, acked), (MAX_TRACKED_ACK_ONLY, 0));
     }
 
     fn app_data_largest_acked_sent_time(lr: &Fixture) -> Option<Instant> {
