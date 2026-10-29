@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::{Duration, Instant};
+
 use neqo_common::Datagram;
 use test_fixture::{
     assertions::{is_handshake, is_initial},
@@ -48,6 +50,17 @@ fn assert_update_blocked(c: &mut Connection) {
         c.initiate_key_update().unwrap_err(),
         Error::KeyUpdateBlocked
     );
+}
+
+/// Check that `c` can initiate a key update only three PTOs after `confirmed`.
+fn assert_update_after_3pto(c: &mut Connection, confirmed: Instant) {
+    let allowed = confirmed + 3 * c.pto();
+    let tick = Duration::from_nanos(1);
+    let blocked = allowed.checked_sub(tick).unwrap();
+    assert_eq!(c.process_output(blocked).callback(), tick);
+    assert_update_blocked(c);
+    drop(c.process_output(allowed));
+    c.initiate_key_update().unwrap();
 }
 
 fn overwrite_invocations(n: packet::Number) {
@@ -140,8 +153,7 @@ fn key_update_client() {
         panic!("server should now be waiting to clear keys");
     }
 
-    // Without having had time to purge old keys, more updates are blocked.
-    // The spec would permits it at this point, but we are more conservative.
+    // The client hasn't received an ACK for a packet with the new keys.
     assert_update_blocked(&mut client);
     // The server can't update until it receives an ACK for a packet.
     assert_update_blocked(&mut server);
@@ -221,6 +233,55 @@ fn key_update_consecutive() {
     // However, as the server didn't wait long enough to update again, the
     // client hasn't rotated its keys, so the packet gets dropped.
     check_discarded(&mut client, &dgram, false, 1, 0);
+}
+
+#[test]
+fn key_update_wait_after_local_update() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    client.initiate_key_update().unwrap();
+    let ack = send_and_receive(&mut client, &mut server, now);
+    client.process_input(ack.unwrap(), now);
+    assert_update_after_3pto(&mut client, now);
+    assert_eq!(client.get_epochs(), (Some(5), Some(4)));
+}
+
+#[test]
+fn key_update_no_wait_after_later_ack() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+
+    client.initiate_key_update().unwrap();
+    let ack = send_and_receive(&mut client, &mut server, now);
+    client.process_input(ack.unwrap(), now);
+    now += 3 * client.pto();
+    drop(client.process_output(now));
+
+    // Another ACK in the same key phase doesn't delay the next key update.
+    let ack = send_and_receive(&mut client, &mut server, now);
+    client.process_input(ack.unwrap(), now);
+    client.initiate_key_update().unwrap();
+    assert_eq!(client.get_epochs(), (Some(5), Some(4)));
+}
+
+#[test]
+fn key_update_wait_after_peer_update() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    server.initiate_key_update().unwrap();
+    client.process_input(send_something(&mut server, now), now);
+    let ack = send_and_receive(&mut client, &mut server, now);
+    client.process_input(ack.unwrap(), now);
+    assert_update_after_3pto(&mut client, now);
+    assert_eq!(client.get_epochs(), (Some(5), Some(4)));
 }
 
 // Receiving the same key update packet twice must not be treated as two key
@@ -397,6 +458,26 @@ fn automatic_update_write_keys_later() {
     // The second will update though.
     drop(send_something(&mut client, now()));
     assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+}
+
+#[test]
+fn automatic_update_write_keys_during_wait() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+
+    client.initiate_key_update().unwrap();
+    let ack = send_and_receive(&mut client, &mut server, now);
+    client.process_input(ack.unwrap(), now);
+    let allowed = now + 3 * client.pto();
+    let now = allowed.checked_sub(Duration::from_nanos(1)).unwrap();
+    drop(client.process_output(now));
+    assert_update_blocked(&mut client);
+
+    overwrite_invocations(UPDATE_WRITE_KEYS_AT);
+    drop(send_something(&mut client, now));
+    assert_eq!(client.get_epochs(), (Some(5), Some(4)));
 }
 
 #[test]
