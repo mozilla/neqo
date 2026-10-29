@@ -1979,6 +1979,7 @@ impl Http3Connection {
         {
             self.send_streams.remove(&stream_id)?;
             if let Some(wt) = s.extended_connect_session() {
+                wt.borrow_mut().reset_control_stream_recv();
                 self.remove_extended_connect(&wt, conn);
             }
         }
@@ -1998,6 +1999,7 @@ impl Http3Connection {
                 .remove(&stream_id)?
                 .extended_connect_session()
         {
+            wt.borrow_mut().reset_control_stream_recv();
             self.remove_extended_connect(&wt, conn);
         }
         stream
