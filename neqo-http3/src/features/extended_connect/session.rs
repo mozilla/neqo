@@ -384,6 +384,15 @@ impl Session {
         matches!(self.state, State::Active)
     }
 
+    pub(crate) fn defer_close(
+        &mut self,
+        stream_id: StreamId,
+        recv: bool,
+        close_type: CloseType,
+    ) -> bool {
+        self.protocol.defer_close(stream_id, recv, close_type)
+    }
+
     #[must_use]
     pub(crate) const fn is_closing(&self) -> bool {
         self.state.closing_state()
@@ -631,6 +640,7 @@ impl Session {
     }
 
     pub(crate) fn datagram(&self, datagram: Bytes) {
+        // TODO: Buffer datagrams until the session is established (draft-16 Section 4.6).
         if self.state != State::Active {
             debug!("[{self}]: received datagram on {:?} session.", self.state);
             return;
@@ -811,6 +821,11 @@ pub(crate) trait Protocol: Debug + Display {
         let msg = "Protocol does not support removing send streams";
         debug!("{msg}");
         debug_assert!(false, "{msg}");
+    }
+
+    /// Returns `true` if `stream_id` is pending; its close is then reported once it is announced.
+    fn defer_close(&mut self, _stream_id: StreamId, _recv: bool, _close_type: CloseType) -> bool {
+        false
     }
 
     fn take_sub_streams(&mut self) -> (HashSet<StreamId>, HashSet<StreamId>) {

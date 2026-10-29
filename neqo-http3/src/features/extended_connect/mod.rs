@@ -31,7 +31,7 @@ use crate::{
     settings::{HSettingType, HSettings},
 };
 
-pub(crate) trait ExtendedConnectEvents: Debug {
+pub(crate) trait ExtendedConnectEvents: RecvStreamEvents + SendStreamEvents + Debug {
     fn session_start(
         &self,
         connect_type: ExtendedConnectType,
