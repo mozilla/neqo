@@ -68,7 +68,7 @@ fn server_receive_unknown_first_packet() {
     assert_dscp(&server.stats());
 }
 
-fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
+pub fn create_vn(initial_pkt: &[u8], versions: &[u32]) -> Vec<u8> {
     let mut dec = Decoder::from(&initial_pkt[5..]); // Skip past version.
     let dst_cid = dec.decode_vec(1).expect("client DCID");
     let src_cid = dec.decode_vec(1).expect("client SCID");
