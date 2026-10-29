@@ -283,7 +283,7 @@ impl TransportParameter {
         Ok(Self::PreferredAddress { v4, v6, cid, srt })
     }
 
-    fn decode_versions(dec: &mut Decoder) -> Res<Self> {
+    fn decode_versions(role: Role, dec: &mut Decoder) -> Res<Self> {
         fn dv(dec: &mut Decoder) -> Res<version::Wire> {
             let v = dec
                 .decode_uint::<version::Wire>()
@@ -301,6 +301,10 @@ impl TransportParameter {
         let mut other = Vec::with_capacity(count);
         for _ in 0..count {
             other.push(dv(dec)?);
+        }
+        // RFC 9368, Section 4: servers treat this as a parsing failure.
+        if role == Role::Server && !other.contains(&current) {
+            return Err(Error::TransportParameter);
         }
         Ok(Self::Versions { current, other })
     }
@@ -380,7 +384,7 @@ impl TransportParameter {
                 Some(v) if v < (1 << 24) => Self::Integer(v),
                 _ => return Err(Error::TransportParameter),
             },
-            TransportParameterId::VersionInformation => Self::decode_versions(&mut d)?,
+            TransportParameterId::VersionInformation => Self::decode_versions(role, &mut d)?,
             #[cfg(test)]
             TransportParameterId::TestTransportParameter => {
                 Self::Bytes(d.decode_remainder().to_vec())
@@ -1486,6 +1490,20 @@ mod tests {
             TransportParameter::decode(Client, &mut dec).unwrap_err(),
             Error::TransportParameter
         );
+    }
+
+    #[test]
+    fn versions_chosen_not_available() {
+        let vi = TransportParameter::Versions {
+            current: Version::Version1.wire_version(),
+            other: vec![Version::Version2.wire_version()],
+        };
+        let mut enc = Encoder::default();
+        vi.encode(&mut enc, VersionInformation);
+        let res = TransportParameter::decode(Server, &mut enc.as_decoder());
+        assert_eq!(res, Err(Error::TransportParameter));
+        let res = TransportParameter::decode(Client, &mut enc.as_decoder());
+        assert_eq!(res, Ok(Some((VersionInformation, vi))));
     }
 
     #[test]
