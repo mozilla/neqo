@@ -59,7 +59,8 @@ fn take_ranges(c: &mut Criterion) {
             || collect_packets((0..PACKETS).map(|i| make_packet(i, now))),
             // Take the first 90 packets, minus some gaps.
             |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29])),
-            BatchSize::SmallInput,
+            // Each input is ~180 KB; batching them leaves the routine reading cold memory.
+            BatchSize::PerIteration,
         );
     });
 }
@@ -78,7 +79,7 @@ fn track(c: &mut Criterion) {
                 }
                 black_box(pkts)
             },
-            BatchSize::SmallInput,
+            BatchSize::PerIteration,
         );
     });
 }
@@ -101,7 +102,7 @@ fn remove_expired(c: &mut Criterion) {
                 )
             },
             |pkts| black_box(pkts.remove_expired(now, cd)),
-            BatchSize::SmallInput,
+            BatchSize::PerIteration,
         );
     });
 }
