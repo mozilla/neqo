@@ -127,29 +127,26 @@ impl ClosingFrame {
         if builder.remaining() < Self::MIN_LENGTH {
             return;
         }
-        // Truncate the reason phrase if it doesn't fit.  As we send this frame in
-        // multiple packet number spaces, limit the overall size to 256.
-        let available = min(256, builder.remaining());
-        let reason = if available < Encoder::vvec_len(self.reason_phrase.len()) {
-            &self.reason_phrase[..available - 2]
-        } else {
-            &self.reason_phrase
+        let limit = builder.limit();
+        let (frame, code) = match &self.error {
+            CloseReason::Transport(e) => (FrameType::ConnectionCloseTransport, e.code()),
+            CloseReason::Application(code) => (FrameType::ConnectionCloseApplication, *code),
         };
-        match &self.error {
-            CloseReason::Transport(e) => {
-                builder.encode_frame(FrameType::ConnectionCloseTransport, |b| {
-                    b.encode_varint(e.code());
-                    b.encode_varint(self.frame_type);
-                    b.encode_vvec(reason);
-                });
+        builder.encode_frame(frame, |b| {
+            b.encode_varint(code);
+            if matches!(self.error, CloseReason::Transport(_)) {
+                b.encode_varint(self.frame_type);
             }
-            CloseReason::Application(code) => {
-                builder.encode_frame(FrameType::ConnectionCloseApplication, |b| {
-                    b.encode_varint(*code);
-                    b.encode_vvec(reason);
-                });
-            }
-        }
+            // Truncate the reason phrase if it doesn't fit.  As we send this frame in
+            // multiple packet number spaces, limit the encoded reason to 256.
+            let available = min(256, limit - b.len());
+            let reason = if available < Encoder::vvec_len(self.reason_phrase.len()) {
+                &self.reason_phrase[..available - 2]
+            } else {
+                &self.reason_phrase
+            };
+            b.encode_vvec(reason);
+        });
     }
 }
 
@@ -252,13 +249,55 @@ impl StateSignaling {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{State, StateSignaling};
-    use crate::{CloseReason, Error};
+    use std::{cell::RefCell, rc::Rc};
+
+    use neqo_common::{Encoder, qlog::Qlog};
+    use test_fixture::{DEFAULT_ADDR, now};
+
+    use super::{ClosingFrame, State, StateSignaling};
+    use crate::{
+        CloseReason, ConnectionParameters, Error, Stats, frame::FrameType, packet, path::Path,
+    };
 
     #[test]
     fn closing_frame_min_length() {
         // 1 (type) + 8 (error code) + 8 (frame type) + 2 (reason prefix) + 8 (reason capacity).
-        assert_eq!(super::ClosingFrame::MIN_LENGTH, 1 + 8 + 8 + 2 + 8);
+        assert_eq!(ClosingFrame::MIN_LENGTH, 1 + 8 + 8 + 2 + 8);
+    }
+
+    fn write_closing_frame(remaining: usize) -> usize {
+        let path = Path::temporary(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            &ConnectionParameters::default(),
+            Qlog::disabled(),
+            now(),
+            &mut Stats::default(),
+        );
+        let error = CloseReason::Transport(Error::ProtocolViolation);
+        let reason = "a".repeat(remaining);
+        let frame = ClosingFrame::new(
+            Rc::new(RefCell::new(path)),
+            error,
+            FrameType::Crypto,
+            reason,
+        );
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let start = builder.len();
+        builder.set_limit(start + remaining);
+        frame.write_frame(&mut builder);
+        builder.len() - start
+    }
+
+    #[test]
+    fn closing_frame_truncated_fits() {
+        assert_eq!(write_closing_frame(100), 100);
+    }
+
+    #[test]
+    fn closing_frame_no_space() {
+        assert_eq!(write_closing_frame(ClosingFrame::MIN_LENGTH - 1), 0);
     }
 
     fn assert_resets_to_reset(mut ss: StateSignaling) {
@@ -274,7 +313,7 @@ mod tests {
 
     #[test]
     fn state_predicates() {
-        let now = test_fixture::now();
+        let now = now();
         let err = CloseReason::Transport(Error::None);
         let closing = State::Closing {
             error: err.clone(),
