@@ -369,8 +369,7 @@ impl<'a> Frame<'a> {
     }
 
     /// Converts `AckRanges` as encoded in a ACK frame (see -transport
-    /// 19.3.1) into ranges of acked packets (end, start), inclusive of
-    /// start and end values.
+    /// 19.3.1) into ranges of acked packets, as `start..=end`.
     ///
     /// # Errors
     ///
@@ -380,36 +379,17 @@ impl<'a> Frame<'a> {
         first_ack_range: u64,
         ack_ranges: &[AckRange],
     ) -> Res<Vec<RangeInclusive<u64>>> {
+        let mut smallest = largest_acked
+            .checked_sub(first_ack_range)
+            .ok_or(Error::FrameEncoding)?;
         let mut acked_ranges = Vec::with_capacity(ack_ranges.len() + 1);
-
-        if largest_acked < first_ack_range {
-            return Err(Error::FrameEncoding);
-        }
-        acked_ranges.push((largest_acked - first_ack_range)..=largest_acked);
-        if !ack_ranges.is_empty() && largest_acked < first_ack_range + 1 {
-            return Err(Error::FrameEncoding);
-        }
-        let mut cur = if ack_ranges.is_empty() {
-            0
-        } else {
-            largest_acked - first_ack_range - 1
-        };
+        acked_ranges.push(smallest..=largest_acked);
         for r in ack_ranges {
-            if cur < r.gap + 1 {
-                return Err(Error::FrameEncoding);
-            }
-            cur = cur - r.gap - 1;
-
-            if cur < r.range {
-                return Err(Error::FrameEncoding);
-            }
-            acked_ranges.push((cur - r.range)..=cur);
-
-            if cur > r.range + 1 {
-                cur -= r.range + 1;
-            } else {
-                cur -= r.range;
-            }
+            let largest = smallest
+                .checked_sub(r.gap + 2)
+                .ok_or(Error::FrameEncoding)?;
+            smallest = largest.checked_sub(r.range).ok_or(Error::FrameEncoding)?;
+            acked_ranges.push(smallest..=largest);
         }
 
         Ok(acked_ranges)
@@ -1510,27 +1490,39 @@ mod tests {
     #[test]
     fn decode_ack_frame_boundaries() {
         // largest_acked < first_ack_range is always invalid.
-        assert!(Frame::decode_ack_frame(3, 4, &[]).is_err());
+        assert_eq!(
+            Frame::decode_ack_frame(3, 4, &[]),
+            Err(Error::FrameEncoding)
+        );
 
         // largest_acked == first_ack_range with additional ranges: no room for a gap.
-        assert!(Frame::decode_ack_frame(4, 4, &[AckRange { gap: 0, range: 0 }]).is_err());
+        assert_eq!(
+            Frame::decode_ack_frame(4, 4, &[AckRange { gap: 0, range: 0 }]),
+            Err(Error::FrameEncoding)
+        );
 
-        // After the first range (5..=5), cur = 0, which is less than gap+1=1.
-        assert!(Frame::decode_ack_frame(5, 4, &[AckRange { gap: 0, range: 0 }]).is_err());
+        // The first range is 1..=5, so the next largest 1 - 0 - 2 underflows.
+        assert_eq!(
+            Frame::decode_ack_frame(5, 4, &[AckRange { gap: 0, range: 0 }]),
+            Err(Error::FrameEncoding)
+        );
 
-        // With one extra unit of room (largest - first = 2), cur starts at 1 — enough.
+        // The first range is 2..=5, so the next largest is 2 - 0 - 2 = 0.
         assert!(Frame::decode_ack_frame(5, 3, &[AckRange { gap: 0, range: 0 }]).is_ok());
     }
 
-    /// `decode_ack_frame` correctly advances `cur` by `gap + 1` and produces exact ranges.
+    /// `decode_ack_frame` applies each gap and produces exact ranges.
     #[test]
     fn decode_ack_frame_gap_arithmetic() {
-        // gap=1 skips 2 packet numbers (gap+1=2): cur goes 5→3 after the gap.
+        // The first range is 6..=10, so with gap=1 the next largest is 6 - 1 - 2 = 3.
         let result = Frame::decode_ack_frame(10, 4, &[AckRange { gap: 1, range: 0 }]);
         assert_eq!(result.unwrap(), vec![6..=10, 3..=3]);
 
-        // cur < r.range: cur=7, range=8 → error.
-        assert!(Frame::decode_ack_frame(10, 2, &[AckRange { gap: 0, range: 8 }]).is_err());
+        // The first range is 8..=10, so the next range's smallest 6 - 8 underflows.
+        assert_eq!(
+            Frame::decode_ack_frame(10, 2, &[AckRange { gap: 0, range: 8 }]),
+            Err(Error::FrameEncoding)
+        );
 
         // Two ranges with gaps; all arithmetic must stay consistent.
         let result = Frame::decode_ack_frame(
@@ -1539,6 +1531,28 @@ mod tests {
             &[AckRange { gap: 0, range: 1 }, AckRange { gap: 1, range: 1 }],
         );
         assert!(result.is_ok());
+    }
+
+    /// `decode_ack_frame` rejects a range whose largest packet number underflows.
+    #[test]
+    fn decode_ack_frame_underflow() {
+        // The second range is 1..=3, so the third range's largest 1 - 0 - 2 underflows.
+        let ranges = [AckRange { gap: 0, range: 2 }, AckRange { gap: 0, range: 0 }];
+        assert_eq!(
+            Frame::decode_ack_frame(5, 0, &ranges),
+            Err(Error::FrameEncoding)
+        );
+    }
+
+    /// `decode_ack_frame` accepts a range whose largest packet number is zero.
+    #[test]
+    fn decode_ack_frame_zero_largest() {
+        // The second range is 2..=3, so the third range's largest is 2 - 0 - 2 = 0.
+        let ranges = [AckRange { gap: 0, range: 1 }, AckRange { gap: 0, range: 0 }];
+        assert_eq!(
+            Frame::decode_ack_frame(5, 0, &ranges),
+            Ok(vec![5..=5, 2..=3, 0..=0])
+        );
     }
 
     fn encode_ack_header(range_count: u64) -> Encoder {
