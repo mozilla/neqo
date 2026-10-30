@@ -2347,7 +2347,7 @@ impl Connection {
             }
         }
 
-        let pn = tx.next_pn();
+        let pn = tx.next_pn(); // Deliberately not closed at 2^62-1 (RFC 9000 Section 12.3).
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
         // The conversion is safe because the maximum value is 8.
