@@ -50,7 +50,11 @@ const FRAME_LIMIT: usize = 500;
 const DATA_AT_FRAME_LIMIT: &[u8] = &[0; FRAME_LIMIT];
 const _: () = assert!(FRAME_LIMIT < DATAGRAM_LEN_MTU);
 const LENGTH_FIELD_LEN: usize = Encoder::varint_len(to_u64(FRAME_LIMIT));
-const _: () = assert!(Encoder::varint_len(to_u64(FRAME_LIMIT)) == LENGTH_FIELD_LEN);
+const _: () = assert!(
+    Encoder::varint_len(to_u64(
+        FRAME_LIMIT - LENGTH_FIELD_LEN - DATAGRAM_FRAME_TYPE_VARINT_LEN
+    )) == LENGTH_FIELD_LEN
+);
 
 struct InsertDatagram<'a> {
     data: &'a [u8],
