@@ -858,7 +858,7 @@ impl RecvStream {
     pub fn inbound_stream_frame(&mut self, fin: bool, offset: u64, data: &[u8]) -> Res<()> {
         // We should post a DataReadable event only once when we change from no-data-ready to
         // data-ready. Therefore remember the state before processing a new frame.
-        let already_data_ready = self.data_ready();
+        let already_data_ready = self.data_ready() || self.needs_to_inform_app_about_fin();
         let new_end = offset + u64::try_from(data.len())?;
 
         self.state.flow_control_consume_data(new_end, fin)?;
@@ -2841,6 +2841,19 @@ mod tests {
         s.inbound_stream_frame(false, SW / 2, &[0; 10]).unwrap();
         check_fc(&fc.borrow(), SW / 2 + 10, SW / 2 + 10);
         check_fc(s.fc().unwrap(), SW / 2 + 10, SW / 2 + 10);
+    }
+
+    #[test]
+    fn repeated_fin_readable_once() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(true, 0, &[]).unwrap();
+        let readable = ConnectionEvent::RecvStreamReadable {
+            stream_id: RR_STREAM,
+        };
+        assert_eq!(events.next_event(), Some(readable));
+        s.inbound_stream_frame(true, 0, &[]).unwrap();
+        assert_eq!(events.next_event(), None);
     }
 
     // --- RESET_STREAM_AT (reliable stream reset) receive side ---
