@@ -198,6 +198,7 @@ pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
     received: u64,                       // The number of bytes stored in `data_ranges`
+    buffered: u64,                       // The number of unread bytes in `data_ranges`
     /// Exclusive end offset of the rightmost received range (the end of the
     /// last entry in `data_ranges`, or `retired` if the map is empty).
     end: u64,
@@ -314,6 +315,7 @@ impl RxStreamOrderer {
                 "end must equal the end of the last range, or retired if empty"
             );
             self.received += to_u64(new_data.len());
+            self.buffered += to_u64(new_data.len());
             // Adjacent: extend the last entry to avoid a BTreeMap insert, if small enough.
             // Checks existing length, so the stored chunk may grow slightly past RANGE_TARGET
             // (by up to one frame). Gap (new_start > end): falls through to insert.
@@ -418,12 +420,15 @@ impl RxStreamOrderer {
             }
 
             for start in to_remove {
-                self.data_ranges.remove(&start);
+                if let Some(data) = self.data_ranges.remove(&start) {
+                    self.buffered -= to_u64(data.len());
+                }
             }
         }
 
         if !to_add.is_empty() {
             self.received += to_u64(to_add.len());
+            self.buffered += to_u64(to_add.len());
             // new_start was advanced by overlap, so new_end is still the real end.
             // When to_add is empty, a surviving forward entry with next_end >= new_end
             // exists, so self.end is already correct — the max() is a no-op in that case.
@@ -463,6 +468,14 @@ impl RxStreamOrderer {
             prev_end = Some(start + to_u64(data.len()));
         }
         runs
+    }
+
+    #[cfg(test)]
+    fn count_buffered(&self) -> u64 {
+        self.data_ranges
+            .iter()
+            .map(|(&start, data)| to_u64(data.len()) - self.retired.saturating_sub(start))
+            .sum()
     }
 
     /// Are any bytes readable?
@@ -523,7 +536,9 @@ impl RxStreamOrderer {
         reason = "OK here."
     )]
     pub fn discard_after(&mut self, offset: u64) {
-        self.data_ranges.split_off(&offset);
+        for (&start, data) in &self.data_ranges.split_off(&offset) {
+            self.buffered -= to_u64(data.len()) - self.retired.saturating_sub(start);
+        }
         // Truncate a range that straddles `offset`.
         if let Some(mut e) = self.data_ranges.last_entry() {
             let start = *e.key();
@@ -531,6 +546,7 @@ impl RxStreamOrderer {
             // Conversion is safe because this cannot be more than what the entry holds.
             let keep = expect_usize(offset - start);
             let data = e.get_mut();
+            self.buffered -= (start + to_u64(data.len())).saturating_sub(max(offset, self.retired));
             data.truncate(keep);
 
             // No overflow risk: neither start nor offset can exceed 1<<62.
@@ -542,11 +558,8 @@ impl RxStreamOrderer {
 
     /// Data bytes buffered. Could be more than `bytes_readable` if there are
     /// ranges missing.
-    fn buffered(&self) -> u64 {
-        self.data_ranges
-            .iter()
-            .map(|(&start, data)| to_u64(data.len()) - self.retired.saturating_sub(start))
-            .sum()
+    const fn buffered(&self) -> u64 {
+        self.buffered
     }
 
     /// Copy received data (if any) into the buffer. Returns bytes copied.
@@ -583,12 +596,14 @@ impl RxStreamOrderer {
             if keep {
                 let mut keep = self.data_ranges.split_off(&range_start);
                 mem::swap(&mut self.data_ranges, &mut keep);
+                self.buffered -= to_u64(copied);
                 return copied;
             }
         }
 
         self.data_ranges.clear();
         self.end = self.retired; // All entries were consumed.
+        self.buffered -= to_u64(copied);
         copied
     }
 
@@ -871,8 +886,8 @@ impl RecvStream {
             } => {
                 recv_buf.inbound_frame(offset, data)?;
                 if fin {
-                    let all_recv =
-                        fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready());
+                    // Ranges neither overlap nor pass the final size, so this means no gaps.
+                    let all_recv = fc.consumed() == recv_buf.retired() + recv_buf.buffered();
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -897,7 +912,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data)?;
-                if fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready()) {
+                if fc.consumed() == recv_buf.retired() + recv_buf.buffered() {
                     let buf = mem::replace(recv_buf, RxStreamOrderer::new());
                     let fc_copy = mem::take(fc);
                     let session_fc_copy = mem::take(session_fc);
@@ -1404,7 +1419,7 @@ impl RecvStream {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
+    use std::{cell::RefCell, cmp::max, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
     use neqo_common::{Encoder, event::Provider as _, expect_usize, to_u64};
     use test_fixture::now;
@@ -1421,21 +1436,30 @@ mod tests {
     };
 
     const SESSION_WINDOW: usize = 1024;
+    const ZEROES: &[u8] = &[0; 100];
+
+    fn assert_buffered(s: &RxStreamOrderer) {
+        assert_eq!(s.buffered(), s.count_buffered());
+    }
+
+    fn data(r: &Range<u64>) -> &'static [u8] {
+        &ZEROES[..expect_usize(r.end - r.start)]
+    }
 
     fn recv_ranges(ranges: &[Range<u64>], available: usize) {
-        const ZEROES: &[u8] = &[0; 100];
         trace!("recv_ranges {ranges:?}");
 
         let mut s = RxStreamOrderer::default();
         for r in ranges {
-            let data = &ZEROES[..expect_usize(r.end - r.start)];
-            s.inbound_frame(r.start, data).unwrap();
+            s.inbound_frame(r.start, data(r)).unwrap();
+            assert_buffered(&s);
         }
 
         let mut buf = [0xff; 100];
         let mut total_recvd = 0;
         loop {
             let recvd = s.read(&mut buf[..]);
+            assert_buffered(&s);
             trace!("recv_ranges read {recvd}");
             total_recvd += recvd;
             if recvd == 0 {
@@ -1834,6 +1858,7 @@ mod tests {
     }
 
     fn check_chunks(s: &RxStreamOrderer, expected: &[(u64, usize)]) {
+        assert_buffered(s);
         assert_eq!(s.data_ranges.len(), expected.len());
         for ((start, buf), (expected_start, expected_len)) in s.data_ranges.iter().zip(expected) {
             assert_eq!((*start, buf.len()), (*expected_start, *expected_len));
@@ -2111,6 +2136,77 @@ mod tests {
         assert_eq!(rx_ord.bytes_ready(), 9);
         assert_eq!(rx_ord.buffered(), 15);
         assert_eq!(rx_ord.retired(), 2);
+    }
+
+    /// Out of order, overlapping on both sides, repeated and empty, and together all of `[0, 30)`.
+    const FRAMES: &[Range<u64>] = &[
+        24..30,
+        20..24,
+        8..12,
+        10..22,
+        0..4,
+        0..4,
+        6..6,
+        30..30,
+        3..9,
+    ];
+
+    /// Each rotation of `frames`, with no reads and with 3-byte reads after every frame.
+    fn rotations(frames: &[Range<u64>]) -> impl Iterator<Item = (Vec<Range<u64>>, usize)> + '_ {
+        (0..frames.len()).flat_map(move |r| {
+            let mut order = frames.to_vec();
+            order.rotate_left(r);
+            [0, 3].map(|read_len| (order.clone(), read_len))
+        })
+    }
+
+    #[test]
+    fn buffered_matches_ranges() {
+        for (order, read_len) in rotations(FRAMES) {
+            let mut s = RxStreamOrderer::new();
+            for (i, r) in order.iter().enumerate() {
+                s.inbound_frame(r.start, data(r)).unwrap();
+                assert_buffered(&s);
+                s.read(&mut [0; 3][..read_len]);
+                assert_buffered(&s);
+                if i == order.len() / 2 {
+                    s.discard_after(max(16, s.retired()));
+                    assert_buffered(&s);
+                }
+            }
+            for offset in [28, 21, 10] {
+                s.discard_after(max(offset, s.retired()));
+                assert_buffered(&s);
+            }
+        }
+    }
+
+    fn assert_all_recv(s: &RecvStream, final_size: u64) {
+        let o = s.state.recv_buf().unwrap();
+        assert_buffered(o);
+        let all_recv = o.retired() + to_u64(o.bytes_ready()) == final_size;
+        let data_recvd = matches!(s.state, RecvStreamState::DataRecvd { .. });
+        assert_eq!(data_recvd, all_recv);
+    }
+
+    /// With the final size known, the stream has all data exactly when nothing is missing.
+    #[test]
+    fn size_known_all_recv_matches_ranges() {
+        let fin = &FRAMES[0];
+        for (order, read_len) in rotations(&FRAMES[1..]) {
+            let mut s = create_stream(1024 * to_u64(INITIAL_LOCAL_MAX_STREAM_DATA));
+            s.inbound_stream_frame(true, fin.start, data(fin)).unwrap();
+            assert_all_recv(&s, fin.end);
+            for r in order {
+                s.inbound_stream_frame(r.end == fin.end, r.start, data(&r))
+                    .unwrap();
+                assert_all_recv(&s, fin.end);
+                s.read(&mut [0; 3][..read_len]).unwrap();
+                assert_all_recv(&s, fin.end);
+            }
+            let left = expect_usize(fin.end - s.state.recv_buf().unwrap().retired());
+            assert_eq!(s.read(&mut [0; 30]).unwrap(), (left, true));
+        }
     }
 
     #[test]
@@ -2872,6 +2968,7 @@ mod tests {
         let mut o = RxStreamOrderer::new();
         o.inbound_frame(0, &[1; 10]).unwrap();
         o.discard_after(4);
+        assert_buffered(&o);
         // Only `[0, 4)` remains readable.
         let mut buf = [0; 16];
         assert_eq!(o.read(&mut buf), 4);
@@ -2881,6 +2978,7 @@ mod tests {
         o.inbound_frame(0, &[1; 4]).unwrap();
         o.inbound_frame(8, &[2; 4]).unwrap(); // gap at [4,8)
         o.discard_after(6); // drops [8,12), keeps [0,4)
+        assert_buffered(&o);
         o.inbound_frame(4, &[3; 2]).unwrap(); // fills [4,6)
         assert_eq!(o.read(&mut buf), 6);
 
@@ -2890,6 +2988,7 @@ mod tests {
         assert_eq!(o.read(&mut buf), 4);
         o.inbound_frame(8, &[2; 4]).unwrap(); // gap at [4,8)
         o.discard_after(6); // drops [8,12), keeps [0,4)
+        assert_buffered(&o);
         o.inbound_frame(4, &[3; 2]).unwrap(); // fills [4,6)
         assert_eq!(o.read(&mut buf), 2);
     }
@@ -2925,6 +3024,20 @@ mod tests {
         assert!(s.reset(7, 10, 0).is_ok());
         assert!(s.is_ended());
         assert_eq!(reset_count(&mut events), 1);
+    }
+
+    /// A reliable size below what was read, at and inside a partly read range, completes at once.
+    #[test]
+    fn reset_at_below_read() {
+        const CHUNK: usize = RxStreamOrderer::RANGE_TARGET;
+        const TARGET: u64 = to_u64(CHUNK);
+        for reliable_size in [TARGET, TARGET + 2] {
+            let mut s = reliable_recv_stream(ConnectionEvents::default());
+            s.inbound_stream_frame(false, 0, &[0; CHUNK]).unwrap();
+            s.inbound_stream_frame(false, TARGET, &[0; 10]).unwrap();
+            assert_eq!(s.read(&mut [0; CHUNK + 4]).unwrap(), (CHUNK + 4, false));
+            assert_eq!(s.reset(7, TARGET + 10, reliable_size), Ok(true));
+        }
     }
 
     /// The reset waits for the reliable prefix to arrive (reordering) and be read.
