@@ -10,7 +10,6 @@ use std::{
 };
 
 use neqo_common::{Buffer, qlog::Qlog};
-use static_assertions::const_assert;
 use tracing::{debug, info};
 
 use crate::{
@@ -32,7 +31,7 @@ const MTU_SIZES_V6: &[usize] = &[
     1420, // 1420 is not in the paper for v6, but adding it makes the arrays the same length
     1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
-const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
+const _: () = assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
 const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1

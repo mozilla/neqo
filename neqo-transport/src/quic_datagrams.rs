@@ -37,14 +37,12 @@ use crate::{
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
 /// QUIC varint encoding.
 pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
-static_assertions::const_assert_eq!(
-    Encoder::varint_len(FrameType::Datagram as u64),
-    DATAGRAM_FRAME_TYPE_VARINT_LEN
-);
-static_assertions::const_assert_eq!(
-    Encoder::varint_len(FrameType::DatagramWithLen as u64),
-    DATAGRAM_FRAME_TYPE_VARINT_LEN
-);
+const _: () = {
+    assert!(Encoder::varint_len(FrameType::Datagram as u64) == DATAGRAM_FRAME_TYPE_VARINT_LEN);
+    assert!(
+        Encoder::varint_len(FrameType::DatagramWithLen as u64) == DATAGRAM_FRAME_TYPE_VARINT_LEN
+    );
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum DatagramTracking {

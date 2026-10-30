@@ -17,7 +17,6 @@ use libc::{
     RT_TABLE_MAIN, RTA_DST, RTA_OIF, RTM_GETLINK, RTM_GETROUTE, RTM_NEWLINK, RTM_NEWROUTE,
     RTN_UNICAST, c_int,
 };
-use static_assertions::{const_assert, const_assert_eq};
 
 use crate::{aligned_by, default_err, routesocket::RouteSocket, unlikely_err};
 
@@ -43,10 +42,10 @@ asserted_const_with_type!(NLM_F_REQUEST, u16, libc::NLM_F_REQUEST, c_int);
 asserted_const_with_type!(NLM_F_ACK, u16, libc::NLM_F_ACK, c_int);
 asserted_const_with_type!(NLMSG_ERROR, u16, libc::NLMSG_ERROR, c_int);
 
-const_assert!(size_of::<nlmsghdr>() <= u8::MAX as usize);
-const_assert!(size_of::<rtmsg>() <= u8::MAX as usize);
-const_assert!(size_of::<rtattr>() <= u8::MAX as usize);
-const_assert!(size_of::<ifinfomsg>() <= u8::MAX as usize);
+const _: () = assert!(size_of::<nlmsghdr>() <= u8::MAX as usize);
+const _: () = assert!(size_of::<rtmsg>() <= u8::MAX as usize);
+const _: () = assert!(size_of::<rtattr>() <= u8::MAX as usize);
+const _: () = assert!(size_of::<ifinfomsg>() <= u8::MAX as usize);
 
 const NETLINK_BUFFER_SIZE: usize = 8192; // See netlink(7) man page.
 
@@ -99,7 +98,7 @@ impl IfIndexMsg {
         let addr = AddrBytes::new(remote);
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "Structs lens are <= u8::MAX per `const_assert!`s above; `addr_bytes` is max. 16 for IPv6."
+            reason = "Structs lens are <= u8::MAX per `assert!`s above; `addr_bytes` is max. 16 for IPv6."
         )]
         let nlmsg_len =
             (size_of::<nlmsghdr>() + size_of::<rtmsg>() + size_of::<rtattr>() + addr.len()) as u32;
@@ -128,7 +127,7 @@ impl IfIndexMsg {
             rt: rtattr {
                 #[expect(
                     clippy::cast_possible_truncation,
-                    reason = "Structs len is <= u8::MAX per `const_assert!` above; `addr_bytes` is max. 16 for IPv6."
+                    reason = "Structs len is <= u8::MAX per `assert!` above; `addr_bytes` is max. 16 for IPv6."
                 )]
                 rta_len: (size_of::<rtattr>() + addr.len()) as u16,
                 rta_type: RTA_DST,
@@ -278,7 +277,7 @@ impl IfInfoMsg {
     fn new(if_index: i32, nlmsg_seq: u32) -> Self {
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "Structs lens are <= u8::MAX per `const_assert!`s above."
+            reason = "Structs lens are <= u8::MAX per `assert!`s above."
         )]
         let nlmsg_len = (size_of::<nlmsghdr>() + size_of::<ifinfomsg>()) as u32;
         Self {

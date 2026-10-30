@@ -11,7 +11,7 @@ use neqo_common::expect_usize;
 use crate::huffman_table::HUFFMAN_TABLE;
 
 // Since we're encoding the table length as a u16, we need to ensure that it fits.
-static_assertions::const_assert!(HUFFMAN_TABLE.len() <= u16::MAX as usize);
+const _: () = assert!(HUFFMAN_TABLE.len() <= u16::MAX as usize);
 
 pub struct HuffmanDecoderNode {
     pub next: [Option<Box<Self>>; 2],
@@ -42,7 +42,7 @@ fn make_huffman_tree(prefix: u32, len: u8) -> HuffmanDecoderNode {
                 next: [None, None],
                 #[expect(
                     clippy::cast_possible_truncation,
-                    reason = "We've checked this in a `const_assert!` above."
+                    reason = "We've checked this in a const `assert!` above."
                 )]
                 value: Some(i as u16),
             }));

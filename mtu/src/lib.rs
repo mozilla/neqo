@@ -59,10 +59,10 @@ macro_rules! asserted_const_with_type {
             clippy::allow_attributes,
             clippy::cast_possible_truncation,
             clippy::cast_possible_wrap,
-            reason = "Guarded by the following `const_assert_eq!`."
+            reason = "Guarded by the following `assert!`."
         )]
         const $name: $t1 = $e as $t1;
-        const_assert_eq!($name as $t2, $e);
+        const _: () = assert!($name as $t2 == $e);
     };
 }
 

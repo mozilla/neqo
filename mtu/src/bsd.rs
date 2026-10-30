@@ -18,7 +18,6 @@ use libc::{
     AF_UNSPEC, PF_ROUTE, freeifaddrs, getifaddrs, getpid, if_indextoname, ifaddrs, in_addr,
     in6_addr, sockaddr, sockaddr_dl, sockaddr_in, sockaddr_in6, sockaddr_storage,
 };
-use static_assertions::{const_assert, const_assert_eq};
 
 #[cfg_attr(
     not(any(target_os = "netbsd", target_os = "solaris")),
@@ -75,9 +74,9 @@ asserted_const_with_type!(AF_LINK, AddressFamily, libc::AF_LINK, i32);
 asserted_const_with_type!(RTM_VERSION, u8, bindings::RTM_VERSION, u32);
 asserted_const_with_type!(RTM_GET, u8, bindings::RTM_GET, u32);
 
-const_assert!(size_of::<sockaddr_in>() + ALIGN <= u8::MAX as usize);
-const_assert!(size_of::<sockaddr_in6>() + ALIGN <= u8::MAX as usize);
-const_assert!(size_of::<rt_msghdr>() <= u8::MAX as usize);
+const _: () = assert!(size_of::<sockaddr_in>() + ALIGN <= u8::MAX as usize);
+const _: () = assert!(size_of::<sockaddr_in6>() + ALIGN <= u8::MAX as usize);
+const _: () = assert!(size_of::<rt_msghdr>() <= u8::MAX as usize);
 
 struct IfAddrs(*mut ifaddrs);
 
@@ -210,7 +209,7 @@ impl From<IpAddr> for SockaddrStorage {
                     #[cfg(not(target_os = "solaris"))]
                     #[expect(
                         clippy::cast_possible_truncation,
-                        reason = "`sockaddr_in` len is <= u8::MAX per `const_assert!` above."
+                        reason = "`sockaddr_in` len is <= u8::MAX per `assert!` above."
                     )]
                     sin_len: size_of::<sockaddr_in>() as u8,
                     sin_family: AF_INET,
@@ -226,7 +225,7 @@ impl From<IpAddr> for SockaddrStorage {
                     #[cfg(not(target_os = "solaris"))]
                     #[expect(
                         clippy::cast_possible_truncation,
-                        reason = "`sockaddr_in6` len is <= u8::MAX per `const_assert!` above."
+                        reason = "`sockaddr_in6` len is <= u8::MAX per `assert!` above."
                     )]
                     sin6_len: size_of::<sockaddr_in6>() as u8,
                     sin6_family: AF_INET6,
@@ -276,7 +275,7 @@ impl RouteMessage {
             rtm: rt_msghdr {
                 #[expect(
                     clippy::cast_possible_truncation,
-                    reason = "`rt_msghdr` len + `ALIGN` is <= u8::MAX per `const_assert!` above."
+                    reason = "`rt_msghdr` len + `ALIGN` is <= u8::MAX per `assert!` above."
                 )]
                 rtm_msglen: (size_of::<rt_msghdr>() + sa_len) as u16,
                 rtm_version: RTM_VERSION,

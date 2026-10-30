@@ -7,7 +7,6 @@
 use std::{cell::RefCell, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use neqo_common::{Encoder, event::Provider as _, to_u64};
-use static_assertions::const_assert;
 
 use super::{
     AT_LEAST_PTO, assert_error, connect_force_idle, default_server, new_client, new_server, now,
@@ -37,21 +36,21 @@ const DATAGRAM_LEN_MTU: usize =
     Pmtud::default_plpmtu(DEFAULT_ADDR.ip()) - MIN_DATAGRAM_PACKET_OVERHEAD;
 const DATA_MTU: &[u8] = &[1; DATAGRAM_LEN_MTU];
 const DATA_BIGGER_THAN_MTU: &[u8] = &[0; 2 * DATAGRAM_LEN_MTU];
-const_assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
+const _: () = assert!(DATA_BIGGER_THAN_MTU.len() > DATAGRAM_LEN_MTU);
 const DATAGRAM_LEN_SMALLER_THAN_MTU: u64 = to_u64(MIN_INITIAL_PACKET_SIZE);
-const_assert!(DATAGRAM_LEN_SMALLER_THAN_MTU < to_u64(DATAGRAM_LEN_MTU));
+const _: () = assert!(DATAGRAM_LEN_SMALLER_THAN_MTU < to_u64(DATAGRAM_LEN_MTU));
 const DATA_SMALLER_THAN_MTU: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE - DATAGRAM_FRAME_TYPE_VARINT_LEN];
-const_assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
+const _: () = assert!(DATA_SMALLER_THAN_MTU.len() < DATAGRAM_LEN_MTU);
 const DATA_SMALLER_THAN_MTU_2: &[u8] = &[0; MIN_INITIAL_PACKET_SIZE / 2];
-const_assert!(DATA_SMALLER_THAN_MTU_2.len() < DATA_SMALLER_THAN_MTU.len());
+const _: () = assert!(DATA_SMALLER_THAN_MTU_2.len() < DATA_SMALLER_THAN_MTU.len());
 
 /// A peer limit well below the path MTU, so that it, not the MTU, bounds the
 /// DATAGRAM frame.
 const FRAME_LIMIT: usize = 500;
 const DATA_AT_FRAME_LIMIT: &[u8] = &[0; FRAME_LIMIT];
-const_assert!(FRAME_LIMIT < DATAGRAM_LEN_MTU);
+const _: () = assert!(FRAME_LIMIT < DATAGRAM_LEN_MTU);
 const LENGTH_FIELD_LEN: usize = Encoder::varint_len(to_u64(FRAME_LIMIT));
-const_assert!(Encoder::varint_len(to_u64(FRAME_LIMIT)) == LENGTH_FIELD_LEN);
+const _: () = assert!(Encoder::varint_len(to_u64(FRAME_LIMIT)) == LENGTH_FIELD_LEN);
 
 struct InsertDatagram<'a> {
     data: &'a [u8],

@@ -21,7 +21,6 @@ pub mod qlog;
 pub mod tos;
 
 use enum_map::Enum;
-use static_assertions::const_assert;
 use strum::Display;
 
 #[cfg(feature = "build-fuzzing-corpus")]
@@ -49,7 +48,7 @@ pub const fn const_min_u64(a: u64, b: u64) -> u64 {
 }
 
 // The conversions below depend on this relationship.
-const_assert!(usize::BITS <= u64::BITS);
+const _: () = assert!(usize::BITS <= u64::BITS);
 
 /// A trait for values that represent a length or byte count, convertible
 /// to the wire domain (`u64`).
@@ -73,7 +72,7 @@ impl Length for usize {
 #[expect(
     clippy::cast_possible_truncation,
     reason = "debug_assert roundtrip `v as u64 as usize` contains a u64→usize cast; \
-              const_assert above ensures it is lossless on all supported targets"
+              const assert above ensures it is lossless on all supported targets"
 )]
 #[inline]
 #[must_use]
