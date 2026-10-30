@@ -3298,7 +3298,11 @@ impl Connection {
         let was_authentication_pending =
             *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
         let try_update = data.is_some();
-        match self.crypto.handshake(now, space, data)? {
+        match self
+            .crypto
+            .handshake(now, space, data)
+            .map_err(|e| self.tps.borrow_mut().take_error().unwrap_or(e))?
+        {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
             HandshakeState::AuthenticationPending => {
                 if !was_authentication_pending {
