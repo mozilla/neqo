@@ -17,8 +17,8 @@ fuzz_target!(|data: &[u8]| {
         let mut dec = Decoder::new(data);
         let ip_bytes = dec.decode_vec(1)?;
         let ip = match ip_bytes.len() {
-            4 => IpAddr::V4(Ipv4Addr::from(<[u8; 4]>::try_from(ip_bytes).ok()?)),
-            16 => IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(ip_bytes).ok()?)),
+            4 => IpAddr::V4(Ipv4Addr::from_octets(*ip_bytes.as_array()?)),
+            16 => IpAddr::V6(Ipv6Addr::from_octets(*ip_bytes.as_array()?)),
             _ => return None,
         };
         let port = dec.decode_uint::<u16>()?;

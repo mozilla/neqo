@@ -50,7 +50,7 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
     if let Some(h) = headers.iter().take(1).find_header(":status") {
-        let status_code = std::str::from_utf8(h.value())
+        let status_code = str::from_utf8(h.value())
             .map_err(|_| Error::InvalidHeader)?
             .parse::<u16>()
             .map_err(|_| Error::InvalidHeader)?;

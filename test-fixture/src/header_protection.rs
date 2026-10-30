@@ -121,7 +121,7 @@ pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     fixed_header.extend_from_slice(&payload[..4]);
 
     // Sample for masking and apply the mask.
-    let mask = hp.mask(payload[4..20].try_into().unwrap()).unwrap();
+    let mask = hp.mask(payload[4..20].as_array().unwrap()).unwrap();
     fixed_header[0] ^= mask[0] & 0xf;
     let pn_len = 1 + usize::from(fixed_header[0] & 0x3);
     for i in 0..pn_len {

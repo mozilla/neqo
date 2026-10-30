@@ -706,11 +706,8 @@ impl<'a> Frame<'a> {
                     return Err(Error::FrameEncoding);
                 }
                 let delay = dv(dec)?;
-                let ignore_order = match d(dec.decode_uint::<u8>())? {
-                    0 => false,
-                    1 => true,
-                    _ => return Err(Error::FrameEncoding),
-                };
+                let ignore_order = bool::try_from(d(dec.decode_uint::<u8>())?)
+                    .map_err(|_| Error::FrameEncoding)?;
                 Ok(Self::AckFrequency {
                     seqno,
                     tolerance,

@@ -594,7 +594,7 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
             Http3ServerEvent::WebTransport(ServerEvent::Datagram { session, datagram })
                 if session.stream_id() == session_id =>
             {
-                Some(u64::from_le_bytes(datagram.as_ref().try_into().unwrap()))
+                Some(u64::from_le_bytes(*datagram.as_ref().as_array().unwrap()))
             }
             _ => None,
         })

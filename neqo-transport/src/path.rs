@@ -226,20 +226,17 @@ impl Paths {
     /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
     /// for themselves.
     pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
-        let to_retire = &mut self.to_retire;
         let mut primary_failed = false;
-        self.paths.retain(|p| {
-            if p.borrow_mut().process_timeout(now, pto, stats) {
-                true
-            } else {
-                debug!("[{}] Retiring path", p.borrow());
-                if p.borrow().is_primary() {
-                    primary_failed = true;
-                }
-                Self::retire(to_retire, p);
-                false
+        for p in self
+            .paths
+            .extract_if(.., |p| !p.borrow_mut().process_timeout(now, pto, stats))
+        {
+            debug!("[{}] Retiring path", p.borrow());
+            if p.borrow().is_primary() {
+                primary_failed = true;
             }
-        });
+            Self::retire(&mut self.to_retire, &p);
+        }
 
         if primary_failed {
             self.primary = None;

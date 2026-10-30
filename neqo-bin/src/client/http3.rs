@@ -283,7 +283,7 @@ impl StreamHandler for DownloadStreamHandler {
         } else if tracing::enabled!(tracing::Level::DEBUG) {
             if !self.output_read_data {
                 debug!("READ[{stream_id}]: {} bytes", data.len());
-            } else if let Ok(txt) = std::str::from_utf8(data) {
+            } else if let Ok(txt) = str::from_utf8(data) {
                 debug!("READ[{stream_id}]: {txt}");
             } else {
                 debug!("READ[{stream_id}]: 0x{}", Hex::new(data));
@@ -319,7 +319,7 @@ struct UploadStreamHandler {
 
 impl StreamHandler for UploadStreamHandler {
     fn process_data_readable(&mut self, stream_id: StreamId, _fin: bool, data: &[u8]) -> Res<()> {
-        if let Ok(txt) = std::str::from_utf8(data) {
+        if let Ok(txt) = str::from_utf8(data) {
             let trimmed_txt = txt.trim_end_matches(char::from(0));
             let parsed: usize = trimmed_txt.parse().map_err(|_| Error::InvalidInput)?;
             if parsed == self.data.len() {

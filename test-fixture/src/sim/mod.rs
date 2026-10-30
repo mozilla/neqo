@@ -201,7 +201,7 @@ impl Simulator {
     /// # Panics
     /// When the provided string is not 32 bytes of hex (64 characters).
     pub fn seed_str<A: AsRef<str>>(&mut self, seed: A) {
-        let seed = <[u8; 32]>::try_from(Encoder::from_hex(seed).as_ref()).unwrap();
+        let seed = *Encoder::from_hex(seed).as_ref().as_array().unwrap();
         self.rng = Rc::new(RefCell::new(Random::new(&seed)));
     }
 

@@ -6,7 +6,7 @@
 
 mod common;
 
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
 use neqo_common::{Datagram, Decoder, Encoder, Role};
@@ -945,7 +945,7 @@ fn saved_datagrams() {
         .process_multiple(
             vec![invalid_dgram(), valid_dgram, invalid_dgram()],
             now(),
-            1.try_into().expect("1>0"),
+            NonZeroUsize::MIN,
         )
         .dgram()
         .expect("first packet triggers first vn");
@@ -955,13 +955,13 @@ fn saved_datagrams() {
     // which does require an immediate response. It thereby has to save the
     // fourth (new) datagram for the next call.
     server
-        .process_multiple(Some(invalid_dgram()), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Some(invalid_dgram()), now(), NonZeroUsize::MIN)
         .dgram()
         .expect("third packet triggers second vn");
 
     // Server processes the fourth datagram.
     server
-        .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Vec::<Datagram>::new(), now(), NonZeroUsize::MIN)
         .dgram()
         .expect("fourth packet triggers third vn");
 }

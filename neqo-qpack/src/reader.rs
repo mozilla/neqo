@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{mem, str};
+use std::mem;
 
 use neqo_transport::{Connection, StreamId};
 use tracing::debug;

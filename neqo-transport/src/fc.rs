@@ -1239,7 +1239,6 @@ mod test {
     }
 
     #[expect(clippy::cast_precision_loss, reason = "This is test code.")]
-    #[expect(clippy::too_many_lines, reason = "This is test code.")]
     #[test]
     fn auto_tuning_approximates_bandwidth_delay_product() -> Res<()> {
         const DATA_FRAME_SIZE: u64 = 1_500;
@@ -1287,8 +1286,7 @@ mod test {
             let mut next_send_time = now;
             loop {
                 // Sender receives window updates.
-                if recv_to_send.front().is_some_and(|(at, _)| *at <= now) {
-                    let (_, update) = recv_to_send.pop_front().unwrap();
+                if let Some((_, update)) = recv_to_send.pop_front_if(|(at, _)| *at <= now) {
                     sender_window += update;
                 }
 
@@ -1310,8 +1308,7 @@ mod test {
 
                 // Receiver receives data frames.
                 let mut receiver_progressed = false;
-                if send_to_recv.front().is_some_and(|(at, _)| *at <= now) {
-                    let (_, data) = send_to_recv.pop_front().unwrap();
+                if let Some((_, data)) = send_to_recv.pop_front_if(|(at, _)| *at <= now) {
                     bytes_received += data;
                     let consumed = fc.set_consumed(fc.retired() + data)?;
                     fc.add_retired(consumed);

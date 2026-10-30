@@ -78,13 +78,8 @@ const _: () = assert!(size_of::<sockaddr_in>() + ALIGN <= u8::MAX as usize);
 const _: () = assert!(size_of::<sockaddr_in6>() + ALIGN <= u8::MAX as usize);
 const _: () = assert!(size_of::<rt_msghdr>() <= u8::MAX as usize);
 
+#[derive(Default)]
 struct IfAddrs(*mut ifaddrs);
-
-impl Default for IfAddrs {
-    fn default() -> Self {
-        Self(ptr::null_mut())
-    }
-}
 
 impl IfAddrs {
     fn new() -> Result<Self> {
