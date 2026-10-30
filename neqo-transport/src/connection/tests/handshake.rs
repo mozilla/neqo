@@ -205,6 +205,16 @@ fn authenticated_after_tls_failure() {
     assert_error(&client, &error);
 }
 
+/// A verdict that arrives after the handshake completed is ignored.
+#[test]
+fn authenticated_after_connected() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    client.authenticated(AuthenticationStatus::Ok, now());
+    assert_eq!(*client.state(), State::Confirmed);
+}
+
 #[test]
 fn no_alpn() {
     let mut client = default_client();
