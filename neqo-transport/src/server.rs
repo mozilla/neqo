@@ -440,8 +440,7 @@ impl Server {
             let len = dgram.len();
             let destination = dgram.destination();
             let source = dgram.source();
-            let res =
-                Public::decode_server(&mut dgram[..], self.cid_generator.borrow().as_decoder());
+            let res = Public::decode_server(&mut dgram[..], &*self.cid_generator.borrow());
             let Ok((packet, _remainder)) = res else {
                 trace!("[{self}] Discarding {dgram:?}");
                 continue;

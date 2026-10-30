@@ -92,10 +92,6 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
         self.counter += 1;
         Some(ConnectionId::from(&r[..8]))
     }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
-    }
 }
 
 // This is fabulous: because test_fixture uses the public API for Connection,
