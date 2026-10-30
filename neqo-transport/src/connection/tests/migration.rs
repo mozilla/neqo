@@ -432,6 +432,70 @@ fn rebind_address_and_port_zero_len_cid() {
     rebind_address_and_port_with_client(&mut client);
 }
 
+fn deliver(from: &mut Connection, to: &mut Connection, now: Instant) {
+    while let Some(d) = from.process_output(now).dgram() {
+        to.process_input(d, now);
+    }
+}
+
+/// The client's Finished arrives at the server from a new port.
+fn rebind_finished(client: &mut Connection, server: &mut Connection, now: Instant) {
+    assert!(maybe_authenticate(client));
+    while let Some(d) = client.process_output(now).dgram() {
+        server.process_input(change_source_port(&d, 1), now);
+        while server.process_output(now).dgram().is_some() {}
+    }
+    assert_eq!(*server.state(), State::Confirmed);
+}
+
+/// The client's Finished arrives from a new port while a server Handshake probe is unacknowledged.
+fn rebind_finished_with_client(client: &mut Connection) {
+    let mut server = default_server();
+    let mut now = now();
+    deliver(client, &mut server, now);
+    deliver(&mut server, client, now);
+    deliver(client, &mut server, now);
+
+    now += server.process_output(now).callback();
+    let pings = server.stats().frame_tx.ping;
+    assert!(server.process_output(now).dgram().is_some());
+    assert_eq!(server.stats().frame_tx.ping, pings + 1);
+    rebind_finished(client, &mut server, now);
+}
+
+#[test]
+fn rebind_finished_during_handshake_probe() {
+    rebind_finished_with_client(&mut default_client());
+}
+
+#[test]
+fn rebind_finished_during_handshake_probe_zero_len_cid() {
+    rebind_finished_with_client(&mut zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR));
+}
+
+/// As above, but the client's ACK of the server's first flight is lost, so the probe retransmits.
+#[test]
+fn rebind_finished_during_handshake_retransmission() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = now();
+    deliver(&mut client, &mut server, now);
+    deliver(&mut server, &mut client, now);
+    while client.process_output(now).dgram().is_some() {}
+
+    let stats = server.stats();
+    let mut out = server.process_output(now);
+    while let Output::Callback(delay) = out {
+        now += delay;
+        out = server.process_output(now);
+    }
+    assert!(out.dgram().is_some());
+    while server.process_output(now).dgram().is_some() {}
+    let crypto = server.stats().frame_tx.crypto - stats.frame_tx.crypto;
+    assert_eq!(crypto, server.stats().packets_tx - stats.packets_tx); // One CRYPTO frame per probe packet.
+    rebind_finished(&mut client, &mut server, now);
+}
+
 /// This simulates an attack where a valid packet is forwarded on
 /// a different path.  This shows how both paths are probed and the
 /// server eventually returns to the original path.
