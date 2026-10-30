@@ -895,8 +895,8 @@ impl<'a> Public<'a> {
         let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
+            .and_then(<[u8]>::as_array)
             .ok_or(Error::NoMoreData)?;
-        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
         trace!(
             "{:?} unmask hdr={}",
             crypto.version(),

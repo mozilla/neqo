@@ -241,7 +241,7 @@ impl TransportParameter {
 
     fn decode_preferred_address(d: &mut Decoder) -> Res<Self> {
         // IPv4 address (maybe)
-        let v4ip = Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?)?);
+        let v4ip = Ipv4Addr::from_octets(*d.decode_array().ok_or(Error::NoMoreData)?);
         let v4port = d.decode_uint::<u16>().ok_or(Error::NoMoreData)?;
         // Can't have non-zero IP and zero port, or vice versa.
         if v4ip.is_unspecified() ^ (v4port == 0) {
@@ -254,9 +254,7 @@ impl TransportParameter {
         };
 
         // IPv6 address (mostly the same as v4)
-        let v6ip = Ipv6Addr::from(<[u8; 16]>::try_from(
-            d.decode(16).ok_or(Error::NoMoreData)?,
-        )?);
+        let v6ip = Ipv6Addr::from_octets(*d.decode_array().ok_or(Error::NoMoreData)?);
         let v6port = d.decode_uint().ok_or(Error::NoMoreData)?;
         if v6ip.is_unspecified() ^ (v6port == 0) {
             return Err(Error::TransportParameter);

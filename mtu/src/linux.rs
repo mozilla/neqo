@@ -169,18 +169,27 @@ fn parse_c_int(buf: &[u8]) -> Result<c_int> {
     Ok(c_int::from_ne_bytes(bytes))
 }
 
+/// Splits the first message off `buf` into its header, its payload and any following messages.
+fn split_msg(buf: &[u8]) -> Result<(nlmsghdr, &[u8], &[u8])> {
+    let (hdr, rest) = buf
+        .split_at_checked(size_of::<nlmsghdr>())
+        .ok_or_else(default_err)?;
+    let hdr: nlmsghdr = hdr.try_into()?;
+    let (msg, next) = (hdr.nlmsg_len as usize)
+        .checked_sub(size_of::<nlmsghdr>())
+        .and_then(|len| rest.split_at_checked(len))
+        .ok_or_else(default_err)?;
+    Ok((hdr, msg, next))
+}
+
 fn read_msg_with_seq(fd: &mut RouteSocket, seq: u32, kind: u16) -> Result<(nlmsghdr, Vec<u8>)> {
     loop {
         let buf = &mut [0u8; NETLINK_BUFFER_SIZE];
         let len = fd.read(buf.as_mut_slice())?;
         let mut next = &buf[..len];
         while size_of::<nlmsghdr>() <= next.len() {
-            let (hdr, mut msg) = next.split_at(size_of::<nlmsghdr>());
-            let hdr: nlmsghdr = hdr.try_into()?;
-            // `msg` has the remainder of this message plus any following messages.
-            // Strip those it off and assign them to `next`.
-            debug_assert!(size_of::<nlmsghdr>() <= hdr.nlmsg_len as usize);
-            (msg, next) = msg.split_at(hdr.nlmsg_len as usize - size_of::<nlmsghdr>());
+            let (hdr, msg, rest) = split_msg(next)?;
+            next = rest;
 
             if hdr.nlmsg_seq != seq {
                 continue;
@@ -218,17 +227,26 @@ struct RtAttr<'a> {
 
 impl<'a> RtAttr<'a> {
     fn new(bytes: &'a [u8]) -> Result<Self> {
-        debug_assert!(bytes.len() >= size_of::<rtattr>());
-        let (hdr, mut msg) = bytes.split_at(size_of::<rtattr>());
+        let (hdr, msg) = bytes
+            .split_at_checked(size_of::<rtattr>())
+            .ok_or_else(default_err)?;
         let hdr: rtattr = hdr.try_into()?;
-        let aligned_len = aligned_by(hdr.rta_len.into(), 4);
-        debug_assert!(size_of::<rtattr>() <= aligned_len);
-        (msg, _) = msg.split_at(aligned_len - size_of::<rtattr>());
+        let (msg, _) = aligned_by(hdr.rta_len.into(), 4)
+            .checked_sub(size_of::<rtattr>())
+            .and_then(|len| msg.split_at_checked(len))
+            .ok_or_else(default_err)?;
         Ok(Self { hdr, msg })
     }
 }
 
 struct RtAttrs<'a>(&'a [u8]);
+
+impl<'a> RtAttrs<'a> {
+    /// Returns the attributes following a header of type `T` in `msg`.
+    fn after<T>(msg: &'a [u8]) -> Result<Self> {
+        msg.get(size_of::<T>()..).map(Self).ok_or_else(default_err)
+    }
+}
 
 impl<'a> Iterator for RtAttrs<'a> {
     type Item = RtAttr<'a>;
@@ -237,8 +255,7 @@ impl<'a> Iterator for RtAttrs<'a> {
         if size_of::<rtattr>() <= self.0.len() {
             let attr = RtAttr::new(self.0).ok()?;
             let aligned_len = aligned_by(attr.hdr.rta_len.into(), 4);
-            debug_assert!(self.0.len() >= aligned_len);
-            self.0 = self.0.split_at(aligned_len).1;
+            self.0 = self.0.get(aligned_len..)?;
             Some(attr)
         } else {
             None
@@ -253,12 +270,10 @@ fn if_index(remote: IpAddr, fd: &mut RouteSocket) -> Result<i32> {
     fd.write_all((&msg).into())?;
 
     // Receive RTM_GETROUTE response.
-    let (_hdr, mut buf) = read_msg_with_seq(fd, msg_seq, RTM_NEWROUTE)?;
-    debug_assert!(size_of::<rtmsg>() <= buf.len());
-    let buf = buf.split_off(size_of::<rtmsg>());
+    let (_hdr, buf) = read_msg_with_seq(fd, msg_seq, RTM_NEWROUTE)?;
 
     // Parse through the attributes to find the interface index.
-    for attr in RtAttrs(buf.as_slice()).by_ref() {
+    for attr in RtAttrs::after::<rtmsg>(&buf)? {
         if attr.hdr.rta_type == RTA_OIF {
             // We have our interface index.
             return parse_c_int(attr.msg);
@@ -316,14 +331,12 @@ fn if_name_mtu(if_index: i32, fd: &mut RouteSocket) -> Result<(String, usize)> {
     fd.write_all((&msg).into())?;
 
     // Receive RTM_GETLINK response.
-    let (_hdr, mut buf) = read_msg_with_seq(fd, msg_seq, RTM_NEWLINK)?;
-    debug_assert!(size_of::<ifinfomsg>() <= buf.len());
-    let buf = buf.split_off(size_of::<ifinfomsg>());
+    let (_hdr, buf) = read_msg_with_seq(fd, msg_seq, RTM_NEWLINK)?;
 
     // Parse through the attributes to find the interface name and MTU.
     let mut ifname = None;
     let mut mtu = None;
-    for attr in RtAttrs(buf.as_slice()).by_ref() {
+    for attr in RtAttrs::after::<ifinfomsg>(&buf)? {
         match attr.hdr.rta_type {
             IFLA_IFNAME => {
                 let name = CStr::from_bytes_until_nul(attr.msg).map_err(Error::other)?;
@@ -359,6 +372,76 @@ mod test {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     use super::*;
+
+    const HDR: usize = size_of::<nlmsghdr>();
+    const ATTR: usize = size_of::<rtattr>();
+
+    fn is_default_err<T>(res: Result<T>) -> bool {
+        res.is_err_and(|e| format!("{e:?}") == format!("{:?}", default_err()))
+    }
+
+    /// Returns a zeroed buffer of `len` bytes starting with a header of length `nlmsg_len`.
+    fn nlmsg(nlmsg_len: usize, len: usize) -> Vec<u8> {
+        let mut buf = vec![0; len];
+        let nlmsg_len = u32::try_from(nlmsg_len).unwrap();
+        buf[..size_of::<u32>()].copy_from_slice(&nlmsg_len.to_ne_bytes());
+        buf
+    }
+
+    /// Returns a zeroed buffer of `len` bytes starting with an attribute of length `rta_len`.
+    fn rta(rta_len: usize, len: usize) -> Vec<u8> {
+        let mut buf = vec![0; len];
+        let rta_len = u16::try_from(rta_len).unwrap();
+        buf[..size_of::<u16>()].copy_from_slice(&rta_len.to_ne_bytes());
+        buf
+    }
+
+    #[test]
+    fn split_msg_valid() {
+        let payload = size_of::<c_int>();
+        let buf = nlmsg(HDR + payload, HDR + payload + 1);
+        let (hdr, msg, next) = split_msg(&buf).unwrap();
+        assert_eq!(hdr.nlmsg_len as usize, HDR + payload);
+        assert_eq!((msg.len(), next.len()), (payload, 1));
+    }
+
+    #[test]
+    fn split_msg_short_header() {
+        assert!(is_default_err(split_msg(&[0; HDR - 1])));
+    }
+
+    #[test]
+    fn split_msg_len_below_header() {
+        assert!(is_default_err(split_msg(&nlmsg(HDR - 1, HDR))));
+    }
+
+    #[test]
+    fn split_msg_len_beyond_buffer() {
+        assert!(is_default_err(split_msg(&nlmsg(HDR + 1, HDR))));
+    }
+
+    #[test]
+    fn rtattr_new_short_header() {
+        assert!(is_default_err(RtAttr::new(&[0; ATTR - 1])));
+    }
+
+    #[test]
+    fn rtattr_new_len_beyond_buffer() {
+        assert!(is_default_err(RtAttr::new(&rta(2 * ATTR, ATTR))));
+    }
+
+    #[test]
+    fn rtattrs_stop_at_truncated_attr() {
+        let buf = [rta(ATTR, ATTR), rta(2 * ATTR, ATTR)].concat();
+        assert_eq!(RtAttrs(&buf).count(), 1);
+    }
+
+    #[test]
+    fn rtattrs_after_header() {
+        assert!(is_default_err(RtAttrs::after::<rtmsg>(&[0; 1])));
+        let buf = [vec![0; size_of::<rtmsg>()], rta(ATTR, ATTR)].concat();
+        assert_eq!(RtAttrs::after::<rtmsg>(&buf).unwrap().count(), 1);
+    }
 
     #[test]
     fn nlmsghdr_try_from() {
