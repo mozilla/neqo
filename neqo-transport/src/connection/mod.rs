@@ -1848,7 +1848,6 @@ impl Connection {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     let pn = payload.pn();
-                    self.idle_timeout.on_packet_received(now);
                     self.log_packet(
                         packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
                         now,
@@ -1872,6 +1871,7 @@ impl Connection {
                         } else {
                             match self.process_packet(path, &payload, now) {
                                 Ok(migrate) => {
+                                    self.idle_timeout.on_packet_received(now);
                                     self.postprocess_packet(
                                         path, tos, remote, &payload, migrate, now,
                                     );

@@ -281,6 +281,27 @@ fn idle_recv_packet() {
     assert!(matches!(client.state(), State::Closed(_)));
 }
 
+/// A duplicate packet does not restart the idle timer.
+#[test]
+fn idle_recv_duplicate_packet() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let mut now = now();
+    let dgram = send_something(&mut server, now);
+    client.process_input(dgram.clone(), now);
+
+    now += default_timeout() / 2;
+    let dups_rx = client.stats().dups_rx;
+    client.process_input(dgram, now);
+    assert_eq!(client.stats().dups_rx, dups_rx + 1);
+
+    now += default_timeout() / 2;
+    drop(client.process_output(now));
+    assert!(matches!(client.state(), State::Closed(_)));
+}
+
 /// Caching packets should not cause the connection to become idle.
 /// This requires a few tricks to keep the connection from going
 /// idle while preventing any progress on the handshake.
