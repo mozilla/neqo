@@ -6,7 +6,7 @@
 
 use std::mem;
 
-use neqo_transport::{Connection, StreamId};
+use neqo_transport::{Connection, Error as TransportError, StreamId};
 use tracing::debug;
 
 use crate::{Error, Res, huffman, prefix::Prefix};
@@ -35,10 +35,11 @@ pub(crate) struct ReceiverConnWrapper<'a> {
 impl ReadByte for ReceiverConnWrapper<'_> {
     fn read_byte(&mut self) -> Res<u8> {
         let mut b = [0];
-        match self.conn.stream_recv(self.stream_id, &mut b)? {
-            (_, true) => Err(Error::ClosedCriticalStream),
-            (0, false) => Err(Error::NeedMoreData),
-            _ => Ok(b[0]),
+        match self.conn.stream_recv(self.stream_id, &mut b) {
+            Ok((_, true)) | Err(TransportError::NoMoreData) => Err(Error::ClosedCriticalStream),
+            Ok((0, false)) => Err(Error::NeedMoreData),
+            Ok(_) => Ok(b[0]),
+            Err(e) => Err(e.into()),
         }
     }
 }

@@ -385,6 +385,9 @@ mod tests {
         check_capacity: u64,
     ) {
         let mut decoder = connect();
+        // The encoder stream does not exist yet.
+        let early = decoder.decoder.receive(&mut decoder.conn);
+        assert_eq!(early, Err(Error::EncoderStream));
 
         if capacity > 0 {
             assert!(decoder.decoder.set_capacity(capacity).is_ok());
