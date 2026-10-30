@@ -2253,6 +2253,7 @@ impl Connection {
                 .handle_migration(path, remote, now, &mut self.stats.borrow_mut());
             if !was_primary {
                 self.path_migrated(path);
+                self.loss_recovery.migrate();
             }
         } else {
             info!(

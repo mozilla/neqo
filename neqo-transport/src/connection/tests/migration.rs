@@ -546,6 +546,42 @@ fn path_challenges_on_one_path_each_get_a_response() {
     assert_eq!(client.stats().frame_tx.path_response, 2);
 }
 
+/// Old-path packets lost after a peer migration are not congestion on the new path (RFC 9000 §9.4).
+#[test]
+fn old_path_loss_is_not_new_path_congestion() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+    let before = server.stats().cc.congestion_events.loss;
+    let lost = server.stats().lost;
+
+    // Lost on the old path.
+    for _ in 0..3 {
+        drop(send_something(&mut server, now));
+    }
+
+    let dgram = change_source_port(&send_something(&mut client, now), 1);
+    let rebound = dgram.source();
+    server.process_input(dgram, now);
+    while let Some(d) = server.process_output(now).dgram() {
+        // Drop old-path datagrams; the NAT maps new-path ones to the client.
+        if d.destination() == rebound {
+            client.process_input(
+                Datagram::new(d.source(), DEFAULT_ADDR, d.tos(), &d[..]),
+                now,
+            );
+        }
+    }
+
+    // The ACK of the new path's `PATH_CHALLENGE` declares the first old-path packet lost.
+    while let Some(d) = client.process_output(now).dgram() {
+        server.process_input(change_source_port(&d, 1), now);
+    }
+    assert_eq!(server.stats().lost, lost + 1);
+    assert_eq!(server.stats().cc.congestion_events.loss, before);
+}
+
 #[test]
 fn migrate_immediate() {
     let mut client = default_client();
