@@ -1034,15 +1034,17 @@ impl Loss {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         trace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
-        if let Some(profile) = self
-            .pto_state
-            .as_mut()
-            .and_then(|pto| pto.send_profile(mtu))
+        // Probes count against the anti-amplification limit (RFC 9002, Section 6.2.2.1).
+        let pto_possible = path.pto_possible();
+        if pto_possible
+            && let Some(profile) = self
+                .pto_state
+                .as_mut()
+                .and_then(|pto| pto.send_profile(mtu))
         {
             profile
         } else {
@@ -1057,7 +1059,7 @@ impl Loss {
                 } else {
                     SendProfile::new_limited(mtu, mtu)
                 }
-            } else if sender.recovery_packet() {
+            } else if sender.recovery_packet() && pto_possible {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
