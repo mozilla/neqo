@@ -32,6 +32,16 @@ use tracing::{debug, info, warn};
 use super::{Args, CloseState, Res, get_output_file, qlog_new};
 use crate::{STREAM_IO_BUFFER_SIZE, now};
 
+/// The HTTP/0.9 request line for `url`, including any query.
+fn request_line(url: &Url) -> String {
+    // Unlike `PathAndQuery::as_str`, the `Display` implementation adds the
+    // leading `/` for targets like `https://example.com?q`.
+    let path = url
+        .path_and_query()
+        .map_or_else(String::new, ToString::to_string);
+    format!("GET {path}\r\n")
+}
+
 pub struct Handler<'a> {
     streams: HashMap<StreamId, Option<BufWriter<File>>>,
     url_queue: VecDeque<Url>,
@@ -272,7 +282,7 @@ impl<'b> Handler<'b> {
                 client
                     .stream_keep_alive(client_stream_id, true)
                     .expect("keep-alive on new stream");
-                let req = format!("GET {}\r\n", url.path());
+                let req = request_line(&url);
                 if client
                     .stream_send(client_stream_id, req.as_bytes())
                     .is_err()
@@ -359,5 +369,26 @@ impl<'b> Handler<'b> {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn request_line_includes_query() {
+        for (url, line) in [
+            (
+                "https://example.com/search?q=term",
+                "GET /search?q=term\r\n",
+            ),
+            ("https://example.com", "GET /\r\n"),
+            ("https://example.com?q=1", "GET /?q=1\r\n"),
+            ("https://example.com/a#frag", "GET /a\r\n"),
+        ] {
+            assert_eq!(request_line(&url.parse().unwrap()), line, "{url}");
+        }
     }
 }
