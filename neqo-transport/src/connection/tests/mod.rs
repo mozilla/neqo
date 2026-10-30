@@ -49,6 +49,7 @@ mod migration;
 mod null;
 mod pmtud;
 mod priority;
+mod qlog;
 mod recovery;
 mod reset_stream_at;
 mod resumption;
