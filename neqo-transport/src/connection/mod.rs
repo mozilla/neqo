@@ -496,8 +496,7 @@ impl Connection {
     /// # Errors
     /// When the operation fails.
     pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
-        self.crypto.tls_mut().set_certificate_compression::<T>()?;
-        Ok(())
+        self.crypto.set_certificate_compression::<T>()
     }
 
     /// # Errors
@@ -607,8 +606,7 @@ impl Connection {
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
-        self.crypto.tls_mut().set_alpn(protocols)?;
-        Ok(())
+        self.crypto.set_alpn(protocols)
     }
 
     /// Enable a set of ciphers.
@@ -619,8 +617,7 @@ impl Connection {
             error!("[{self}] Cannot enable ciphers in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls_mut().set_ciphers(ciphers)?;
-        Ok(())
+        self.crypto.set_ciphers(ciphers)
     }
 
     /// Enable a set of key exchange groups.
@@ -631,8 +628,7 @@ impl Connection {
             error!("[{self}] Cannot enable groups in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls_mut().set_groups(groups)?;
-        Ok(())
+        self.crypto.set_groups(groups)
     }
 
     /// Set the number of additional key shares to send in the client hello.
@@ -643,8 +639,7 @@ impl Connection {
             error!("[{self}] Cannot enable groups in state {:?}", self.state);
             return Err(Error::ConnectionState);
         }
-        self.crypto.tls_mut().send_additional_key_shares(count)?;
-        Ok(())
+        self.crypto.send_additional_key_shares(count)
     }
 
     fn make_resumption_token(&mut self) -> ResumptionToken {
@@ -1525,7 +1520,13 @@ impl Connection {
             c.conn_params
                 .get_versions_mut()
                 .set_initial(self.conn_params.get_versions().initial());
+            c.crypto.take_tls_settings(&mut self.crypto)?;
+            c.set_qlog(self.qlog.clone());
             mem::swap(self, &mut c);
+            // `c` is now the discarded connection; report its lost 0-RTT on the replacement.
+            if c.zero_rtt_state == ZeroRttState::Sending {
+                self.events.client_0rtt_rejected();
+            }
             qlog::client_version_information_negotiated(
                 &mut self.qlog,
                 self.conn_params.get_versions().all(),
