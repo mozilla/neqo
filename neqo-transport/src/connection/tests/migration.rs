@@ -27,9 +27,9 @@ use tracing::debug;
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle, cwnd_avail,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    CountingConnectionIdGenerator, assert_error, connect_fail, connect_force_idle,
+    connect_rtt_idle, cwnd_avail, default_client, default_server, maybe_authenticate, new_client,
+    new_server, send_something, zero_len_cid_client,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -1271,6 +1271,61 @@ fn retire_all() {
     );
 
     assert_ne!(get_cid(&retire), original_cid);
+}
+
+/// Sends one `NEW_CONNECTION_ID` frame from `sender`.
+fn send_new_connection_id(sender: &mut Connection) -> Datagram {
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    send_with_extra(sender, NewConnectionIds::new(1, cid_gen), now())
+}
+
+/// RFC 9000, Section 19.15: an endpoint that is sending packets with a zero-length
+/// Destination Connection ID treats receipt of a `NEW_CONNECTION_ID` frame as a
+/// connection error of type `PROTOCOL_VIOLATION`.
+fn assert_new_connection_id_rejected(peer: &mut Connection, endpoint: &mut Connection) {
+    let ncid = send_new_connection_id(peer);
+    let close = endpoint.process(Some(ncid), now()).dgram();
+    assert_error(endpoint, &CloseReason::Transport(Error::ProtocolViolation));
+    peer.process_input(close.unwrap(), now());
+    let peer_error = Error::Peer(Error::ProtocolViolation.code());
+    assert_error(peer, &CloseReason::Transport(peer_error));
+}
+
+#[test]
+fn new_connection_id_to_zero_len_cid_client() {
+    let mut client = default_client();
+    let mut server = Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
+    )
+    .unwrap();
+    connect_force_idle(&mut client, &mut server);
+    assert_new_connection_id_rejected(&mut server, &mut client);
+}
+
+#[test]
+fn new_connection_id_to_zero_len_cid_server() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    assert_new_connection_id_rejected(&mut client, &mut server);
+}
+
+/// An endpoint that provides a zero-length connection ID still sends a non-empty
+/// Destination Connection ID to a peer that does not, so it accepts `NEW_CONNECTION_ID`.
+#[test]
+fn new_connection_id_from_non_zero_len_cid_server() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let before = client.stats().frame_rx.new_connection_id;
+    let ncid = send_new_connection_id(&mut server);
+    client.process_input(ncid, now());
+    assert_eq!(client.stats().frame_rx.new_connection_id, before + 1);
+    assert_eq!(*client.state(), State::Confirmed);
 }
 
 /// RFC 9000, Section 5.1.2: an endpoint SHOULD bound the number of connection IDs it
