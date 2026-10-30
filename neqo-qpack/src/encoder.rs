@@ -103,16 +103,7 @@ impl Encoder {
 
     /// This function is use for setting encoders table max capacity. The value is received as
     /// a `SETTINGS_QPACK_MAX_TABLE_CAPACITY` setting parameter.
-    ///
-    /// # Errors
-    ///
-    /// `EncoderStream` if value is too big.
-    /// `ChangeCapacity` if table capacity cannot be reduced.
-    pub fn set_max_capacity(&mut self, cap: u64) -> Res<()> {
-        if cap > (1 << 30) - 1 {
-            return Err(Error::EncoderStream);
-        }
-
+    pub fn set_max_capacity(&mut self, cap: u64) {
         // The decoder's maximum capacity, not the capacity we select, determines
         // when table indices roll over. See RFC 9204, Section 4.5.1.1.
         // Track this separately for when the decoder accepts a table
@@ -120,7 +111,7 @@ impl Encoder {
         self.max_entries = cap / to_u64(ADDITIONAL_TABLE_ENTRY_SIZE);
 
         if cap == self.table.capacity() {
-            return Ok(());
+            return;
         }
 
         debug!(
@@ -132,18 +123,12 @@ impl Encoder {
         let new_cap = min(self.max_table_size, cap);
         // we also set our table to the max allowed.
         self.change_capacity(new_cap);
-        Ok(())
     }
 
     /// This function is use for setting encoders max blocked streams. The value is received as
     /// a `SETTINGS_QPACK_BLOCKED_STREAMS` setting parameter.
-    ///
-    /// # Errors
-    ///
-    /// `EncoderStream` if value is too big.
-    pub fn set_max_blocked_streams(&mut self, blocked_streams: u64) -> Res<()> {
-        self.max_blocked_streams = u16::try_from(blocked_streams).or(Err(Error::EncoderStream))?;
-        Ok(())
+    pub fn set_max_blocked_streams(&mut self, blocked_streams: u64) {
+        self.max_blocked_streams = u16::try_from(blocked_streams).unwrap_or(u16::MAX);
     }
 
     /// Reads decoder instructions.
@@ -608,7 +593,7 @@ mod tests {
 
     impl TestEncoder {
         pub fn change_capacity(&mut self, capacity: u64) -> Res<()> {
-            self.encoder.set_max_capacity(capacity)?;
+            self.encoder.set_max_capacity(capacity);
             // We will try to really change the table only when we send the change capacity
             // instruction.
             self.encoder.send_encoder_updates(&mut self.conn)
@@ -755,7 +740,7 @@ mod tests {
     fn insert_with_name_literal_2() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
         // test the change capacity instruction.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
@@ -772,7 +757,7 @@ mod tests {
     fn change_capacity() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
         encoder.send_instructions(CAP_INSTRUCTION_200);
     }
 
@@ -843,8 +828,8 @@ mod tests {
 
         let mut encoder = connect(false);
 
-        encoder.encoder.set_max_blocked_streams(100).unwrap();
-        encoder.encoder.set_max_capacity(200).unwrap();
+        encoder.encoder.set_max_blocked_streams(100);
+        encoder.encoder.set_max_capacity(200);
 
         // test the change capacity instruction.
         encoder.send_instructions(CAP_INSTRUCTION_200);
@@ -917,8 +902,8 @@ mod tests {
 
         let mut encoder = connect(true);
 
-        encoder.encoder.set_max_blocked_streams(100).unwrap();
-        encoder.encoder.set_max_capacity(200).unwrap();
+        encoder.encoder.set_max_blocked_streams(100);
+        encoder.encoder.set_max_capacity(200);
 
         // test the change capacity instruction.
         encoder.send_instructions(CAP_INSTRUCTION_200);
@@ -937,7 +922,7 @@ mod tests {
     fn insertion_blocked_on_insert_count_feedback() {
         let mut encoder = connect(false);
 
-        encoder.encoder.set_max_capacity(60).unwrap();
+        encoder.encoder.set_max_capacity(60);
 
         // test the change capacity instruction.
         encoder.send_instructions(CAP_INSTRUCTION_60);
@@ -978,7 +963,7 @@ mod tests {
     fn test_insertion_blocked_on_waiting_for_header_ack_or_stream_cancel(wait: u8) {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(60).is_ok());
+        encoder.encoder.set_max_capacity(60);
         // test the change capacity instruction.
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
@@ -1099,7 +1084,7 @@ mod tests {
     fn max_block_streams1() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(60).is_ok());
+        encoder.encoder.set_max_capacity(60);
 
         // change capacity to 60.
         encoder.send_instructions(CAP_INSTRUCTION_60);
@@ -1113,7 +1098,7 @@ mod tests {
         assert!(res.is_ok());
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_1_NAME_LITERAL);
 
-        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.encoder.set_max_blocked_streams(1);
 
         // send a header block, it refers to unacked entry.
         let buf = encoder.encoder.encode_header_block(
@@ -1154,7 +1139,7 @@ mod tests {
     fn max_block_streams2() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
@@ -1177,7 +1162,7 @@ mod tests {
         assert!(res.is_ok());
         encoder.send_instructions(HEADER_CONTENT_LENGTH_VALUE_2_NAME_LITERAL);
 
-        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.encoder.set_max_blocked_streams(1);
 
         // send a header block, it refers to unacked entry.
         let buf = encoder.encoder.encode_header_block(
@@ -1200,15 +1185,22 @@ mod tests {
     }
 
     #[test]
+    fn max_block_streams_clamped() {
+        let mut encoder = connect(false).encoder;
+        encoder.set_max_blocked_streams(u64::from(u16::MAX) + 1);
+        assert_eq!(encoder.max_blocked_streams, u16::MAX);
+    }
+
+    #[test]
     fn max_block_streams3() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
-        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.encoder.set_max_blocked_streams(1);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
@@ -1248,12 +1240,12 @@ mod tests {
     fn max_block_streams4() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
-        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.encoder.set_max_blocked_streams(1);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
@@ -1288,12 +1280,12 @@ mod tests {
     fn max_block_streams5() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
-        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.encoder.set_max_blocked_streams(1);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
@@ -1328,12 +1320,12 @@ mod tests {
     fn max_block_streams6() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
@@ -1368,12 +1360,12 @@ mod tests {
     fn max_block_streams7() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
@@ -1410,12 +1402,12 @@ mod tests {
     fn max_block_stream8() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
 
         // change capacity to 200.
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
 
@@ -1461,12 +1453,12 @@ mod tests {
     fn dynamic_table_can_evict1() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(60).is_ok());
+        encoder.encoder.set_max_capacity(60);
 
         // change capacity to 60.
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         // insert "content-length: 1234
         let res =
@@ -1505,12 +1497,12 @@ mod tests {
     fn dynamic_table_can_evict2() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(60).is_ok());
+        encoder.encoder.set_max_capacity(60);
 
         // change capacity to 60.
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         // insert "content-length: 1234
         let res =
@@ -1549,12 +1541,12 @@ mod tests {
     fn dynamic_table_can_evict3() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(60).is_ok());
+        encoder.encoder.set_max_capacity(60);
 
         // change capacity to 60.
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         // insert "content-length: 1234
         let res =
@@ -1579,12 +1571,12 @@ mod tests {
     fn dynamic_table_can_evict4() {
         let mut encoder = connect(false);
 
-        assert!(encoder.encoder.set_max_capacity(60).is_ok());
+        encoder.encoder.set_max_capacity(60);
 
         // change capacity to 60.
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
-        encoder.encoder.set_max_blocked_streams(2).unwrap();
+        encoder.encoder.set_max_blocked_streams(2);
 
         // insert "content-length: 1234
         let res =
@@ -1627,8 +1619,8 @@ mod tests {
         let mut encoder = connect_flow_control(SMALL_MAX_DATA);
 
         // change capacity to 1000 and max_block streams to 20.
-        encoder.encoder.set_max_blocked_streams(20).unwrap();
-        assert!(encoder.encoder.set_max_capacity(1000).is_ok());
+        encoder.encoder.set_max_blocked_streams(20);
+        encoder.encoder.set_max_capacity(1000);
         encoder.send_instructions(CAP_INSTRUCTION_1000);
 
         // Encode a header block with 2 headers. The first header will be added to the dynamic
@@ -1694,7 +1686,7 @@ mod tests {
         let mut encoder = connect(false);
 
         // change capacity to 2000.
-        assert!(encoder.encoder.set_max_capacity(2000).is_ok());
+        encoder.encoder.set_max_capacity(2000);
         encoder.send_instructions(CAP_INSTRUCTION_1500);
         assert_eq!(encoder.encoder.table.capacity(), 1500);
 
@@ -1725,8 +1717,8 @@ mod tests {
         for (local_limit, reduce_capacity) in [(60, false), (128, false), (256, false), (128, true)]
         {
             let mut encoder = connect_generic(false, None, local_limit);
-            encoder.encoder.set_max_capacity(128).unwrap();
-            encoder.encoder.set_max_blocked_streams(1).unwrap();
+            encoder.encoder.set_max_capacity(128);
+            encoder.encoder.set_max_blocked_streams(1);
             encoder
                 .encoder
                 .send_encoder_updates(&mut encoder.conn)
@@ -1800,12 +1792,12 @@ mod tests {
     #[test]
     fn same_table_capacity_updates_required_insert_count_range() {
         let mut encoder = connect_generic(false, None, 60);
-        encoder.encoder.set_max_capacity(128).unwrap();
-        encoder.encoder.set_max_blocked_streams(1).unwrap();
+        encoder.encoder.set_max_capacity(128);
+        encoder.encoder.set_max_blocked_streams(1);
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
         // The new maximum equals the current capacity, but changes the wrapping range.
-        encoder.encoder.set_max_capacity(60).unwrap();
+        encoder.encoder.set_max_capacity(60);
         for expected_count in [0x02, 0x01] {
             encoder.insert(
                 HEADER_CONTENT_LENGTH,
@@ -1826,7 +1818,7 @@ mod tests {
     fn do_not_evict_entry_that_are_referred_only_by_the_same_header_blocked_encoding() {
         let mut encoder = connect(false);
 
-        encoder.encoder.set_max_blocked_streams(20).unwrap();
+        encoder.encoder.set_max_blocked_streams(20);
         assert!(encoder.change_capacity(50).is_ok());
 
         encoder
@@ -1870,7 +1862,7 @@ mod tests {
     fn streams_cancel_cleans_up_unacked_header_blocks() {
         let mut encoder = connect(false);
 
-        encoder.encoder.set_max_blocked_streams(10).unwrap();
+        encoder.encoder.set_max_blocked_streams(10);
         assert!(encoder.change_capacity(60).is_ok());
         encoder.send_instructions(CAP_INSTRUCTION_60);
 
@@ -1913,9 +1905,9 @@ mod tests {
         let mut encoder = connect(false);
 
         // The encoder is never allowed to block a stream, and tracks at most CAP streams.
-        encoder.encoder.set_max_blocked_streams(0).unwrap();
+        encoder.encoder.set_max_blocked_streams(0);
         encoder.encoder.max_tracked_streams = expect_usize(CAP);
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
         encoder.insert(
@@ -1963,9 +1955,9 @@ mod tests {
 
         let mut encoder = connect(false);
 
-        encoder.encoder.set_max_blocked_streams(10).unwrap();
+        encoder.encoder.set_max_blocked_streams(10);
         encoder.encoder.max_tracked_streams = CAP;
-        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.encoder.set_max_capacity(200);
         encoder.send_instructions(CAP_INSTRUCTION_200);
 
         // STREAM_1 inserts and references a new, unacknowledged entry: it becomes a
