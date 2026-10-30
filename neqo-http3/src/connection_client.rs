@@ -4019,7 +4019,7 @@ mod tests {
 
         let mut server = TestServer::new_with_conn(new_server::<CountingConnectionIdGenerator, _>(
             DEFAULT_ALPN_H3,
-            ConnectionParameters::default().versions(Version::Version2, Version::all()),
+            ConnectionParameters::default().versions(Version::Version2, vec![Version::Version2]),
         ));
         connect_with(&mut client, &mut server);
     }
