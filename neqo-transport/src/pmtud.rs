@@ -9,8 +9,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, qdebug, qinfo, qlog::Qlog};
-use static_assertions::const_assert;
+use neqo_common::{Buffer, qlog::Qlog};
+use tracing::{debug, info};
 
 use crate::{
     Stats,
@@ -31,12 +31,12 @@ const MTU_SIZES_V6: &[usize] = &[
     1420, // 1420 is not in the paper for v6, but adding it makes the arrays the same length
     1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
-const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
+const _: () = assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
 const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
 const MAX_PROBES: usize = 3;
-const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
+const PMTU_RAISE_TIMER: Duration = Duration::from_mins(10);
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
@@ -127,7 +127,7 @@ impl Pmtud {
     /// Checks whether the PMTUD raise timer should be fired, and does so if needed.
     pub fn maybe_fire_raise_timer(&mut self, now: Instant, stats: &mut Stats) {
         if self.probe_state == Probe::NotNeeded && self.raise_timer.is_some_and(|t| now >= t) {
-            qdebug!("PMTUD raise timer fired");
+            debug!("PMTUD raise timer fired");
             self.raise_timer = None;
             self.next(now, stats);
         }
@@ -169,10 +169,9 @@ impl Pmtud {
         stats.pmtud_tx += 1;
         self.probe_count += 1;
         self.probe_state = Probe::Sent;
-        qdebug!(
+        debug!(
             "Sending PMTUD probe of size {}, count {}",
-            self.search_table[self.probe_index],
-            self.probe_count
+            self.search_table[self.probe_index], self.probe_count
         );
     }
 
@@ -218,7 +217,7 @@ impl Pmtud {
 
         // A probe was ACKed, confirm the new MTU and try to probe upwards further.
         let confirmed_idx = self.probe_index;
-        qdebug!(
+        debug!(
             "PMTUD probe of size {} succeeded",
             self.search_table[confirmed_idx]
         );
@@ -233,10 +232,9 @@ impl Pmtud {
         self.set_mtu(idx, stats, now); // Leading to this MTU
         self.probe_count = 0; // Reset the count
         self.raise_timer = Some(now + PMTU_RAISE_TIMER);
-        qinfo!(
+        info!(
             "PMTUD stopped, PLPMTU is now {}, raise timer {:?}",
-            self.mtu,
-            self.raise_timer
+            self.mtu, self.raise_timer
         );
     }
 
@@ -258,7 +256,7 @@ impl Pmtud {
             // We've sent MAX_PROBES probes and they were all lost. Stop probing at the
             // previous successful MTU.
             let ok_idx = self.probe_index.saturating_sub(1);
-            qdebug!(
+            debug!(
                 "PMTUD probe of size {} failed after {MAX_PROBES} attempts",
                 self.search_table[self.probe_index]
             );
@@ -275,13 +273,13 @@ impl Pmtud {
         self.raise_timer = None;
         self.next(now, stats);
         self.set_mtu(0, stats, now);
-        qdebug!("PMTUD started, PLPMTU is now {}", self.mtu);
+        debug!("PMTUD started, PLPMTU is now {}", self.mtu);
     }
 
     /// Starts the next upward PMTUD probe.
     pub fn next(&mut self, now: Instant, stats: &mut Stats) {
         if self.probe_index == SEARCH_TABLE_LEN - 1 {
-            qdebug!(
+            debug!(
                 "PMTUD reached end of search table, i.e. {}, stopping upwards search",
                 self.mtu,
             );
@@ -293,7 +291,7 @@ impl Pmtud {
             self.iface_mtu.min(p.saturating_add(self.header_size))
         });
         if self.search_table[self.probe_index + 1] > mtu_limit {
-            qdebug!(
+            debug!(
                 "PMTUD reached MTU limit {mtu_limit}, stopping upwards search at {}",
                 self.mtu
             );
@@ -304,7 +302,7 @@ impl Pmtud {
         self.probe_state = Probe::Needed; // We need to send a probe
         self.probe_count = 0; // For the first time
         self.probe_index += 1; // At this size
-        qdebug!(
+        debug!(
             "PMTUD started with probe size {}",
             self.search_table[self.probe_index],
         );
@@ -326,8 +324,9 @@ mod tests {
         time::Instant,
     };
 
-    use neqo_common::{Encoder, qdebug, qinfo};
+    use neqo_common::Encoder;
     use test_fixture::{fixture_init, now};
+    use tracing::{debug, info};
 
     use super::MAX_PROBES;
     use crate::{
@@ -462,7 +461,7 @@ mod tests {
         assert_eq!(Probe::NotNeeded, pmtud.probe_state);
 
         // Fire the raise timer - this only triggers probing for *higher* MTUs.
-        qdebug!("Firing raise timer after reaching MTU {current_mtu}");
+        debug!("Firing raise timer after reaching MTU {current_mtu}");
         let now = now + PMTU_RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now, &mut stats);
 
@@ -495,7 +494,7 @@ mod tests {
         }
         assert_mtu(&pmtud, mtu);
 
-        qdebug!("Increasing MTU to {larger_mtu}");
+        debug!("Increasing MTU to {larger_mtu}");
         let now = now + PMTU_RAISE_TIMER;
         pmtud.maybe_fire_raise_timer(now, &mut stats);
         while pmtud.needs_probe() {
@@ -513,7 +512,7 @@ mod tests {
         for &addr in &[V4, V6] {
             for path_mtu in path_mtus() {
                 for &iface_mtu in IFACE_MTUS {
-                    qinfo!("PMTUD for {addr}, path MTU {path_mtu}, iface MTU {iface_mtu:?}");
+                    info!("PMTUD for {addr}, path MTU {path_mtu}, iface MTU {iface_mtu:?}");
                     find_pmtu(addr, path_mtu, iface_mtu);
                 }
             }
@@ -525,7 +524,7 @@ mod tests {
     fn raise_timer_probes_upward_only() {
         for &addr in &[V4, V6] {
             for path_mtu in path_mtus() {
-                qinfo!("Testing raise timer behavior for {addr}, path MTU {path_mtu}");
+                info!("Testing raise timer behavior for {addr}, path MTU {path_mtu}");
                 find_pmtu_no_reduction_detection(addr, path_mtu);
             }
         }
@@ -538,7 +537,7 @@ mod tests {
                 let path_mtus = path_mtus();
                 let larger_mtus = path_mtus.iter().filter(|&mtu| *mtu > path_mtu);
                 for &larger_mtu in larger_mtus {
-                    qinfo!("PMTUD for {addr}, path MTU {path_mtu}, larger path MTU {larger_mtu}");
+                    info!("PMTUD for {addr}, path MTU {path_mtu}, larger path MTU {larger_mtu}");
                     find_pmtu_with_increase(addr, path_mtu, larger_mtu);
                 }
             }

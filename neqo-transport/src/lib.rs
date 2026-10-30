@@ -6,9 +6,9 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use neqo_common::qdebug;
 use nss::Error as CryptoError;
 use thiserror::Error;
+use tracing::debug;
 
 mod ackrate;
 #[cfg(fuzzing)]
@@ -242,7 +242,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qdebug!("Crypto operation failed {err:?}");
+        debug!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::Crypto(err),

@@ -15,13 +15,13 @@ use std::{
 };
 
 use clap::{Parser, builder::TypedValueParser as _};
-use neqo_common::{qerror, qinfo};
 use neqo_transport::{
     CongestionControl, ConnectionParameters, DEFAULT_INITIAL_RTT, SlowStart, Stats, StreamType,
     Version, tparams::PreferredAddress,
 };
 use strum::VariantNames as _;
 use thiserror::Error;
+use tracing::{error, info, level_filters::LevelFilter};
 
 pub mod client;
 mod send_data;
@@ -98,6 +98,18 @@ impl Default for SharedArgs {
 }
 
 impl SharedArgs {
+    fn level_filter(&self) -> Option<LevelFilter> {
+        use clap_verbosity_flag::VerbosityFilter;
+        self.verbose.as_ref().map(|v| match v.filter() {
+            VerbosityFilter::Off => LevelFilter::OFF,
+            VerbosityFilter::Error => LevelFilter::ERROR,
+            VerbosityFilter::Warn => LevelFilter::WARN,
+            VerbosityFilter::Info => LevelFilter::INFO,
+            VerbosityFilter::Debug => LevelFilter::DEBUG,
+            VerbosityFilter::Trace => LevelFilter::TRACE,
+        })
+    }
+
     #[must_use]
     pub fn get_alpn(&self) -> &str {
         &self.alpn
@@ -329,12 +341,12 @@ pub(crate) fn report_stats(stats: &Stats, path: Option<&Path>) {
     let mut json = match json {
         Ok(json) => json,
         Err(e) => {
-            qerror!("Failed to serialize stats: {e}");
+            error!("Failed to serialize stats: {e}");
             return;
         }
     };
     let Some(path) = path else {
-        qinfo!("{json}");
+        info!("{json}");
         return;
     };
     json.push('\n'); // Append the record in one write.
@@ -344,7 +356,7 @@ pub(crate) fn report_stats(stats: &Stats, path: Option<&Path>) {
         .open(path)
         .and_then(|mut f| f.write_all(json.as_bytes()))
     {
-        qerror!("Failed to report stats to {}: {e}", path.display());
+        error!("Failed to report stats to {}: {e}", path.display());
     }
 }
 

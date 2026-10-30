@@ -18,7 +18,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Encoder, qdebug, to_u64};
+use neqo_common::{Buffer, Encoder, to_u64};
+use tracing::debug;
 
 use crate::{
     ConnectionEvents, Error, MAX_DATAGRAM_FRAME_SIZE, Res, Stats,
@@ -36,14 +37,12 @@ use crate::{
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
 /// QUIC varint encoding.
 pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
-static_assertions::const_assert_eq!(
-    Encoder::varint_len(FrameType::Datagram as u64),
-    DATAGRAM_FRAME_TYPE_VARINT_LEN
-);
-static_assertions::const_assert_eq!(
-    Encoder::varint_len(FrameType::DatagramWithLen as u64),
-    DATAGRAM_FRAME_TYPE_VARINT_LEN
-);
+const _: () = {
+    assert!(Encoder::varint_len(FrameType::Datagram as u64) == DATAGRAM_FRAME_TYPE_VARINT_LEN);
+    assert!(
+        Encoder::varint_len(FrameType::DatagramWithLen as u64) == DATAGRAM_FRAME_TYPE_VARINT_LEN
+    );
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum DatagramTracking {
@@ -190,7 +189,7 @@ impl QuicDatagrams {
                 let dgram = self
                     .take_from_session_queue(session, Disposition::DropTooBig)
                     .expect("just peeked Some above, with no intervening mutation");
-                qdebug!(
+                debug!(
                     "QUIC datagram ({}) exceeds remote limit ({}) or does not fit MTU.",
                     dgram.data.len(),
                     self.remote_datagram_size
@@ -306,7 +305,7 @@ impl QuicDatagrams {
     ) -> Res<DatagramQueueOutcome> {
         let frame_len = data.len().saturating_add(DATAGRAM_FRAME_TYPE_VARINT_LEN);
         if to_u64(frame_len) > self.remote_datagram_size {
-            qdebug!(
+            debug!(
                 "QUIC DATAGRAM frame exceeds remote limit, dropping it, frame size {frame_len}, remote DATAGRAM frame size limit {}.",
                 self.remote_datagram_size
             );

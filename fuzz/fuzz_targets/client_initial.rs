@@ -34,8 +34,8 @@ fuzz_target!(|data: &[u8]| {
         .encode_vec(1, d_cid)
         .encode_vec(1, s_cid)
         .encode_vvec(&[])
-        .encode_len(payload_enc.len() + aead.expansion() + 1)
-        .encode_uint(2, u16::try_from(pn).unwrap());
+        .encode_len(payload_enc.len() + aead.expansion() + 2)
+        .encode_uint(2, u16::try_from(pn).expect("first PN"));
 
     let mut ciphertext = header_enc.as_ref().to_vec();
     ciphertext.resize(header_enc.len() + payload_enc.len() + aead.expansion(), 0);
@@ -46,7 +46,7 @@ fuzz_target!(|data: &[u8]| {
             payload_enc.as_ref(),
             &mut ciphertext[header_enc.len()..],
         )
-        .unwrap();
+        .expect("encrypt");
     assert_eq!(header_enc.len() + v.len(), ciphertext.len());
     // Pad with zero to get up to MIN_INITIAL_PACKET_SIZE.
     ciphertext.resize(MIN_INITIAL_PACKET_SIZE, 0);
@@ -54,7 +54,7 @@ fuzz_target!(|data: &[u8]| {
     header_protection::apply(
         &hp,
         &mut ciphertext,
-        (header_enc.len() - 1)..header_enc.len(),
+        (header_enc.len() - 2)..header_enc.len(),
     );
     let fuzzed_ci = Datagram::new(ci.source(), ci.destination(), ci.tos(), ciphertext);
 

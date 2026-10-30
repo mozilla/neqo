@@ -7,8 +7,9 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::{Ecn, qdebug, qinfo};
+use neqo_common::Ecn;
 use serde::{Serialize, Serializer};
+use tracing::{debug, info};
 
 use crate::{Stats, packet, recovery::sent};
 
@@ -215,9 +216,9 @@ impl Info {
     pub(crate) fn on_packet_sent(&mut self, num_datagrams: usize, stats: &mut Stats) {
         if let ValidationState::Testing { probes_sent, .. } = &mut self.state {
             *probes_sent += num_datagrams;
-            qdebug!("ECN probing: sent {probes_sent} probes");
+            debug!("ECN probing: sent {probes_sent} probes");
             if *probes_sent >= TEST_COUNT {
-                qdebug!("ECN probing concluded with {probes_sent} probes sent");
+                debug!("ECN probing concluded with {probes_sent} probes sent");
                 self.state.set(ValidationState::Unknown, stats);
             }
         }
@@ -268,9 +269,7 @@ impl Info {
             // If we have lost all initial probes a bunch of times, we can conclude that the path
             // is not ECN capable and likely drops all ECN marked packets.
             if *probes_acked == 0 && *probes_lost == TEST_COUNT_INITIAL_PHASE {
-                qdebug!(
-                    "ECN validation failed, all {probes_lost} initial marked packets were lost"
-                );
+                debug!("ECN validation failed, all {probes_lost} initial marked packets were lost");
                 self.disable_ecn(stats, ValidationError::BlackHole);
             }
         }
@@ -315,7 +314,7 @@ impl Info {
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
         // > corresponding ECN counts are not present in the ACK frame.
         let Some(ack_ecn) = ack_ecn else {
-            qinfo!("ECN validation failed, no ECN counts in ACK frame");
+            info!("ECN validation failed, no ECN counts in ACK frame");
             self.disable_ecn(stats, ValidationError::Bleaching);
             return;
         };
@@ -334,15 +333,15 @@ impl Info {
         let ecn_diff = ack_ecn - self.baseline;
         let sum_inc = ecn_diff[Ecn::Ect0] + ecn_diff[Ecn::Ce];
         if sum_inc < newly_acked_sent_with_ect0 {
-            qinfo!(
+            info!(
                 "ECN validation failed, ACK counted {sum_inc} new marks, but {newly_acked_sent_with_ect0} of newly acked packets were sent with ECT(0)"
             );
             self.disable_ecn(stats, ValidationError::Bleaching);
         } else if ecn_diff[Ecn::Ect1] > 0 {
-            qinfo!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
+            info!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, ValidationError::ReceivedUnsentECT1);
         } else if self.state != ValidationState::Capable {
-            qinfo!("ECN validation succeeded, path is capable");
+            info!("ECN validation succeeded, path is capable");
             self.state.set(ValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;

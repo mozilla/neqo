@@ -13,13 +13,14 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _, qdebug, qinfo, qtrace};
+use neqo_common::{Datagram, event::Provider as _};
 use neqo_http3::{
     Header, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server, Http3ServerEvent,
     Http3State, Priority,
 };
 use neqo_transport::{ConnectionParameters, Output, RandomConnectionIdGenerator, StreamId};
 use nss::AuthenticationStatus;
+use tracing::{debug, info, trace};
 
 use crate::{
     boxed, http3_client_with_cid_gen, http3_server_with_cid_gen, now,
@@ -191,7 +192,7 @@ impl sim::Node for Node {
 
             let mut active = false;
             while let Some(e) = self.c.next_event() {
-                qtrace!("[{}] received event {e:?}", self.c);
+                trace!("[{}] received event {e:?}", self.c);
 
                 // Perform authentication automatically.
                 if matches!(e, Event::Client(Http3ClientEvent::AuthenticationNeeded)) {
@@ -211,7 +212,7 @@ impl sim::Node for Node {
             if matches!(res, Output::Datagram(_)) || !active {
                 return res;
             }
-            qdebug!("[{}] no datagram and goal activity, looping", self.c);
+            debug!("[{}] no datagram and goal activity, looping", self.c);
         }
     }
 
@@ -227,11 +228,11 @@ impl sim::Node for Node {
 
     fn print_summary(&self, test_name: &str) {
         match &self.c {
-            Endpoint::Client(c) => qinfo!(
+            Endpoint::Client(c) => info!(
                 "{test_name}: {}",
                 serde_json::to_string(&c.transport_stats()).unwrap()
             ),
-            Endpoint::Server(_) => qinfo!("{test_name}: Server (no stats available on server)"),
+            Endpoint::Server(_) => info!("{test_name}: Server (no stats available on server)"),
         }
     }
 }
@@ -307,7 +308,7 @@ impl Requests {
                 }
                 Err(e) => panic!("unexpected error from fetch: {e}"),
             };
-            qdebug!("[{c}] made stream {stream_id} for sending");
+            debug!("[{c}] made stream {stream_id} for sending");
             self.remaining.insert(stream_id, self.send_per_request);
             self.amount -= 1;
             self.send(c, stream_id, now);
@@ -326,7 +327,7 @@ impl Requests {
             }
             status = GoalStatus::Active;
             *remaining -= sent;
-            qtrace!("sent {sent} remaining {remaining}");
+            trace!("sent {sent} remaining {remaining}");
             if *remaining == 0 {
                 c.stream_close_send(stream_id, now).unwrap();
                 self.remaining.remove(&stream_id);
@@ -428,7 +429,7 @@ impl Goal for Responses {
                 let remaining = self.remaining.get_mut(&stream_id).unwrap();
 
                 *remaining -= len;
-                qtrace!("received {len} remaining {remaining}");
+                trace!("received {len} remaining {remaining}");
                 if *remaining == 0 {
                     assert!(fin);
                     stream

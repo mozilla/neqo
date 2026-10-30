@@ -18,9 +18,10 @@ use std::{
 
 use enum_map::EnumMap;
 use enumset::enum_set;
-use neqo_common::{qdebug, qinfo, qlog::Qlog, qtrace, qwarn};
+use neqo_common::qlog::Qlog;
 use strum::IntoEnumIterator as _;
 pub use token::{StreamRecoveryToken, Token, Tokens};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     ecn, packet,
@@ -181,7 +182,7 @@ impl LossRecoverySpace {
     pub fn pto_packets(&mut self) -> impl Iterator<Item = &sent::Packet> {
         self.sent_packets.iter_mut().filter_map(|sent| {
             sent.pto().then(|| {
-                qtrace!("PTO: marking packet {} lost ", sent.pn());
+                trace!("PTO: marking packet {} lost ", sent.pn());
                 &*sent
             })
         })
@@ -254,7 +255,7 @@ impl LossRecoverySpace {
         debug_assert!(self.in_flight_outstanding >= count);
         self.in_flight_outstanding -= count;
         if self.in_flight_outstanding == 0 {
-            qtrace!("remove_packet outstanding == 0 for space {}", self.space);
+            trace!("remove_packet outstanding == 0 for space {}", self.space);
         }
     }
 
@@ -338,7 +339,7 @@ impl LossRecoverySpace {
         // Housekeeping.
         self.remove_old_lost(now, cleanup_delay);
 
-        qtrace!(
+        trace!(
             "detect lost {}: now={now:?} delay={loss_delay:?}",
             self.space,
         );
@@ -353,14 +354,14 @@ impl LossRecoverySpace {
         {
             // Packets sent before now - loss_delay are deemed lost.
             let trigger = if packet.time_sent() + loss_delay <= now {
-                qtrace!(
+                trace!(
                     "lost={}, time sent {:?} is before lost_delay {loss_delay:?}",
                     packet.pn(),
                     packet.time_sent()
                 );
                 sent::LossTrigger::TimeThreshold
             } else if largest_acked >= Some(packet.pn() + PACKET_THRESHOLD) {
-                qtrace!(
+                trace!(
                     "lost={}, is >= {PACKET_THRESHOLD} from largest acked {largest_acked:?}",
                     packet.pn()
                 );
@@ -545,7 +546,7 @@ impl Loss {
             return Vec::new();
         };
         if sp.largest_acked.is_some() {
-            qwarn!("0-RTT packets already acknowledged, not dropping");
+            warn!("0-RTT packets already acknowledged, not dropping");
             return Vec::new();
         }
         let mut dropped = sp.remove_ignored().collect::<Vec<_>>();
@@ -558,7 +559,7 @@ impl Loss {
 
     pub fn on_packet_sent(&mut self, path: &PathRef, mut sent_packet: sent::Packet, now: Instant) {
         let pn_space = sent_packet.space();
-        qtrace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
+        trace!("[{self}] packet {pn_space}-{} sent", sent_packet.pn());
         if let Some(pto) = self.pto_state.as_mut() {
             pto.pto_sent(pn_space);
         }
@@ -566,7 +567,7 @@ impl Loss {
             path.borrow_mut().packet_sent(&mut sent_packet, now);
             space.on_packet_sent(sent_packet);
         } else {
-            qinfo!(
+            info!(
                 "[{self}] ignoring packet {} from dropped space {pn_space}",
                 sent_packet.pn()
             );
@@ -634,7 +635,7 @@ impl Loss {
 
         // Only prime if we haven't sent or received anything in Handshake space yet.
         if hs_space.last_ack_eliciting.is_none() && hs_space.largest_acked.is_none() {
-            qtrace!(
+            trace!(
                 "Priming Handshake PTO baseline (no HS packets after {} Initial PTOs)",
                 pto.count()
             );
@@ -656,7 +657,7 @@ impl Loss {
         R: IntoIterator<Item = RangeInclusive<packet::Number>>,
     {
         let Some(space) = self.spaces.get_mut(pn_space) else {
-            qinfo!("ACK on discarded space");
+            info!("ACK on discarded space");
             return (Vec::new(), Vec::new());
         };
 
@@ -685,7 +686,7 @@ impl Loss {
             }
         }
 
-        qdebug!(
+        debug!(
             "[{self}] ACK for {pn_space:?} - largest_acked={}",
             largest_acked_pkt.pn()
         );
@@ -777,7 +778,7 @@ impl Loss {
 
     /// Discard state for a given packet number space.
     pub fn discard(&mut self, primary_path: &PathRef, space: PacketNumberSpace, now: Instant) {
-        qdebug!("[{self}] Reset loss recovery state for {space:?}");
+        debug!("[{self}] Reset loss recovery state for {space:?}");
         let mut path = primary_path.borrow_mut();
         for p in self.spaces.drop_space(space) {
             path.discard_packet(&p, now, &mut self.stats.borrow_mut());
@@ -807,7 +808,7 @@ impl Loss {
         } else {
             None
         };
-        qtrace!("[{self}] next_timeout loss={loss_time:?} pto={pto_time:?}");
+        trace!("[{self}] next_timeout loss={loss_time:?} pto={pto_time:?}");
         match (loss_time, pto_time) {
             (Some(loss_time), Some(pto_time)) => Some(min(loss_time, pto_time)),
             (Some(loss_time), None) => Some(loss_time),
@@ -857,7 +858,7 @@ impl Loss {
         let pto_count = pto_state.map_or(0, |p| u32::try_from(p.count).unwrap_or(0));
         rtt.pto(confirmed)
             .checked_mul(u32::from(fast_pto) << min(pto_count, u32::BITS - u8::BITS))
-            .map_or(Duration::from_secs(3600), |p| p / u32::from(FAST_PTO_SCALE))
+            .map_or(Duration::from_hours(1), |p| p / u32::from(FAST_PTO_SCALE))
     }
 
     /// Get the current PTO period for the given packet number space.
@@ -944,7 +945,7 @@ impl Loss {
             if t > now {
                 continue;
             }
-            qdebug!("[{self}] PTO timer fired for {pn_space:?}");
+            debug!("[{self}] PTO timer fired for {pn_space:?}");
             retransmit.insert(pn_space);
             // When Handshake PTO fires, also retransmit Initial CRYPTO data.
             // This handles lost Initial CRYPTO that hasn't triggered its own
@@ -979,7 +980,7 @@ impl Loss {
             );
         }
 
-        qtrace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
+        trace!("[{self}] PTO {pn_space}, probing {allow_probes:?}");
         self.fire_pto(pn_space, allow_probes, primary_path.borrow().rtt(), now);
 
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
@@ -994,7 +995,7 @@ impl Loss {
         now: Instant,
         has_handshake_keys: bool,
     ) -> Vec<sent::Packet> {
-        qtrace!("[{self}] timeout {now:?}");
+        trace!("[{self}] timeout {now:?}");
         if let Some(timer_type) = self
             .pending_timer_type
             .take()
@@ -1035,7 +1036,7 @@ impl Loss {
     /// what the current congestion window is, and what the pacer says.
     #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
-        qtrace!("[{self}] get send profile {now:?}");
+        trace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
         if let Some(profile) = self
@@ -1079,7 +1080,7 @@ impl Display for Loss {
 #[allow(
     clippy::allow_attributes,
     clippy::single_range_in_vec_init,
-    reason = "TODO: false positive in clippy 1.98-nightly; re-check when bumping MSRV"
+    reason = "Single-range ACK lists are intended."
 )]
 mod tests {
     use std::{

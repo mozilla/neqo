@@ -25,7 +25,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 # Don't increase beyond what Firefox is currently using:
 # https://searchfox.org/mozilla-central/search?q=MINIMUM_RUST_VERSION&path=python/mozboot/mozboot/util.py
-rust-version = "1.90.0"
+rust-version = "1.95.0"
 
 [workspace.dependencies]
 cfg_aliases = { version = "0.2.2", default-features = false }
@@ -38,13 +38,14 @@ log = { version = "0.4", default-features = false }
 nss = { version = "0.16", package = "nss-rs", git = "https://github.com/mozilla/nss-rs" }
 nss-test-fixture = { version = "0.1", package = "test-fixture", git = "https://github.com/mozilla/nss-rs" }
 qlog = { version = "0.18.1", default-features = false }
-quinn-udp = { version = "0.6", default-features = false, features = ["log", "fast-apple-datapath"] }
+quinn-udp = { version = "0.6", default-features = false, features = ["tracing-log", "fast-apple-datapath"] }
 rustc-hash = { version = "2.1", default-features = false, features = [ "std" ]}
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
-static_assertions = { version = "1.1", default-features = false }
 strum = { version = "0.27", default-features = false, features = ["derive"] }
 thiserror = { version = "2.0.12", default-features = false }
+tracing = { version = "0.1.37", default-features = false, features = ["std"] }
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
 windows = { version = ">=0.60,<0.63", default-features = false }
 
 [workspace.lints.cargo]
@@ -76,6 +77,7 @@ allow_attributes_without_reason = "warn"
 assert_is_empty = "allow" # We prefer using is_empty() in asserts.
 cfg_not_test = "warn"
 clone_on_ref_ptr = "warn"
+cognitive_complexity = "allow" # TODO: Remove when MSRV >= 1.91 (lint moved to `restriction`).
 create_dir = "warn"
 dbg_macro = "warn"
 empty_drop = "warn"

@@ -6,7 +6,6 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::qdebug;
 use nss::AuthenticationStatus;
 use test_fixture::{
     assertions::{
@@ -14,6 +13,7 @@ use test_fixture::{
     },
     now, split_datagram,
 };
+use tracing::debug;
 
 use super::{
     super::{Connection, ConnectionParameters, Output, State},
@@ -245,7 +245,7 @@ fn pto_initial() {
     let mut now = now();
 
     // This test makes too many assumptions about single-packet PTOs for multi-packet MLKEM flights
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let pkt1 = client.process_output(now).dgram();
     assert!(pkt1.is_some());
@@ -442,19 +442,19 @@ fn pto_handshake_complete() {
 #[test]
 fn pto_handshake_frames() {
     let mut now = now();
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let pkt = client.process_output(now);
     let pkt2 = client.process_output(now);
 
     now += Duration::from_millis(10);
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     server.process_input(pkt.dgram().unwrap(), now);
     let pkt = server.process(pkt2.dgram(), now);
 
     now += Duration::from_millis(10);
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let pkt = client.process(pkt.dgram(), now);
 
     now += Duration::from_millis(10);
@@ -471,7 +471,7 @@ fn pto_handshake_frames() {
     let stream = client.stream_create(StreamType::UniDi).unwrap();
     assert_eq!(stream, 2);
     assert_eq!(client.stream_send(stream, b"zero").unwrap(), 4);
-    qdebug!("---- client: SH..FIN -> FIN and 1RTT packet");
+    debug!("---- client: SH..FIN -> FIN and 1RTT packet");
     let pkt1 = client.process_output(now).dgram();
     assert!(pkt1.is_some());
 
@@ -810,7 +810,7 @@ fn trickle(sender: &mut Connection, receiver: &mut Connection, mut count: usize,
     let id = sender.stream_create(StreamType::UniDi).unwrap();
     let mut maybe_ack = None;
     while count > 0 {
-        qdebug!("trickle: remaining={count}");
+        debug!("trickle: remaining={count}");
         assert_eq!(sender.stream_send(id, &[9]).unwrap(), 1);
         let dgram = sender.process(maybe_ack, now).dgram();
 

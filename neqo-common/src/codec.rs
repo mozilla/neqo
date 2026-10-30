@@ -119,6 +119,11 @@ impl<'a> Decoder<'a> {
         Some(res)
     }
 
+    /// Decodes `N` bytes of arbitrary data as an array.
+    pub fn decode_array<const N: usize>(&mut self) -> Option<&'a [u8; N]> {
+        self.decode(N)?.as_array()
+    }
+
     pub(crate) fn decode_n(&mut self, n: usize) -> Option<u64> {
         debug_assert!(n > 0 && n <= 8);
         if self.remaining() < n {
@@ -801,6 +806,15 @@ mod tests {
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode(2).unwrap(), &[0x01, 0x23]);
         assert!(dec.decode(2).is_none());
+    }
+
+    #[test]
+    fn decode_array() {
+        let enc = Encoder::from_hex("012345");
+        let mut dec = enc.as_decoder();
+        assert_eq!(dec.decode_array(), Some(&[0x01, 0x23]));
+        assert!(dec.decode_array::<2>().is_none());
+        assert_eq!(dec.decode_array(), Some(&[0x45]));
     }
 
     #[test]

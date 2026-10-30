@@ -14,14 +14,13 @@ use std::{
 };
 
 use enum_map::Enum;
-use log::debug;
 use neqo_common::{
     Buffer, Decoder, Encoder,
     hex::{Hex, HexWithLen},
-    qtrace, qwarn,
 };
 use nss::{Mode, RecordProtectionOps as _, random};
 use strum::{EnumIter, FromRepr};
+use tracing::{debug, trace, warn};
 
 use crate::{
     Error, Res,
@@ -488,7 +487,7 @@ impl<B: Buffer> Builder<B> {
     /// This will return an error if the packet is too large.
     pub fn build(mut self, crypto: &mut CryptoDxState) -> Res<Encoder<B>> {
         if self.len() > self.limit {
-            qwarn!("Packet contents are more than the limit");
+            warn!("Packet contents are more than the limit");
             debug_assert!(
                 false,
                 "Builder length ({}) is larger than limit ({}).",
@@ -503,7 +502,7 @@ impl<B: Buffer> Builder<B> {
             self.write_len(crypto.expansion());
         }
 
-        qtrace!(
+        trace!(
             "Packet build pn={} hdr={} body={}",
             self.pn,
             Hex::new(&self.encoder.as_ref()[self.header.clone()]),
@@ -529,7 +528,7 @@ impl<B: Buffer> Builder<B> {
             self.encoder.as_mut()[j] ^= mask[i];
         }
 
-        qtrace!("Packet built {}", Hex::new(&self.encoder));
+        trace!("Packet built {}", Hex::new(&self.encoder));
         Ok(self.encoder)
     }
 
@@ -896,9 +895,9 @@ impl<'a> Public<'a> {
         let sample = self
             .data
             .get(sample_offset..(sample_offset + SAMPLE_SIZE))
+            .and_then(<[u8]>::as_array)
             .ok_or(Error::NoMoreData)?;
-        let sample: &[u8; SAMPLE_SIZE] = sample.try_into()?;
-        qtrace!(
+        trace!(
             "{:?} unmask hdr={}",
             crypto.version(),
             Hex::new(&self.data[..sample_offset])
@@ -932,7 +931,7 @@ impl<'a> Public<'a> {
         hdrbytes.end = self.header_len + pn_len;
         pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
 
-        qtrace!("unmasked hdr={}", Hex::new(&self.data[hdrbytes.clone()]));
+        trace!("unmasked hdr={}", Hex::new(&self.data[hdrbytes.clone()]));
 
         let key_phase =
             self.packet_type == Type::Short && (first_byte & BIT_KEY_PHASE) == BIT_KEY_PHASE;
@@ -961,7 +960,7 @@ impl<'a> Public<'a> {
             if crypto.rx_pending(epoch) {
                 return Err((self, Error::KeysPending(epoch)).into());
             }
-            qtrace!("keys for {epoch:?} already discarded");
+            trace!("keys for {epoch:?} already discarded");
             return Err((self, Error::KeysDiscarded(epoch)).into());
         };
         // Note that this will dump early, which creates a side-channel.

@@ -18,10 +18,11 @@ use std::{
 use neqo_common::{
     Buffer, Decoder, Encoder, expect_usize,
     hex::{Hex, HexWithLen},
-    qdebug, qinfo, to_u64,
+    to_u64,
 };
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
+use tracing::{debug, info};
 
 use crate::{
     Error, Res,
@@ -179,7 +180,6 @@ pub trait ConnectionIdGenerator: ConnectionIdDecoder {
     fn generates_empty_cids(&self) -> bool {
         false
     }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
 }
 
 /// An `EmptyConnectionIdGenerator` generates empty connection IDs.
@@ -195,9 +195,6 @@ impl ConnectionIdDecoder for EmptyConnectionIdGenerator {
 impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         Some(ConnectionId::from(&[]))
-    }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
     fn generates_empty_cids(&self) -> bool {
         true
@@ -229,10 +226,6 @@ impl ConnectionIdGenerator for RandomConnectionIdGenerator {
         let mut buf = smallvec![0; self.len];
         randomize(&mut buf);
         Some(ConnectionId::from(buf))
-    }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
 
     fn generates_empty_cids(&self) -> bool {
@@ -388,7 +381,7 @@ impl ConnectionIdStore<Srt> {
         }
         // It's not OK if any individual piece matches though.
         if self.cids.iter().any(|c| c.any_part_equal(&entry)) {
-            qinfo!("ConnectionIdStore found reused part in NEW_CONNECTION_ID");
+            info!("ConnectionIdStore found reused part in NEW_CONNECTION_ID");
             return Err(Error::ProtocolViolation);
         }
 
@@ -426,11 +419,11 @@ pub struct ConnectionIdDecoderRef<'a> {
     generator: Ref<'a, dyn ConnectionIdGenerator>,
 }
 
-// Ideally this would be an implementation of `Deref`, but it doesn't
-// seem to be possible to convince the compiler to build anything useful.
-impl<'a: 'b, 'b> ConnectionIdDecoderRef<'a> {
-    pub fn as_ref(&'a self) -> &'b dyn ConnectionIdDecoder {
-        self.generator.as_decoder()
+impl<'a> Deref for ConnectionIdDecoderRef<'a> {
+    type Target = dyn ConnectionIdDecoder + 'a;
+
+    fn deref(&self) -> &Self::Target {
+        &*self.generator
     }
 }
 
@@ -541,7 +534,7 @@ impl ConnectionIdManager {
                 .iter()
                 .any(|c| c.seqno == seqno && c.cid.is_empty());
         if empty_cid {
-            qdebug!("Connection ID {seqno} is zero-length, not retiring");
+            debug!("Connection ID {seqno} is zero-length, not retiring");
         } else {
             self.connection_ids.retire(seqno);
             self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
@@ -665,10 +658,6 @@ mod tests {
                 panic!("unexpected CID generation attempt");
             };
             cid
-        }
-
-        fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-            self
         }
     }
 

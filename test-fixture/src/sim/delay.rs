@@ -85,12 +85,10 @@ impl Node for RandomDelay {
         if let Some(dgram) = d {
             self.insert(dgram, now);
         }
-        if let Some((&k, _)) = self.queue.range(..=now).next() {
-            Output::Datagram(self.queue.remove(&k).unwrap())
-        } else if let Some(&t) = self.queue.keys().next() {
-            Output::Callback(t - now)
-        } else {
-            Output::None
+        match self.queue.first_entry() {
+            Some(e) if *e.key() <= now => Output::Datagram(e.remove()),
+            Some(e) => Output::Callback(*e.key() - now),
+            None => Output::None,
         }
     }
 }
@@ -128,13 +126,10 @@ impl Node for Delay {
             self.insert(dgram, now);
         }
 
-        if let Some((t, _)) = self.queue.front() {
-            if *t <= now {
-                let (_, d) = self.queue.pop_front().expect("was Some above");
-                Output::Datagram(d)
-            } else {
-                Output::Callback(*t - now)
-            }
+        if let Some((_, d)) = self.queue.pop_front_if(|(t, _)| *t <= now) {
+            Output::Datagram(d)
+        } else if let Some((t, _)) = self.queue.front() {
+            Output::Callback(*t - now)
         } else {
             Output::None
         }
