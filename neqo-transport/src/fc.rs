@@ -1187,7 +1187,7 @@ mod test {
         );
 
         // Huge idle time.
-        now += Duration::from_secs(60 * 60); // 1h
+        now += Duration::from_hours(1);
         let consumed = fc.set_consumed(fc.next_limit()).unwrap();
         fc.add_retired(consumed);
 

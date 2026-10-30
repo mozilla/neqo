@@ -775,7 +775,7 @@ fn closed() {
     assert!(res.callback() > Duration::new(0, 0));
 
     trace!("60s later");
-    let res = server.process_output(now() + Duration::from_secs(60));
+    let res = server.process_output(now() + Duration::from_mins(1));
     assert_eq!(res, Output::None);
 }
 
