@@ -931,12 +931,12 @@ impl Connection {
 
     /// Call by application when the peer cert has been verified.
     ///
-    /// This panics if there is no active peer.  It's OK to call this
-    /// when authentication isn't needed, that will likely only cause
-    /// the connection to fail.  However, if no packets have been
-    /// exchanged, it's not OK.
+    /// Does nothing if TLS is not waiting for a verdict.
     pub fn authenticated(&mut self, status: AuthenticationStatus, now: Instant) {
         debug!("[{self}] Authenticated {status:?}");
+        if !self.crypto.tls().state().authentication_needed() {
+            return;
+        }
         self.crypto.tls_mut().authenticated(status);
         let res = self.handshake(now, self.version, PacketNumberSpace::Handshake, None);
         self.absorb_error(now, res);
@@ -3295,8 +3295,7 @@ impl Connection {
             data.as_ref().map(HexWithLen::new),
         );
 
-        let was_authentication_pending =
-            *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
+        let was_authentication_pending = self.crypto.tls().state().authentication_needed();
         let try_update = data.is_some();
         match self.crypto.handshake(now, space, data)? {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
@@ -3305,9 +3304,12 @@ impl Connection {
                     self.events.authentication_needed();
                 }
             }
-            HandshakeState::EchFallbackAuthenticationPending(public_name) => self
-                .events
-                .ech_fallback_authentication_needed(public_name.clone()),
+            HandshakeState::EchFallbackAuthenticationPending(public_name) => {
+                if !was_authentication_pending {
+                    self.events
+                        .ech_fallback_authentication_needed(public_name.clone());
+                }
+            }
             HandshakeState::Complete(_) => {
                 if !self.state.connected() {
                     self.set_connected(now)?;
