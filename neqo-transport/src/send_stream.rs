@@ -1198,6 +1198,15 @@ impl SendStream {
         }
     }
 
+    /// The reliable size of the reset frame that is still awaiting an ack, if any.
+    pub(crate) const fn reset_reliable_size(&self) -> Option<u64> {
+        match self.state {
+            State::ResetSent { reliable_size, .. }
+            | State::ResetSentReliable { reliable_size, .. } => Some(reliable_size),
+            _ => None,
+        }
+    }
+
     /// Maybe write a `RESET_STREAM` or `RESET_STREAM_AT` frame.
     /// Returns true if the reset is successfully sent
     /// and that is the only data that needs sending.
@@ -1250,6 +1259,7 @@ impl SendStream {
         if written {
             tokens.push(recovery::Token::Stream(StreamRecoveryToken::ResetStream {
                 stream_id: self.stream_id,
+                reliable_size: *reliable_size,
             }));
             if *reliable_size == 0 {
                 stats.reset_stream += 1;
@@ -1673,9 +1683,9 @@ impl SendStream {
     /// Before a reset is sent, this just clears the committed offset so that a subsequent
     /// [`Self::reset`] emits a plain `RESET_STREAM` (`reliable_size == 0`). If a `RESET_STREAM_AT`
     /// has already been sent (`ResetSentReliable`), the buffer of still-in-flight committed data is
-    /// dropped and the stream moves to `ResetSent` with `reliable_size` reset to 0 (so any
-    /// retransmission of the reset frame is a plain `RESET_STREAM`), or straight to `ResetRecvd` if
-    /// the reset frame is already acked.
+    /// dropped and the stream moves to `ResetSent` with `reliable_size` reset to 0 and a plain
+    /// `RESET_STREAM` queued, which lowers the peer's reliable size; only its ack completes the
+    /// reset.
     pub(crate) fn drop_commitment(&mut self) {
         match &mut self.state {
             State::Send { committed, .. } | State::DataSent { committed, .. } => {
@@ -1685,30 +1695,15 @@ impl SendStream {
                 send_buf,
                 err,
                 final_size,
-                reset_acked,
-                priority,
                 ..
             } => {
-                let final_retired = send_buf.retired();
-                let final_written = to_u64(send_buf.buffered());
-                let new_state = if *reset_acked {
-                    // The reset is already acked, so abandoning the data completes the reset.
-                    State::ResetRecvd {
-                        final_retired,
-                        final_written,
-                    }
-                } else {
-                    // Drop the buffer and await the frame ack in `ResetSent`. Clearing
-                    // `reliable_size` makes any retransmission of the reset frame a plain
-                    // `RESET_STREAM`.
-                    State::ResetSent {
-                        err: *err,
-                        final_size: *final_size,
-                        reliable_size: 0,
-                        priority: *priority,
-                        final_retired,
-                        final_written,
-                    }
+                let new_state = State::ResetSent {
+                    err: *err,
+                    final_size: *final_size,
+                    reliable_size: 0,
+                    priority: Some(self.priority),
+                    final_retired: send_buf.retired(),
+                    final_written: to_u64(send_buf.buffered()),
                 };
                 self.state.transition(new_state);
             }
@@ -4737,12 +4732,13 @@ mod tests {
         // Once the frame is acked, the stream ends without waiting for the data.
         s.reset_acked();
         assert!(s.is_ended());
+        assert_eq!(s.reset_reliable_size(), None);
     }
 
-    /// A `STOP_SENDING` after a `RESET_STREAM_AT` whose frame is already acked completes the reset
-    /// immediately, abandoning the still-in-flight committed data.
+    /// A `STOP_SENDING` after a `RESET_STREAM_AT` whose frame is already acked abandons the
+    /// still-in-flight committed data and sends a plain `RESET_STREAM`; its ack ends the stream.
     #[test]
-    fn stop_sending_after_reset_stream_at_acked_completes() {
+    fn stop_sending_after_reset_stream_at_acked_sends_reset_stream() {
         let mut s = reliable_stream_committed(&[0x42; 5], &[0x42; 5], ConnectionEvents::default());
         s.reset(0);
         s.mark_as_sent(0, 5, false);
@@ -4753,6 +4749,11 @@ mod tests {
         assert!(!s.is_ended());
 
         s.drop_commitment();
+        assert!(!s.is_ended());
+        let stats = send_reset_frame(&mut s);
+        assert_eq!(stats.reset_stream, 1);
+
+        s.reset_acked();
         assert!(s.is_ended());
     }
 
