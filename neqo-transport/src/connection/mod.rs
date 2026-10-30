@@ -876,9 +876,10 @@ impl Connection {
         // but there are just 0 or 1 in the current implementation.
         match self.paths.primary() {
             Some(path) => {
-                if let Some(token) = self
-                    .address_validation
-                    .generate_new_token(path.borrow().remote_address(), now)
+                if path.borrow().is_valid()
+                    && let Some(token) = self
+                        .address_validation
+                        .generate_new_token(path.borrow().remote_address(), now)
                 {
                     self.new_token.send_new_token(token);
                 }
@@ -1767,6 +1768,7 @@ impl Connection {
         if self.state.connected() {
             self.handle_migration(path, remote, migrate, now);
         } else if self.role != Role::Client
+            && path.borrow().is_primary()
             && (packet.packet_type() == packet::Type::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
         {
