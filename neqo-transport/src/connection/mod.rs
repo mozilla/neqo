@@ -826,7 +826,7 @@ impl Connection {
         self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
         self.tps.borrow_mut().set_remote_0rtt(Some(tp));
-        if !init_token.is_empty() {
+        if !init_token.is_empty() && init_token.len() <= packet::MAX_INITIAL_TOKEN_LEN {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
         self.paths
