@@ -201,6 +201,8 @@ struct Inner {
     buffers: Vec<Vec<u8>>,
     /// Total capacity of `buffers`; tracking bytes bounds memory when buffer sizes vary.
     retained: usize,
+    /// Gaps held by all streams, see `RxStreamOrderer::count_gaps`.
+    gaps: usize,
 }
 
 impl FreeList {
@@ -300,6 +302,13 @@ pub struct RxStreamOrderer {
     /// last entry in `data_ranges`, or `retired` if the map is empty).
     end: u64,
     free_list: FreeList,
+    gaps: usize, // This stream's part of the connection's gaps
+}
+
+impl Drop for RxStreamOrderer {
+    fn drop(&mut self) {
+        self.free_list.0.borrow_mut().gaps -= self.gaps;
+    }
 }
 
 impl RxStreamOrderer {
@@ -312,6 +321,9 @@ impl RxStreamOrderer {
     /// Maximum number of gaps allowed in the data a stream holds.
     pub(crate) const MAX_GAPS: usize = 4096;
 
+    /// Connection receive window bytes per gap the streams may hold beyond `MAX_GAPS`.
+    pub(crate) const WINDOW_PER_GAP: u64 = 32;
+
     /// Limit the entries a stream can be made to hold, which flow control does not.
     ///
     /// Adjacent data is coalesced up to `RANGE_TARGET`, so the data itself accounts for one entry
@@ -323,10 +335,39 @@ impl RxStreamOrderer {
     /// `received` will not do: it counts overlapping data once per copy, so a peer could grow the
     /// allowance for as long as the connection lasts.
     fn check_gap_limit(&self) -> Res<()> {
+        if self.gaps() > Self::MAX_GAPS {
+            warn!("Too many gaps in the reassembly buffer, closing connection");
+            return Err(Error::ProtocolViolation);
+        }
+        Ok(())
+    }
+
+    /// Entries in excess of what the data accounts for.
+    fn gaps(&self) -> usize {
         let span = self.end - self.retired;
         let needed = expect_usize(span / to_u64(Self::RANGE_TARGET));
-        if self.data_ranges.len() > Self::MAX_GAPS + needed {
-            warn!("Too many gaps in the reassembly buffer, closing connection");
+        self.data_ranges.len().saturating_sub(needed)
+    }
+
+    /// Update this stream's part of the connection's gaps. Without gaps, a stream can hold two
+    /// entries more than its span accounts for: a partly read first one and a partly filled last.
+    fn count_gaps(&mut self) {
+        let gaps = self.gaps().saturating_sub(2);
+        if gaps != self.gaps {
+            let mut inner = self.free_list.0.borrow_mut();
+            inner.gaps = inner.gaps + gaps - self.gaps;
+            self.gaps = gaps;
+        }
+    }
+
+    /// Limit the gaps all streams of a connection hold together, which `check_gap_limit` does
+    /// not. The allowance grows with the connection's window, as a stream's does with its span.
+    fn check_connection_gap_limit(&self, session_fc: &RefCell<ReceiverFlowControl<()>>) -> Res<()> {
+        let window = session_fc.borrow().max_active();
+        if to_u64(self.free_list.0.borrow().gaps)
+            > to_u64(Self::MAX_GAPS) + window / Self::WINDOW_PER_GAP
+        {
+            warn!("Too many gaps in the connection's reassembly buffers, closing connection");
             return Err(Error::ProtocolViolation);
         }
         Ok(())
@@ -335,6 +376,7 @@ impl RxStreamOrderer {
     /// Add a range, which is the only thing that can take the entry count over the limit.
     fn insert_range(&mut self, start: u64, data: RangeBuf) -> Res<()> {
         self.data_ranges.insert(start, data);
+        self.count_gaps();
         self.check_gap_limit()
     }
 
@@ -383,6 +425,7 @@ impl RxStreamOrderer {
             received: 0,
             end: 0,
             free_list,
+            gaps: 0,
         }
     }
 
@@ -445,6 +488,7 @@ impl RxStreamOrderer {
                 .filter(|e| e.get().len() < Self::RANGE_TARGET)
             {
                 e.get_mut().extend_from_slice(new_data);
+                self.count_gaps();
                 Ok(())
             } else {
                 // An in-order chunk start, which is what the list holds.
@@ -570,6 +614,7 @@ impl RxStreamOrderer {
             }
         }
 
+        self.count_gaps();
         Ok(())
     }
 
@@ -644,6 +689,7 @@ impl RxStreamOrderer {
         reason = "OK here."
     )]
     pub fn discard_after(&mut self, offset: u64) {
+        let offset = max(offset, self.retired); // Read data stays read.
         self.data_ranges.split_off(&offset);
         // Truncate a range that straddles `offset`.
         if let Some(mut e) = self.data_ranges.last_entry() {
@@ -659,6 +705,7 @@ impl RxStreamOrderer {
         } else {
             self.end = self.retired;
         }
+        self.count_gaps();
     }
 
     /// Data bytes buffered. Could be more than `bytes_readable` if there are
@@ -705,12 +752,14 @@ impl RxStreamOrderer {
                 // After the swap, `consumed` holds what was read out.
                 let mut consumed = self.data_ranges.split_off(&range_start);
                 mem::swap(&mut self.data_ranges, &mut consumed);
+                self.count_gaps();
                 return copied;
             }
         }
 
         self.data_ranges.clear();
         self.end = self.retired; // All entries were consumed.
+        self.count_gaps();
         copied
     }
 
@@ -994,6 +1043,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data)?;
+                recv_buf.check_connection_gap_limit(session_fc)?;
                 if fin {
                     let all_recv =
                         fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready());
@@ -1021,6 +1071,7 @@ impl RecvStream {
                 session_fc,
             } => {
                 recv_buf.inbound_frame(offset, data)?;
+                recv_buf.check_connection_gap_limit(session_fc)?;
                 if fc.consumed() == recv_buf.retired() + to_u64(recv_buf.bytes_ready()) {
                     let buf = recv_buf.take();
                     let fc_copy = mem::take(fc);
@@ -1034,6 +1085,7 @@ impl RecvStream {
             }
             RecvStreamState::SizeKnownAt {
                 recv_buf,
+                session_fc,
                 reliable_size,
                 ..
             } => {
@@ -1043,6 +1095,7 @@ impl RecvStream {
                 if keep > 0 {
                     let keep = min(data.len(), usize::try_from(keep)?);
                     recv_buf.inbound_frame(offset, &data[..keep])?;
+                    recv_buf.check_connection_gap_limit(session_fc)?;
                 }
             }
             RecvStreamState::DataRecvd { .. }
@@ -1542,7 +1595,7 @@ mod tests {
 
     use super::{FreeList, RecvStream, RecvStreamState};
     use crate::{
-        ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, StreamId,
+        ConnectionEvents, Error, INITIAL_LOCAL_MAX_STREAM_DATA, Res, StreamId,
         events::ConnectionEvent,
         fc::{ReceiverFlowControl, WINDOW_UPDATE_FRACTION},
         packet, recovery,
@@ -2163,6 +2216,144 @@ mod tests {
             let span =
                 expect_usize((buf.end - buf.retired) / to_u64(RxStreamOrderer::RANGE_TARGET));
             assert_eq!(buf.data_ranges.len(), RxStreamOrderer::MAX_GAPS + span + 1);
+        }
+    }
+
+    /// One-byte frames with a gap after each, of which the first two ranges are not gaps.
+    const GAP_FRAMES: u64 = 1026;
+    const GAP_END: u64 = 2 * GAP_FRAMES;
+    const STREAM_GAPS: u64 = GAP_FRAMES - 2;
+
+    fn add_gap(s: &mut RecvStream, i: u64) -> Res<()> {
+        s.inbound_stream_frame(false, 2 * i + 1, &[0; 1])
+    }
+
+    fn add_gaps(s: &mut RecvStream) {
+        (0..GAP_FRAMES).try_for_each(|i| add_gap(s, i)).unwrap();
+    }
+
+    /// Streams of one connection: `full` of them with `STREAM_GAPS` each reach its limit; one more.
+    fn create_full_streams() -> (Vec<RecvStream>, u64) {
+        let window = to_u64(INITIAL_LOCAL_MAX_STREAM_DATA) * 2;
+        let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new((), window)));
+        let free_list = FreeList::default();
+        let limit = to_u64(RxStreamOrderer::MAX_GAPS) + window / RxStreamOrderer::WINDOW_PER_GAP;
+        let full = limit / STREAM_GAPS;
+        let streams = (0..=full)
+            .map(|i| {
+                RecvStream::new(
+                    StreamId::from(i),
+                    to_u64(INITIAL_LOCAL_MAX_STREAM_DATA),
+                    Rc::clone(&session_fc),
+                    free_list.clone(),
+                    ConnectionEvents::default(),
+                )
+            })
+            .collect();
+        (streams, full)
+    }
+
+    /// The connection's count is the sum over the streams that hold data.
+    fn assert_gaps_counted(streams: &[RecvStream]) {
+        let held = streams
+            .iter()
+            .filter_map(|s| s.state.recv_buf())
+            .map(|b| b.gaps().saturating_sub(2))
+            .sum::<usize>();
+        let free_list = streams.iter().find_map(RecvStream::free_list).unwrap();
+        assert_eq!(free_list.0.borrow().gaps, held);
+    }
+
+    /// In each state that buffers data.
+    #[test]
+    fn reject_fragmentation_across_streams() {
+        let states: [fn(&mut RecvStream); 3] = [
+            |_| {},
+            |s| s.inbound_stream_frame(true, GAP_END, &[]).unwrap(),
+            |s| assert!(!s.reset(0, GAP_END, GAP_END).unwrap()),
+        ];
+        for state in states {
+            let (mut streams, full) = create_full_streams();
+            streams.iter_mut().for_each(state);
+            let rejected = streams.iter_mut().zip(0..).find_map(|(s, n)| {
+                (0..GAP_FRAMES).find_map(|i| add_gap(s, i).err().map(|e| (n, i, e)))
+            });
+            assert_eq!(rejected, Some((full, 2, Error::ProtocolViolation)));
+            assert_gaps_counted(&streams);
+        }
+    }
+
+    /// The count follows each change to what a stream holds, not only its end.
+    #[test]
+    fn gaps_counted_on_every_change() {
+        const TARGET: usize = RxStreamOrderer::RANGE_TARGET;
+        // Ranges this long cannot merge with each other.
+        const LEN: usize = TARGET / 2 + 1;
+        const RANGES: usize = 8;
+        let changes: [fn(&mut [RecvStream]); 6] = [
+            |s| add_gaps(&mut s[0]),
+            // Extend the last range, so the span grows.
+            |s| {
+                s[0].inbound_stream_frame(false, GAP_END, &[0; TARGET])
+                    .unwrap();
+            },
+            // Fill a gap, so two ranges merge.
+            |s| s[0].inbound_stream_frame(false, 2, &[0; 1]).unwrap(),
+            // Read up to the next gap.
+            |s| {
+                s[0].inbound_stream_frame(false, 0, &[0; 1]).unwrap();
+                assert_eq!(s[0].read(&mut [0; 8]).unwrap(), (4, false));
+            },
+            // Fill gaps between ranges that cannot merge.
+            |s| {
+                for i in 0..RANGES {
+                    let start = to_u64(i * (LEN + 1));
+                    s[1].inbound_stream_frame(false, start, &[0; LEN]).unwrap();
+                }
+                for i in 0..RANGES {
+                    let gap = to_u64(i * (LEN + 1) + LEN);
+                    s[1].inbound_stream_frame(false, gap, &[0; 1]).unwrap();
+                }
+            },
+            // Read all of them.
+            |s| {
+                let mut buf = vec![0; RANGES * (LEN + 1)];
+                assert_eq!(s[1].read(&mut buf).unwrap(), (buf.len(), false));
+            },
+        ];
+        let (mut streams, _) = create_full_streams();
+        for change in changes {
+            change(&mut streams);
+            assert_gaps_counted(&streams);
+        }
+    }
+
+    /// What a stream stops holding no longer counts for the connection.
+    #[test]
+    fn fragmentation_across_streams_released() {
+        let releases: [fn(&mut Vec<RecvStream>); 6] = [
+            |s| assert!(s[0].reset(0, GAP_END, 0).unwrap()),
+            |s| assert!(!s[0].reset(0, GAP_END, 1).unwrap()),
+            |s| assert!(!s[0].stop_sending(0)),
+            |s| {
+                let data = vec![0; expect_usize(GAP_END)];
+                s[0].inbound_stream_frame(false, 0, &data).unwrap();
+            },
+            |s| {
+                let mut data = vec![0; expect_usize(GAP_END)];
+                s[0].inbound_stream_frame(true, 0, &data).unwrap();
+                assert_eq!(s[0].read(&mut data).unwrap(), (data.len(), true));
+            },
+            |s| drop(s.remove(0)),
+        ];
+        for release in releases {
+            let (mut streams, _) = create_full_streams();
+            let mut spare = streams.pop().unwrap();
+            streams.iter_mut().for_each(add_gaps);
+            release(&mut streams);
+            add_gaps(&mut spare);
+            streams.push(spare);
+            assert_gaps_counted(&streams);
         }
     }
 
@@ -3217,6 +3408,18 @@ mod tests {
         // Only `[0, 4)` survives.
         assert_eq!(s.read(&mut buf).unwrap(), (4, false));
         assert!(s.is_ended());
+    }
+
+    /// A `reliable_size` below what the application has read ends the stream.
+    #[test]
+    fn reset_at_below_read() {
+        let mut events = ConnectionEvents::default();
+        let mut s = reliable_recv_stream(events.clone());
+        s.inbound_stream_frame(false, 0, &[0x42; 10]).unwrap();
+        assert_eq!(s.read(&mut [0; 6]).unwrap(), (6, false));
+        assert!(s.reset(7, 10, 4).is_ok());
+        assert!(s.is_ended());
+        assert_eq!(reset_count(&mut events), 1);
     }
 
     /// A plain `RESET_STREAM` is handled correctly after receiving `RESET_STREAM_AT`.
