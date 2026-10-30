@@ -6,19 +6,19 @@
 
 use std::time::Duration;
 
-use neqo_common::{Decoder, Dscp, Encoder, event::Provider as _};
+use neqo_common::{Datagram, Decoder, Dscp, Encoder, event::Provider as _};
 use test_fixture::{
     assertions::{self, assert_initial, assert_version},
     datagram, now, split_datagram, strip_padding,
 };
 
-#[cfg(not(feature = "disable-encryption"))]
-use super::{super::Connection, assert_error, forged_server_initial};
 use super::{
-    super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
+    super::{CloseReason, Connection, ConnectionEvent, Output, State, ZeroRttState},
     CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
     new_client, new_server, send_something,
 };
+#[cfg(not(feature = "disable-encryption"))]
+use super::{assert_error, forged_server_initial};
 #[cfg(not(feature = "disable-encryption"))]
 use crate::frame::FrameType;
 use crate::{
@@ -499,6 +499,140 @@ fn no_compatible_version() {
         Error::Peer(Error::TransportParameter.code()),
         Error::TransportParameter,
     );
+}
+
+/// A server treats a client Chosen Version that is not in its Available Versions as a parsing
+/// failure, even if Available Versions lists another compatible version.
+#[test]
+fn chosen_version_not_available() {
+    let mut client = default_client();
+    let mut server = default_server();
+
+    client
+        .set_local_tparam(
+            VersionInformation,
+            TransportParameter::Versions {
+                current: Version::Version1.wire_version(),
+                other: vec![Version::Version2.wire_version()],
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
+    );
+}
+
+/// Answers the next client Initial with a Version Negotiation packet listing `versions`.
+fn vn_to_client(client: &mut Connection, versions: &[Version]) -> Datagram {
+    let initial = client.process_output(now()).dgram().unwrap();
+    let versions: Vec<_> = versions.iter().map(|v| v.wire_version()).collect();
+    client.process_input(datagram(create_vn(&initial, &versions)), now());
+    initial
+}
+
+/// A client that reacted to a Version Negotiation packet closes the connection
+/// if the server's Available Versions field is empty.
+#[test]
+fn version_negotiation_empty_available_versions() {
+    const OTHER_VERSION: Version = Version::Draft29;
+
+    let mut client = default_client();
+    let mut server =
+        new_server(ConnectionParameters::default().versions(OTHER_VERSION, Version::all()));
+    server
+        .set_local_tparam(
+            VersionInformation,
+            TransportParameter::Versions {
+                current: OTHER_VERSION.wire_version(),
+                other: Vec::new(),
+            },
+        )
+        .unwrap();
+
+    vn_to_client(&mut client, &[OTHER_VERSION]);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// A client that reacted to a Version Negotiation packet closes the connection
+/// if the server's Version Information is missing, even for version 1.
+#[test]
+fn version_negotiation_missing_version_information() {
+    let mut client =
+        new_client(ConnectionParameters::default().versions(Version::Version2, Version::all()));
+    let mut server = new_server(
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+    );
+    server
+        .tps
+        .borrow_mut()
+        .local_mut()
+        .remove(VersionInformation);
+
+    vn_to_client(&mut client, &[Version::Version1]);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+
+    // Without Version Negotiation, version 1 does not need Version Information.
+    let mut client = default_client();
+    let mut server = new_server(
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
+    );
+    server
+        .tps
+        .borrow_mut()
+        .local_mut()
+        .remove(VersionInformation);
+    connect(&mut client, &mut server);
+}
+
+/// A client that reacted to a Version Negotiation packet closes the connection
+/// if it would have chosen another version from the server's Available Versions,
+/// even if the version it chose is compatible with that one.
+#[test]
+fn version_negotiation_compatible_downgrade() {
+    let mut client = new_client(ConnectionParameters::default().versions(
+        Version::Version1,
+        vec![Version::Version1, Version::Version2],
+    ));
+    let mut server = new_server(ConnectionParameters::default().versions(
+        Version::Version2,
+        vec![Version::Version2, Version::Version1],
+    ));
+
+    vn_to_client(&mut client, &[Version::Version2]);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// A client that made a connection attempt based on a Version Negotiation packet
+/// ignores any further Version Negotiation packets.
+#[test]
+fn version_negotiation_twice() {
+    const OTHER_VERSION: Version = Version::Draft29;
+
+    let mut client = default_client();
+    vn_to_client(&mut client, &[OTHER_VERSION]);
+    let initial = vn_to_client(&mut client, &[Version::Version2]);
+    assert_version(&initial, OTHER_VERSION.wire_version());
+    let initial = client.process_output(now()).dgram().unwrap();
+    assert_version(&initial, OTHER_VERSION.wire_version());
 }
 
 /// When a compatible upgrade chooses a different version, 0-RTT is rejected.
