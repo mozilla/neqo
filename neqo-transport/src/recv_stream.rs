@@ -1188,8 +1188,8 @@ impl RecvStream {
             } => {
                 let bytes_read = recv_buf.read(buf);
                 Self::flow_control_retire_data(u64::try_from(bytes_read)?, fc, session_fc);
-                let fin_read = if data_recvd_state {
-                    if recv_buf.buffered() == 0 {
+                let fin_read = data_recvd_state
+                    && if recv_buf.buffered() == 0 {
                         let received = recv_buf.received();
                         let read = recv_buf.retired();
                         self.set_state(RecvStreamState::DataRead {
@@ -1199,10 +1199,7 @@ impl RecvStream {
                         true
                     } else {
                         false
-                    }
-                } else {
-                    false
-                };
+                    };
                 Ok((bytes_read, fin_read))
             }
             RecvStreamState::SizeKnownAt {
