@@ -159,7 +159,7 @@ jobs:
         run: sudo ip link set dev lo mtu "$MTU"
 
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: ${{ matrix.batch.mode }}
           run: cargo codspeed run
@@ -321,7 +321,7 @@ jobs:
           } > "$GITHUB_WORKSPACE/codspeed.yml"
 
       - name: Run benchmark
-        uses: CodSpeedHQ/action@821a40cd6c80e3cfe387caf55668287addd808da # v5.5.0
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: walltime
           working-directory: ${{ github.workspace }}
