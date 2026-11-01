@@ -30,7 +30,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+        uses: mozilla/actions/toolchains@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
