@@ -6,7 +6,7 @@
 
 // Collecting a list of events relevant to whoever is using the Connection.
 
-use std::{cell::RefCell, mem, net::SocketAddr, num::NonZeroU64, rc::Rc};
+use std::{cell::RefCell, iter, mem, net::SocketAddr, num::NonZeroU64, rc::Rc};
 
 use enum_map::EnumMap;
 use neqo_common::event::{Provider as EventProvider, Queue as EventQueue};
@@ -93,7 +93,7 @@ pub enum ConnectionEvent {
 
 /// The keys of the de-duplicated events in the queue, by kind.
 #[derive(Debug, Default)]
-struct Queued {
+struct Pending {
     readable: HashSet<StreamId>,
     reset: HashSet<StreamId>,
     writable: HashSet<StreamId>,
@@ -102,8 +102,9 @@ struct Queued {
     creatable: EnumMap<StreamType, bool>,
 }
 
-impl Queued {
-    fn remove(&mut self, event: &ConnectionEvent) {
+impl Pending {
+    /// Removes the key of a dequeued `event` and returns whether the event is still pending.
+    fn remove(&mut self, event: &ConnectionEvent) -> bool {
         match event {
             ConnectionEvent::RecvStreamReadable { stream_id } => self.readable.remove(stream_id),
             ConnectionEvent::RecvStreamReset { stream_id, .. } => self.reset.remove(stream_id),
@@ -115,21 +116,21 @@ impl Queued {
             ConnectionEvent::SendStreamCreatable { stream_type } => {
                 mem::take(&mut self.creatable[*stream_type])
             }
-            _ => false,
-        };
+            _ => true,
+        }
     }
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct ConnectionEvents {
     events: EventQueue<ConnectionEvent>,
-    queued: Rc<RefCell<Queued>>,
+    pending: Rc<RefCell<Pending>>,
 }
 
 impl ConnectionEvents {
     fn clear(&self) {
         self.events.clear();
-        *self.queued.borrow_mut() = Queued::default();
+        *self.pending.borrow_mut() = Pending::default();
     }
 
     pub fn authentication_needed(&self) {
@@ -146,21 +147,19 @@ impl ConnectionEvents {
     }
 
     pub fn recv_stream_readable(&self, stream_id: StreamId) {
-        if self.queued.borrow_mut().readable.insert(stream_id) {
+        if self.pending.borrow_mut().readable.insert(stream_id) {
             self.events
                 .push(ConnectionEvent::RecvStreamReadable { stream_id });
         }
     }
 
     pub fn recv_stream_reset(&self, stream_id: StreamId, app_error: AppError) {
-        let mut queued = self.queued.borrow_mut();
+        let mut pending = self.pending.borrow_mut();
         // If reset, no longer readable.
-        if queued.readable.remove(&stream_id) {
-            self.events.remove_matching(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
-        }
+        pending.readable.remove(&stream_id);
 
         // A duplicate is any reset for the stream, even with a different error.
-        if queued.reset.insert(stream_id) {
+        if pending.reset.insert(stream_id) {
             self.events.push(ConnectionEvent::RecvStreamReset {
                 stream_id,
                 app_error,
@@ -169,21 +168,19 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_writable(&self, stream_id: StreamId) {
-        if self.queued.borrow_mut().writable.insert(stream_id) {
+        if self.pending.borrow_mut().writable.insert(stream_id) {
             self.events
                 .push(ConnectionEvent::SendStreamWritable { stream_id });
         }
     }
 
     pub fn send_stream_stop_sending(&self, stream_id: StreamId, app_error: AppError) {
-        let mut queued = self.queued.borrow_mut();
+        let mut pending = self.pending.borrow_mut();
         // If stopped, no longer writable.
-        if queued.writable.remove(&stream_id) {
-            self.events.remove_matching(|evt| matches!(evt, ConnectionEvent::SendStreamWritable { stream_id: x } if *x == stream_id));
-        }
+        pending.writable.remove(&stream_id);
 
         // A duplicate is any stop for the stream, even with a different error.
-        if queued.stop_sending.insert(stream_id) {
+        if pending.stop_sending.insert(stream_id) {
             self.events.push(ConnectionEvent::SendStreamStopSending {
                 stream_id,
                 app_error,
@@ -192,25 +189,17 @@ impl ConnectionEvents {
     }
 
     pub fn send_stream_complete(&self, stream_id: StreamId) {
-        let mut queued = self.queued.borrow_mut();
-        let writable = queued.writable.remove(&stream_id);
-        let stop_sending = queued.stop_sending.remove(&stream_id);
-        if !queued.complete.insert(stream_id) || writable || stop_sending {
-            self.events.remove_matching(|evt| {
-                matches!(evt,
-                    ConnectionEvent::SendStreamWritable { stream_id: x } |
-                    ConnectionEvent::SendStreamStopSending { stream_id: x, .. } |
-                    ConnectionEvent::SendStreamComplete { stream_id: x }
-                    if *x == stream_id)
-            });
+        let mut pending = self.pending.borrow_mut();
+        pending.writable.remove(&stream_id);
+        pending.stop_sending.remove(&stream_id);
+        if pending.complete.insert(stream_id) {
+            self.events
+                .push(ConnectionEvent::SendStreamComplete { stream_id });
         }
-
-        self.events
-            .push(ConnectionEvent::SendStreamComplete { stream_id });
     }
 
     pub fn send_stream_creatable(&self, stream_type: StreamType) {
-        if !mem::replace(&mut self.queued.borrow_mut().creatable[stream_type], true) {
+        if !mem::replace(&mut self.pending.borrow_mut().creatable[stream_type], true) {
             self.events
                 .push(ConnectionEvent::SendStreamCreatable { stream_type });
         }
@@ -238,9 +227,7 @@ impl ConnectionEvents {
 
     pub fn recv_stream_complete(&self, stream_id: StreamId) {
         // If stopped, no longer readable.
-        if self.queued.borrow_mut().readable.remove(&stream_id) {
-            self.events.remove_matching(|evt| matches!(evt, ConnectionEvent::RecvStreamReadable { stream_id: x } if *x == stream_id.as_u64()));
-        }
+        self.pending.borrow_mut().readable.remove(&stream_id);
     }
 
     pub fn scone_updated(&self, scone: Bitrate) {
@@ -285,9 +272,8 @@ impl EventProvider for ConnectionEvents {
 
     #[inline]
     fn next_event(&mut self) -> Option<Self::Event> {
-        self.events
-            .next_event()
-            .inspect(|event| self.queued.borrow_mut().remove(event))
+        let mut pending = self.pending.borrow_mut();
+        iter::from_fn(|| self.events.next_event()).find(|event| pending.remove(event))
     }
 }
 
@@ -298,29 +284,33 @@ mod tests {
 
     use neqo_common::event::Provider as _;
 
-    use super::Queued;
+    use super::Pending;
     use crate::{
         AppError, CloseReason, ConnectionEvent, ConnectionEvents, Error, State, StreamId,
         StreamType,
     };
 
-    /// Asserts that the index holds exactly one key per queued de-duplicated event.
+    /// Asserts that the index holds one key per queued de-duplicated event, except cancelled ones.
     fn assert_index(evts: &ConnectionEvents) {
         let events = evts.events.take_all();
-        let mut expected = Queued::default();
+        let mut expected = Pending::default();
         for event in &events {
             assert!(match event {
+                // Cancelled events stay queued, so these can repeat.
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    expected.readable.insert(*stream_id)
+                    expected.readable.insert(*stream_id);
+                    true
                 }
                 ConnectionEvent::RecvStreamReset { stream_id, .. } => {
                     expected.reset.insert(*stream_id)
                 }
                 ConnectionEvent::SendStreamWritable { stream_id } => {
-                    expected.writable.insert(*stream_id)
+                    expected.writable.insert(*stream_id);
+                    true
                 }
                 ConnectionEvent::SendStreamStopSending { stream_id, .. } => {
-                    expected.stop_sending.insert(*stream_id)
+                    expected.stop_sending.insert(*stream_id);
+                    true
                 }
                 ConnectionEvent::SendStreamComplete { stream_id } => {
                     expected.complete.insert(*stream_id)
@@ -331,11 +321,11 @@ mod tests {
                 _ => true,
             });
         }
-        let queued = evts.queued.borrow();
-        assert_eq!(queued.readable, expected.readable);
+        let queued = evts.pending.borrow();
+        assert!(queued.readable.is_subset(&expected.readable));
         assert_eq!(queued.reset, expected.reset);
-        assert_eq!(queued.writable, expected.writable);
-        assert_eq!(queued.stop_sending, expected.stop_sending);
+        assert!(queued.writable.is_subset(&expected.writable));
+        assert!(queued.stop_sending.is_subset(&expected.stop_sending));
         assert_eq!(queued.complete, expected.complete);
         assert_eq!(queued.creatable, expected.creatable);
         for event in events {
@@ -413,8 +403,8 @@ mod tests {
             creatable(StreamType::BiDi),
             creatable(StreamType::UniDi),
             reset(4, 3),
-            complete(1),
             complete(9),
+            complete(1),
         ]
     }
 
@@ -592,9 +582,9 @@ mod tests {
             creatable(StreamType::BiDi),
             creatable(StreamType::UniDi),
             reset(4, 3),
-            stop(5, 1),
-            complete(1),
             complete(9),
+            complete(1),
+            stop(5, 1),
         ];
         assert_eq!(take(&mut evts), expected);
     }

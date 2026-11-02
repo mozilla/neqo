@@ -105,6 +105,10 @@ codspeed.mode = "simulation"
 name = "send_streams"
 codspeed.mode = "simulation"
 
+[[package.metadata.bench]]
+name = "events"
+codspeed.mode = "simulation"
+
 [[bench]]
 name = "transfer_walltime"
 harness = false
@@ -152,5 +156,10 @@ required-features = ["bench"]
 
 [[bench]]
 name = "send_streams"
+harness = false
+required-features = ["bench"]
+
+[[bench]]
+name = "events"
 harness = false
 required-features = ["bench"]
