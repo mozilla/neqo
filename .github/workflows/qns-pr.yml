@@ -21,7 +21,7 @@ env:
   # renovate: depName=https://github.com/quic-interop/quic-interop-runner datasource=git-refs branch=master
   RUNNER_REF: a224e5ecb600284b1a6a604f15d87cfccfcd6315
   # renovate: depName=https://github.com/lxin/quic datasource=git-refs branch=main
-  LINUXQUIC_REF: 863e714c9ee54b7b84bd7038847e3375e6dc4306
+  LINUXQUIC_REF: d11434a9cf158454d410ee37be32d6c93b8667d5
 
 jobs:
   docker-image:
