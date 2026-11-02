@@ -4,7 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::min, fmt::Debug, time::Instant};
+use std::{cmp::min, fmt::Debug, num::NonZeroUsize, time::Instant};
 
 use neqo_common::{
     Decoder, IncrementalDecoderBuffer, IncrementalDecoderIgnore, IncrementalDecoderUint,
@@ -304,14 +304,14 @@ impl FrameReader {
                     self.state = FrameReaderState::GetData {
                         decoder: IncrementalDecoderBuffer::new(len),
                     };
-                } else if self.frame_len == 0 {
-                    self.reset();
-                } else {
+                } else if let Some(len) =
+                    NonZeroUsize::new(usize::try_from(len).or(Err(Error::HttpFrame))?)
+                {
                     self.state = FrameReaderState::UnknownFrameDischargeData {
-                        decoder: IncrementalDecoderIgnore::new(
-                            usize::try_from(len).or(Err(Error::HttpFrame))?,
-                        ),
+                        decoder: IncrementalDecoderIgnore::new(len),
                     };
+                } else {
+                    self.reset();
                 }
             }
         }
