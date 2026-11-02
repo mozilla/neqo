@@ -47,7 +47,7 @@ runs:
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
             openbsd)    # renovate: depName=llvm datasource=custom.openbsd-packages registryUrl=https://cdn.openbsd.org/pub/OpenBSD/8.0/packages/amd64/
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm%21 nss # rustup does not support OpenBSD at all
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm%22 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
@@ -79,9 +79,9 @@ runs:
             fi
           fi
           case "$PLATFORM" in
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
-                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm22/lib
+                        export LLVM_COV=/usr/local/llvm22/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm22/bin/llvm-profdata
                         export PATH="\$HOME/.cargo/bin:\$PATH"
                         ;;
             *)          # rustup >= 1.29.2 is built with a std lacking File::lock on Solaris.
