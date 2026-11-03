@@ -340,7 +340,7 @@ impl Info {
         } else if ecn_diff[Ecn::Ect1] > 0 {
             info!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, ValidationError::ReceivedUnsentECT1);
-        } else if self.state != ValidationState::Capable {
+        } else if self.state != ValidationState::Capable && newly_acked_sent_with_ect0 > 0 {
             info!("ECN validation succeeded, path is capable");
             self.state.set(ValidationState::Capable, stats);
         }
@@ -370,8 +370,10 @@ impl Info {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use super::{Count, ValidationError, ValidationOutcome, ValidationState};
-    use crate::stats::Stats;
+    use test_fixture::now;
+
+    use super::{Count, Info, TEST_COUNT, ValidationError, ValidationOutcome, ValidationState};
+    use crate::{recovery::sent::make_packet, stats::Stats};
 
     fn make_unknown() -> (ValidationState, Stats) {
         (ValidationState::Unknown, Stats::default())
@@ -415,5 +417,16 @@ mod tests {
         assert!(Count::new(0, 0, 0, 1).is_some()); // ce > 0
         assert!(!Count::new(1, 0, 0, 0).is_empty());
         assert!(!Count::new(1, 0, 0, 0).is_some()); // not_ect alone
+    }
+
+    #[test]
+    fn unknown_stays_unknown_without_marked_ack() {
+        let mut stats = Stats::default();
+        let mut info = Info::default();
+        info.start(&mut stats);
+        info.on_packet_sent(TEST_COUNT, &mut stats);
+        let unmarked = [make_packet(1, now(), 100)];
+        info.on_packets_acked(&unmarked, Some(&Count::default()), &mut stats);
+        assert_eq!(info.state, ValidationState::Unknown);
     }
 }
