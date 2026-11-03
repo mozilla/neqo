@@ -905,6 +905,10 @@ pub struct CryptoStates {
     // keys and would otherwise be detected as that update again; comparing
     // against this stops us from responding to the same update twice.
     read_update_epoch: Option<usize>,
+    // If this is set, we cannot initiate a key update until this time passes.
+    write_update_time: Option<Instant>,
+    // The write epoch of the most recent key update confirmed by an ACK.
+    write_confirmed_epoch: Option<usize>,
 }
 
 impl CryptoStates {
@@ -1285,9 +1289,12 @@ impl CryptoStates {
         // Only update if we are able to. We can only do this if we have
         // received an acknowledgement for a packet in the current phase.
         // Also, skip this if we are waiting for read keys on the existing
-        // key update to be rolled over.
+        // key update to be rolled over, or for the wait after its ACK to end.
         let write = &self.app_write.as_ref().ok_or(Error::Internal)?.dx;
-        if write.can_update(largest_acknowledged) && self.read_update_time.is_none() {
+        if write.can_update(largest_acknowledged)
+            && self.read_update_time.is_none()
+            && self.write_update_time.is_none()
+        {
             // This call additionally checks that we don't advance to the next
             // epoch while a key update is in progress.
             if self.maybe_update_write()? {
@@ -1297,7 +1304,7 @@ impl CryptoStates {
                 Err(Error::KeyUpdateBlocked)
             }
         } else {
-            debug!("[{self}] Waiting for ACK or blocked on read key timer");
+            debug!("[{self}] Waiting for ACK or blocked on key update timer");
             Err(Error::KeyUpdateBlocked)
         }
     }
@@ -1371,9 +1378,28 @@ impl CryptoStates {
         Ok(())
     }
 
+    /// Delay initiating the next key update once an ACK confirms the current one.
+    pub fn key_update_acked(
+        &mut self,
+        largest_acknowledged: Option<packet::Number>,
+        expiration: Instant,
+    ) {
+        if let Some(write) = &self.app_write
+            && write.epoch() > usize::from(Epoch::ApplicationData)
+            && self.write_confirmed_epoch != Some(write.epoch())
+            && write.dx.can_update(largest_acknowledged)
+        {
+            self.write_confirmed_epoch = Some(write.epoch());
+            self.write_update_time = Some(expiration);
+        }
+    }
+
     #[must_use]
-    pub const fn update_time(&self) -> Option<Instant> {
+    pub fn update_time(&self) -> Option<Instant> {
         self.read_update_time
+            .into_iter()
+            .chain(self.write_update_time)
+            .min()
     }
 
     /// Check if time has passed for updating key update parameters.
@@ -1394,6 +1420,9 @@ impl CryptoStates {
                 }
                 self.read_update_time = None;
             }
+        }
+        if self.write_update_time.is_some_and(|t| now >= t) {
+            self.write_update_time = None;
         }
         Ok(())
     }
@@ -1449,6 +1478,8 @@ impl CryptoStates {
             app_read_next: Some(app_read(4)),
             read_update_time: None,
             read_update_epoch: None,
+            write_update_time: None,
+            write_confirmed_epoch: None,
         }
     }
 
@@ -1499,6 +1530,8 @@ impl CryptoStates {
             app_read_next: Some(app_read(4)),
             read_update_time: None,
             read_update_epoch: None,
+            write_update_time: None,
+            write_confirmed_epoch: None,
         }
     }
 }
