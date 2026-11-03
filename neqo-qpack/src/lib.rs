@@ -164,7 +164,7 @@ impl Error {
             Self::DecoderStream => 0x202,
             Self::ClosedCriticalStream => 0x104,
             // These are all internal errors.
-            _ => 3,
+            _ => 0x102,
         }
     }
 
@@ -210,7 +210,7 @@ mod tests {
             Error::Transport(neqo_transport::Error::NoMoreData),
             Error::Qlog,
         ] {
-            assert_eq!(err.code(), 3);
+            assert_eq!(err.code(), 0x102);
         }
     }
 
