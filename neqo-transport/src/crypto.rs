@@ -1327,7 +1327,9 @@ impl CryptoStates {
             && app_write.dx.should_update()
         {
             info!("[{self}] Initiating automatic key update");
-            if !self.maybe_update_write()? {
+            self.discard_0rtt_read(); // RFC 9001, Section 4.9.3.
+            // RFC 9001, Section 6.6.
+            if self.read_update_time.is_some() || !self.maybe_update_write()? {
                 return Err(Error::KeysExhausted);
             }
         }
@@ -1338,6 +1340,13 @@ impl CryptoStates {
         self.zero_rtt
             .as_ref()
             .is_some_and(|z| z.direction == CryptoDxDirection::Read)
+    }
+
+    fn discard_0rtt_read(&mut self) {
+        if self.has_0rtt_read() {
+            self.zero_rtt = None;
+            self.read_update_time = None;
+        }
     }
 
     /// Prepare to update read keys.  This doesn't happen immediately as
@@ -1357,10 +1366,7 @@ impl CryptoStates {
         trace!("[{self}] Key update received");
         // A server may still hold 0-RTT read keys (RFC 9001, Section 4.9.3).
         debug_assert_eq!(self.read_update_time.is_some(), self.has_0rtt_read());
-        if self.has_0rtt_read() {
-            self.zero_rtt = None;
-            self.read_update_time = None;
-        }
+        self.discard_0rtt_read();
 
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
