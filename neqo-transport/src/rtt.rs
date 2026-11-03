@@ -115,17 +115,18 @@ impl RttEstimate {
             ack_delay
         };
 
-        // min_rtt ignores ack delay.
-        self.min_rtt = min(self.min_rtt, rtt_sample);
-        // Adjust for ack delay unless it goes below `min_rtt`.
-        if rtt_sample >= ack_delay + self.min_rtt {
-            rtt_sample -= ack_delay;
-        }
-
         if self.first_sample_time.is_none() {
+            // The first sample initializes the estimator without ack delay (RFC 9002, Section 5.3).
             self.init(rtt_sample);
             self.first_sample_time = Some(now);
         } else {
+            // min_rtt ignores ack delay (RFC 9002, Section 5.2).
+            self.min_rtt = min(self.min_rtt, rtt_sample);
+            // Adjust for ack delay unless it goes below `min_rtt` (RFC 9002, Section 5.3).
+            if rtt_sample >= ack_delay + self.min_rtt {
+                rtt_sample -= ack_delay;
+            }
+
             // Calculate EWMA RTT (based on {{?RFC6298}}).
             let rttvar_sample = self.smoothed_rtt.abs_diff(rtt_sample);
 
@@ -240,6 +241,15 @@ mod tests {
         assert!(rtt.first_sample_time().is_some());
         assert_eq!(rtt.estimate(), Duration::from_millis(80));
         assert_eq!(rtt.minimum(), Duration::from_millis(80));
+    }
+
+    #[test]
+    fn first_sample_ignores_ack_delay() {
+        let sample = DEFAULT_INITIAL_RTT * 5;
+        let mut rtt = RttEstimate::new(DEFAULT_INITIAL_RTT);
+        update(&mut rtt, sample, DEFAULT_INITIAL_RTT, RttSource::Ack);
+        assert_eq!(rtt.estimate(), sample);
+        assert_eq!(rtt.minimum(), sample);
     }
 
     // Compute the expected EWMA smoothed RTT after one initialization sample and one EWMA sample.
