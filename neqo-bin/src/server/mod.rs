@@ -310,6 +310,7 @@ pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendDat
             error!("Rejecting path outside /www: {path}");
             return Err(());
         };
+        // Reading the whole file is fine for QNS test mode.
         fs::read(file_path).map(SendData::from).map_err(|e| {
             error!("Failed to read {path}: {e}");
         })
