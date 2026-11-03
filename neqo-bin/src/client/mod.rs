@@ -47,7 +47,7 @@ use thiserror::Error;
 use tokio::time::Sleep;
 use tracing::{debug, error, info};
 
-use crate::{SharedArgs, now, report_stats};
+use crate::{SharedArgs, contained_path, now, report_stats};
 
 mod http09;
 mod http3;
@@ -312,8 +312,6 @@ fn get_output_file(
     all_paths: &mut Vec<PathBuf>,
 ) -> Option<BufWriter<File>> {
     if let Some(dir) = output_dir {
-        let mut out_path = dir.clone();
-
         let url_path = if url.path() == "/" {
             // If no path is given... call it "root"?
             "root"
@@ -321,7 +319,10 @@ fn get_output_file(
             // Omit leading slash
             &url.path()[1..]
         };
-        out_path.push(url_path);
+        let Some(out_path) = contained_path(dir, url_path) else {
+            error!("path {url_path} escapes {}", dir.display());
+            return None;
+        };
 
         if all_paths.contains(&out_path) {
             error!("duplicate path {}", out_path.display());

@@ -10,7 +10,7 @@ use std::{
     fs::OpenOptions,
     io::Write as _,
     net::{SocketAddr, ToSocketAddrs as _},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -360,6 +360,14 @@ pub(crate) fn report_stats(stats: &Stats, path: Option<&Path>) {
     }
 }
 
+/// Join `path` onto `base`, or `None` if `path` has a component other than a plain name.
+pub(crate) fn contained_path(base: &Path, path: &str) -> Option<PathBuf> {
+    let path = Path::new(path);
+    path.components()
+        .all(|c| matches!(c, Component::Normal(_)))
+        .then(|| base.join(path))
+}
+
 /// A directory that deletes itself.
 #[cfg(test)]
 pub(crate) mod temp_dir {
@@ -408,9 +416,9 @@ pub(crate) mod temp_dir {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::fs;
+    use std::{fs, path::Path};
 
-    use crate::{Stats, client, report_stats, server, temp_dir::TempDir};
+    use crate::{Stats, client, contained_path, report_stats, server, temp_dir::TempDir};
 
     #[tokio::test]
     #[cfg_attr(target_os = "netbsd", ignore = "FIXME: Test fails on NetBSD.")]
@@ -467,5 +475,14 @@ mod tests {
     fn report_stats_to_unwritable_path_is_not_fatal() {
         let dir = TempDir::new();
         report_stats(&Stats::default(), Some(&dir.path()));
+    }
+
+    #[test]
+    fn contained_path_stays_in_base() {
+        let base = Path::new("base");
+        assert_eq!(contained_path(base, "a/b"), Some(base.join("a").join("b")));
+        for path in ["..", "a/../../b", "/a"] {
+            assert_eq!(contained_path(base, path), None, "{path}");
+        }
     }
 }
