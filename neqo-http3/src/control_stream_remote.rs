@@ -67,15 +67,12 @@ impl RecvStream for ControlStreamRemote {
     }
 
     fn receive(&mut self, conn: &mut Connection, now: Instant) -> Res<(ReceiveOutput, bool)> {
-        let mut control_frames = Vec::new();
-
-        loop {
-            if let Some(f) = self.receive_single(conn, now)? {
-                control_frames.push(f);
-            } else {
-                return Ok((ReceiveOutput::ControlFrames(control_frames), false));
-            }
-        }
+        let output = self
+            .receive_single(conn, now)?
+            .map_or(ReceiveOutput::NoOutput, |f| {
+                ReceiveOutput::ControlFrames(vec![f])
+            });
+        Ok((output, false))
     }
 }
 
@@ -86,4 +83,33 @@ fn control_stream_remote_display() {
         stream.to_string(),
         "Http3 remote control stream StreamId(2)"
     );
+}
+
+#[test]
+fn control_stream_remote_receive_one_frame_at_a_time() {
+    use neqo_common::Encoder;
+    use neqo_transport::StreamType;
+    use test_fixture::{connect, now};
+
+    let (mut client, mut server) = connect();
+    let stream_id = server.stream_create(StreamType::UniDi).unwrap();
+    let frames = [8, 4].map(|id| HFrame::Goaway {
+        stream_id: StreamId::new(id),
+    });
+    let mut enc = Encoder::default();
+    for f in &frames {
+        f.encode(&mut enc);
+    }
+    let sent = server.stream_send(stream_id, enc.as_ref()).unwrap();
+    assert_eq!(sent, enc.len());
+    let out = server.process_output(now());
+    client.process_input(out.dgram().unwrap(), now());
+
+    let mut stream = ControlStreamRemote::new(stream_id);
+    for f in frames {
+        let output = ReceiveOutput::ControlFrames(vec![f]);
+        assert_eq!(stream.receive(&mut client, now()), Ok((output, false)));
+    }
+    let output = ReceiveOutput::NoOutput;
+    assert_eq!(stream.receive(&mut client, now()), Ok((output, false)));
 }

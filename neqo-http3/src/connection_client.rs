@@ -871,7 +871,7 @@ impl Http3Client {
                     }
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    self.handle_stream_readable(stream_id, now)?;
+                    while self.handle_stream_readable(stream_id, now)? {}
                 }
                 ConnectionEvent::RecvStreamReset {
                     stream_id,
@@ -942,8 +942,10 @@ impl Http3Client {
     ///     - `HFrame::Goaway { stream_id }` needs specific handling by the client by the protocol
     ///       specification.
     ///
+    /// Returns `true` if a control frame was read, i.e., there may be more to read.
+    ///
     /// [1]: https://github.com/mozilla/neqo/blob/main/neqo-http3/src/connection.rs
-    fn handle_stream_readable(&mut self, stream_id: StreamId, now: Instant) -> Res<()> {
+    fn handle_stream_readable(&mut self, stream_id: StreamId, now: Instant) -> Res<bool> {
         match self
             .base_handler
             .handle_stream_readable(&mut self.conn, stream_id, now)?
@@ -960,7 +962,7 @@ impl Http3Client {
                     self.base_handler
                         .handle_stream_readable(&mut self.conn, stream_id, now)?;
                 debug_assert!(matches!(res, ReceiveOutput::NoOutput));
-                Ok(())
+                Ok(false)
             }
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
@@ -980,9 +982,9 @@ impl Http3Client {
                         }
                     }?;
                 }
-                Ok(())
+                Ok(true)
             }
-            _ => Ok(()),
+            _ => Ok(false),
         }
     }
 
@@ -3210,6 +3212,30 @@ mod tests {
         client.process(out.dgram(), now());
 
         assert_closed(&client, &Error::HttpGeneralProtocol);
+    }
+
+    #[test]
+    fn multiple_goaways_in_one_packet() {
+        let (mut client, mut server) = connect();
+
+        let ids = [8, 4];
+        let mut enc = Encoder::default();
+        for id in ids {
+            HFrame::Goaway {
+                stream_id: StreamId::new(id),
+            }
+            .encode(&mut enc);
+        }
+        _ = server
+            .conn
+            .stream_send(server.control_stream_id.unwrap(), enc.as_ref())
+            .unwrap();
+
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+
+        let last = StreamId::new(ids[ids.len() - 1]);
+        assert_eq!(client.state(), Http3State::GoingAway(last));
     }
 
     #[test]
