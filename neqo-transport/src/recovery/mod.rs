@@ -1356,13 +1356,19 @@ mod tests {
         lr
     }
 
-    // The ack delay is removed from any RTT estimate.
+    // The ack delay is removed from the smoothed RTT and RTTVAR, but not from the latest RTT.
     #[test]
     fn ack_delay_adjusted() {
         let mut lr = setup_lr(2);
         ack(&mut lr, 1, TEST_RTT + ACK_DELAY);
         // RTT stays the same, but the RTTVAR is adjusted downwards.
-        assert_rtts(&lr, TEST_RTT, TEST_RTT, TEST_RTTVAR * 3 / 4, TEST_RTT);
+        assert_rtts(
+            &lr,
+            TEST_RTT + ACK_DELAY,
+            TEST_RTT,
+            TEST_RTTVAR * 3 / 4,
+            TEST_RTT,
+        );
         assert_no_sent_times(&lr);
     }
 
