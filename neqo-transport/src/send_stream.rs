@@ -121,6 +121,8 @@ pub struct RangeTracker {
     used: BTreeMap<u64, (u64, RangeState)>,
     /// This is a cache for the output of `first_unmarked_range`, which we check a lot.
     first_unmarked: Option<(u64, Option<u64>)>,
+    /// Everything below this offset is marked, so `first_unmarked_range` resumes from here.
+    marked_below: u64,
 }
 
 impl RangeTracker {
@@ -141,17 +143,22 @@ impl RangeTracker {
             return first_unmarked;
         }
 
-        let mut prev_end = self.acked;
+        let mut prev_end = max(self.acked, self.marked_below);
+        if let Some((&off, &(len, _))) = self.used.range(..prev_end).next_back() {
+            prev_end = max(prev_end, off + len); // That range might have been extended.
+        }
 
-        for (&cur_off, &(cur_len, _)) in &self.used {
+        for (&cur_off, &(cur_len, _)) in self.used.range(prev_end..) {
             if prev_end == cur_off {
                 prev_end = cur_off + cur_len;
             } else {
                 let res = (prev_end, Some(cur_off - prev_end));
+                self.marked_below = prev_end;
                 self.first_unmarked = Some(res);
                 return res;
             }
         }
+        self.marked_below = prev_end;
         self.first_unmarked = Some((prev_end, None));
         (prev_end, None)
     }
@@ -425,6 +432,7 @@ impl RangeTracker {
                 } else {
                     to_remove.push(*cur_off);
                 }
+                self.marked_below = min(self.marked_below, max(off, *cur_off));
             }
 
             if head {
@@ -3309,6 +3317,34 @@ mod tests {
 
         assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
         assert_eq!(rt.highest_offset(), 30);
+    }
+
+    /// The search for the first unmarked range follows extended, lost and acked ranges.
+    #[test]
+    fn first_unmarked_range_resumes() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 10);
+        assert_eq!(rt.first_unmarked_range(), (10, None));
+
+        rt.mark_sent(10, 5); // Extends a range that starts before the last result.
+        assert_eq!(rt.first_unmarked_range(), (15, None));
+        rt.mark_acked(20, 5);
+        assert_eq!(rt.first_unmarked_range(), (15, Some(5)));
+        rt.mark_sent(15, 5);
+        assert_eq!(rt.first_unmarked_range(), (25, None));
+
+        rt.mark_acked(5, 5);
+        assert_eq!(rt.first_unmarked_range(), (25, None));
+        rt.unmark_range(7, 15); // Only 10..20 is `Sent`.
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+        rt.unmark_range(2, 2);
+        assert_eq!(rt.first_unmarked_range(), (2, Some(2)));
+        rt.mark_sent(2, 2);
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+
+        rt.mark_acked(0, 20); // The acknowledged prefix overtakes the last result.
+        assert_eq!(rt.acked_from_zero(), 25);
+        assert_eq!(rt.first_unmarked_range(), (25, None));
     }
 
     /// Losing a frame inside a coalesced range retransmits only that frame.
