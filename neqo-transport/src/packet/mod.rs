@@ -978,6 +978,9 @@ impl<'a> Public<'a> {
         let header_end = header.end;
         let payload_len = match rx.decrypt(pn, header, self.data) {
             Ok(v) => v,
+            Err(e @ Error::Crypto(_)) => {
+                return Err((self, crypto.auth_failed().err().unwrap_or(e)).into());
+            }
             Err(e) => return Err((self, e).into()),
         };
         // The two reserved bits in the first byte (0x0c for long headers, 0x18
