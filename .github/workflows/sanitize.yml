@@ -1,16 +1,13 @@
 name: Sanitize
 on:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, edited]
   merge_group:
   workflow_dispatch:
 env:
   DUMP_SIMULATION_SEEDS: /tmp/simulation-seeds
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -23,7 +20,6 @@ defaults:
 jobs:
   sanitize:
     name: Sanitize
-    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       fail-fast: false
       matrix:
