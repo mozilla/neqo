@@ -691,7 +691,7 @@ fn client_setters_work_before_the_connect_response() {
     let mut wt = WtTest::new();
     let session_id = wt
         .client
-        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
 
     wt.client

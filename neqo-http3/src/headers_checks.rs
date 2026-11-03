@@ -4,6 +4,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::{net::Ipv6Addr, str::from_utf8};
+
 use enumset::{EnumSet, EnumSetType, enum_set};
 use neqo_common::{Header, header::HeadersExt as _};
 
@@ -102,9 +104,91 @@ const fn is_tchar_symbol(b: u8) -> bool {
     )
 }
 
+/// Whether `b` is a `tchar` (RFC 9110, Section 5.6.2).
+const fn is_tchar(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || is_tchar_symbol(b)
+}
+
 /// Whether `b` may appear in an HTTP/3 field name (RFC 9114, Section 4.2).
 const fn is_field_name_char(b: u8) -> bool {
     b.is_ascii_lowercase() || b.is_ascii_digit() || is_tchar_symbol(b)
+}
+
+/// Whether a request scheme is `http` or `https`, the only schemes supported.
+#[must_use]
+pub const fn request_scheme_valid(scheme: &[u8]) -> bool {
+    scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https")
+}
+
+/// Whether a request authority is valid (RFC 9110, Section 4.2).
+#[must_use]
+pub fn request_authority_valid(authority: &[u8]) -> bool {
+    authority_valid(authority, false)
+}
+
+/// Whether a request path is in origin form (RFC 9112, Section 3.2.1).
+#[must_use]
+pub fn request_path_valid(path: &[u8]) -> bool {
+    // Other VCHARs are accepted, as Firefox sends them unescaped (RFC 3986 allows only pchar).
+    path.starts_with(b"/") && path.iter().all(|&b| b.is_ascii_graphic() && b != b'#')
+}
+
+/// Whether a classic CONNECT authority is valid (RFC 9114, Section 4.4).
+#[must_use]
+pub fn connect_authority_valid(authority: &[u8]) -> bool {
+    authority_valid(authority, true)
+}
+
+/// Whether `s` is `*( unreserved / pct-encoded / sub-delims )` (RFC 3986, Section 2).
+fn uri_chars_valid(s: &[u8]) -> bool {
+    let mut bytes = s.iter();
+    while let Some(&b) = bytes.next() {
+        let valid = if b == b'%' {
+            bytes.next().is_some_and(u8::is_ascii_hexdigit)
+                && bytes.next().is_some_and(u8::is_ascii_hexdigit)
+        } else {
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'-' | b'.'
+                        | b'_'
+                        | b'~'
+                        | b'!'
+                        | b'$'
+                        | b'&'
+                        | b'\''
+                        | b'('
+                        | b')'
+                        | b'*'
+                        | b'+'
+                        | b','
+                        | b';'
+                        | b'='
+                )
+        };
+        if !valid {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether `a` is `host [ ":" port ]` (RFC 3986, Section 3.2; RFC 9110, Sections 4.2 and 9.3.6).
+fn authority_valid(a: &[u8], connect: bool) -> bool {
+    let (host, port) = match a.iter().rposition(|&b| b == b':') {
+        Some(i) if !a[i..].contains(&b']') => (&a[..i], Some(&a[i + 1..])),
+        _ => (a, None),
+    };
+    let host_valid = match host {
+        [b'[', ip @ .., b']'] => from_utf8(ip).is_ok_and(|ip| ip.parse::<Ipv6Addr>().is_ok()),
+        _ => !host.is_empty() && uri_chars_valid(host),
+    };
+    host_valid
+        && port.map_or(!connect, |p| {
+            (p.is_empty() && !connect)
+                || (p.iter().all(u8::is_ascii_digit)
+                    && from_utf8(p).is_ok_and(|p| p.parse::<u16>().is_ok())) // RFC 6335, Section 6.
+        })
 }
 
 /// Checks if request/response headers are well formed, i.e. contain
@@ -117,17 +201,21 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     let mut method_value: Option<&[u8]> = None;
     let mut protocol_value: Option<&[u8]> = None;
     let mut scheme_value: Option<&[u8]> = None;
+    let mut authority_value: Option<&[u8]> = None;
+    let mut path_value: Option<&[u8]> = None;
     let mut pseudo_state = EnumSet::new();
     for header in headers {
         let is_pseudo = track_pseudo(header.name(), &mut pseudo_state, message_type)?;
 
         if is_pseudo {
-            if header.name() == ":method" {
-                method_value = Some(header.value());
-            } else if header.name() == ":protocol" {
-                protocol_value = Some(header.value());
-            } else if header.name() == ":scheme" {
-                scheme_value = Some(header.value());
+            let value = Some(header.value());
+            match header.name() {
+                ":method" => method_value = value,
+                ":protocol" => protocol_value = value,
+                ":scheme" => scheme_value = value,
+                ":authority" => authority_value = value,
+                ":path" => path_value = value,
+                _ => {}
             }
         }
 
@@ -157,6 +245,12 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 return Err(Error::InvalidHeader);
             }
             "te" if header.value() != b"trailers" => return Err(Error::InvalidHeader),
+            "host" if message_type == MessageType::Request => {
+                if authority_value.is_some_and(|a| a != header.value()) {
+                    return Err(Error::InvalidHeader); // RFC 9114, Section 4.3.1.
+                }
+                authority_value = Some(header.value());
+            }
             _ => {}
         }
     }
@@ -195,6 +289,30 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         return Err(Error::InvalidHeader);
     }
 
+    let valid = match message_type {
+        MessageType::Response => true,
+        MessageType::Request
+            if method_value == Some(b"CONNECT".as_ref()) && protocol_value.is_none() =>
+        {
+            scheme_value.is_none()
+                && path_value.is_none()
+                && authority_value.is_some_and(connect_authority_valid)
+        }
+        MessageType::Request => match (method_value, scheme_value, authority_value, path_value) {
+            (Some(m), Some(s), Some(a), Some(p)) => {
+                !m.is_empty()
+                    && m.iter().all(|&b| is_tchar(b))
+                    && request_scheme_valid(s)
+                    && request_authority_valid(a)
+                    && (request_path_valid(p) || (p == b"*" && m == b"OPTIONS"))
+            }
+            _ => false,
+        },
+    };
+    if !valid {
+        return Err(Error::InvalidHeader);
+    }
+
     Ok(())
 }
 
@@ -219,7 +337,7 @@ mod tests {
     use neqo_common::Header;
 
     use super::{headers_valid, is_interim};
-    use crate::{Error, MessageType};
+    use crate::{Error, MessageType, Res};
 
     fn create_connect_headers() -> Vec<Header> {
         vec![
@@ -333,6 +451,16 @@ mod tests {
     }
 
     #[test]
+    fn response_host_not_checked() {
+        let headers = vec![
+            Header::new(":status", "200"),
+            Header::new("host", ""),
+            Header::new("host", "a.example"),
+        ];
+        assert_eq!(headers_valid(&headers, MessageType::Response), Ok(()));
+    }
+
+    #[test]
     fn response_missing_status() {
         let headers: Vec<Header> = vec![];
         assert!(headers_valid(&headers, MessageType::Response).is_err());
@@ -343,6 +471,7 @@ mod tests {
         let headers = vec![
             Header::new(":method", "GET"),
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
             Header::new(":path", "/index.html"),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_ok());
@@ -357,6 +486,7 @@ mod tests {
             let headers = vec![
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
+                Header::new(":authority", "something.com"),
                 Header::new(":path", "/"),
                 Header::new(bad, "value"),
             ];
@@ -367,6 +497,7 @@ mod tests {
         let headers = vec![
             Header::new(":method", "GET"),
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
             Header::new(":path", "/"),
             Header::new("xname", "value"),
         ];
@@ -382,6 +513,7 @@ mod tests {
             let headers = vec![
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
+                Header::new(":authority", "something.com"),
                 Header::new(":path", "/"),
                 Header::new("name", bad),
             ];
@@ -392,6 +524,7 @@ mod tests {
         let headers = vec![
             Header::new(":method", "GET"),
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
             Header::new(":path", b"/\r\nx".as_slice()),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
@@ -412,6 +545,7 @@ mod tests {
             let request = vec![
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
+                Header::new(":authority", "something.com"),
                 Header::new(":path", "/"),
                 Header::new(bad, "1"),
             ];
@@ -438,10 +572,177 @@ mod tests {
         let request = vec![
             Header::new(":method", "GET"),
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
             Header::new(":path", "/"),
             Header::new("x", value),
         ];
         assert_eq!(headers_valid(&request, MessageType::Request), Ok(()));
+    }
+
+    fn request(method: &str, scheme: &str, authority: &str, path: &str) -> Vec<Header> {
+        vec![
+            Header::new(":method", method),
+            Header::new(":scheme", scheme),
+            Header::new(":authority", authority),
+            Header::new(":path", path),
+        ]
+    }
+
+    fn connect(authority: &str) -> Vec<Header> {
+        vec![
+            Header::new(":method", "CONNECT"),
+            Header::new(":authority", authority),
+        ]
+    }
+
+    fn no_authority(scheme: &str) -> Vec<Header> {
+        vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", scheme),
+            Header::new(":path", "/"),
+        ]
+    }
+
+    fn field(name: &str, value: &str) -> Vec<Header> {
+        vec![Header::new(name, value)]
+    }
+
+    fn check(headers: &[Header]) -> Res<()> {
+        headers_valid(headers, MessageType::Request)
+    }
+
+    #[test]
+    fn reject_invalid_request_pseudo_header_value() {
+        // Invalid pseudo-header values make a request malformed (RFC 9114, Sections 4.3.1 and 4.4).
+        for bad in [
+            request("GET /admin HTTP/1.1", "https", "a.example", "/x"),
+            request("", "https", "a.example", "/x"),
+            request("GE\x7fT", "https", "a.example", "/x"),
+            request("GET", "", "a.example", "/x"),
+            request("GET", "1http", "a.example", "/x"),
+            request("GET", "ht_tp", "a.example", "/x"),
+            request("GET", "ftp", "a.example", "/x"),
+            request("GET", "a1+-.", "u@a.example", "x"),
+            request("GET", "https", "", "/x"),
+            request("GET", "https", "u@a.example", "/x"),
+            request("GET", "http", "u@a.example", "/x"),
+            request("GET", "https", "a.example", ""),
+            request("GET", "https", "a.example", "x"),
+            request("GET", "HTTPS", "a.example", "x"),
+            request("GET", "https", "a.example", "*"),
+            request("OPTIONS", "https", "a.example", "*x"),
+            request("GET", "https", "a.example", "/x HTTP/1.0"),
+            request("GET", "https", "a.example", "/x\x01"),
+            request("GET", "https", "a.example", "/x\x7f"),
+            [
+                request("GET", "https", "a.example", "/"),
+                field("host", "b.example"),
+            ]
+            .concat(),
+            no_authority("https"),
+            no_authority("http"),
+            no_authority("a1+-."),
+            [no_authority("https"), field("host", "")].concat(),
+            connect(""),
+            connect("a.example"),
+            connect("a.example:"),
+            connect("a.example:4x3"),
+            connect("::1:443"),
+            connect("[::1:443"),
+            connect("::1]:443"),
+            connect("[::1]"),
+            [connect("a.example:443"), field(":scheme", "https")].concat(),
+            [connect("a.example:443"), field(":path", "/")].concat(),
+        ] {
+            assert_eq!(check(&bad), Err(Error::InvalidHeader));
+        }
+
+        for good in [
+            request("GET", "https", "a.example", "/x?y"),
+            request("OPTIONS", "https", "a.example", "*"),
+            [
+                request("GET", "https", "a.example", "/"),
+                field("host", "a.example"),
+            ]
+            .concat(),
+            [no_authority("https"), field("host", "a.example")].concat(),
+            connect("a.example:443"),
+            connect("[::1]:443"),
+        ] {
+            assert_eq!(check(&good), Ok(()));
+        }
+    }
+
+    #[test]
+    fn reject_invalid_request_target() {
+        // RFC 3986 grammar (RFC 9114, Section 4.3.1; RFC 9110, Sections 4.2 and 9.3.6).
+        for bad in [
+            request("GET", "https", "a.example", "/\u{e9}"),
+            request("GET", "https", "a.example", "/x?a#b"),
+            request("GET", "https", "a.example", "/x#y"),
+            request("GET", "https", "a.example", "#y"),
+            request("GET", "https", "a.example", "/a b"),
+            request("GET", "https", "a.example:abc", "/"),
+            request("GET", "https", "a.example:65536", "/"),
+            request("GET", "https", ":443", "/"),
+            request("GET", "https", "a b", "/"),
+            request("GET", "https", "a.example/", "/"),
+            request("GET", "https", "a%zz", "/"),
+            request("GET", "https", "\u{e9}.example", "/"),
+            request("GET", "https", "::1", "/"),
+            request("GET", "https", "[::g]", "/"),
+            request("GET", "https", "[1.2.3.4]", "/"),
+            request("GET", "https", "[::1]x", "/"),
+            request("GET", "https", "[v1]", "/"),
+            request("GET", "https", "[v.x]", "/"),
+            request("GET", "https", "[vx.y]", "/"),
+            request("GET", "https", "[v1.]", "/"),
+            request("GET", "https", "[v1.%41]", "/"),
+            request("GET", "https", "[v1F.a:b]", "/"),
+            request("GET", "https", "[V1.x]", "/"),
+            request("GET", "https", "a.example:+443", "/"),
+            [no_authority("https"), field("host", "a.example:abc")].concat(),
+            connect(":443"),
+            connect("a.example:65536"),
+            connect("a b:443"),
+            connect("[v1]:443"),
+            connect("[v1.x]:443"),
+        ] {
+            assert_eq!(check(&bad), Err(Error::InvalidHeader));
+        }
+
+        let vchars: String = (b'!'..=b'~')
+            .filter(|&b| b != b'#')
+            .map(char::from)
+            .collect();
+        for good in [
+            request("GET", "https", "a.example", "/a-._~!$&'()*+,;=:@/%2F%aa"),
+            request("GET", "https", "a.example", "/a//b/"),
+            request("GET", "https", "a.example", "/x?a/b?c:@%20"),
+            request("GET", "https", "a.example", "//x"),
+            request("GET", "https", "a.example", "/a|b"),
+            request("GET", "https", "a.example", "/a[b]"),
+            request("GET", "https", "a.example", "/%"),
+            request("GET", "https", "a.example", "/%2"),
+            request("GET", "https", "a.example", "/%2g"),
+            request("GET", "https", "a.example", "/%g2"),
+            request("GET", "https", "a.example", "/x?a[b]"),
+            request("GET", "https", "a.example", "/x?%zz"),
+            request("GET", "https", "a.example", &format!("/{vchars}")),
+            request("GET", "https", "a.example:", "/"),
+            request("GET", "https", "a.example:0", "/"),
+            request("GET", "https", "a.example:0443", "/"),
+            request("GET", "https", "a.example:65535", "/"),
+            request("GET", "https", "a_b-c~!$&'()*+,;=%2E", "/"),
+            request("GET", "https", "192.0.2.1:443", "/"),
+            request("GET", "https", "[::1]", "/"),
+            request("GET", "https", "[2001:db8::192.0.2.1]:443", "/"),
+            [no_authority("https"), field("host", "a.example:443")].concat(),
+            connect("a.example:0"),
+            connect("a.example:65535"),
+        ] {
+            assert_eq!(check(&good), Ok(()));
+        }
     }
 
     #[test]
@@ -462,6 +763,7 @@ mod tests {
             let request = vec![
                 Header::new(":method", "GET"),
                 Header::new(":scheme", "https"),
+                Header::new(":authority", "something.com"),
                 Header::new(":path", "/"),
                 Header::new(name, "x"),
             ];
@@ -472,6 +774,7 @@ mod tests {
         let ok = vec![
             Header::new(":method", "GET"),
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
             Header::new(":path", "/"),
             Header::new("te", "trailers"),
         ];
@@ -482,6 +785,7 @@ mod tests {
     fn regular_request_missing_method() {
         let headers = vec![
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
             Header::new(":path", "/index.html"),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
@@ -501,6 +805,7 @@ mod tests {
         let headers = vec![
             Header::new(":method", "GET"),
             Header::new(":scheme", "https"),
+            Header::new(":authority", "something.com"),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
     }

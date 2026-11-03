@@ -86,6 +86,62 @@ fn wt_session_reject() {
 }
 
 #[test]
+fn wt_session_create_invalid_header_value() {
+    let mut wt = WtTest::new();
+    let headers = [Header::new("x", "a\rb")];
+    let target = ("https", "something.com", "/");
+    let client = &mut wt.client;
+    let res = client.webtransport_create_session(now(), &target, &headers);
+    assert_eq!(res, Err(Error::InvalidInput));
+    let first = StreamId::new(0);
+    let protocol = client.webtransport_session_protocol(first);
+    assert_eq!(protocol, Err(Error::InvalidStreamId));
+    assert_eq!(wt.create_wt_session().stream_id(), first);
+}
+
+fn session_response_invalid_header_value(accept: &SessionAcceptAction) {
+    let mut wt = WtTest::new();
+    let session_id = wt
+        .client
+        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
+        .unwrap();
+    wt.exchange_packets();
+    let session = wt
+        .server
+        .events()
+        .find_map(|e| match e {
+            Http3ServerEvent::WebTransport(ServerEvent::NewSession { session, .. }) => {
+                Some(session)
+            }
+            _ => None,
+        })
+        .unwrap();
+    let before = wt.client.transport_stats().frame_rx;
+    assert_eq!(session.response(accept, now()), Err(Error::InvalidInput));
+    wt.exchange_packets();
+    let after = wt.client.transport_stats().frame_rx;
+    assert_eq!(after.reset_stream, before.reset_stream + 1);
+    assert_eq!(after.stop_sending, before.stop_sending + 1);
+    assert!(wt.server.events().any(|e| matches!(e,
+        Http3ServerEvent::StreamReset { stream, error }
+            if stream.stream_id() == session_id && error == Error::HttpRequestRejected.code())));
+    let reason = CloseReason::Error(Error::HttpRequestRejected.code());
+    wt.check_session_closed_event_client(session_id, &reason, None);
+}
+
+#[test]
+fn wt_session_accept_with_invalid_header_value() {
+    let headers = vec![Header::new("x", "a\rb")];
+    session_response_invalid_header_value(&SessionAcceptAction::AcceptWith(headers));
+}
+
+#[test]
+fn wt_session_reject_invalid_header_value() {
+    let headers = vec![Header::new(":status", "404"), Header::new("x", "a\rb")];
+    session_response_invalid_header_value(&SessionAcceptAction::Reject(headers));
+}
+
+#[test]
 fn wt_session_close_client() {
     let mut wt = WtTest::new();
     let wt_session = wt.create_wt_session();
@@ -162,7 +218,7 @@ fn wt_session_response_with_1xx() {
 
     let wt_session_id = wt
         .client
-        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
     wt.exchange_packets();
 
@@ -224,7 +280,7 @@ fn wt_session_respone_200_with_fin() {
 
     let wt_session_id = wt
         .client
-        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
     wt.exchange_packets();
     let mut wt_server_session = None;
@@ -267,7 +323,7 @@ fn wt_session_respone_200_with_fin() {
 fn wt_session_request(wt: &mut WtTest) -> (StreamId, ServerSession) {
     let wt_session_id = wt
         .client
-        .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+        .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
     wt.exchange_packets();
     let wt_server_session = wt
@@ -362,7 +418,7 @@ fn connect_udp_session_reject_with_datagram_capsule() {
     let wt_session = wt.create_wt_session();
     let udp_session_id = wt
         .client
-        .connect_udp_create_session(now(), ("https", "something.com", "/"), &[])
+        .connect_udp_create_session(now(), &("https", "something.com", "/"), &[])
         .unwrap();
     wt.exchange_packets();
     // No server API sends data after a non-2xx response, so borrow the WT handler's connection.
@@ -552,7 +608,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -841,7 +897,7 @@ fn wt_session_protocol_non_webtransport_session() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
