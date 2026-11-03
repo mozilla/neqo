@@ -99,7 +99,7 @@ impl RttEstimate {
     pub fn update(
         &mut self,
         qlog: &mut Qlog,
-        mut rtt_sample: Duration,
+        rtt_sample: Duration,
         ack_delay: Duration,
         source: RttSource,
         now: Instant,
@@ -123,16 +123,18 @@ impl RttEstimate {
             // min_rtt ignores ack delay (RFC 9002, Section 5.2).
             self.min_rtt = min(self.min_rtt, rtt_sample);
             // Adjust for ack delay unless it goes below `min_rtt` (RFC 9002, Section 5.3).
+            let mut adjusted_rtt = rtt_sample;
             if rtt_sample >= ack_delay + self.min_rtt {
-                rtt_sample -= ack_delay;
+                adjusted_rtt -= ack_delay;
             }
 
             // Calculate EWMA RTT (based on {{?RFC6298}}).
-            let rttvar_sample = self.smoothed_rtt.abs_diff(rtt_sample);
+            let rttvar_sample = self.smoothed_rtt.abs_diff(adjusted_rtt);
 
+            // latest_rtt ignores ack delay (RFC 9002, Section 5.1 and Appendix A.7).
             self.latest_rtt = rtt_sample;
             self.rttvar = (self.rttvar * 3 + rttvar_sample) / 4;
-            self.smoothed_rtt = (self.smoothed_rtt * 7 + rtt_sample) / 8;
+            self.smoothed_rtt = (self.smoothed_rtt * 7 + adjusted_rtt) / 8;
         }
         trace!(
             "RTT latest={:?} -> estimate={:?}~{:?}",
@@ -279,6 +281,16 @@ mod tests {
         let mut rtt = initialized_rtt();
         update(&mut rtt, sample, large_delay, RttSource::Ack);
         assert_eq!(rtt.estimate(), ewma(DEFAULT_INITIAL_RTT, effective));
+    }
+
+    #[test]
+    fn latest_rtt_ignores_ack_delay() {
+        let sample = DEFAULT_INITIAL_RTT * 2;
+        let adjusted = sample.checked_sub(DEFAULT_REMOTE_ACK_DELAY).unwrap();
+        let mut rtt = initialized_rtt();
+        update(&mut rtt, sample, DEFAULT_REMOTE_ACK_DELAY, RttSource::Ack);
+        assert_eq!(rtt.latest_rtt(), sample);
+        assert_eq!(rtt.estimate(), ewma(DEFAULT_INITIAL_RTT, adjusted));
     }
 
     #[test]
