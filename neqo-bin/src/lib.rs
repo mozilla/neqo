@@ -485,4 +485,12 @@ mod tests {
             assert_eq!(contained_path(base, path), None, "{path}");
         }
     }
+
+    #[test]
+    #[cfg(windows)]
+    fn contained_path_rejects_windows_separators_and_prefixes() {
+        for path in [r"..\a", r"a\..\..\b", r"C:\a", "C:a", r"\\s\h\a"] {
+            assert_eq!(contained_path(Path::new("base"), path), None, "{path}");
+        }
+    }
 }

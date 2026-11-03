@@ -20,7 +20,7 @@ use std::{
     io,
     net::{SocketAddr, ToSocketAddrs as _},
     num::NonZeroUsize,
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     process::exit,
     rc::Rc,
@@ -48,7 +48,7 @@ use thiserror::Error;
 use tokio::time::Sleep;
 use tracing::{debug, error, info, warn};
 
-use crate::{SharedArgs, now, report_stats, send_data::SendData};
+use crate::{SharedArgs, contained_path, now, report_stats, send_data::SendData};
 
 const ANTI_REPLAY_WINDOW: Duration = Duration::from_secs(10);
 
@@ -306,11 +306,10 @@ pub(super) fn configure_server(server: &mut impl ServerConfig, args: &Args) {
 /// path bytes instead.
 pub(super) fn response_for_path(path: &str, is_qns_test: bool) -> Result<SendData, ()> {
     if is_qns_test {
-        if path.split('/').any(|segment| segment == "..") {
-            error!("Rejecting path with '..' component: {path}");
+        let Some(file_path) = contained_path(Path::new("/www"), path.trim_matches('/')) else {
+            error!("Rejecting path outside /www: {path}");
             return Err(());
-        }
-        let file_path: PathBuf = ["/www", path.trim_matches('/')].iter().collect();
+        };
         fs::read(file_path).map(SendData::from).map_err(|e| {
             error!("Failed to read {path}: {e}");
         })
