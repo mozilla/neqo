@@ -5419,7 +5419,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: 0x10e,
                 local: true,
             }
         );
@@ -5736,7 +5736,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: 0x101,
                 local: true,
             }
         );
