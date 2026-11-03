@@ -35,7 +35,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            TransportPrerequisites,
+            TransportPrerequisites, WT_SESSION_GONE,
             send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
@@ -598,6 +598,12 @@ impl Http3Connection {
             return Err(Error::HttpClosedCriticalStream);
         }
 
+        let app_error = self
+            .send_streams
+            .get(&stream_id)
+            .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+            .and_then(|_| conn.stream_reset_code(stream_id).ok().flatten())
+            .unwrap_or(app_error);
         self.close_send(stream_id, CloseType::ResetRemote(app_error), conn);
         Ok(())
     }
@@ -1204,6 +1210,7 @@ impl Http3Connection {
             self.remove_send_stream(stream_id, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
+            self.cancel_extended_connect_sub_streams(stream_id, conn);
         }
         Ok(())
     }
@@ -1520,8 +1527,17 @@ impl Http3Connection {
             self.remove_send_stream(session_id, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(session_id);
+            self.cancel_extended_connect_sub_streams(session_id, conn);
         }
         Ok(session)
+    }
+
+    /// A session is terminated once its close is queued, even if flow control holds it back.
+    fn cancel_extended_connect_sub_streams(&mut self, session_id: StreamId, conn: &mut Connection) {
+        // TODO: Bound how long a closed session waits for flow-control credit.
+        if let Ok(wt) = self.get_extended_connect_session(session_id) {
+            self.remove_extended_connect(&wt, conn);
+        }
     }
 
     fn get_extended_connect_session(
@@ -1606,6 +1622,7 @@ impl Http3Connection {
 
     pub(crate) fn webtransport_create_stream_remote(
         &mut self,
+        conn: &mut Connection,
         session_id: StreamId,
         stream_id: StreamId,
         send_events: Box<dyn SendStreamEvents>,
@@ -1614,6 +1631,11 @@ impl Http3Connection {
         trace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
         let wt = self.get_extended_connect_session(session_id)?;
+        if wt.borrow().is_closing() {
+            drop(conn.stream_stop_sending(stream_id, WT_SESSION_GONE));
+            drop(conn.stream_reset_send(stream_id, WT_SESSION_GONE));
+            return Ok(());
+        }
 
         self.webtransport_create_stream_internal(
             wt,
@@ -1951,9 +1973,9 @@ impl Http3Connection {
             // Use CloseType::ResetRemote so that an event will be sent. CloseType::LocalError would
             // have the same effect.
             if let Some(mut s) = self.recv_streams.remove(&id) {
-                drop(s.reset(CloseType::ResetRemote(Error::HttpRequestCancelled.code())));
+                drop(s.reset(CloseType::ResetRemote(WT_SESSION_GONE)));
             }
-            drop(conn.stream_stop_sending(id, Error::HttpRequestCancelled.code()));
+            drop(conn.stream_stop_sending(id, WT_SESSION_GONE));
         }
         #[expect(
             clippy::iter_over_hash_type,
@@ -1962,9 +1984,9 @@ impl Http3Connection {
         for id in send {
             trace!("Remove the extended connect sub send stream {id}");
             if let Some(mut s) = self.send_streams.remove(&id) {
-                s.handle_stop_sending(CloseType::ResetRemote(Error::HttpRequestCancelled.code()));
+                s.handle_stop_sending(CloseType::ResetRemote(WT_SESSION_GONE));
             }
-            drop(conn.stream_reset_send(id, Error::HttpRequestCancelled.code()));
+            drop(conn.stream_reset_send(id, WT_SESSION_GONE));
         }
     }
 
