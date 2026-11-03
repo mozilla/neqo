@@ -8,16 +8,25 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, to_u64};
 use nss::{AllowZeroRtt, AntiReplay};
-use test_fixture::{assertions, now};
+use test_fixture::{DEFAULT_ADDR, assertions, fixture_init, now};
 use tracing::debug;
 
 use super::{
-    super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
-    default_server, exchange_ticket, migration::NewConnectionIds, new_server, resumed_server,
+    super::{CloseReason, Connection},
+    CountingConnectionIdGenerator, Output, assert_error, connect, connect_fail, default_client,
+    default_server, exchange_ticket, handshake,
+    migration::NewConnectionIds,
+    new_server, resumed_server,
 };
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamDataLimit, StreamType,
-    Version, events::ConnectionEvent,
+    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Pmtud, State, StreamDataLimit,
+    StreamType, Version,
+    events::ConnectionEvent,
+    tparams::{
+        TransportParameter,
+        TransportParameterId::{self, *},
+        TransportParameters, TransportParametersHandler,
+    },
 };
 
 #[test]
@@ -360,6 +369,316 @@ fn zero_rtt_update_flow_control() {
     // And the new limit applies.
     assert!(client.stream_send_atomic(uni_stream, MESSAGE).unwrap());
     assert!(client.stream_send_atomic(bidi_stream, MESSAGE).unwrap());
+}
+
+/// The limits that a server accepting 0-RTT must not reduce.
+const REMEMBERED_LIMITS: [TransportParameterId; 8] = [
+    ActiveConnectionIdLimit,
+    InitialMaxData,
+    InitialMaxStreamDataBidiLocal,
+    InitialMaxStreamDataBidiRemote,
+    InitialMaxStreamDataUni,
+    InitialMaxStreamsBidi,
+    InitialMaxStreamsUni,
+    MaxDatagramFrameSize,
+];
+
+/// Resume after `server` with a server that applies `change` to the remembered transport
+/// parameters. The ticket carries the changed values, so that a server accepts 0-RTT.
+fn zero_rtt_resume_changed(
+    mut server: Connection,
+    change: impl Fn(&mut TransportParameters, &TransportParameters),
+) -> (Connection, Connection) {
+    let mut client = default_client();
+    connect(&mut client, &mut server);
+    let remembered = client.tps.borrow().remote().clone();
+    change(server.tps.borrow_mut().local_mut(), &remembered);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let server = resumed_server(&client);
+    change(server.tps.borrow_mut().local_mut(), &remembered);
+    (client, server)
+}
+
+fn zero_rtt_resume_connect(
+    server: Connection,
+    change: impl Fn(&mut TransportParameters, &TransportParameters),
+) -> Connection {
+    let (mut client, mut server) = zero_rtt_resume_changed(server, change);
+    connect(&mut client, &mut server);
+    client
+}
+
+fn add(
+    tp: TransportParameterId,
+    delta: i64,
+) -> impl Fn(&mut TransportParameters, &TransportParameters) {
+    move |tps, remembered| {
+        let value = remembered.get_integer(tp);
+        tps.set_integer(tp, value.checked_add_signed(delta).unwrap());
+    }
+}
+
+fn remove_reset_stream_at(tps: &mut TransportParameters, _: &TransportParameters) {
+    tps.remove(ResetStreamAt);
+}
+
+fn zero_rtt_accepted_reduced(change: impl Fn(&mut TransportParameters, &TransportParameters)) {
+    let (mut client, mut server) = zero_rtt_resume_changed(default_server(), change);
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::ProtocolViolation,
+        Error::Peer(Error::ProtocolViolation.code()),
+    );
+    assert!(client.tls_info().unwrap().early_data_accepted());
+}
+
+/// A server that accepts 0-RTT must not reduce remembered limits (RFC 9000, Section 7.4.1;
+/// RFC 9221, Section 3).
+#[test]
+fn zero_rtt_accepted_reduced_limits() {
+    for tp in REMEMBERED_LIMITS {
+        zero_rtt_accepted_reduced(add(tp, -1));
+    }
+}
+
+/// A server that accepts 0-RTT must not disable `reset_stream_at`.
+#[test]
+fn zero_rtt_accepted_reset_stream_at_disabled() {
+    zero_rtt_accepted_reduced(remove_reset_stream_at);
+}
+
+#[test]
+fn zero_rtt_accepted_same_or_larger_limits() {
+    for tp in REMEMBERED_LIMITS {
+        for delta in [0, 1] {
+            let client = zero_rtt_resume_connect(default_server(), add(tp, delta));
+            assert!(client.tls_info().unwrap().early_data_accepted());
+        }
+    }
+}
+
+#[test]
+fn zero_rtt_accepted_reset_stream_at_not_remembered() {
+    let server = new_server(ConnectionParameters::default().reliable_stream_reset(false));
+    let client = zero_rtt_resume_connect(server, remove_reset_stream_at);
+    assert!(client.tls_info().unwrap().early_data_accepted());
+}
+
+/// An absent value is the default, so it does not reduce an explicit default value.
+#[test]
+fn zero_rtt_accepted_absent_default_limit() {
+    let server = default_server();
+    let dflt = TransportParameters::default().get_integer(ActiveConnectionIdLimit);
+    server
+        .tps
+        .borrow_mut()
+        .local_mut()
+        .set(ActiveConnectionIdLimit, TransportParameter::Integer(dflt));
+    let client = zero_rtt_resume_connect(server, |tps, _| tps.remove(ActiveConnectionIdLimit));
+    assert!(client.tls_info().unwrap().early_data_accepted());
+    let tps = client.tps.borrow();
+    let (remembered, handshake) = (tps.remote_0rtt().unwrap(), tps.remote_handshake().unwrap());
+    assert!(remembered.has_value(ActiveConnectionIdLimit));
+    assert!(!handshake.has_value(ActiveConnectionIdLimit));
+}
+
+fn zero_rtt_rejected_changed(
+    change: impl Fn(&mut TransportParameters, &TransportParameters),
+) -> (Connection, Connection) {
+    let (client, server) = resumed_pair_that_rejects_0rtt(0);
+    let remembered = client.tps.borrow().remote_0rtt().unwrap().clone();
+    change(server.tps.borrow_mut().local_mut(), &remembered);
+    (client, server)
+}
+
+fn zero_rtt_rejected_reduced(change: impl Fn(&mut TransportParameters, &TransportParameters)) {
+    let (mut client, mut server) = zero_rtt_rejected_changed(change);
+    connect(&mut client, &mut server);
+    assert!(!client.tls_info().unwrap().early_data_accepted());
+}
+
+/// Without accepted 0-RTT, the limits from the handshake apply.
+#[test]
+fn zero_rtt_rejected_reduced_limits() {
+    for tp in REMEMBERED_LIMITS {
+        zero_rtt_rejected_reduced(add(tp, -1));
+    }
+    zero_rtt_rejected_reduced(remove_reset_stream_at);
+}
+
+fn server_without_0rtt() -> Connection {
+    fixture_init();
+    Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
+    )
+    .unwrap()
+}
+
+fn zero_rtt_not_attempted_reduced(change: impl Fn(&mut TransportParameters, &TransportParameters)) {
+    let client = zero_rtt_resume_connect(server_without_0rtt(), change);
+    assert!(!client.tls_info().unwrap().early_data_accepted());
+}
+
+/// A ticket from a server without 0-RTT leaves the client without 0-RTT.
+#[test]
+fn zero_rtt_not_attempted_reduced_limits() {
+    for tp in REMEMBERED_LIMITS {
+        zero_rtt_not_attempted_reduced(add(tp, -1));
+    }
+    zero_rtt_not_attempted_reduced(remove_reset_stream_at);
+}
+
+/// Like `zero_rtt_resume_changed`, with a shorter idle timeout and `padding` bytes of transport
+/// parameters at the resumed server.
+fn zero_rtt_resume_padded(
+    change: &impl Fn(&mut TransportParameters, &TransportParameters),
+    padding: usize,
+) -> (Connection, Connection) {
+    pad(zero_rtt_resume_changed(default_server(), change), padding)
+}
+
+fn pad((client, server): (Connection, Connection), padding: usize) -> (Connection, Connection) {
+    let idle = ConnectionParameters::DEFAULT_IDLE_TIMEOUT / 2;
+    let idle = TransportParameter::Integer(u64::try_from(idle.as_millis()).unwrap());
+    server.set_local_tparam(IdleTimeout, idle).unwrap();
+    let padding = TransportParameter::Bytes(vec![0; padding]);
+    server
+        .set_local_tparam(TestTransportParameter, padding)
+        .unwrap();
+    (client, server)
+}
+
+/// Delivers the client's first flight and the server's response to it.
+fn first_flight(client: &mut Connection, server: &mut Connection) {
+    while let Some(d) = client.process_output(now()).dgram() {
+        server.process_input(d, now());
+    }
+    while let Some(d) = server.process_output(now()).dgram() {
+        client.process_input(d, now());
+    }
+}
+
+/// Returns `pair(padding)` for a padding at which the server's first flight delivers
+/// `EncryptedExtensions` without `Finished`.
+fn split_flight(pair: impl Fn(usize) -> (Connection, Connection)) -> (Connection, Connection) {
+    let sizes: Vec<_> = (0..Pmtud::default_plpmtu(DEFAULT_ADDR.ip())).collect();
+    let first_flight_until = |done: fn(&Connection) -> bool| {
+        sizes.partition_point(|&padding| {
+            let (mut client, mut server) = pair(padding);
+            first_flight(&mut client, &mut server);
+            done(&client)
+        })
+    };
+    let finished = first_flight_until(|c| *c.state() != State::Handshaking);
+    let encrypted_extensions = first_flight_until(|c| c.tps.borrow().remote_handshake().is_some());
+    // Packet sizes vary by a few bytes, so stay away from the edges.
+    pair(usize::midpoint(finished, encrypted_extensions))
+}
+
+/// The client applies no transport parameter from a server that reduces remembered limits, even
+/// when `EncryptedExtensions` arrives before `Finished`.
+fn zero_rtt_accepted_reduced_split(
+    change: impl Fn(&mut TransportParameters, &TransportParameters),
+) {
+    let (mut client, mut server) = split_flight(|padding| zero_rtt_resume_padded(&change, padding));
+    let stream = client.stream_create(StreamType::BiDi).unwrap();
+    let avail = client.stream_avail_send_space(stream).unwrap();
+    let datagram_size = client.quic_datagrams.remote_datagram_size();
+    let idle = client.idle_timeout.expiry(now(), Duration::ZERO);
+    let reliable_reset = client.peer_supports_reliable_stream_reset();
+
+    first_flight(&mut client, &mut server);
+    let later = client.stream_create(StreamType::BiDi).unwrap();
+    assert!(client.tps.borrow().remote_handshake().is_some());
+    assert_eq!(*client.state(), State::Handshaking);
+    assert_eq!(client.peer_supports_reliable_stream_reset(), reliable_reset);
+    assert_eq!(client.stream_commit(later).is_ok(), reliable_reset);
+    assert_eq!(client.quic_datagrams.remote_datagram_size(), datagram_size);
+    assert_eq!(client.stream_avail_send_space(stream).unwrap(), avail);
+    assert_eq!(client.stream_avail_send_space(later).unwrap(), avail);
+    assert_eq!(client.idle_timeout.expiry(now(), Duration::ZERO), idle);
+
+    handshake(&mut client, &mut server, now(), Duration::ZERO);
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+    let peer_error = Error::Peer(Error::ProtocolViolation.code());
+    assert_error(&server, &CloseReason::Transport(peer_error));
+    assert!(client.tls_info().unwrap().early_data_accepted());
+}
+
+#[test]
+fn zero_rtt_accepted_reduced_limits_split_flight() {
+    zero_rtt_accepted_reduced_split(add(MaxDatagramFrameSize, -1));
+    zero_rtt_accepted_reduced_split(add(InitialMaxStreamDataBidiRemote, -1));
+}
+
+#[test]
+fn zero_rtt_accepted_reset_stream_at_disabled_split_flight() {
+    zero_rtt_accepted_reduced_split(remove_reset_stream_at);
+}
+
+fn assert_remote_applied(client: &Connection, tps: &TransportParameters) {
+    let datagram_size = tps.get_integer(MaxDatagramFrameSize);
+    assert_eq!(client.quic_datagrams.remote_datagram_size(), datagram_size);
+    let reliable_reset = tps.get_empty(ResetStreamAt);
+    assert_eq!(client.peer_supports_reliable_stream_reset(), reliable_reset);
+    assert_eq!(*client.tps.borrow().remote(), *tps);
+}
+
+/// With a split server flight, the client uses the `before_finished` transport parameters until
+/// `Finished` arrives, then the handshake ones.
+fn zero_rtt_split_applies(
+    pair: impl Fn(usize) -> (Connection, Connection),
+    before_finished: fn(&TransportParametersHandler) -> Option<&TransportParameters>,
+) {
+    let (mut client, mut server) = split_flight(pair);
+    first_flight(&mut client, &mut server);
+    assert_eq!(*client.state(), State::Handshaking);
+    let tps = client.tps.borrow();
+    let expected = before_finished(&tps).unwrap().clone();
+    let handshake_tps = tps.remote_handshake().unwrap().clone();
+    drop(tps);
+    assert_remote_applied(&client, &expected);
+
+    handshake(&mut client, &mut server, now(), Duration::ZERO);
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_remote_applied(&client, &handshake_tps);
+}
+
+fn zero_rtt_rejected_split(change: impl Fn(&mut TransportParameters, &TransportParameters)) {
+    let pair = |p| pad(zero_rtt_rejected_changed(&change), p);
+    zero_rtt_split_applies(pair, TransportParametersHandler::remote_handshake);
+}
+
+fn zero_rtt_not_attempted_split(change: impl Fn(&mut TransportParameters, &TransportParameters)) {
+    let pair = |p| pad(zero_rtt_resume_changed(server_without_0rtt(), &change), p);
+    zero_rtt_split_applies(pair, TransportParametersHandler::remote_handshake);
+}
+
+#[test]
+fn zero_rtt_accepted_larger_limits_split_flight() {
+    for tp in [InitialMaxData, InitialMaxStreamsBidi] {
+        let pair = |p| zero_rtt_resume_padded(&add(tp, 1), p);
+        zero_rtt_split_applies(pair, TransportParametersHandler::remote_0rtt);
+    }
+}
+
+#[test]
+fn zero_rtt_rejected_reduced_limits_split_flight() {
+    zero_rtt_rejected_split(add(MaxDatagramFrameSize, -1));
+    zero_rtt_rejected_split(remove_reset_stream_at);
+}
+
+#[test]
+fn zero_rtt_not_attempted_reduced_limits_split_flight() {
+    zero_rtt_not_attempted_split(add(MaxDatagramFrameSize, -1));
+    zero_rtt_not_attempted_split(remove_reset_stream_at);
 }
 
 #[test]
