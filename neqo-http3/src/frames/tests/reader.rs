@@ -130,12 +130,16 @@ fn frame_reading_with_stream_settings2() {
     }
 }
 
-/// Assert that a declared length one byte over `cap` is rejected before buffering,
+/// Assert that a declared length one byte over `cap` is rejected with `err` before buffering,
 /// while exactly `cap` is accepted (i.e. the check is `>`, not `>=`).
-fn assert_cap_boundary<T: FrameDecoder<T> + PartialEq + Debug>(frame_type: HFrameType, cap: usize) {
+fn assert_cap_boundary<T: FrameDecoder<T> + PartialEq + Debug>(
+    frame_type: HFrameType,
+    cap: usize,
+    err: Error,
+) {
     let mut fr = FrameReaderTest::new();
     let over = encode_frame_header(frame_type, cap + 1);
-    assert_eq!(Err(Error::HttpExcessiveLoad), fr.try_process::<T>(&over));
+    assert_eq!(Err(err), fr.try_process::<T>(&over));
 
     let mut fr = FrameReaderTest::new();
     let at = encode_frame_header(frame_type, cap);
@@ -171,7 +175,7 @@ const HFRAME_CAPS: &[(usize, &[HFrameType])] = &[
 fn hframe_length_cap_boundary() {
     for &(cap, frame_types) in HFRAME_CAPS {
         for &frame_type in frame_types {
-            assert_cap_boundary::<HFrame>(frame_type, cap);
+            assert_cap_boundary::<HFrame>(frame_type, cap, Error::HttpExcessiveLoad);
         }
     }
 }
@@ -181,6 +185,7 @@ fn wt_close_session_length_cap_boundary() {
     assert_cap_boundary::<WebTransportFrame>(
         HFrameType(0x2843), // WebTransportFrame::CLOSE_SESSION
         WebTransportFrame::MAX_CLOSE_SESSION_BYTES,
+        Error::HttpMessage,
     );
 }
 
@@ -189,6 +194,7 @@ fn capsule_datagram_length_cap_boundary() {
     assert_cap_boundary::<Capsule>(
         HFrameType(0x00), // capsule::CAPSULE_TYPE_DATAGRAM
         MAX_DATAGRAM_BYTES,
+        Error::HttpExcessiveLoad,
     );
 }
 
