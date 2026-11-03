@@ -1174,13 +1174,14 @@ mod tests {
 
     use super::{
         AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
-        Http3Parameters, Http3State, Rc, RefCell,
+        Http3Parameters, Http3State, Rc, RefCell, WebTransportEvent,
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
+        webtransport::ClientSession as _,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -4949,6 +4950,108 @@ mod tests {
                 .unwrap(),
         );
         assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
+    }
+
+    /// Create a `WebTransport` session whose response headers are blocked on QPACK encoder
+    /// instructions, end it with `close`, and check that the client sends a Stream Cancellation.
+    fn wt_session_qpack_blocked_close(
+        close: impl FnOnce(&mut Http3Client, &mut TestServer, StreamId),
+    ) {
+        let mut client = Http3Client::new(
+            DEFAULT_SERVER_NAME,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            Http3Parameters::default()
+                .connection_parameters(
+                    ConnectionParameters::default()
+                        .versions(Version::default(), vec![Version::default()]),
+                )
+                .max_table_size_decoder(100)
+                .webtransport(true),
+            now(),
+        )
+        .unwrap();
+        let mut server = TestServer::new_with_settings(&[
+            HSetting::new(HSettingType::MaxTableCapacity, 100),
+            HSetting::new(HSettingType::EnableWebTransport, 1),
+            HSetting::new(HSettingType::EnableH3Datagram, 1),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ]);
+        connect_only_transport_with(&mut client, &mut server);
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        server.read_and_check_stream_data(
+            CLIENT_SIDE_DECODER_STREAM_ID,
+            DECODER_STREAM_DATA,
+            false,
+        );
+        server.create_control_stream();
+        server.create_qpack_streams();
+        let out = server.conn.process_output(now());
+        client.process_input(out.dgram().unwrap(), now());
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let session_id = client
+            .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+            .unwrap();
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let header_block = server.encoder.borrow_mut().encode_header_block(
+            &mut server.conn,
+            &[
+                Header::new(":status", "200"),
+                Header::new("my-header", "my-header"),
+            ],
+            session_id,
+        );
+        drop(server.conn.process_output(now())); // Lose the encoder instructions.
+        let mut d = Encoder::default();
+        HFrame::Headers {
+            header_block: header_block.to_vec(),
+        }
+        .encode(&mut d);
+        server_send_response_and_exchange_packet(&mut client, &mut server, session_id, &d, false);
+        let new_session = |e| {
+            matches!(
+                e,
+                Http3ClientEvent::WebTransport(WebTransportEvent::NewSession { .. })
+            )
+        };
+        assert!(!client.events().any(new_session));
+
+        close(&mut client, &mut server, session_id);
+        assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        drop(
+            server
+                .encoder_receiver
+                .receive(&mut server.conn, now())
+                .unwrap(),
+        );
+        assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
+    }
+
+    #[test]
+    fn qpack_blocked_wt_session_reset_by_peer() {
+        wt_session_qpack_blocked_close(|client, server, session_id| {
+            server
+                .conn
+                .stream_reset_send(session_id, Error::HttpRequestCancelled.code())
+                .unwrap();
+            let out = server.conn.process_output(now());
+            client.process_input(out.dgram().unwrap(), now());
+        });
+    }
+
+    #[test]
+    fn qpack_blocked_wt_session_closed_locally() {
+        wt_session_qpack_blocked_close(|client, _, session_id| {
+            client
+                .webtransport_close_session(session_id, 0, "", now())
+                .unwrap();
+        });
     }
 
     /// Park a request stream in `DecodingHeaders`, blocked on QPACK encoder instructions, then
