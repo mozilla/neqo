@@ -770,7 +770,18 @@ impl Http3Connection {
                     .get(&StreamId::from(session_id))
                     .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
                 if !session_exists {
-                    conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
+                    let session = StreamId::from(session_id);
+                    if session.is_client_initiated()
+                        && session.is_bidi()
+                        && conn.is_stream_id_opened(session)
+                        && !self.recv_streams.contains_key(&session)
+                    {
+                        drop(conn.stream_stop_sending(stream_id, WT_SESSION_GONE));
+                        drop(conn.stream_reset_send(stream_id, WT_SESSION_GONE));
+                    } else {
+                        // Test server only: early streams aren't buffered (draft-16 Section 4.6).
+                        conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
+                    }
                     return Ok(ReceiveOutput::NoOutput);
                 }
                 // Set incoming WebTransport streams to be fair (share bandwidth).
