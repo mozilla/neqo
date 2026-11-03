@@ -4,12 +4,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::to_u64;
-use neqo_transport::{ConnectionParameters, StreamType};
+use std::time::Duration;
+
+use neqo_common::{event::Provider as _, to_u64};
+use neqo_transport::{ConnectionParameters, StreamId, StreamType, send_stream};
 use test_fixture::now;
 
 use crate::{
-    Error, Http3Parameters,
+    Error, Http3ClientEvent, Http3Parameters, Http3ServerEvent, WebTransportEvent,
     features::extended_connect::{
         CloseReason,
         tests::webtransport::{DATAGRAM_SIZE, WtTest, wt_default_parameters},
@@ -119,6 +121,242 @@ fn wt_client_stream_uni_close() {
     wt.send_data_client(wt_stream, BUF_CLIENT);
     wt.close_stream_sending_client(wt_stream);
     wt.receive_data_server(wt_stream, true, BUF_CLIENT, true);
+}
+
+fn complete_event(stream_id: StreamId, len: u64) -> Http3ClientEvent {
+    Http3ClientEvent::WebTransport(WebTransportEvent::SendStreamComplete {
+        stream_id,
+        stats: send_stream::Stats::new(len, len, len),
+    })
+}
+
+fn is_complete_event(e: &Http3ClientEvent) -> bool {
+    matches!(
+        e,
+        Http3ClientEvent::WebTransport(WebTransportEvent::SendStreamComplete { .. })
+    )
+}
+
+#[test]
+fn wt_client_stream_uni_close_stats() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+    let len = to_u64(BUF_CLIENT.len());
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    assert_eq!(
+        wt.client.send_data(wt_stream, BUF_CLIENT, now()).unwrap(),
+        BUF_CLIENT.len()
+    );
+    wt.client.stream_close_send(wt_stream, now()).unwrap();
+
+    // The FIN is queued, but nothing has been acknowledged yet.
+    let stats = wt.send_stream_stats(wt_stream).unwrap();
+    assert_eq!(stats.bytes_written(), len);
+    assert_eq!(stats.bytes_acked(), 0);
+
+    wt.exchange_packets();
+    let complete = complete_event(wt_stream, len);
+    assert!(wt.client.events().any(|e| e == complete));
+    assert_eq!(
+        wt.send_stream_stats(wt_stream).unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+#[test]
+fn wt_client_stream_uni_stop_sending_after_close() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    let wt_server_stream = wt.receive_data_server(wt_stream, true, BUF_CLIENT, false);
+
+    wt_server_stream
+        .stream_stop_sending(Error::HttpNone.code())
+        .unwrap();
+    // Have the STOP_SENDING and the FIN cross, so that the client gets the
+    // STOP_SENDING for a stream it has already closed.  The test clock has
+    // to keep moving forward past what `exchange_packets` used.
+    let mut t = now() + Duration::from_secs(1);
+    let mut out = wt.server.process_output(t).dgram();
+    wt.client.stream_close_send(wt_stream, t).unwrap();
+    loop {
+        t += Duration::from_millis(5);
+        out = wt.client.process(out, t).dgram();
+        let client_none = out.is_none();
+        t += Duration::from_millis(5);
+        out = wt.server.process(out, t).dgram();
+        if client_none && out.is_none() {
+            break;
+        }
+    }
+
+    let events: Vec<_> = wt.client.events().collect();
+    assert!(events.iter().any(|e| matches!(
+        e,
+        Http3ClientEvent::StopSending { stream_id, .. } if *stream_id == wt_stream
+    )));
+    assert!(!events.iter().any(is_complete_event));
+    assert_eq!(
+        wt.send_stream_stats(wt_stream).unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+#[test]
+fn wt_client_stream_uni_reset_after_close() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    drop(wt.receive_data_server(wt_stream, true, BUF_CLIENT, false));
+    wt.client.stream_close_send(wt_stream, now()).unwrap();
+    wt.reset_stream_client(wt_stream);
+    assert_eq!(
+        wt.send_stream_stats(wt_stream).unwrap_err(),
+        Error::InvalidStreamId
+    );
+
+    wt.receive_reset_server(wt_stream, Error::HttpNone.code());
+    assert!(!wt.client.events().any(|e| is_complete_event(&e)));
+}
+
+#[test]
+fn wt_client_stream_bidi_close_stats() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    wt.close_stream_sending_client(wt_stream);
+
+    let complete = complete_event(wt_stream, to_u64(BUF_CLIENT.len()));
+    assert!(wt.client.events().any(|e| e == complete));
+    assert_eq!(
+        wt.send_stream_stats(wt_stream).unwrap_err(),
+        Error::InvalidStreamId
+    );
+}
+
+#[test]
+fn wt_server_stream_bidi_client_close_stats() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    let wt_stream = wt_server_stream.stream_id();
+    wt.send_data_server(&wt_server_stream, &[1; 20]);
+    wt.client.events().for_each(drop);
+
+    // No stream header on a server-initiated stream, so nothing is subtracted.
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    wt.client.stream_close_send(wt_stream, now()).unwrap();
+    let stats = wt.send_stream_stats(wt_stream).unwrap();
+    assert_eq!(stats.bytes_written(), to_u64(BUF_CLIENT.len()));
+
+    wt.exchange_packets();
+    let complete = complete_event(wt_stream, to_u64(BUF_CLIENT.len()));
+    assert!(wt.client.events().any(|e| e == complete));
+}
+
+#[test]
+fn wt_client_stream_uni_close_then_session_close() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::UniDi);
+    wt.send_data_client(wt_stream, BUF_CLIENT);
+    wt.client.stream_close_send(wt_stream, now()).unwrap();
+    wt.session_close_frame_client(wt_session.stream_id(), 0, "");
+
+    // The application closed the stream already, so there is no event for it.
+    assert!(!wt.client.events().any(|e| matches!(
+        e,
+        Http3ClientEvent::StopSending { stream_id, .. } if stream_id == wt_stream
+    )));
+    assert_eq!(
+        wt.send_stream_stats(wt_stream).unwrap_err(),
+        Error::InvalidStreamId
+    );
+
+    let resets_sent = |wt: &WtTest| {
+        let frames = wt.client.transport_stats().frame_tx;
+        frames.reset_stream + frames.reset_stream_at
+    };
+    let before = resets_sent(&wt);
+    drop(wt.client.process_output(now() + Duration::from_secs(1)));
+    assert_eq!(resets_sent(&wt), before + 1);
+}
+
+#[test]
+fn wt_server_stream_uni_close_then_session_close() {
+    const BUF_SERVER: &[u8] = &[2; 30];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    wt.send_data_server(&wt_server_stream, BUF_SERVER);
+    wt.receive_data_client(wt_server_stream.stream_id(), true, BUF_SERVER, false);
+
+    wt_server_stream.stream_close_send(now()).unwrap();
+    WtTest::session_close_frame_server(&wt_session, 0, "");
+    assert!(!wt.server.events().any(|e| matches!(
+        e,
+        Http3ServerEvent::StreamStopSending { stream, .. }
+            if stream.stream_id() == wt_server_stream.stream_id()
+    )));
+
+    let resets_received = |wt: &WtTest| {
+        let frames = wt.client.transport_stats().frame_rx;
+        frames.reset_stream + frames.reset_stream_at
+    };
+    let before = resets_received(&wt);
+    let t = now() + Duration::from_secs(1);
+    let out = wt.server.process_output(t).dgram();
+    drop(wt.client.process(out, t));
+    assert_eq!(resets_received(&wt), before + 1);
+}
+
+#[test]
+fn wt_server_stream_uni_stop_sending_after_close() {
+    const BUF_SERVER: &[u8] = &[2; 30];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::UniDi);
+    let wt_stream = wt_server_stream.stream_id();
+    wt.send_data_server(&wt_server_stream, BUF_SERVER);
+    wt.receive_data_client(wt_stream, true, BUF_SERVER, false);
+
+    wt.client
+        .stream_stop_sending(wt_stream, Error::HttpNone.code())
+        .unwrap();
+    // Have the STOP_SENDING and the FIN cross, as in
+    // `wt_client_stream_uni_stop_sending_after_close`.
+    let mut t = now() + Duration::from_secs(1);
+    let mut out = wt.client.process_output(t).dgram();
+    wt_server_stream.stream_close_send(t).unwrap();
+    loop {
+        t += Duration::from_millis(5);
+        out = wt.server.process(out, t).dgram();
+        let server_none = out.is_none();
+        t += Duration::from_millis(5);
+        out = wt.client.process(out, t).dgram();
+        if server_none && out.is_none() {
+            break;
+        }
+    }
+
+    wt.receive_stop_sending_server(wt_stream, Error::HttpNone.code());
 }
 
 #[test]

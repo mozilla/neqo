@@ -919,8 +919,13 @@ impl Http3Client {
                 ConnectionEvent::OutgoingDatagramSpaceAvailable => {
                     self.events.datagram_space_available();
                 }
-                ConnectionEvent::SendStreamComplete { .. }
-                | ConnectionEvent::OutgoingDatagramOutcome { .. }
+                ConnectionEvent::SendStreamComplete { stream_id } => {
+                    if let Some(stats) = self.base_handler.handle_send_stream_complete(stream_id) {
+                        self.events
+                            .webtransport_send_stream_complete(stream_id, stats);
+                    }
+                }
+                ConnectionEvent::OutgoingDatagramOutcome { .. }
                 | ConnectionEvent::SconeUpdated(_)
                 | ConnectionEvent::PathMigrated { .. } => {}
             }
