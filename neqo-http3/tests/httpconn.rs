@@ -157,7 +157,7 @@ fn fetch() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -197,42 +197,25 @@ fn fetch_uri_drops_userinfo() {
 }
 
 #[test]
-fn fetch_invalid_uri() {
+fn fetch_invalid() {
     let (mut hconn_c, _hconn_s, _dgram) = connect();
     for uri in ["/", "https://a.example/\x7f", "https://a.example/?\x7f"] {
         let uri = uri.parse::<Uri>().unwrap();
         let res = hconn_c.fetch(now(), "GET", &uri, &[], Priority::default());
         assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
     }
-    let target = ("https", "something.com", "/");
-    let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
-    assert_eq!(res.unwrap(), 0);
-}
-
-#[test]
-fn fetch_invalid_target() {
-    let (mut hconn_c, _hconn_s, _dgram) = connect();
-    for target in [
-        ("https", "something.com", "/x#y"),
-        ("https", ":443", "/"),
-        ("https", "something.com:65536", "/"),
+    let bad_header = [Header::new("x", "a\rb")];
+    for (target, headers) in [
+        (("https", "something.com", "/x#y"), &[][..]),
+        (("https", ":443", "/"), &[]),
+        (("https", "something.com:65536", "/"), &[]),
+        (("https", "something.com", "/"), &bad_header),
     ] {
-        let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
+        let res = hconn_c.fetch(now(), "GET", &target, headers, Priority::default());
         assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
     }
     let target = ("https", "something.com", "/s?a[]=1&q={x}|y");
-    let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
-    assert_eq!(res.unwrap(), 0);
-}
-
-#[test]
-fn fetch_invalid_header_value() {
-    let (mut hconn_c, _hconn_s, _dgram) = connect();
-    let headers = [Header::new("x", "a\rb")];
-    let target = ("https", "something.com", "/");
-    let res = hconn_c.fetch(now(), "GET", target, &headers, Priority::default());
-    assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
-    let res = hconn_c.fetch(now(), "GET", target, &[], Priority::default());
+    let res = hconn_c.fetch(now(), "GET", &target, &[], Priority::default());
     assert_eq!(res.unwrap(), 0);
 }
 
@@ -244,6 +227,15 @@ fn response_invalid_header_value() {
 }
 
 #[test]
+fn response_invalid_status() {
+    let (_hconn_c, _hconn_s, request) = fetch_uri("https://something.com/");
+    for status in ["101", "abc"] {
+        let res = request.send_headers(&[Header::new(":status", status)]);
+        assert_eq!(res, Err(neqo_http3::Error::InvalidInput));
+    }
+}
+
+#[test]
 fn response_103() {
     let (mut hconn_c, mut hconn_s, dgram) = connect();
 
@@ -251,7 +243,7 @@ fn response_103() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -304,7 +296,7 @@ fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>
     let stream_id = hconn_c.fetch(
         now(),
         "GET",
-        ("https", "something.com", "/"),
+        &("https", "something.com", "/"),
         &[],
         Priority::default(),
     )?;
@@ -379,7 +371,7 @@ fn data_writable_events() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -517,7 +509,7 @@ fn zerortt() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -587,7 +579,7 @@ fn fetch_noresponse_will_idletimeout() {
         .fetch(
             now,
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -677,7 +669,7 @@ fn server_reliable_reset() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -746,7 +738,7 @@ fn server_reliable_reset_with_body() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

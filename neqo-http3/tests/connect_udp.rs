@@ -499,7 +499,7 @@ fn connect_udp_operation_on_fetch_stream() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )

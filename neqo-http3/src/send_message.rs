@@ -64,11 +64,11 @@ impl MessageState {
             Self::WaitingForHeaders => {
                 match message_type {
                     MessageType::Request => {
-                        *self = Self::WaitingForData; // Validated by `create_request_headers`.
+                        *self = Self::WaitingForData; // Validated by `RequestDescription::new`.
                     }
                     MessageType::Response => {
                         headers_valid(headers, message_type).map_err(|_| Error::InvalidInput)?;
-                        if !is_interim(headers)? {
+                        if !is_interim(headers).map_err(|_| Error::InvalidInput)? {
                             *self = Self::WaitingForData;
                         }
                     }

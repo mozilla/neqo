@@ -114,40 +114,58 @@ const fn is_field_name_char(b: u8) -> bool {
     b.is_ascii_lowercase() || b.is_ascii_digit() || is_tchar_symbol(b)
 }
 
-/// Whether request pseudo-header values are valid (RFC 9114, Section 4.3.1).
-fn request_values_valid(
+/// Whether an `http` or `https` request target is valid (RFC 9114, Section 4.3.1).
+fn request_target_valid(
     method: Option<&[u8]>,
     scheme: Option<&[u8]>,
     authority: Option<&[u8]>,
     path: Option<&[u8]>,
 ) -> bool {
-    let http_scheme =
-        scheme.is_some_and(|s| s.eq_ignore_ascii_case(b"http") || s.eq_ignore_ascii_case(b"https"));
-    method.is_none_or(|m| !m.is_empty() && m.iter().all(|&b| is_tchar(b)))
-        && scheme.is_none_or(|s| {
-            s.first().is_some_and(u8::is_ascii_alphabetic)
-                && s.iter()
-                    .all(|&b| b.is_ascii_alphanumeric() || b"+-.".contains(&b))
-        })
-        && authority.is_none_or(|a| !a.is_empty() && (!http_scheme || authority_valid(a, false)))
-        && (!http_scheme || authority.is_some()) // Other schemes' rules need a scheme registry.
+    method.is_some_and(|m| !m.is_empty() && m.iter().all(|&b| is_tchar(b)))
+        && scheme.is_some_and(|s| s.eq_ignore_ascii_case(b"http") || s.eq_ignore_ascii_case(b"https"))
+        && authority.is_some_and(|a| authority_valid(a, false))
         // Other VCHARs are accepted, as Firefox sends them unescaped (RFC 3986 allows only pchar).
-        && (!http_scheme
-            || path.is_none_or(|p| {
-                (p.starts_with(b"/") && p.iter().all(|&b| b.is_ascii_graphic() && b != b'#'))
-                    || (p == b"*" && method == Some(b"OPTIONS".as_ref()))
-            }))
+        && path.is_some_and(|p| {
+            (p.starts_with(b"/") && p.iter().all(|&b| b.is_ascii_graphic() && b != b'#'))
+                || (p == b"*" && method == Some(b"OPTIONS".as_ref()))
+        })
 }
 
-/// Whether `s` is `*( unreserved / pct-encoded / sub-delims / extra )` (RFC 3986, Section 2).
-fn uri_chars_valid(s: &[u8], extra: &[u8]) -> bool {
+/// Whether a classic CONNECT target is valid (RFC 9114, Section 4.4).
+fn connect_target_valid(
+    scheme: Option<&[u8]>,
+    authority: Option<&[u8]>,
+    path: Option<&[u8]>,
+) -> bool {
+    scheme.is_none() && path.is_none() && authority.is_some_and(|a| authority_valid(a, true))
+}
+
+/// Whether `s` is `*( unreserved / pct-encoded / sub-delims )` (RFC 3986, Section 2).
+fn uri_chars_valid(s: &[u8]) -> bool {
     let mut bytes = s.iter();
     while let Some(&b) = bytes.next() {
         let valid = if b == b'%' {
             bytes.next().is_some_and(u8::is_ascii_hexdigit)
                 && bytes.next().is_some_and(u8::is_ascii_hexdigit)
         } else {
-            b.is_ascii_alphanumeric() || b"-._~!$&'()*+,;=".contains(&b) || extra.contains(&b)
+            b.is_ascii_alphanumeric()
+                || matches!(
+                    b,
+                    b'-' | b'.'
+                        | b'_'
+                        | b'~'
+                        | b'!'
+                        | b'$'
+                        | b'&'
+                        | b'\''
+                        | b'('
+                        | b')'
+                        | b'*'
+                        | b'+'
+                        | b','
+                        | b';'
+                        | b'='
+                )
         };
         if !valid {
             return false;
@@ -163,17 +181,8 @@ fn authority_valid(a: &[u8], connect: bool) -> bool {
         _ => (a, None),
     };
     let host_valid = match host {
-        [b'[', b'v' | b'V', future @ .., b']'] => {
-            future.iter().position(|&b| b == b'.').is_some_and(|i| {
-                i > 0
-                    && future[..i].iter().all(u8::is_ascii_hexdigit)
-                    && future.len() > i + 1
-                    && !future.contains(&b'%')
-                    && uri_chars_valid(&future[i + 1..], b":")
-            })
-        }
         [b'[', ip @ .., b']'] => from_utf8(ip).is_ok_and(|ip| ip.parse::<Ipv6Addr>().is_ok()),
-        _ => !host.is_empty() && uri_chars_valid(host, b""),
+        _ => !host.is_empty() && uri_chars_valid(host),
     };
     host_valid
         && port.map_or(!connect, |p| {
@@ -200,16 +209,14 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         let is_pseudo = track_pseudo(header.name(), &mut pseudo_state, message_type)?;
 
         if is_pseudo {
-            if header.name() == ":method" {
-                method_value = Some(header.value());
-            } else if header.name() == ":protocol" {
-                protocol_value = Some(header.value());
-            } else if header.name() == ":scheme" {
-                scheme_value = Some(header.value());
-            } else if header.name() == ":authority" {
-                authority_value = Some(header.value());
-            } else if header.name() == ":path" {
-                path_value = Some(header.value());
+            let value = Some(header.value());
+            match header.name() {
+                ":method" => method_value = value,
+                ":protocol" => protocol_value = value,
+                ":scheme" => scheme_value = value,
+                ":authority" => authority_value = value,
+                ":path" => path_value = value,
+                _ => {}
             }
         }
 
@@ -239,7 +246,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 return Err(Error::InvalidHeader);
             }
             "te" if header.value() != b"trailers" => return Err(Error::InvalidHeader),
-            "host" => {
+            "host" if message_type == MessageType::Request => {
                 if authority_value.is_some_and(|a| a != header.value()) {
                     return Err(Error::InvalidHeader); // RFC 9114, Section 4.3.1.
                 }
@@ -263,11 +270,6 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                     // The CONNECT request for with :protocol included must have the scheme,
                     // authority, and path set.
                     connect_mask | PseudoHeaderState::Scheme | PseudoHeaderState::Path
-                } else if scheme_value.is_some()
-                    || path_value.is_some()
-                    || !authority_value.is_some_and(|a| authority_valid(a, true))
-                {
-                    return Err(Error::InvalidHeader); // RFC 9114, Section 4.4.
                 } else {
                     connect_mask
                 }
@@ -288,7 +290,18 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         return Err(Error::InvalidHeader);
     }
 
-    if !request_values_valid(method_value, scheme_value, authority_value, path_value) {
+    let valid = match message_type {
+        MessageType::Response => true,
+        MessageType::Request
+            if method_value == Some(b"CONNECT".as_ref()) && protocol_value.is_none() =>
+        {
+            connect_target_valid(scheme_value, authority_value, path_value)
+        }
+        MessageType::Request => {
+            request_target_valid(method_value, scheme_value, authority_value, path_value)
+        }
+    };
+    if !valid {
         return Err(Error::InvalidHeader);
     }
 
@@ -427,6 +440,16 @@ mod tests {
     fn response_requires_status() {
         let headers = vec![Header::new(":status", "200")];
         assert!(headers_valid(&headers, MessageType::Response).is_ok());
+    }
+
+    #[test]
+    fn response_host_not_checked() {
+        let headers = vec![
+            Header::new(":status", "200"),
+            Header::new("host", ""),
+            Header::new("host", "a.example"),
+        ];
+        assert_eq!(headers_valid(&headers, MessageType::Response), Ok(()));
     }
 
     #[test]
@@ -590,6 +613,8 @@ mod tests {
             request("GET", "", "a.example", "/x"),
             request("GET", "1http", "a.example", "/x"),
             request("GET", "ht_tp", "a.example", "/x"),
+            request("GET", "ftp", "a.example", "/x"),
+            request("GET", "a1+-.", "u@a.example", "x"),
             request("GET", "https", "", "/x"),
             request("GET", "https", "u@a.example", "/x"),
             request("GET", "http", "u@a.example", "/x"),
@@ -608,6 +633,7 @@ mod tests {
             .concat(),
             no_authority("https"),
             no_authority("http"),
+            no_authority("a1+-."),
             [no_authority("https"), field("host", "")].concat(),
             connect(""),
             connect("a.example"),
@@ -626,14 +652,12 @@ mod tests {
         for good in [
             request("GET", "https", "a.example", "/x?y"),
             request("OPTIONS", "https", "a.example", "*"),
-            request("GET", "a1+-.", "u@a.example", "x"),
             [
                 request("GET", "https", "a.example", "/"),
                 field("host", "a.example"),
             ]
             .concat(),
             [no_authority("https"), field("host", "a.example")].concat(),
-            no_authority("a1+-."),
             connect("a.example:443"),
             connect("[::1]:443"),
         ] {
@@ -666,12 +690,15 @@ mod tests {
             request("GET", "https", "[vx.y]", "/"),
             request("GET", "https", "[v1.]", "/"),
             request("GET", "https", "[v1.%41]", "/"),
+            request("GET", "https", "[v1F.a:b]", "/"),
+            request("GET", "https", "[V1.x]", "/"),
             request("GET", "https", "a.example:+443", "/"),
             [no_authority("https"), field("host", "a.example:abc")].concat(),
             connect(":443"),
             connect("a.example:65536"),
             connect("a b:443"),
             connect("[v1]:443"),
+            connect("[v1.x]:443"),
         ] {
             assert_eq!(check(&bad), Err(Error::InvalidHeader));
         }
@@ -702,12 +729,9 @@ mod tests {
             request("GET", "https", "192.0.2.1:443", "/"),
             request("GET", "https", "[::1]", "/"),
             request("GET", "https", "[2001:db8::192.0.2.1]:443", "/"),
-            request("GET", "https", "[v1F.a:b]", "/"),
-            request("GET", "https", "[V1.x]", "/"),
             [no_authority("https"), field("host", "a.example:443")].concat(),
             connect("a.example:0"),
             connect("a.example:65535"),
-            connect("[v1.x]:443"),
         ] {
             assert_eq!(check(&good), Ok(()));
         }
