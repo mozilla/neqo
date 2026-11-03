@@ -222,7 +222,7 @@ pub trait ClientSession {
     fn webtransport_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId>;
 
@@ -431,7 +431,7 @@ impl ClientSession for Http3Client {
     fn webtransport_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId> {
         let events = Box::new(self.client_events().clone());
@@ -543,7 +543,7 @@ trait Handler {
         &mut self,
         conn: &mut Connection,
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId>;
 
@@ -586,7 +586,7 @@ impl Handler for Http3Connection {
         &mut self,
         conn: &mut Connection,
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId> {
         info!("[{self}] Create WebTransport");

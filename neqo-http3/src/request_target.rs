@@ -16,13 +16,13 @@ pub trait RequestTarget: Debug {
     fn path(&self) -> Res<&str>;
 }
 
-impl RequestTarget for &Url {
+impl RequestTarget for Url {
     fn scheme(&self) -> Res<&str> {
         self.scheme_str().ok_or(Error::InvalidInput)
     }
 
     fn authority(&self) -> &str {
-        Url::authority(self).map_or("", |a| a.as_str().rsplit('@').next().unwrap_or_default())
+        Self::authority(self).map_or("", |a| a.as_str().rsplit('@').next().unwrap_or_default())
     }
 
     fn path(&self) -> Res<&str> {
@@ -32,7 +32,7 @@ impl RequestTarget for &Url {
         {
             return Err(Error::InvalidInput);
         }
-        Ok(Url::path(self))
+        Ok(Self::path(self))
     }
 }
 
