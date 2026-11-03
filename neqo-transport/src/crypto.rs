@@ -1355,18 +1355,19 @@ impl CryptoStates {
         self.read_update_epoch = Some(epoch);
 
         trace!("[{self}] Key update received");
+        // A server may still hold 0-RTT read keys (RFC 9001, Section 4.9.3).
+        debug_assert_eq!(self.read_update_time.is_some(), self.has_0rtt_read());
+        if self.has_0rtt_read() {
+            self.zero_rtt = None;
+            self.read_update_time = None;
+        }
+
         // If we received a key update, then we assume that the peer has
         // acknowledged a packet we sent in this epoch. It's OK to do that
         // because they aren't allowed to update without first having received
         // something from us. If the ACK isn't in the packet that triggered this
         // key update, it must be in some other packet they have sent.
         _ = self.maybe_update_write()?;
-
-        // We shouldn't have 0-RTT keys at this point, but if we do, dump them.
-        debug_assert_eq!(self.read_update_time.is_some(), self.has_0rtt_read());
-        if self.has_0rtt_read() {
-            self.zero_rtt = None;
-        }
         self.read_update_time = Some(expiration);
         Ok(())
     }
