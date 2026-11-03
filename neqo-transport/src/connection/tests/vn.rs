@@ -13,7 +13,7 @@ use test_fixture::{
 };
 
 #[cfg(not(feature = "disable-encryption"))]
-use super::{super::Connection, assert_error, forged_server_initial};
+use super::{super::Connection, forged_server_initial};
 use super::{
     super::{CloseReason, ConnectionEvent, Output, State, ZeroRttState},
     CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
@@ -682,8 +682,8 @@ fn ack(largest: packet::Number) -> [u64; 5] {
     [FrameType::Ack.into(), largest, 0, 0, 0]
 }
 
-/// A client cannot switch back to a version it has switched away from.
-/// It closes the connection in the version it is using.
+/// A client does not switch back to a version it has switched away from,
+/// as only the first long header with a different version counts (RFC 9369, Section 4.1).
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn compatible_upgrade_and_back() {
@@ -698,14 +698,14 @@ fn compatible_upgrade_and_back() {
     client.process_input(datagram(s2), now());
 
     let s3 = forged_server_initial(&ci, Version::Version1, 2, &[], crypto_with_gap());
-    let close = client.process(Some(datagram(s3)), now()).dgram();
-    assert_error(&client, &CloseReason::Transport(Error::PacketNumberOverlap));
+    let out = client.process(Some(datagram(s3)), now()).dgram();
+    assert_eq!(*client.state(), State::WaitVersion);
     assert_eq!(client.version(), Version::Version2);
-    assert_version(&close.unwrap(), Version::Version2.wire_version());
+    assert_version(&out.unwrap(), Version::Version2.wire_version());
 }
 
-/// Interleaved Initial packets can make the first version switch fail.
-/// The client closes the connection in the version it is using.
+/// Interleaved Initial packets in the original version do not stop the version switch,
+/// as other versions can appear in long headers at any point (RFC 9368, Section 4).
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn compatible_upgrade_interleaved() {
@@ -718,8 +718,8 @@ fn compatible_upgrade_interleaved() {
         forged_server_initial(&ci, Version::Version2, 2, &[], crypto_with_gap()),
     ]
     .concat();
-    let close = client.process(Some(datagram(s)), now()).dgram();
-    assert_error(&client, &CloseReason::Transport(Error::PacketNumberOverlap));
-    assert_eq!(client.version(), Version::Version1);
-    assert_version(&close.unwrap(), Version::Version1.wire_version());
+    let out = client.process(Some(datagram(s)), now()).dgram();
+    assert_eq!(*client.state(), State::WaitVersion);
+    assert_eq!(client.version(), Version::Version2);
+    assert_version(&out.unwrap(), Version::Version2.wire_version());
 }
