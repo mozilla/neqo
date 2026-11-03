@@ -8,7 +8,7 @@ use std::{cmp::min, time::Instant};
 
 use neqo_common::{Decoder, IncrementalDecoderUint, Role};
 use neqo_qpack::{decoder::QPACK_UNI_STREAM_TYPE_DECODER, encoder::QPACK_UNI_STREAM_TYPE_ENCODER};
-use neqo_transport::{Connection, StreamId, StreamType};
+use neqo_transport::{Connection, Error as TransportError, StreamId, StreamType};
 use tracing::trace;
 
 use crate::{
@@ -126,14 +126,17 @@ impl NewStreamHeadReader {
             loop {
                 let to_read = min(reader.min_remaining(), buf.len());
                 let buf = &mut buf[0..to_read];
-                match conn.stream_recv(*stream_id, &mut buf[..])? {
-                    (0, f) => return Ok((None, f)),
-                    (amount, f) => {
+                match conn.stream_recv(*stream_id, &mut buf[..]) {
+                    Ok((0, f)) => return Ok((None, f)),
+                    Ok((amount, f)) => {
                         let res = reader.consume(&mut Decoder::from(&buf[..amount]));
                         if res.is_some() || f {
                             return Ok((res, f));
                         }
                     }
+                    // A reliable reset can end the stream here; the reset event handles it.
+                    Err(TransportError::NoMoreData) => return Ok((None, false)),
+                    Err(e) => return Err(e.into()),
                 }
             }
         }
