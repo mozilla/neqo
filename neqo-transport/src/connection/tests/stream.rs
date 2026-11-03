@@ -4,9 +4,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap, fmt::Debug};
+use std::{cmp::max, collections::HashMap, fmt::Debug, iter};
 
-use neqo_common::{Role, event::Provider as _, to_u64};
+use neqo_common::{Role, event::Provider as _, expect_usize, to_u64};
 use test_fixture::now;
 use tracing::debug;
 
@@ -15,11 +15,13 @@ use super::{
     default_server, maybe_authenticate, new_client, new_server, send_something, send_with_extra,
 };
 use crate::{
-    CloseReason, Connection, ConnectionParameters, Error, StreamDataLimit, StreamId, StreamType,
+    CloseReason, Connection, ConnectionParameters, Error, Output, StreamDataLimit, StreamId,
+    StreamType,
     connection::params::INITIAL_LOCAL_MAX_STREAM_DATA,
     events::ConnectionEvent,
     frame::FrameType,
     packet,
+    recv_stream::RxStreamOrderer,
     send_stream::{self, OrderGroup},
     streams::SendOrder,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -1488,4 +1490,91 @@ fn uni_stream_cleaned_up_after_stop_sending_acked_with_final_size_known() {
     exchange_data(&mut client, &mut server);
 
     client.stream_create(StreamType::UniDi).unwrap();
+}
+
+/// All the unidirectional streams the server may open.
+fn server_uni_streams() -> Vec<StreamId> {
+    let mut id = StreamId::init(StreamType::UniDi, Role::Server);
+    let count = ConnectionParameters::default().get_max_streams(StreamType::UniDi);
+    iter::repeat_with(|| {
+        let current = id;
+        id.next();
+        current
+    })
+    .take(expect_usize(count))
+    .collect()
+}
+
+/// Have the server send `frames`, `per_packet` at a time, with the client acknowledging them.
+fn send_frames(
+    client: &mut Connection,
+    server: &mut Connection,
+    frames: &[Vec<u64>],
+    per_packet: usize,
+) {
+    let mut now = now();
+    for chunk in frames.chunks(per_packet) {
+        if client.state().closed() {
+            return;
+        }
+        let dgram = loop {
+            match server.test_write_frames(Writer(chunk.concat()), now) {
+                Output::Datagram(d) => break d,
+                Output::Callback(t) => now += t,
+                Output::None => panic!("nothing to send"),
+            }
+        };
+        if let Some(ack) = client.process(Some(dgram), now).dgram() {
+            server.process_input(ack, now);
+        }
+    }
+}
+
+#[test]
+/// Ranges that each stream may hold must not add up to more for the connection.
+fn fragmentation_across_streams() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let ids = server_uni_streams();
+    let window = ConnectionParameters::default().get_max_data();
+    let limit = to_u64(RxStreamOrderer::MAX_GAPS) + window / RxStreamOrderer::WINDOW_PER_GAP;
+    // One-byte frames with a gap after each; the first two ranges of a stream are not gaps.
+    let ty = FrameType::StreamWithOffLen.into();
+    let frames = (0_u64..)
+        .flat_map(|i| {
+            ids.iter()
+                .map(move |id| vec![ty, id.as_u64(), 2 * i + 1, 1, 0])
+        })
+        .take(expect_usize(limit + 2 * to_u64(ids.len()) + 1))
+        .collect::<Vec<_>>();
+    send_frames(&mut client, &mut server, &frames, 100);
+    assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+}
+
+#[test]
+/// Losing packets that carry small frames for many streams leaves gaps the connection accepts.
+fn fragmentation_from_loss_across_streams() {
+    const LEN: usize = 10;
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    let ids = server_uni_streams();
+    // Most of the connection's flow control credit, with 3 in every 10 frames lost.
+    let count = ConnectionParameters::default().get_max_data() * 9 / 10 / to_u64(ids.len() * LEN);
+    let ty = FrameType::StreamWithOffLen.into();
+    let frames = (0..count)
+        .filter(|i| ![1, 4, 7].contains(&(i % 10)))
+        .flat_map(|i| {
+            ids.iter().map(move |id| {
+                let header = [ty, id.as_u64(), i * to_u64(LEN), to_u64(LEN)];
+                [&header[..], &[0; LEN]].concat()
+            })
+        })
+        .collect::<Vec<_>>();
+    send_frames(&mut client, &mut server, &frames, 20);
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_eq!(client.stats().frame_rx.stream, frames.len());
 }
