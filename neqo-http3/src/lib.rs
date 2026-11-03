@@ -170,7 +170,9 @@ pub use conn_params::Http3Parameters;
 pub use connection::{Http3State, MAX_ANTICIPATED_INCOMING_STREAMS, SessionAcceptAction};
 pub use connection_client::Http3Client;
 use frames::HFrame;
-pub use headers_checks::{connect_authority_valid, request_target_valid};
+pub use headers_checks::{
+    connect_authority_valid, request_authority_valid, request_path_valid, request_scheme_valid,
+};
 pub use neqo_common::Header;
 use neqo_common::MessageType;
 use neqo_qpack::Error as QpackError;
