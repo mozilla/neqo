@@ -85,12 +85,16 @@ pub enum Http3ClientEvent {
     /// New bytes available for reading.
     DataReadable { stream_id: StreamId },
     /// Peer reset the stream or there was an parsing error.
+    ///
+    /// For `WebTransport` data streams, unmap `error` per draft-ietf-webtrans-http3 §4.4.
     Reset {
         stream_id: StreamId,
         error: AppError,
         local: bool,
     },
     /// Peer has sent a `STOP_SENDING`.
+    ///
+    /// For `WebTransport` data streams, unmap `error` per draft-ietf-webtrans-http3 §4.4.
     StopSending {
         stream_id: StreamId,
         error: AppError,
