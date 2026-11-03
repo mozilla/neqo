@@ -2,12 +2,9 @@ name: Check semver
 on:
   workflow_dispatch:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, edited]
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -16,7 +13,6 @@ permissions:
 jobs:
   semver:
     name: Check semver
-    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     steps:
       - uses: mozilla/actions/semver@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
