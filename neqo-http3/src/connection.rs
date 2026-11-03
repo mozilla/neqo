@@ -977,6 +977,7 @@ impl Http3Connection {
                     stream_type,
                     stream_id,
                     first_frame_type: None,
+                    no_content: request.method == "HEAD",
                 },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,

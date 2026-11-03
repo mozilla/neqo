@@ -329,6 +329,7 @@ impl Http3ServerHandler {
                             stream_type: Http3StreamType::Http,
                             stream_id,
                             first_frame_type: Some(first_frame_type),
+                            no_content: false,
                         },
                         Rc::clone(self.base_handler.qpack_decoder()),
                         Box::new(self.events.clone()),

@@ -21,7 +21,7 @@ use crate::{
     CloseType, Error, Http3StreamInfo, Http3StreamType, HttpRecvStream, HttpRecvStreamEvents,
     MessageType, Priority, ReceiveOutput, RecvStream, Res, Stream,
     frames::{FrameReader, HFrame, StreamReaderConnectionWrapper, hframe::HFrameType},
-    headers_checks::{headers_valid, is_interim},
+    headers_checks::{headers_valid, status},
     priority::PriorityHandler,
     qlog,
 };
@@ -31,6 +31,7 @@ pub struct RecvMessageInfo {
     pub stream_type: Http3StreamType,
     pub stream_id: StreamId,
     pub first_frame_type: Option<u64>,
+    pub no_content: bool,
 }
 
 /*
@@ -73,6 +74,9 @@ pub struct RecvMessage {
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     priority_handler: PriorityHandler,
+    no_content: bool,
+    content_length: Option<u64>,
+    data_len: u64,
 }
 
 impl Display for RecvMessage {
@@ -102,6 +106,9 @@ impl RecvMessage {
             qpack_decoder,
             conn_events,
             priority_handler,
+            no_content: message_info.no_content,
+            content_length: None,
+            data_len: 0,
         }
     }
 
@@ -136,6 +143,10 @@ impl RecvMessage {
                 return Err(Error::HttpFrameUnexpected);
             }
             RecvMessageState::WaitingForData { .. } => {
+                self.data_len += len;
+                if self.content_length.is_some_and(|l| self.data_len > l) {
+                    return Err(Error::HttpMessage);
+                }
                 if len > 0 {
                     if fin {
                         return Err(Error::HttpFrame);
@@ -154,11 +165,12 @@ impl RecvMessage {
 
     fn add_headers(&mut self, mut headers: Vec<Header>, fin: bool) -> Res<()> {
         trace!("[{self}] Add new headers fin={fin}");
-        let interim = match self.message_type {
-            MessageType::Request => false,
-            MessageType::Response => is_interim(&headers)?,
+        let status = match self.message_type {
+            MessageType::Request => None,
+            MessageType::Response => Some(status(&headers)?),
         };
-        headers_valid(&headers, self.message_type)?;
+        let interim = status.is_some_and(|s| (100..200).contains(&s));
+        let content_length = headers_valid(&headers, self.message_type)?;
         if self.message_type == MessageType::Response {
             headers.retain(Header::is_allowed_for_response);
         }
@@ -167,9 +179,20 @@ impl RecvMessage {
             return Err(Error::HttpGeneralProtocolStream);
         }
 
-        let is_extended_connect = self.message_type == MessageType::Request
-            && headers.contains_header(":method", "CONNECT")
-            && headers.find_header(":protocol").is_some();
+        let is_connect = self.message_type == MessageType::Request
+            && headers.contains_header(":method", "CONNECT");
+        // RFC 9110, Section 6.4.1.
+        let no_content = status.map_or(is_connect, |s| {
+            self.no_content
+                || matches!(s, 204 | 304)
+                || (self.stream_type == Http3StreamType::ExtendedConnect && (200..300).contains(&s))
+        });
+        self.content_length = content_length.filter(|_| !no_content);
+        if fin {
+            self.check_content_length()?;
+        }
+
+        let is_extended_connect = is_connect && headers.find_header(":protocol").is_some();
         if is_extended_connect {
             self.conn_events
                 .extended_connect_new_session(self.stream_info.stream_id(), headers);
@@ -212,6 +235,7 @@ impl RecvMessage {
             RecvMessageState::ReadingData { .. } => {}
             RecvMessageState::WaitingForData { .. }
             | RecvMessageState::WaitingForFinAfterTrailers { .. } => {
+                self.check_content_length()?;
                 if post_readable_event {
                     self.conn_events.data_readable(&self.stream_info);
                 }
@@ -317,6 +341,13 @@ impl RecvMessage {
         }
     }
 
+    fn check_content_length(&self) -> Res<()> {
+        if self.content_length.is_some_and(|l| l != self.data_len) {
+            return Err(Error::HttpMessage);
+        }
+        Ok(())
+    }
+
     fn set_closed(&mut self) {
         self.state = RecvMessageState::Closed;
         self.conn_events
@@ -383,6 +414,7 @@ impl RecvStream for RecvMessage {
                         if *remaining_data_len > 0 {
                             return Err(Error::HttpFrame);
                         }
+                        self.check_content_length()?;
                         self.set_closed();
                         break Ok((written, fin));
                     } else if *remaining_data_len == 0 {

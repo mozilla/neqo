@@ -323,7 +323,10 @@ impl Error {
 
     #[must_use]
     pub const fn stream_reset_error(&self) -> bool {
-        matches!(self, Self::HttpGeneralProtocolStream | Self::InvalidHeader)
+        matches!(
+            self,
+            Self::HttpGeneralProtocolStream | Self::InvalidHeader | Self::HttpMessage
+        )
     }
 
     /// # Errors
