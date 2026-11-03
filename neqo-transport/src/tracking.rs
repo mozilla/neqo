@@ -7,7 +7,7 @@
 // Tracking of received packets and generating ACKs thereof.
 
 use std::{
-    cmp::min,
+    cmp::{max, min},
     collections::VecDeque,
     fmt::{self, Display, Formatter},
     time::{Duration, Instant},
@@ -179,6 +179,8 @@ const MAX_TRACKED_RANGES: usize = 128;
 pub struct RecvdPackets {
     space: PacketNumberSpace,
     ranges: VecDeque<PacketRange>,
+    /// The largest ack-eliciting packet number received.
+    largest_ack_eliciting: Option<packet::Number>,
     /// The packet number of the lowest number packet that we are tracking.
     min_tracked: packet::Number,
     /// The time we got the largest acknowledged.
@@ -211,6 +213,7 @@ impl RecvdPackets {
         Self {
             space,
             ranges: VecDeque::new(),
+            largest_ack_eliciting: None,
             min_tracked: 0,
             largest_pn_time: None,
             ack_time: None,
@@ -337,8 +340,18 @@ impl RecvdPackets {
         if ack_eliciting {
             self.unacknowledged_count += 1;
 
+            // RFC 9000 Section 13.2.1: reordering relative to ack-eliciting packets.
+            let first_needed = self.largest_ack_eliciting.map_or(0, |la| la + 1);
+            let out_of_order = self.largest_ack_eliciting.is_some_and(|la| pn < la)
+                || self
+                    .ranges
+                    .iter()
+                    .find(|r| r.contains(pn))
+                    .is_none_or(|r| r.smallest > first_needed);
+            self.largest_ack_eliciting = max(self.largest_ack_eliciting, Some(pn));
+
             let immediate_ack = self.space != PacketNumberSpace::ApplicationData
-                || (pn != next_in_order_pn && !self.ignore_order)
+                || (out_of_order && !self.ignore_order)
                 || self.unacknowledged_count > self.unacknowledged_tolerance;
 
             let ack_time = if immediate_ack {
@@ -655,8 +668,8 @@ mod tests {
     use test_fixture::now;
 
     use super::{
-        AckTracker, Duration, Instant, MAX_TRACKED_RANGES, PacketNumberSpace, PacketRange,
-        RecvdPackets,
+        AckTracker, DEFAULT_LOCAL_ACK_DELAY, Duration, Instant, MAX_TRACKED_RANGES,
+        PacketNumberSpace, PacketRange, RecvdPackets,
     };
     use crate::{
         Stats,
@@ -913,6 +926,50 @@ mod tests {
         assert_ne!(Some(now()), rp.ack_time());
         rp.set_received(now(), 3, true, &mut stats).unwrap();
         assert_eq!(Some(now()), rp.ack_time());
+    }
+
+    /// Receive `prior` as `(pn, ack_eliciting)`, flush the ACK, then receive
+    /// ack-eliciting `pn` and return the resulting ACK time.
+    fn ack_time_after(prior: &[(packet::Number, bool)], pn: packet::Number) -> Option<Instant> {
+        let mut stats = Stats::default();
+        let mut rp = RecvdPackets::new(PacketNumberSpace::ApplicationData);
+        for &(p, elicit) in prior {
+            rp.set_received(now(), p, elicit, &mut stats).unwrap();
+        }
+        rp.immediate_ack(now());
+        write_frame(&mut rp);
+        rp.set_received(now(), pn, true, &mut stats).unwrap();
+        rp.ack_time()
+    }
+
+    /// A gap after the largest ack-eliciting packet causes an immediate ACK,
+    /// even if a later non-ack-eliciting packet was received.
+    #[test]
+    fn ooo_gap_after_largest_ack_eliciting() {
+        assert_eq!(ack_time_after(&[(4, true), (6, false)], 7), Some(now()));
+    }
+
+    /// A packet filling in behind a non-ack-eliciting packet, with no gap after
+    /// the largest ack-eliciting packet, does not cause an immediate ACK.
+    #[test]
+    fn no_gap_after_largest_ack_eliciting() {
+        let delayed = Some(now() + DEFAULT_LOCAL_ACK_DELAY);
+        assert_eq!(ack_time_after(&[(4, true), (6, false)], 5), delayed);
+    }
+
+    /// The first ack-eliciting packet is acknowledged immediately if
+    /// packets below it are missing.
+    #[test]
+    fn ooo_first_ack_eliciting_gap() {
+        assert_eq!(ack_time_after(&[(1, false)], 2), Some(now()));
+    }
+
+    /// The first ack-eliciting packet is not acknowledged immediately if
+    /// no packets below it are missing.
+    #[test]
+    fn first_ack_eliciting_no_gap() {
+        let delayed = Some(now() + DEFAULT_LOCAL_ACK_DELAY);
+        assert_eq!(ack_time_after(&[(2, false)], 0), delayed);
     }
 
     #[test]
