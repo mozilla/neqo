@@ -697,6 +697,37 @@ fn simultaneous_stop_sending_and_reset() {
 }
 
 #[test]
+fn stop_sending_creates_stream() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_stop_sending(stream_id, 0).unwrap();
+    server.process_input(client.process_output(now()).dgram().unwrap(), now());
+
+    let events = server
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                ConnectionEvent::NewStream { .. } | ConnectionEvent::SendStreamStopSending { .. }
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        events,
+        [
+            ConnectionEvent::NewStream { stream_id },
+            ConnectionEvent::SendStreamStopSending {
+                stream_id,
+                app_error: 0
+            }
+        ]
+    );
+}
+
+#[test]
 /// Make a stream data or control frame arrive after the stream has been used and cleared.
 fn late_stream_related_frames() {
     fn late_stream_related_frame(frame_type: FrameType) {
