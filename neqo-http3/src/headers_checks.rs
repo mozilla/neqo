@@ -51,9 +51,9 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
     let status = headers.iter().take(1).find_header(":status");
     match status.map(Header::value) {
-        // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
+        // https://datatracker.ietf.org/doc/html/rfc9114#section-4.5
         Some(b"101") => Err(Error::InvalidHeader),
-        Some([d @ b'0'..=b'9', b'0'..=b'9', b'0'..=b'9']) => Ok(*d == b'1'),
+        Some([d @ b'1'..=b'5', b'0'..=b'9', b'0'..=b'9']) => Ok(*d == b'1'),
         _ => Err(Error::InvalidHeader), // RFC 9110, Section 15.
     }
 }
@@ -81,9 +81,30 @@ fn track_pseudo(
     }
 }
 
-/// Whether `b` is a `tchar` (RFC 9110, Section 5.6.2).
-fn is_tchar(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b)
+/// Whether `b` is a `tchar` other than ALPHA or DIGIT (RFC 9110, Section 5.6.2).
+const fn is_tchar_symbol(b: u8) -> bool {
+    matches!(
+        b,
+        b'!' | b'#'
+            | b'$'
+            | b'%'
+            | b'&'
+            | b'\''
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'.'
+            | b'^'
+            | b'_'
+            | b'`'
+            | b'|'
+            | b'~'
+    )
+}
+
+/// Whether `b` may appear in an HTTP/3 field name (RFC 9114, Section 4.2).
+const fn is_field_name_char(b: u8) -> bool {
+    b.is_ascii_lowercase() || b.is_ascii_digit() || is_tchar_symbol(b)
 }
 
 /// Checks if request/response headers are well formed, i.e. contain
@@ -100,7 +121,6 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     for header in headers {
         let is_pseudo = track_pseudo(header.name(), &mut pseudo_state, message_type)?;
 
-        let mut bytes = header.name().bytes();
         if is_pseudo {
             if header.name() == ":method" {
                 method_value = Some(header.value());
@@ -109,10 +129,11 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
             } else if header.name() == ":scheme" {
                 scheme_value = Some(header.value());
             }
-            _ = bytes.next();
         }
 
-        if header.name().is_empty() || bytes.any(|b| !is_tchar(b) || b.is_ascii_uppercase()) {
+        let name = header.name();
+        let name = name.strip_prefix(':').unwrap_or(name);
+        if name.is_empty() || !name.bytes().all(is_field_name_char) {
             return Err(Error::InvalidHeader); // illegal characters.
         }
 
@@ -120,7 +141,11 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         // Section 4.3); carried verbatim into an HTTP/1.1 serialization they
         // would split the message.
         // Other CTLs are accepted, as in Firefox's HTTP/2 stack and Fetch (httpwg/http-core#215).
-        if header.value().iter().any(|b| matches!(b, 0 | 0x0a | 0x0d)) {
+        if header
+            .value()
+            .iter()
+            .any(|b| matches!(b, b'\0' | b'\n' | b'\r'))
+        {
             return Err(Error::InvalidHeader); // illegal characters.
         }
 
@@ -273,7 +298,8 @@ mod tests {
     fn is_interim_not_three_digits() {
         // A status code is a three-digit integer (RFC 9110, Section 15).
         for bad in [
-            "+200", "0200", "20", "7", "65535", "+150", "x00", "1x0", "10x",
+            "+200", "0200", "20", "7", "65535", "+150", "x00", "1x0", "10x", "001", "099", "600",
+            "700", "999",
         ] {
             let headers = vec![Header::new(":status", bad)];
             assert_eq!(is_interim(&headers), Err(Error::InvalidHeader));
@@ -375,7 +401,7 @@ mod tests {
     fn reject_non_token_field_name() {
         // A non-token field name is malformed (RFC 9114, Section 10.3), in either direction.
         for bad in [
-            "", "x y", "x\ty", "te ", "x\x0by", "x\x7fy", "x\u{e9}y", "x(y)",
+            "", "x y", "x\ty", "te ", "x\x0by", "x\x7fy", "x\u{e9}y", "x(y)", "X", "xY",
         ] {
             let response = vec![Header::new(":status", "200"), Header::new(bad, "1")];
             assert_eq!(
