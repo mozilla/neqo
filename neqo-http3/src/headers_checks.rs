@@ -115,29 +115,21 @@ const fn is_field_name_char(b: u8) -> bool {
 }
 
 /// Whether an `http` or `https` request target is valid (RFC 9114, Section 4.3.1).
-fn request_target_valid(
-    method: Option<&[u8]>,
-    scheme: Option<&[u8]>,
-    authority: Option<&[u8]>,
-    path: Option<&[u8]>,
-) -> bool {
-    method.is_some_and(|m| !m.is_empty() && m.iter().all(|&b| is_tchar(b)))
-        && scheme.is_some_and(|s| s.eq_ignore_ascii_case(b"http") || s.eq_ignore_ascii_case(b"https"))
-        && authority.is_some_and(|a| authority_valid(a, false))
+#[must_use]
+pub fn request_target_valid(method: &[u8], scheme: &[u8], authority: &[u8], path: &[u8]) -> bool {
+    !method.is_empty()
+        && method.iter().all(|&b| is_tchar(b))
+        && (scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https"))
+        && authority_valid(authority, false)
         // Other VCHARs are accepted, as Firefox sends them unescaped (RFC 3986 allows only pchar).
-        && path.is_some_and(|p| {
-            (p.starts_with(b"/") && p.iter().all(|&b| b.is_ascii_graphic() && b != b'#'))
-                || (p == b"*" && method == Some(b"OPTIONS".as_ref()))
-        })
+        && ((path.starts_with(b"/") && path.iter().all(|&b| b.is_ascii_graphic() && b != b'#'))
+            || (path == b"*" && method == b"OPTIONS"))
 }
 
-/// Whether a classic CONNECT target is valid (RFC 9114, Section 4.4).
-fn connect_target_valid(
-    scheme: Option<&[u8]>,
-    authority: Option<&[u8]>,
-    path: Option<&[u8]>,
-) -> bool {
-    scheme.is_none() && path.is_none() && authority.is_some_and(|a| authority_valid(a, true))
+/// Whether a classic CONNECT authority is valid (RFC 9114, Section 4.4).
+#[must_use]
+pub fn connect_authority_valid(authority: &[u8]) -> bool {
+    authority_valid(authority, true)
 }
 
 /// Whether `s` is `*( unreserved / pct-encoded / sub-delims )` (RFC 3986, Section 2).
@@ -295,11 +287,14 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
         MessageType::Request
             if method_value == Some(b"CONNECT".as_ref()) && protocol_value.is_none() =>
         {
-            connect_target_valid(scheme_value, authority_value, path_value)
+            scheme_value.is_none()
+                && path_value.is_none()
+                && authority_value.is_some_and(connect_authority_valid)
         }
-        MessageType::Request => {
-            request_target_valid(method_value, scheme_value, authority_value, path_value)
-        }
+        MessageType::Request => match (method_value, scheme_value, authority_value, path_value) {
+            (Some(m), Some(s), Some(a), Some(p)) => request_target_valid(m, s, a, p),
+            _ => false,
+        },
     };
     if !valid {
         return Err(Error::InvalidHeader);
