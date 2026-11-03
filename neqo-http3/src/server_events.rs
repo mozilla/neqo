@@ -328,6 +328,7 @@ impl Http3ServerEvents {
 
     /// Insert a `StateChange` event.
     pub(crate) fn connection_state_change(&self, conn: ConnectionRef, state: Http3State) {
+        // TODO: Drop this connection's queued events on close, as `Http3ClientEvents` does.
         self.events
             .push(Http3ServerEvent::StateChange { conn, state });
     }

@@ -1162,8 +1162,9 @@ mod tests {
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
+        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamId,
+        StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -5798,5 +5799,23 @@ mod tests {
                 client_stop_sending_and_stream_test(separate_packets, stop_sending_first);
             }
         }
+    }
+
+    #[test]
+    fn stream_close_send_after_peer_close() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(false);
+        server.conn.close(now(), 0, "");
+        client.process_input(server.conn.process_output(now()).dgram().unwrap(), now());
+        let reason = CloseReason::Transport(TransportError::PeerApplication(0));
+        assert_eq!(client.state(), Http3State::Closing(reason));
+        assert_eq!(client.stream_close_send(request_stream_id, now()), Ok(()));
+    }
+
+    #[test]
+    fn stream_close_send_after_local_close() {
+        let (mut client, _server, request_stream_id) = connect_and_send_request(false);
+        client.close(now(), 0, "");
+        let res = client.stream_close_send(request_stream_id, now());
+        assert_eq!(res, Err(Error::InvalidStreamId));
     }
 }
