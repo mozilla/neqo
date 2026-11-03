@@ -8,7 +8,7 @@ use std::{
     cell::RefCell,
     cmp::min,
     convert::identity,
-    mem,
+    iter, mem,
     net::SocketAddr,
     rc::Rc,
     time::{Duration, Instant},
@@ -17,7 +17,9 @@ use std::{
 use enum_map::EnumMap;
 use neqo_common::{Datagram, Decoder, Role, event::Provider as _};
 use nss::{AllowZeroRtt, AuthenticationStatus, ResumptionToken, random};
-use test_fixture::{DEFAULT_ADDR, fixture_init, new_neqo_qlog, now};
+use test_fixture::{
+    DEFAULT_ADDR, assertions::is_handshake, fixture_init, new_neqo_qlog, now, split_datagram,
+};
 use tracing::{debug, trace};
 
 use super::{CloseReason, Connection, ConnectionId, Output, State, test_internal};
@@ -233,6 +235,16 @@ fn flush_to(from: &mut Connection, to: &mut Connection, now: &mut Instant) {
 /// Drop everything `c` has to send, as if it were all lost, including anything a PTO adds.
 fn drop_flight(c: &mut Connection, now: &mut Instant) {
     drain(c, now, |_, _| {});
+}
+
+/// The first Handshake packet in `dgrams`, on its own.
+fn handshake_packet(dgrams: &[Datagram]) -> Datagram {
+    dgrams
+        .iter()
+        .flat_map(|d| iter::successors(Some(d.clone()), |p| split_datagram(p).1))
+        .map(|p| split_datagram(&p).0)
+        .find(|p| p[0] & 0x80 == 0x80 && is_handshake(p))
+        .unwrap()
 }
 
 /// Drive the handshake between the client and server.
