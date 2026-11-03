@@ -24,6 +24,7 @@ use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
     OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    tparams::TransportParameterId::InitialMaxStreamsUni,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, cert::CertificateInfo};
 use tracing::{debug, info, trace, warn};
@@ -31,7 +32,7 @@ use tracing::{debug, info, trace, warn};
 use crate::{
     Error, Http3Parameters, NewStreamType, Priority, ReceiveOutput, Res, SendGroupId,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
-    connection::{Http3Connection, Http3State, RequestDescription},
+    connection::{HTTP3_UNI_CONTROL_STREAMS, Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
     frames::HFrame,
     request_target::RequestTarget,
@@ -443,7 +444,9 @@ impl Http3Client {
         )?;
         let tok = dec.decode_remainder();
         trace!("[{self}]   Transport token {}", Hex::new(tok));
-        self.conn.enable_resumption(now, tok)?;
+        self.conn.enable_resumption_with(now, tok, |tp| {
+            tp.get_integer(InitialMaxStreamsUni) >= HTTP3_UNI_CONTROL_STREAMS
+        })?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();
             let res = self
@@ -453,8 +456,12 @@ impl Http3Client {
             return Err(Error::Fatal);
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
-            self.base_handler
-                .set_0rtt_settings(&mut self.conn, settings)?;
+            let res = self
+                .base_handler
+                .set_0rtt_settings(&mut self.conn, settings);
+            if self.check_result(now, &res) {
+                return Err(Error::Fatal);
+            }
             self.events
                 .connection_state_change(self.base_handler.state().clone());
         }
@@ -1163,7 +1170,8 @@ mod tests {
     use neqo_qpack as qpack;
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version, ZeroRttState,
+        tparams::TransportParameterId,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -3900,6 +3908,129 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    /// Rewrite the `initial_max_streams_uni` remembered in a resumption token.
+    fn token_with_max_streams_uni(token: &ResumptionToken, limit: u64) -> Vec<u8> {
+        let mut dec = Decoder::from(token.as_ref());
+        let mut enc = Encoder::default();
+        enc.encode_vvec(dec.decode_vvec().unwrap()); // HTTP/3 settings
+        enc.encode_uint(4, dec.decode_uint::<u32>().unwrap()); // QUIC version
+        enc.encode_varint(dec.decode_varint().unwrap()); // RTT
+        let mut tps = Decoder::from(dec.decode_vvec().unwrap());
+        enc.encode_vvec_with(|enc| {
+            while let Some(id) = tps.decode_varint() {
+                let value = tps.decode_vvec().unwrap();
+                enc.encode_varint(id);
+                if id == u64::from(TransportParameterId::InitialMaxStreamsUni) {
+                    enc.encode_vvec_with(|enc| {
+                        enc.encode_varint(limit);
+                    });
+                } else {
+                    enc.encode_vvec(value);
+                }
+            }
+        });
+        enc.encode(dec.decode_remainder());
+        enc.into()
+    }
+
+    /// A token that can't fit the control and QPACK streams resumes in 1-RTT.
+    fn resume_stream_limit_too_low(token: &ResumptionToken) {
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), token_with_max_streams_uni(token, 2));
+        assert_eq!(res, Ok(()));
+        assert_eq!(client.state(), Http3State::Initializing);
+        assert_eq!(client.conn.zero_rtt_state(), ZeroRttState::Init);
+
+        let mut server = TestServer::new();
+        let out = client.process_output(now());
+        let out2 = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+        assert!(client.tls_info().unwrap().resumed());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        server.check_client_control_qpack_streams_no_resumption();
+    }
+
+    #[test]
+    fn zero_rtt_stream_limit_too_low() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+        resume_stream_limit_too_low(&token);
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), token_with_max_streams_uni(&token, 3));
+        assert_eq!(res, Ok(()));
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+    }
+
+    /// A token that is malformed after its transport parameters leaves 0-RTT enabled.
+    #[test]
+    fn zero_rtt_stream_limit_too_low_token_truncated() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+        let bad = token_with_max_streams_uni(&token, 2);
+        let mut dec = Decoder::from(&bad[..]);
+        dec.skip_vvec(); // HTTP/3 settings
+        dec.decode_uint::<u32>().unwrap(); // QUIC version
+        dec.decode_varint().unwrap(); // RTT
+        dec.skip_vvec(); // transport parameters
+
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), &bad[..dec.offset()]);
+        let err = neqo_transport::Error::InvalidResumptionToken;
+        assert_eq!(res, Err(Error::Transport(err)));
+        assert_eq!(client.state(), Http3State::Initializing);
+        assert_eq!(*client.conn.state(), State::Init);
+        assert_eq!(client.enable_resumption(now(), token), Ok(()));
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+    }
+
+    #[test]
+    fn resumption_stream_limit_too_low_no_zero_rtt() {
+        let params = ConnectionParameters::default();
+        let (mut client, mut server) = connect_with_connection_parameters(params);
+        let token = exchange_token(&mut client, &mut server.conn);
+        resume_stream_limit_too_low(&token);
+    }
+
+    /// A transport token that doesn't decode is rejected by the transport.
+    #[test]
+    fn zero_rtt_transport_token_invalid() {
+        let mut enc = Encoder::default();
+        HSettings::new(&[]).encode_frame_contents(&mut enc);
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), enc);
+        let err = neqo_transport::Error::InvalidResumptionToken;
+        assert_eq!(res, Err(Error::Transport(err)));
+        assert_eq!(client.state(), Http3State::Initializing);
+        let (mut c, mut server) = connect();
+        let token = exchange_token(&mut c, &mut server.conn);
+        assert_eq!(client.enable_resumption(now(), token), Ok(()));
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+    }
+
+    /// Remembered QPACK settings that the encoder rejects close the connection.
+    #[test]
+    fn zero_rtt_qpack_settings_invalid() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+        let mut dec = Decoder::from(token.as_ref());
+        dec.decode_vvec().unwrap();
+        let settings = HSettings::new(&[HSetting::new(HSettingType::MaxTableCapacity, 1 << 30)]);
+        let mut enc = Encoder::default();
+        settings.encode_frame_contents(&mut enc);
+        enc.encode(dec.decode_remainder());
+
+        let mut client = default_http3_client();
+        assert_eq!(client.enable_resumption(now(), enc), Err(Error::Fatal));
+        assert_closed(&client, &Error::Qpack(qpack::Error::EncoderStream));
+        let closing = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Closing(_)));
+        assert!(client.events().any(closing));
     }
 
     #[test]

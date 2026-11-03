@@ -27,8 +27,9 @@ use neqo_common::{
     to_u64,
 };
 use nss::{
-    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, PrivateKey,
-    PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server, ZeroRttChecker,
+    Agent, AntiReplay, AuthenticationStatus, Cipher, Client, Group, HandshakeState, Opt,
+    PrivateKey, PublicKey, ResumptionToken, SecretAgentInfo, SecretAgentPreInfo, Server,
+    ZeroRttChecker,
     cert::{CertificateCompressor, CertificateInfo},
 };
 use smallvec::SmallVec;
@@ -773,6 +774,20 @@ impl Connection {
     /// # Errors
     /// When the operation fails, which is usually due to bad inputs or bad connection state.
     pub fn enable_resumption<A: AsRef<[u8]>>(&mut self, now: Instant, token: A) -> Res<()> {
+        self.enable_resumption_with(now, token, |_| true)
+    }
+
+    /// Like `enable_resumption`, but 0-RTT is only attempted if `allow_0rtt` returns true for
+    /// the transport parameters that the token remembers.
+    ///
+    /// # Errors
+    /// As for `enable_resumption`.
+    pub fn enable_resumption_with<A: AsRef<[u8]>, F: FnOnce(&TransportParameters) -> bool>(
+        &mut self,
+        now: Instant,
+        token: A,
+        allow_0rtt: F,
+    ) -> Res<()> {
         if self.state != State::Init {
             error!("[{self}] set token in state {:?}", self.state);
             return Err(Error::ConnectionState);
@@ -811,8 +826,12 @@ impl Connection {
         let tok = dec.decode_remainder();
         trace!("[{self}]   TLS token {}", Hex::new(tok));
 
+        let zero_rtt = allow_0rtt(&tp);
         match self.crypto.tls_mut() {
             Agent::Client(c) => {
+                if !zero_rtt {
+                    c.set_option(Opt::EarlyData, false)?;
+                }
                 let res = c.enable_resumption(tok);
                 if let Err(e) = res {
                     self.absorb_error::<Error>(now, Err(Error::from(e)));
@@ -825,7 +844,9 @@ impl Connection {
         self.version = version;
         self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
-        self.tps.borrow_mut().set_remote_0rtt(Some(tp));
+        if zero_rtt {
+            self.tps.borrow_mut().set_remote_0rtt(Some(tp));
+        }
         if !init_token.is_empty() {
             self.address_validation = AddressValidationInfo::NewToken(init_token.to_vec());
         }
@@ -835,7 +856,9 @@ impl Connection {
             .borrow_mut()
             .rtt_mut()
             .set_initial(rtt);
-        self.set_initial_limits();
+        if zero_rtt {
+            self.set_initial_limits();
+        }
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
         let res = self.client_start(now);

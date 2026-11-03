@@ -17,7 +17,7 @@ use super::{
 };
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamDataLimit, StreamType,
-    Version, events::ConnectionEvent,
+    Version, ZeroRttState, events::ConnectionEvent,
 };
 
 #[test]
@@ -126,6 +126,51 @@ fn zero_rtt_send_coalesce() {
         })
         .expect("should have received a new stream event");
     assert_eq!(client_stream_id, server_stream_id.as_u64());
+}
+
+#[test]
+fn zero_rtt_not_allowed() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client
+        .enable_resumption_with(now(), token, |_| false)
+        .unwrap();
+    assert_eq!(client.zero_rtt_state(), ZeroRttState::Init);
+    let mut server = resumed_server(&client);
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().resumed());
+    assert!(!server.tls_info().unwrap().early_data_accepted());
+}
+
+/// Without 0-RTT, the remembered limits don't outlive the server's new, lower ones.
+#[test]
+fn zero_rtt_not_allowed_new_limits() {
+    const MAX_DATA: u64 = 1000;
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client
+        .enable_resumption_with(now(), token, |_| false)
+        .unwrap();
+    let mut server = new_server(
+        ConnectionParameters::default()
+            .versions(client.version(), Version::all())
+            .max_streams(StreamType::BiDi, 1)
+            .max_data(MAX_DATA),
+    );
+    connect(&mut client, &mut server);
+    let id = client.stream_create(StreamType::BiDi).unwrap();
+    let avail = client.stream_avail_send_space(id).unwrap();
+    assert_eq!(to_u64(avail), MAX_DATA);
+    let second = client.stream_create(StreamType::BiDi);
+    assert_eq!(second, Err(Error::StreamLimit));
 }
 
 #[test]
