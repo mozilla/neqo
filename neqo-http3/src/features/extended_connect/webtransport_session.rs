@@ -123,13 +123,11 @@ impl Protocol for Session {
         control_stream_recv: &mut Box<dyn RecvStream>,
         now: Instant,
     ) -> Res<Option<State>> {
+        let mut reader = StreamReaderRecvStreamWrapper::new(conn, control_stream_recv);
         let (f, fin) = self
             .frame_reader
-            .receive::<WebTransportFrame>(
-                &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
-                now,
-            )
-            .map_err(|_| Error::HttpGeneralProtocolStream)?;
+            .receive::<WebTransportFrame>(&mut reader, now)
+            .map_err(|e| reader.map_error(e))?;
         trace!("[{self}] Received frame: {f:?} fin={fin}");
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
             events.session_end(

@@ -1178,7 +1178,7 @@ mod tests {
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
-        frames::{HFrame, HFrameType},
+        frames::{HFrame, HFrameType, hframe::MAX_HEADER_BYTES},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
     };
@@ -4548,6 +4548,24 @@ mod tests {
         );
 
         assert_closed(&client, &Error::HttpFrameUnexpected);
+    }
+
+    #[test]
+    fn oversized_trailers_after_headers() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+        let mut enc = Encoder::default();
+        enc.encode(HTTP_HEADER_FRAME_0);
+        enc.encode_varint(HFrameType::HEADERS.0);
+        enc.encode_len(MAX_HEADER_BYTES + 1);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            enc,
+            false,
+        );
+
+        assert_closed(&client, &Error::HttpExcessiveLoad);
     }
 
     #[test]

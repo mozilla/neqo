@@ -76,12 +76,26 @@ impl StreamReader for StreamReaderConnectionWrapper<'_> {
 pub struct StreamReaderRecvStreamWrapper<'a> {
     recv_stream: &'a mut Box<dyn RecvStream>,
     conn: &'a mut Connection,
+    inner_failed: bool,
 }
 
 impl<'a> StreamReaderRecvStreamWrapper<'a> {
     #[cfg_attr(fuzzing, expect(private_interfaces, reason = "OK for fuzzing."))]
     pub fn new(conn: &'a mut Connection, recv_stream: &'a mut Box<dyn RecvStream>) -> Self {
-        Self { recv_stream, conn }
+        Self {
+            recv_stream,
+            conn,
+            inner_failed: false,
+        }
+    }
+
+    /// Keeps the wrapped stream's connection errors, else returns `HttpGeneralProtocolStream`.
+    pub(crate) fn map_error(&self, e: Error) -> Error {
+        if self.inner_failed && e.connection_error() {
+            e
+        } else {
+            Error::HttpGeneralProtocolStream
+        }
     }
 }
 
@@ -90,7 +104,9 @@ impl StreamReader for StreamReaderRecvStreamWrapper<'_> {
     ///
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, buf: &mut [u8], now: Instant) -> Res<(usize, bool)> {
-        self.recv_stream.read_data(self.conn, buf, now)
+        let res = self.recv_stream.read_data(self.conn, buf, now);
+        self.inner_failed = res.is_err();
+        res
     }
 }
 

@@ -62,13 +62,11 @@ impl Protocol for Session {
         now: Instant,
     ) -> Res<Option<State>> {
         loop {
+            let mut reader = StreamReaderRecvStreamWrapper::new(conn, control_stream_recv);
             let (capsule, fin) = self
                 .frame_reader
-                .receive::<Capsule>(
-                    &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
-                    now,
-                )
-                .map_err(|_| Error::HttpGeneralProtocolStream)?;
+                .receive::<Capsule>(&mut reader, now)
+                .map_err(|e| reader.map_error(e))?;
 
             let capsule_is_some = capsule.is_some();
 

@@ -73,6 +73,7 @@ pub struct RecvMessage {
     qpack_decoder: Rc<RefCell<qpack::Decoder>>,
     conn_events: Box<dyn HttpRecvStreamEvents>,
     priority_handler: PriorityHandler,
+    connect_established: bool,
 }
 
 impl Display for RecvMessage {
@@ -102,6 +103,7 @@ impl RecvMessage {
             qpack_decoder,
             conn_events,
             priority_handler,
+            connect_established: false,
         }
     }
 
@@ -114,6 +116,9 @@ impl RecvMessage {
                 self.state = RecvMessageState::DecodingHeaders { header_block, fin };
             }
             RecvMessageState::WaitingForData { .. } => {
+                if self.connect_established {
+                    return Err(Error::HttpFrameUnexpected);
+                }
                 // TODO implement trailers, for now just ignore them.
                 self.state = RecvMessageState::WaitingForFinAfterTrailers {
                     frame_reader: FrameReader::new(),
@@ -165,6 +170,12 @@ impl RecvMessage {
 
         if fin && interim {
             return Err(Error::HttpGeneralProtocolStream);
+        }
+
+        if self.stream_type == Http3StreamType::ExtendedConnect {
+            self.connect_established = headers
+                .find_header(":status")
+                .is_some_and(|h| matches!(h.value(), [b'2', _, _]));
         }
 
         let is_extended_connect = self.message_type == MessageType::Request
@@ -237,10 +248,20 @@ impl RecvMessage {
                 RecvMessageState::WaitingForResponseHeaders { frame_reader }
                 | RecvMessageState::WaitingForData { frame_reader }
                 | RecvMessageState::WaitingForFinAfterTrailers { frame_reader } => {
-                    match frame_reader.receive(
-                        &mut StreamReaderConnectionWrapper::new(conn, self.stream_info.stream_id()),
-                        now,
-                    )? {
+                    let stream_id = self.stream_info.stream_id();
+                    match frame_reader
+                        .receive(
+                            &mut StreamReaderConnectionWrapper::new(conn, stream_id),
+                            now,
+                        )
+                        .map_err(|e| {
+                            // Once CONNECT completes, only DATA is allowed (RFC 9114 §4.4).
+                            if self.connect_established && e == Error::HttpExcessiveLoad {
+                                Error::HttpFrameUnexpected
+                            } else {
+                                e
+                            }
+                        })? {
                         (None, true) => {
                             break self.set_state_to_close_pending(post_readable_event);
                         }
@@ -435,6 +456,7 @@ impl HttpRecvStream for RecvMessage {
         self.state = RecvMessageState::WaitingForData {
             frame_reader: FrameReader::new(),
         };
+        self.connect_established = true;
         self.conn_events = conn_events;
     }
 
