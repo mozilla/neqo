@@ -329,10 +329,13 @@ impl Server {
         initial: InitialDetails,
         orig_dcid: Option<ConnectionId>,
         now: Instant,
-    ) {
+    ) -> Res<()> {
         let zcheck = self.zero_rtt_checker.clone();
         if c.server_enable_0rtt(&self.anti_replay, zcheck).is_err() {
             warn!("[{self}] Unable to enable 0-RTT");
+        }
+        if !self.ciphers.is_empty() {
+            c.set_ciphers(&self.ciphers)?;
         }
         if let Some(odcid) = &orig_dcid {
             // There was a retry, so set the connection IDs for.
@@ -346,6 +349,7 @@ impl Server {
         {
             warn!("[{self}] Unable to enable ECH");
         }
+        Ok(())
     }
 
     fn accept_connection(
@@ -373,7 +377,10 @@ impl Server {
 
         match sconn {
             Ok(mut c) => {
-                self.setup_connection(&mut c, initial, orig_dcid, now);
+                if let Err(e) = self.setup_connection(&mut c, initial, orig_dcid, now) {
+                    warn!("[{self}] Unable to set up connection: {e}");
+                    return Output::None;
+                }
                 let out = c.process(Some(dgram), now);
                 self.connections.push(Rc::new(RefCell::new(c)));
                 out
