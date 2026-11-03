@@ -114,16 +114,23 @@ const fn is_field_name_char(b: u8) -> bool {
     b.is_ascii_lowercase() || b.is_ascii_digit() || is_tchar_symbol(b)
 }
 
-/// Whether an `http` or `https` request target is valid (RFC 9114, Section 4.3.1).
+/// Whether a request scheme is `http` or `https`, the only schemes supported.
 #[must_use]
-pub fn request_target_valid(method: &[u8], scheme: &[u8], authority: &[u8], path: &[u8]) -> bool {
-    !method.is_empty()
-        && method.iter().all(|&b| is_tchar(b))
-        && (scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https"))
-        && authority_valid(authority, false)
-        // Other VCHARs are accepted, as Firefox sends them unescaped (RFC 3986 allows only pchar).
-        && ((path.starts_with(b"/") && path.iter().all(|&b| b.is_ascii_graphic() && b != b'#'))
-            || (path == b"*" && method == b"OPTIONS"))
+pub const fn request_scheme_valid(scheme: &[u8]) -> bool {
+    scheme.eq_ignore_ascii_case(b"http") || scheme.eq_ignore_ascii_case(b"https")
+}
+
+/// Whether a request authority is valid (RFC 9110, Section 4.2).
+#[must_use]
+pub fn request_authority_valid(authority: &[u8]) -> bool {
+    authority_valid(authority, false)
+}
+
+/// Whether a request path is in origin form (RFC 9112, Section 3.2.1).
+#[must_use]
+pub fn request_path_valid(path: &[u8]) -> bool {
+    // Other VCHARs are accepted, as Firefox sends them unescaped (RFC 3986 allows only pchar).
+    path.starts_with(b"/") && path.iter().all(|&b| b.is_ascii_graphic() && b != b'#')
 }
 
 /// Whether a classic CONNECT authority is valid (RFC 9114, Section 4.4).
@@ -292,7 +299,13 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 && authority_value.is_some_and(connect_authority_valid)
         }
         MessageType::Request => match (method_value, scheme_value, authority_value, path_value) {
-            (Some(m), Some(s), Some(a), Some(p)) => request_target_valid(m, s, a, p),
+            (Some(m), Some(s), Some(a), Some(p)) => {
+                !m.is_empty()
+                    && m.iter().all(|&b| is_tchar(b))
+                    && request_scheme_valid(s)
+                    && request_authority_valid(a)
+                    && (request_path_valid(p) || (p == b"*" && m == b"OPTIONS"))
+            }
             _ => false,
         },
     };
