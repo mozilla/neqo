@@ -406,6 +406,16 @@ impl RecvStream for RecvMessage {
     fn http_stream(&mut self) -> Option<&mut dyn HttpRecvStream> {
         Some(self)
     }
+
+    fn datagram_aborts(&self) -> bool {
+        // A request's method is not known before its headers are decoded.
+        self.message_type == MessageType::Response
+            || !matches!(
+                self.state,
+                RecvMessageState::WaitingForResponseHeaders { .. }
+                    | RecvMessageState::DecodingHeaders { .. }
+            )
+    }
 }
 
 impl HttpRecvStream for RecvMessage {
