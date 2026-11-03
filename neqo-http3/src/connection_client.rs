@@ -1181,6 +1181,7 @@ mod tests {
         frames::{HFrame, HFrameType},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
+        stream_type_reader::WEBTRANSPORT_UNI_STREAM,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1967,6 +1968,34 @@ mod tests {
         }
         assert!(stop_sending_event_found);
         assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    /// RFC 9114, Section 6.2: a uni stream closed before its header is complete is tolerated.
+    fn client_received_uni_stream_fin_in_header(header: &[u8]) {
+        let (mut client, mut server) = connect();
+        let stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
+        if !header.is_empty() {
+            _ = server.conn.stream_send(stream_id, header).unwrap();
+        }
+        server.conn.stream_close_send(stream_id).unwrap();
+        let out = server.conn.process_output(now());
+        drop(client.process(out.dgram(), now()));
+        assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    #[test]
+    fn client_received_uni_stream_fin_before_type() {
+        client_received_uni_stream_fin_in_header(&[]);
+        client_received_uni_stream_fin_in_header(&[0x40]); // Half a 2-byte varint.
+    }
+
+    #[test]
+    fn client_received_wt_uni_stream_fin_before_session_id() {
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_UNI_STREAM);
+        client_received_uni_stream_fin_in_header(enc.as_ref());
+        enc.encode_byte(0x40); // Half a 2-byte session ID.
+        client_received_uni_stream_fin_in_header(enc.as_ref());
     }
 
     // Test wrong frame on req/rec stream
