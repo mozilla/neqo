@@ -820,15 +820,6 @@ impl Http3Client {
     /// An error results in closing the connection.
     fn check_result<ERR>(&mut self, now: Instant, res: &Res<ERR>) -> bool {
         match &res {
-            Err(Error::HttpGoaway) => {
-                info!("[{self}] Connection error: goaway stream_id increased");
-                self.close(
-                    now,
-                    Error::HttpId.code(),
-                    "Connection error: goaway stream_id increased",
-                );
-                true
-            }
             Err(e) => {
                 info!("[{self}] Connection error: {e}");
                 self.close(now, e.code(), format!("{e}"));
@@ -1001,7 +992,7 @@ impl Http3Client {
             }
             Http3State::GoingAway(stream_id) => {
                 if goaway_stream_id > *stream_id {
-                    return Err(Error::HttpGoaway);
+                    return Err(Error::HttpId);
                 }
                 *stream_id = goaway_stream_id;
             }
