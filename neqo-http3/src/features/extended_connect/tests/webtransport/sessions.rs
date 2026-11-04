@@ -4,9 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::time::Duration;
+
 use neqo_common::{Bytes, Encoder, event::Provider as _, header::HeadersExt as _};
 use neqo_transport::{
-    StreamId, StreamType,
+    DatagramQueueOutcome, StreamId, StreamType,
     streams::{SendGroupId, SendOrder},
 };
 use test_fixture::now;
@@ -395,6 +397,63 @@ fn connect_udp_session_reject_with_datagram_capsule() {
         headers: Some(headers),
     };
     assert_eq!(events, [closed]);
+}
+
+/// Streams and datagrams that precede the CONNECT response are buffered up to a limit.
+#[test]
+fn wt_session_buffers_before_response() {
+    const BUFFERED: u8 = 16;
+    let mut wt = WtTest::new();
+    let (wt_session_id, wt_server_session) = wt_session_request(&mut wt);
+    // Later than any time `wt.exchange_packets` used.
+    let t = now() + Duration::from_secs(1);
+    wt_server_session
+        .response(&SessionAcceptAction::Accept, t)
+        .unwrap();
+    let accept = wt.server.process_output(t).dgram().unwrap();
+    let mut streams = Vec::new();
+    for i in 0..=BUFFERED {
+        let stream = wt_server_session.create_stream(StreamType::UniDi).unwrap();
+        assert_eq!(stream.send_data(&[i], t), Ok(1));
+        streams.push(stream.stream_id());
+        let sent = wt_server_session.send_datagram(&[i], None, t, SendGroupId::new(0), 0);
+        assert_eq!(sent, Ok(DatagramQueueOutcome::Ok));
+    }
+    while let Some(dgram) = wt.server.process_output(t).dgram() {
+        wt.client.process_input(dgram, t);
+    }
+    wt.client.process_input(accept, t);
+    let stop_sending = wt.client.process_output(t).dgram();
+    drop(wt.server.process(stop_sending, t));
+
+    let events = wt_client_events(&mut wt);
+    let n = usize::from(BUFFERED);
+    let WebTransportEvent::NewSession { status: 200, .. } = &events[0] else {
+        panic!("unexpected {events:?}");
+    };
+    let datagrams: Vec<_> = (0..BUFFERED)
+        .map(|i| WebTransportEvent::Datagram {
+            session_id: wt_session_id,
+            datagram: Bytes::from(vec![i]),
+        })
+        .collect();
+    assert_eq!(events[1 + n..], datagrams);
+    let new_streams: Vec<_> = events[1..=n]
+        .iter()
+        .map(|e| match e {
+            WebTransportEvent::NewStream {
+                stream_id,
+                session_id,
+            } if *session_id == wt_session_id => *stream_id,
+            _ => panic!("unexpected {e:?}"),
+        })
+        .collect();
+    let rejected: Vec<_> = streams
+        .iter()
+        .filter(|s| !new_streams.contains(s))
+        .collect();
+    assert_eq!(rejected.len(), 1);
+    wt.receive_stop_sending_server(*rejected[0], 0x3994_bd84);
 }
 
 #[test]

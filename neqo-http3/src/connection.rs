@@ -35,7 +35,7 @@ use crate::{
         ConnectType,
         extended_connect::{
             self, ExtendedConnectEvents, ExtendedConnectFeature, ExtendedConnectType,
-            TransportPrerequisites,
+            TransportPrerequisites, WT_BUFFERED_STREAM_REJECTED,
             send_group::Generator as SendGroupGenerator,
             webtransport_streams::{WebTransportRecvStream, WebTransportSendStream},
         },
@@ -699,7 +699,9 @@ impl Http3Connection {
             return;
         };
 
-        stream.borrow().datagram(Bytes::new(datagram, varint_len));
+        stream
+            .borrow_mut()
+            .datagram(Bytes::new(datagram, varint_len));
     }
 
     fn check_stream_exists(&self, stream_type: Http3StreamType) -> Res<()> {
@@ -765,6 +767,14 @@ impl Http3Connection {
                     .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
                 if !session_exists {
                     conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
+                    return Ok(ReceiveOutput::NoOutput);
+                }
+                if self
+                    .get_extended_connect_session(StreamId::from(session_id))
+                    .is_ok_and(|s| s.borrow().pending_streams_full())
+                {
+                    drop(conn.stream_stop_sending(stream_id, WT_BUFFERED_STREAM_REJECTED));
+                    drop(conn.stream_reset_send(stream_id, WT_BUFFERED_STREAM_REJECTED));
                     return Ok(ReceiveOutput::NoOutput);
                 }
                 // Set incoming WebTransport streams to be fair (share bandwidth).
