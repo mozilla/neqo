@@ -385,6 +385,17 @@ mod tests {
         assert_eq!(entries(&server), (0, 0));
     }
 
+    #[test]
+    fn readable_stream_closed_before_events() {
+        let (mut server, mut client) = setup();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, b"GET /1").unwrap();
+        let data = client.process_output(now()).dgram();
+        client.close(now(), 0, "bye");
+        _ = server.server.process(data, now());
+        deliver(&mut server, &mut client);
+    }
+
     // Issue 1 (FIN-only frame after buffered partial data) is exercised by
     // the QNS zerortt interop test end-to-end; unit testing it would require
     // a real neqo_transport::server::ConnectionRef.
