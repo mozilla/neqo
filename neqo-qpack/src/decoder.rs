@@ -6,8 +6,9 @@
 
 use std::fmt::{self, Display, Formatter};
 
-use neqo_common::{Encoder, Header, qdebug};
+use neqo_common::{Encoder, Header};
 use neqo_transport::{Connection, StreamId};
+use tracing::debug;
 
 use crate::{
     Error, Res, Settings,
@@ -42,7 +43,7 @@ impl Decoder {
     /// If settings include invalid values.
     #[must_use]
     pub fn new(qpack_settings: &Settings) -> Self {
-        qdebug!("Decoder: creating a new qpack decoder");
+        debug!("Decoder: creating a new qpack decoder");
         let mut send_buf = Encoder::default();
         send_buf.encode_varint(QPACK_UNI_STREAM_TYPE_DECODER);
         let max_blocked_streams = usize::from(qpack_settings.max_blocked_streams);
@@ -142,7 +143,7 @@ impl Decoder {
     }
 
     fn set_capacity(&mut self, cap: u64) -> Res<()> {
-        qdebug!("[{self}] received instruction capacity cap={cap}");
+        debug!("[{self}] received instruction capacity cap={cap}");
         if cap > self.max_table_size {
             return Err(Error::EncoderStream);
         }
@@ -185,7 +186,7 @@ impl Decoder {
                     self.send_buf.as_ref(),
                 )
                 .map_err(|_| Error::DecoderStream)?;
-            qdebug!("[{self}] {r} bytes sent");
+            debug!("[{self}] {r} bytes sent");
             self.send_buf.skip(r);
         }
         Ok(())
@@ -216,7 +217,7 @@ impl Decoder {
         #[cfg(feature = "build-fuzzing-corpus")]
         crate::fuzz::write_item_to_fuzzing_corpus(stream_id, buf);
 
-        qdebug!("[{self}] decode header block");
+        debug!("[{self}] decode header block");
         let mut decoder = HeaderDecoder::new(buf);
 
         match decoder.decode_header_block(&self.table, self.max_entries, self.table.base()) {

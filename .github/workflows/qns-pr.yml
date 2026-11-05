@@ -4,12 +4,10 @@
 name: QNS PR
 on:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 permissions:
@@ -19,14 +17,14 @@ env:
   DELIM: "vs."
   TIMEOUT: 20
   # renovate: depName=https://github.com/quic-interop/quic-interop-runner datasource=git-refs branch=master
-  RUNNER_REF: 740c05a10b61d65e8abd3ad38d60898004d335d9
+  RUNNER_REF: a224e5ecb600284b1a6a604f15d87cfccfcd6315
   # renovate: depName=https://github.com/lxin/quic datasource=git-refs branch=main
-  LINUXQUIC_REF: 863e714c9ee54b7b84bd7038847e3375e6dc4306
+  LINUXQUIC_REF: d11434a9cf158454d410ee37be32d6c93b8667d5
 
 jobs:
   docker-image:
     name: Build Docker images for QNS
-    if: ${{ github.actor != 'dependabot[bot]' && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: github.actor != 'dependabot[bot]'
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -170,10 +168,10 @@ jobs:
       # quic-interop-runner requires Docker v28.1. GitHub's ubuntu-24.04 comes
       # with v28.0.4. Install newer version.
       - name: Set up Docker
-        uses: docker/setup-docker-action@2bf61fb9464cc67f0cbdeabed6aa0380accd1c70 # v5.5.0
+        uses: docker/setup-docker-action@7ec28a010822b4626af4874f9448a4b05ac6f3e5 # v5.6.0
         with:
           # renovate: depName=docker/cli datasource=github-tags
-          version: "v29.9.1"
+          version: "v29.9.2"
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -218,7 +216,7 @@ jobs:
 
   report:
     name: Report results
-    if: ${{ !cancelled() && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: ${{ !cancelled() }}
     needs: [docker-image, run-qns, implementations]
     runs-on: ubuntu-24.04
     steps:
