@@ -976,7 +976,8 @@ impl ServerSession {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidStreamId` if the session no longer exists.
+    /// Returns `InvalidStreamId` if the session is not yet accepted or no
+    /// longer exists.
     pub fn set_max_buffered_datagrams(
         &self,
         max_buffered_datagrams: Option<NonZeroUsize>,
@@ -996,7 +997,8 @@ impl ServerSession {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidStreamId` if the session no longer exists.
+    /// Returns `InvalidStreamId` if the session is not yet accepted or no
+    /// longer exists.
     pub fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler

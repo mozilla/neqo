@@ -221,7 +221,7 @@ fn response_103() {
 }
 
 /// Test [`neqo_http3::SendMessage::send_data`] to set
-/// [`neqo_transport::SendStream::set_writable_event_low_watermark`].
+/// [`neqo_transport::Connection::stream_set_writable_event_low_watermark`].
 #[test]
 fn data_writable_events_low_watermark() -> Result<(), Box<dyn std::error::Error>> {
     const STREAM_LIMIT: u64 = 5000;
