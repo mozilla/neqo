@@ -2067,7 +2067,8 @@ impl Connection {
 
     /// Whether `packet` validates its path during the handshake (RFC 9000, Section 8.1).
     fn validates_path(&self, packet: &packet::Decrypted) -> bool {
-        self.role != Role::Client
+        !self.state.connected()
+            && self.role != Role::Client
             && (packet.packet_type() == packet::Type::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
     }

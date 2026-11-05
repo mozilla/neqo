@@ -1983,3 +1983,22 @@ fn server_handshake_error_validates_path() {
     ));
     assert!(server.paths.primary().unwrap().borrow().is_valid());
 }
+
+/// After the handshake, an error on a new path leaves it unvalidated, even if the packet uses the
+/// server's initial connection ID.
+#[test]
+fn server_error_on_new_path_not_validated() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let garbage = send_with_extra(&mut client, GarbageWriter {}, now());
+    let cid = &server.local_initial_source_cid;
+    assert_eq!(&garbage[1..=cid.len()], cid.as_ref());
+
+    let dgram = change_source_port(&garbage, 1);
+    let remote = dgram.source();
+    server.process_input(dgram, now());
+    let path = closing_path(&server);
+    assert_eq!(path.borrow().remote_address(), remote);
+    assert!(!path.borrow().is_valid());
+}
