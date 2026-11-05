@@ -621,7 +621,8 @@ pub fn run(
 pub(super) mod test_support {
     use std::fs;
 
-    use test_fixture::{ProcessServer, default_client, handshake_with_server, now};
+    use neqo_transport::{Connection, INITIAL_LOCAL_MAX_STREAM_DATA};
+    use test_fixture::{DEFAULT_ALPN, ProcessServer, default_client, handshake_with_server, now};
 
     use super::Args;
     use crate::temp_dir::TempDir;
@@ -631,27 +632,50 @@ pub(super) mod test_support {
         fn transport(&mut self) -> &mut dyn ProcessServer;
     }
 
+    /// [`Args`] for the ALPN that [`default_client`] offers.
+    pub(super) fn alpn_args() -> Args {
+        let mut args = Args::default();
+        args.shared.alpn = DEFAULT_ALPN[0].to_string();
+        args
+    }
+
+    /// Connect a [`default_client`] to `server`.
+    pub(super) fn connect<S: StatsServer>(server: &mut S) -> Connection {
+        let mut client = default_client();
+        handshake_with_server(&mut client, server.transport());
+        server.process_events(now());
+        let out = server.transport().process(None, now()); // NewSessionTicket
+        client.process_input(out.dgram().unwrap(), now());
+        client
+    }
+
+    /// Send `client`'s next datagram to `server` and handle the events.
+    pub(super) fn deliver<S: StatsServer>(server: &mut S, client: &mut Connection) {
+        let out = client.process_output(now());
+        _ = server.transport().process(out.dgram(), now());
+        server.process_events(now());
+    }
+
+    /// A path whose response exceeds the client's stream flow-control window.
+    pub(super) fn blocked_path() -> String {
+        format!("/{}", INITIAL_LOCAL_MAX_STREAM_DATA + 1)
+    }
+
     /// Connect to `make`'s server and close, returning the records it wrote.
     pub(super) fn reported_on_close<S: StatsServer>(make: impl FnOnce(&Args) -> S) -> usize {
         let dir = TempDir::new();
         let file = dir.path().join("stats.json");
 
-        let mut args = Args::default();
-        args.shared.alpn = test_fixture::DEFAULT_ALPN[0].to_string();
+        let mut args = alpn_args();
         args.shared.stats_file = Some(file.clone());
         let mut server = make(&args);
 
-        let mut client = default_client();
-        handshake_with_server(&mut client, server.transport());
-        server.process_events(now());
+        let mut client = connect(&mut server);
         assert!(!file.exists(), "must only report on close");
 
         client.close(now(), 0, "bye");
-        let out = client.process_output(now());
-        _ = server.transport().process(out.dgram(), now());
-
-        server.process_events(now()); // Twice: a repeat would append a line.
-        server.process_events(now());
+        deliver(&mut server, &mut client);
+        server.process_events(now()); // Again: a repeat would append a line.
         fs::read_to_string(&file).map_or(0, |s| s.lines().count())
     }
 }
