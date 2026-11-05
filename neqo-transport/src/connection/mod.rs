@@ -3985,9 +3985,7 @@ impl Connection {
         watermark: NonZeroUsize,
     ) -> Res<()> {
         self.streams
-            .get_send_stream_mut(stream_id)?
-            .set_writable_event_low_watermark(watermark);
-        Ok(())
+            .set_writable_event_low_watermark(stream_id, watermark)
     }
 
     /// Close the stream. Enqueued data will be sent.
