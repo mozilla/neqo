@@ -401,6 +401,40 @@ fn get_token(client: &mut Http3Client) -> ResumptionToken {
 }
 
 #[test]
+fn closing_keeps_resumption_token() {
+    let (mut hconn_c, mut hconn_s, _) = connect();
+    hconn_c.events().for_each(drop);
+    let conn = hconn_s
+        .events()
+        .find_map(|e| match e {
+            Http3ServerEvent::StateChange { conn, .. } => Some(conn),
+            _ => None,
+        })
+        .unwrap();
+    conn.borrow_mut().send_ticket(now(), &[]).unwrap();
+    let ticket = hconn_s.process_output(now()).dgram().unwrap();
+    conn.borrow_mut().close(now(), 42, "");
+    let close = hconn_s.process_output(now()).dgram().unwrap();
+
+    hconn_c.process_multiple_input([ticket, close], now());
+    let state = Http3State::Closing(CloseReason::Transport(Error::PeerApplication(42)));
+    assert_eq!(hconn_c.state(), state);
+    let events = hconn_c.events().collect::<Vec<_>>();
+    let [
+        Http3ClientEvent::ResumptionToken(token),
+        Http3ClientEvent::StateChange(state_change),
+    ] = &events[..]
+    else {
+        panic!("unexpected events {events:?}");
+    };
+    assert_eq!(*state_change, state);
+
+    let mut hconn_c = default_http3_client();
+    hconn_c.enable_resumption(now(), token).unwrap();
+    assert_eq!(hconn_c.state(), Http3State::ZeroRtt);
+}
+
+#[test]
 fn zerortt() {
     let (mut hconn_c, _, dgram) = connect();
     let token = get_token(&mut hconn_c);

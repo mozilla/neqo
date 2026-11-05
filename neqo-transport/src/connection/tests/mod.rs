@@ -432,18 +432,20 @@ fn exchange(a: &mut Connection, b: &mut Connection) {
     }
 }
 
+fn ticket_with_new_token(server: &mut Connection, now: Instant) -> Datagram {
+    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(&validation);
+    server.send_ticket(now, &[]).expect("can send ticket");
+    server.process_output(now).dgram().expect("ticket")
+}
+
 fn exchange_ticket(
     client: &mut Connection,
     server: &mut Connection,
     now: Instant,
 ) -> ResumptionToken {
-    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
-    let validation = Rc::new(RefCell::new(validation));
-    server.set_validation(&validation);
-    server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process_output(now).dgram();
-    assert!(ticket.is_some());
-    client.process_input(ticket.unwrap(), now);
+    client.process_input(ticket_with_new_token(server, now), now);
     assert_eq!(*client.state(), State::Confirmed);
     get_tokens(client).pop().expect("should have token")
 }
