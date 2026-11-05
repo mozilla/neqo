@@ -977,6 +977,7 @@ impl Http3Connection {
                     stream_type,
                     stream_id,
                     first_frame_type: None,
+                    connect_enabled: false,
                 },
                 Rc::clone(&self.qpack_decoder),
                 recv_events,
@@ -1056,6 +1057,19 @@ impl Http3Connection {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .commit(conn, now)
+    }
+
+    /// Abandons reading a stream without notifying the application.
+    pub(crate) fn stream_stop_reading(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        error: AppError,
+    ) -> Res<()> {
+        self.recv_streams.remove(&stream_id);
+        self.qpack_decoder.borrow_mut().cancel_stream(stream_id);
+        conn.stream_stop_sending(stream_id, error)?;
+        Ok(())
     }
 
     pub fn stream_stop_sending(
@@ -1995,9 +2009,10 @@ impl Http3Connection {
             && s.stream_type() == Http3StreamType::ExtendedConnect
             && let Some(wt) = self
                 .recv_streams
-                .remove(&stream_id)?
+                .get(&stream_id)?
                 .extended_connect_session()
         {
+            self.recv_streams.remove(&stream_id);
             self.remove_extended_connect(&wt, conn);
         }
         stream
@@ -2005,6 +2020,10 @@ impl Http3Connection {
 
     pub const fn webtransport_enabled(&self) -> bool {
         self.webtransport.enabled()
+    }
+
+    pub(crate) const fn connect_enabled(&self) -> bool {
+        self.local_params.connect_enabled()
     }
 
     pub const fn connect_udp_enabled(&self) -> bool {

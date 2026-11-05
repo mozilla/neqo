@@ -158,6 +158,17 @@ impl Http3ServerHandler {
             .stream_stop_sending(conn, stream_id, error)
     }
 
+    pub(crate) fn stream_stop_reading(
+        &mut self,
+        stream_id: StreamId,
+        error: AppError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        self.needs_processing = true;
+        self.base_handler
+            .stream_stop_reading(conn, stream_id, error)
+    }
+
     pub fn stream_reset_send(
         &mut self,
         stream_id: StreamId,
@@ -329,6 +340,7 @@ impl Http3ServerHandler {
                             stream_type: Http3StreamType::Http,
                             stream_id,
                             first_frame_type: Some(first_frame_type),
+                            connect_enabled: self.base_handler.connect_enabled(),
                         },
                         Rc::clone(self.base_handler.qpack_decoder()),
                         Box::new(self.events.clone()),

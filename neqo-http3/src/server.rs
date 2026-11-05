@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::Datagram;
+use neqo_common::{Datagram, Header};
 use neqo_transport::{
     ConnectionIdGenerator, Output, OutputBatch, State,
     server::{ConnectionRef, Server, ValidateAddress},
@@ -23,7 +23,7 @@ use rustc_hash::FxHashMap as HashMap;
 use tracing::trace;
 
 use crate::{
-    Http3Parameters, Http3StreamInfo, Res,
+    Error, Http3Parameters, Http3StreamInfo, Res,
     connect_udp::{self, ServerEvents as _},
     connection::Http3State,
     connection_server::Http3ServerHandler,
@@ -350,6 +350,18 @@ impl Http3Server {
                             datagram,
                         );
                     }
+                    Http3ServerConnEvent::UnsupportedExtendedConnect { stream_id } => {
+                        let mut c = conn.borrow_mut();
+                        let headers = [Header::new(":status", "501")]; // RFC 9220, Section 3.
+                        if handler_borrowed
+                            .send_headers(stream_id, &headers, &mut c)
+                            .is_ok()
+                        {
+                            drop(handler_borrowed.stream_close_send(stream_id, &mut c, now));
+                        }
+                        let error = Error::HttpNone.code(); // RFC 9114, Section 4.1.
+                        drop(handler_borrowed.stream_stop_reading(stream_id, error, &mut c));
+                    }
                 }
             }
         }
@@ -442,7 +454,8 @@ mod tests {
     use neqo_common::{Datagram, Encoder, event::Provider as _};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, Connection, ConnectionEvent, State, StreamId, StreamType, ZeroRttState,
+        CloseReason, Connection, ConnectionEvent, ConnectionParameters, State, StreamId,
+        StreamType, ZeroRttState,
     };
     use nss::{AuthenticationStatus, ResumptionToken, ZeroRttCheckResult, ZeroRttChecker};
     use test_fixture::{
@@ -557,7 +570,8 @@ mod tests {
     fn connect_and_receive_settings_with_server(
         server: &mut Http3Server,
     ) -> (Connection, ResumptionToken) {
-        const CONTROL_STREAM_DATA: &[u8] = &[0x0, 0x4, 0x12, 0x1, 0x40, 0x64, 0x7, 0x40, 0x64];
+        const CONTROL_STREAM_SETTINGS: &[u8] = &[0x0, 0x4];
+        const SETTINGS_PREFIX: &[u8] = &[0x1, 0x40, 0x64, 0x7, 0x40, 0x64];
 
         let mut client = default_client();
         connect_transport(server, &mut client, false);
@@ -582,7 +596,8 @@ mod tests {
                         let mut buf = [0_u8; 100];
                         let (_, fin) = client.stream_recv(stream_id, &mut buf).unwrap();
                         assert!(!fin);
-                        assert_eq!(&buf[..CONTROL_STREAM_DATA.len()], CONTROL_STREAM_DATA);
+                        assert_eq!(&buf[..2], CONTROL_STREAM_SETTINGS);
+                        assert_eq!(&buf[3..3 + SETTINGS_PREFIX.len()], SETTINGS_PREFIX); // Skip the frame length.
                     } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID
                         || stream_id == SERVER_SIDE_ENCODER_STREAM_ID
                     {
@@ -1028,6 +1043,54 @@ mod tests {
         hconn.process(out.dgram(), now());
 
         assert_closed(&hconn, &Error::HttpFrame);
+    }
+
+    fn exchange(client: &mut Connection, server: &mut Http3Server, mut out: Option<Datagram>) {
+        loop {
+            let c = client.process(out.take(), now()).dgram();
+            let client_sent = c.is_some();
+            out = server.process(c, now()).dgram();
+            if out.is_none() && !client_sent {
+                break;
+            }
+        }
+    }
+
+    // :method CONNECT, :scheme https, :authority something.com, :path /, :protocol websocket
+    const EXTENDED_CONNECT_WEBSOCKET: &[u8] = &[
+        0x01, 0x25, 0x00, 0x00, 0xcf, 0xd7, 0x50, 0x89, 0x41, 0xe9, 0x2a, 0x67, 0x35, 0x53, 0x2e,
+        0x43, 0xd3, 0xc1, 0x27, 0x02, 0x3a, 0x70, 0x72, 0x6f, 0x74, 0x6f, 0x63, 0x6f, 0x6c, 0x09,
+        0x77, 0x65, 0x62, 0x73, 0x6f, 0x63, 0x6b, 0x65, 0x74,
+    ];
+    const RESPONSE_501: &[u8] = &[0x01, 0x07, 0x00, 0x00, 0x5f, 0x09, 0x82, 0x6c, 0x01];
+
+    #[test]
+    fn server_unsupported_extended_connect_releases_stream() {
+        const MAX_STREAMS: u64 = 2;
+        let conn_params =
+            ConnectionParameters::default().max_streams(StreamType::BiDi, MAX_STREAMS);
+        let mut server = create_server(
+            http3params(qpack_defaults())
+                .connect(true)
+                .connection_parameters(conn_params),
+        );
+        let (mut peer_conn, _) = connect_to(&mut server);
+
+        for _ in 0..=MAX_STREAMS {
+            let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+            peer_conn
+                .stream_send(stream_id, EXTENDED_CONNECT_WEBSOCKET)
+                .unwrap();
+            let out = peer_conn.process_output(now());
+            let out = server.process(out.dgram(), now()); // 501 and STOP_SENDING in flight.
+            peer_conn.stream_close_send(stream_id).unwrap();
+            exchange(&mut peer_conn, &mut server, out.dgram());
+
+            let mut buf = [0; 100];
+            let (amount, fin) = peer_conn.stream_recv(stream_id, &mut buf).unwrap();
+            assert_eq!(&buf[..amount], RESPONSE_501);
+            assert!(fin);
+        }
     }
 
     const REQUEST_WITH_BODY: &[u8] = &[

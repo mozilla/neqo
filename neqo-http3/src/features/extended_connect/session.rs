@@ -112,6 +112,7 @@ impl Session {
                     stream_type: Http3StreamType::ExtendedConnect,
                     stream_id: session_id,
                     first_frame_type: None,
+                    connect_enabled: false,
                 },
                 qpack_decoder,
                 Box::new(Rc::clone(&stream_event_listener)),
