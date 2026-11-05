@@ -206,6 +206,25 @@ fn closing_and_draining() {
     );
 }
 
+/// The closing state limits the rate of responses to incoming packets (RFC 9000, Section 10.2.1).
+#[test]
+fn closing_rate_limited() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    client.close(now(), 7, "");
+    assert!(client.process_output(now()).dgram().is_some());
+
+    let trigger = send_something(&mut server, now());
+    let responses: Vec<_> = (1..=16)
+        .filter(|_| {
+            client.process_input(trigger.clone(), now());
+            client.process_output(now()).dgram().is_some()
+        })
+        .collect();
+    assert_eq!(responses, [1, 2, 4, 8, 16]);
+}
+
 /// Test that a client can handle a stateless reset correctly.
 #[test]
 fn stateless_reset_client() {

@@ -17,11 +17,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
+use neqo_common::{Datagram, Decoder, event::Provider as _, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, new_neqo_qlog, now,
+    fixture_init, new_neqo_qlog, now, split_datagram,
 };
 use tracing::debug;
 
@@ -1960,34 +1960,20 @@ fn error_on_new_path_tiny_amplification_limit() {
     assert_eq!(path.borrow().amplification_limit(), left);
 }
 
-/// A server closing on an unvalidated path stays within the anti-amplification limit
-/// (RFC 9000, Section 10.2.1), however many datagrams for the connection it receives.
+/// A Handshake packet validates the client address (RFC 9000, Section 8.1), even if it causes an
+/// error.
 #[test]
-fn server_closing_amplification_limit() {
-    // Without ML-KEM, the server leaves `WaitInitial` after the first Initial.
+fn server_handshake_error_validates_path() {
     let mut client = new_client(ConnectionParameters::default().mlkem(false));
     let mut server = default_server();
-    let c1 = client.process_output(now()).dgram().unwrap();
-    let mut budget = 3 * c1.len();
-    server.process_input(c1, now());
-    let s1 = server.process_output(now()).dgram().unwrap();
-    let mut sent = s1.len();
-    client.process_input(s1, now());
+    server.process_input(client.process_output(now()).dgram().unwrap(), now());
+    while let Some(d) = server.process_output(now()).dgram() {
+        client.process_input(d, now());
+    }
     client.test_frame_writer = Some(Box::new(GarbageWriter {}));
-    let c2 = client.process_output(now()).dgram().unwrap();
-    budget += 3 * c2.len();
+    let (_, handshake) = split_datagram(&client.process_output(now()).dgram().unwrap());
 
-    // An empty Handshake packet for the connection, which needs no keys.
-    let mut trigger = Encoder::default();
-    trigger
-        .encode_byte(0xe0)
-        .encode_uint(4, client.version().wire_version())
-        .encode_vec(1, client.original_destination_cid.as_ref().unwrap())
-        .encode_vec(1, &[])
-        .encode_varint(0_u64);
-    let trigger = Datagram::new(c2.source(), c2.destination(), c2.tos(), trigger);
-
-    server.process_input(c2, now());
+    server.process_input(handshake.unwrap(), now());
     assert!(matches!(
         server.state(),
         State::Closing {
@@ -1995,15 +1981,5 @@ fn server_closing_amplification_limit() {
             ..
         }
     ));
-    for _ in 0..100 {
-        while let Some(d) = server.process_output(now()).dgram() {
-            sent += d.len();
-        }
-        budget += 3 * trigger.len();
-        server.process_input(trigger.clone(), now());
-    }
-
-    let path = server.paths.primary().unwrap();
-    assert!(!path.borrow().is_valid());
-    assert!(sent <= budget);
+    assert!(server.paths.primary().unwrap().borrow().is_valid());
 }

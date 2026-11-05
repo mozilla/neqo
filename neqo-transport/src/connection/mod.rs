@@ -1754,10 +1754,7 @@ impl Connection {
 
         if self.state.connected() {
             self.handle_migration(path, remote, migrate, now);
-        } else if self.role != Role::Client
-            && (packet.packet_type() == packet::Type::Handshake
-                || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
-        {
+        } else if self.validates_path(packet) {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
             path.borrow_mut().set_valid(now);
@@ -2068,10 +2065,20 @@ impl Connection {
         }
     }
 
+    /// Whether `packet` validates its path during the handshake (RFC 9000, Section 8.1).
+    fn validates_path(&self, packet: &packet::Decrypted) -> bool {
+        self.role != Role::Client
+            && (packet.packet_type() == packet::Type::Handshake
+                || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
+    }
+
     /// After an error, a permanent path is needed to send the `CONNECTION_CLOSE`.
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
     fn ensure_error_path(&mut self, path: &PathRef, packet: &packet::Decrypted, now: Instant) {
+        if self.validates_path(packet) {
+            path.borrow_mut().set_valid(now);
+        }
         if self.paths.is_temporary(path) {
             // First try to fill in handshake details.
             if packet.packet_type() == packet::Type::Initial {
@@ -2775,7 +2782,6 @@ impl Connection {
         let mut profile = self.loss_recovery.send_profile(&path.borrow(), now);
         if closing_frame.is_some() {
             // CONNECTION_CLOSE counts against the anti-amplification limit (RFC 9000, Section 8.1).
-            // TODO: Also rate-limit packets in the closing state (RFC 9000, Section 10.2.1).
             profile.cap(path.borrow().amplification_limit());
         }
         debug!("[{self}] output_dgram_on_path send_profile {profile:?}");
