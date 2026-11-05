@@ -2280,10 +2280,13 @@ impl Connection {
                 || Ok(SendOptionBatch::default()),
                 |path| {
                     let res = self.output_dgram_batch_on_path(&path, now, None, max_datagrams);
-                    if matches!(res, Ok(SendOptionBatch::No(false))) && !path.borrow().is_primary()
+                    if matches!(res, Ok(SendOptionBatch::No(false)))
+                        && self.state.connected()
+                        && !path.borrow().is_valid()
+                        && path.borrow().has_probe()
+                        && path.borrow_mut().block_probe(now)
                     {
                         // The probe does not fit the anti-amplification limit; try another path.
-                        path.borrow_mut().skip_probe(now);
                         return Ok(self.output(now, max_datagrams));
                     }
                     self.capture_error(Some(path), now, FrameType::Padding, res)
