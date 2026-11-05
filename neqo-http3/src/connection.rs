@@ -1059,6 +1059,19 @@ impl Http3Connection {
             .commit(conn, now)
     }
 
+    /// Abandons reading a stream without notifying the application.
+    pub(crate) fn stream_stop_reading(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        error: AppError,
+    ) -> Res<()> {
+        self.recv_streams.remove(&stream_id);
+        self.qpack_decoder.borrow_mut().cancel_stream(stream_id);
+        conn.stream_stop_sending(stream_id, error)?;
+        Ok(())
+    }
+
     pub fn stream_stop_sending(
         &mut self,
         conn: &mut Connection,
@@ -1996,9 +2009,10 @@ impl Http3Connection {
             && s.stream_type() == Http3StreamType::ExtendedConnect
             && let Some(wt) = self
                 .recv_streams
-                .remove(&stream_id)?
+                .get(&stream_id)?
                 .extended_connect_session()
         {
+            self.recv_streams.remove(&stream_id);
             self.remove_extended_connect(&wt, conn);
         }
         stream

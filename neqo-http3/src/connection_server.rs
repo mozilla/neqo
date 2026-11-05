@@ -158,6 +158,17 @@ impl Http3ServerHandler {
             .stream_stop_sending(conn, stream_id, error)
     }
 
+    pub(crate) fn stream_stop_reading(
+        &mut self,
+        stream_id: StreamId,
+        error: AppError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        self.needs_processing = true;
+        self.base_handler
+            .stream_stop_reading(conn, stream_id, error)
+    }
+
     pub fn stream_reset_send(
         &mut self,
         stream_id: StreamId,
