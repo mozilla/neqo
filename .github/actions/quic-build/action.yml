@@ -29,7 +29,7 @@ runs:
         {
           echo "CACHE_VERSION=v5"
           # renovate: depName=https://github.com/google/quiche datasource=git-refs branch=main
-          echo "GOOGLE_QUICHE_REF=2bf674e96892b71e5e8c6225e98f5d055db1d0c1"
+          echo "GOOGLE_QUICHE_REF=00e373993e5fbe1609863fca5aca1a55039c77ad"
           # renovate: depName=cloudflare/quiche datasource=github-tags
           echo "CLOUDFLARE_QUICHE_VERSION=0.30.0"
           echo "CLOUDFLARE_QUICHE_REF=be47c5011215b9f13bad06bd7627d3ae49888a19"

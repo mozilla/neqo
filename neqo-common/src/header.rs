@@ -146,8 +146,6 @@ impl FromStr for Header {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::str::from_utf8;
-
     use super::*;
 
     #[test]
@@ -194,7 +192,7 @@ mod tests {
         assert_eq!(header.value(), non_utf8_bytes.as_slice());
 
         // Verify that the value is indeed not valid UTF-8
-        assert!(from_utf8(header.value()).is_err());
+        assert!(str::from_utf8(header.value()).is_err());
         // Test the value_utf8() helper method
         assert!(header.value_utf8().is_err());
     }
@@ -209,8 +207,8 @@ mod tests {
         assert_eq!(header.value(), emoji_bytes.as_slice());
 
         // Verify we can convert back to UTF-8
-        let emoji_str = from_utf8(header.value()).unwrap();
-        assert_eq!(emoji_str, from_utf8(emoji_bytes).unwrap());
+        let emoji_str = str::from_utf8(header.value()).unwrap();
+        assert_eq!(emoji_str, str::from_utf8(emoji_bytes).unwrap());
         // Test the value_utf8() helper method
         assert_eq!(header.value_utf8().unwrap(), emoji_str);
     }

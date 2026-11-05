@@ -601,12 +601,10 @@ impl CryptoDxState {
 
     fn invoked(&mut self) -> Res<()> {
         #[cfg(test)]
-        OVERWRITE_INVOCATIONS.with(|v| {
-            if let Some(i) = v.borrow_mut().take() {
-                tracing::warn!("Setting {:?} invocations to {i}", self.direction);
-                self.invocations = i;
-            }
-        });
+        if let Some(i) = OVERWRITE_INVOCATIONS.take() {
+            tracing::warn!("Setting {:?} invocations to {i}", self.direction);
+            self.invocations = i;
+        }
         self.invocations = self
             .invocations
             .checked_sub(1)
@@ -1766,7 +1764,7 @@ impl CryptoStreams {
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let mid = sni.start.midpoint(sni.end);
                     let (left, right) = data.split_at(mid);
 
                     // Truncate the chunks so we can fit them into roughly evenly-filled packets.
@@ -1897,7 +1895,7 @@ mod buffer_limits {
     const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
 
     // Offsets have to stay inside `BUFFER_LIMIT`.
-    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
+    const _: () = assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
 
     #[test]
     fn crypto_offset_beyond_buffer() {

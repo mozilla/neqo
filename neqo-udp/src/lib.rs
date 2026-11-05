@@ -49,11 +49,11 @@ const NUM_BUFS: usize = 1;
 const NUM_BUFS: usize = 16;
 
 /// A UDP receive buffer.
-pub struct RecvBuf(Vec<Vec<u8>>);
+pub struct RecvBuf([Vec<u8>; NUM_BUFS]);
 
 impl Default for RecvBuf {
     fn default() -> Self {
-        Self(vec![vec![0; RECV_BUF_SIZE]; NUM_BUFS])
+        Self(array::from_fn(|_| vec![0; RECV_BUF_SIZE]))
     }
 }
 
@@ -105,36 +105,36 @@ pub fn send_inner(
     Ok(())
 }
 
-#[cfg(unix)]
-fn is_emsgsize(e: &io::Error) -> bool {
-    e.raw_os_error() == Some(libc::EMSGSIZE)
-}
+cfg_select! {
+    unix => {
+        fn is_emsgsize(e: &io::Error) -> bool {
+            e.raw_os_error() == Some(libc::EMSGSIZE)
+        }
 
-#[cfg(windows)]
-fn is_emsgsize(e: &io::Error) -> bool {
-    // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
-    // segment size exceeds the supported limit.
-    matches!(e.raw_os_error(), Some(c) if c == WinSock::WSAEMSGSIZE.0 || c == WinSock::WSAEINVAL.0)
-}
+        fn is_enobufs(e: &io::Error) -> bool {
+            e.raw_os_error() == Some(libc::ENOBUFS)
+        }
+    }
+    windows => {
+        fn is_emsgsize(e: &io::Error) -> bool {
+            // WSAEINVAL is returned when the Windows USO (UDP Segmentation Offload)
+            // segment size exceeds the supported limit.
+            matches!(e.raw_os_error(), Some(c) if c == WinSock::WSAEMSGSIZE.0 || c == WinSock::WSAEINVAL.0)
+        }
 
-#[cfg(not(any(unix, windows)))]
-fn is_emsgsize(_: &io::Error) -> bool {
-    false
-}
+        fn is_enobufs(e: &io::Error) -> bool {
+            e.raw_os_error() == Some(WinSock::WSAENOBUFS.0)
+        }
+    }
+    _ => {
+        fn is_emsgsize(_: &io::Error) -> bool {
+            false
+        }
 
-#[cfg(unix)]
-fn is_enobufs(e: &io::Error) -> bool {
-    e.raw_os_error() == Some(libc::ENOBUFS)
-}
-
-#[cfg(windows)]
-fn is_enobufs(e: &io::Error) -> bool {
-    e.raw_os_error() == Some(WinSock::WSAENOBUFS.0)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn is_enobufs(_: &io::Error) -> bool {
-    false
+        fn is_enobufs(_: &io::Error) -> bool {
+            false
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -142,7 +142,6 @@ use std::os::fd::AsFd as SocketRef;
 #[cfg(windows)]
 use std::os::windows::io::AsSocket as SocketRef;
 
-#[expect(clippy::missing_panics_doc, reason = "OK here.")]
 pub fn recv_inner<'a, S: SocketRef>(
     local_address: SocketAddr,
     state: &UdpSocketState,
@@ -150,10 +149,7 @@ pub fn recv_inner<'a, S: SocketRef>(
     recv_buf: &'a mut RecvBuf,
 ) -> Result<DatagramIter<'a>, io::Error> {
     let mut metas = [RecvMeta::default(); NUM_BUFS];
-    let mut iovs: [IoSliceMut; NUM_BUFS] = {
-        let mut bufs = recv_buf.0.iter_mut().map(|b| IoSliceMut::new(b));
-        array::from_fn(|_| bufs.next().expect("NUM_BUFS elements"))
-    };
+    let mut iovs = recv_buf.0.each_mut().map(|b| IoSliceMut::new(b));
 
     let n = state.recv((&socket).into(), &mut iovs, &mut metas)?;
 

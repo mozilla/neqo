@@ -1,8 +1,6 @@
 name: CI
 on:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, edited]
   merge_group:
   push:
     branches: ["main"] # Only to populate the Rust cache
@@ -18,8 +16,7 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -32,7 +29,6 @@ defaults:
 jobs:
   toolchains:
     name: Determine toolchains
-    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -43,7 +39,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+        uses: mozilla/actions/toolchains@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -178,7 +174,7 @@ jobs:
   crap:
     name: CRAP analysis
     needs: check
-    if: ${{ !cancelled() && github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: ${{ !cancelled() && github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -192,7 +188,7 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+      - uses: mozilla/actions/crap@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
         with:
           lcov-path: lcov.info
           threshold: "30"
@@ -200,14 +196,14 @@ jobs:
 
       - # merge_group's ref is often gone by upload time: github/codeql-action#1572
         if: ${{ github.event_name != 'merge_group' }}
-        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: crap.sarif
           category: cargo-crap
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -224,7 +220,7 @@ jobs:
 
   check-android:
     name: Check Android
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -241,7 +237,7 @@ jobs:
   # not i686-pc-windows-msvc or Windows-specific neqo-udp/mtu paths.
   check-i686:
     name: Check i686-unknown-linux-gnu
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -261,7 +257,7 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov

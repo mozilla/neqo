@@ -338,7 +338,7 @@ pub const fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> 
 #[allow(
     clippy::allow_attributes,
     clippy::single_range_in_vec_init,
-    reason = "TODO: false positive in clippy 1.98-nightly; re-check when bumping MSRV"
+    reason = "Single-range ACK lists are intended."
 )]
 mod tests {
     use std::{
