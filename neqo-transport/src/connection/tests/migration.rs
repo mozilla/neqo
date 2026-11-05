@@ -21,7 +21,7 @@ use neqo_common::{Datagram, Decoder, event::Provider as _, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
     assertions::{assert_v4_path, assert_v6_path},
-    fixture_init, new_neqo_qlog, now,
+    fixture_init, new_neqo_qlog, now, split_datagram,
 };
 use tracing::debug;
 
@@ -39,16 +39,18 @@ use crate::{
     addr_valid::{AddressValidation, ValidateAddress},
     cid::ConnectionIdManager,
     connection::{
+        state::StateSignaling,
         test_internal,
         tests::{assert_path_challenge_min_len, connect, send_something_paced, send_with_extra},
     },
     frame::FrameType,
     packet,
-    path::Path,
+    path::{Path, PathRef},
     pmtud::Pmtud,
     recovery::MAX_PTO_PACKET_COUNT,
     stats::FrameStats,
     tparams::{PreferredAddress, TransportParameter, TransportParameterId},
+    tracking::PacketNumberSpace::ApplicationData,
 };
 
 /// This should be a valid-seeming transport parameter.
@@ -1894,4 +1896,109 @@ fn close_on_new_path() {
     let close = client.process_output(now()).dgram().unwrap();
     assert_eq!(close.source(), garbage.destination());
     assert_eq!(client.stats().frame_tx.connection_close, 1);
+}
+
+/// Make `client` close on an invalid frame from a new path; return the size of that datagram.
+fn error_on_new_path(client: &mut Connection, server: &mut Connection) -> usize {
+    connect_force_idle(client, server);
+    let garbage = send_with_extra(server, GarbageWriter {}, now());
+    let dgram = change_path(&garbage, DEFAULT_ADDR_V4);
+    let len = dgram.len();
+    client.process_input(dgram, now());
+    len
+}
+
+fn closing_path(c: &Connection) -> PathRef {
+    let (StateSignaling::Closing(close) | StateSignaling::CloseSent(Some(close))) =
+        &c.state_signaling
+    else {
+        panic!("not closing");
+    };
+    Rc::clone(close.path())
+}
+
+/// `CONNECTION_CLOSE` on an unvalidated path counts against the anti-amplification limit
+/// (RFC 9000, Section 10.2.1).
+#[test]
+fn error_on_new_path_amplification_limit() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let budget = 3 * error_on_new_path(&mut client, &mut server);
+
+    let close = client.process_output(now()).dgram().unwrap();
+    assert_eq!(close.destination(), DEFAULT_ADDR_V4);
+    let mut sent = close.len();
+    // Every datagram from the server draws another CONNECTION_CLOSE, until the budget is spent.
+    let trigger = send_something(&mut server, now());
+    for _ in 0..10 {
+        client.process_input(trigger.clone(), now());
+        sent += client.process_output(now()).dgram().map_or(0, |d| d.len());
+    }
+
+    let path = closing_path(&client);
+    assert!(!path.borrow().is_valid());
+    assert!(sent <= budget);
+}
+
+/// A closing budget smaller than the AEAD expansion leaves room for no packet at all.
+#[test]
+fn error_on_new_path_tiny_amplification_limit() {
+    let mut client = default_client();
+    let mut server = default_server();
+    error_on_new_path(&mut client, &mut server);
+
+    let path = closing_path(&client);
+    let (_, tx) = client
+        .crypto
+        .states()
+        .select_tx(client.version, ApplicationData)
+        .unwrap();
+    let left = tx.expansion() - 1;
+    let limit = path.borrow().amplification_limit();
+    path.borrow_mut().add_sent(limit - left);
+    assert!(client.process_output(now()).dgram().is_none());
+    assert_eq!(path.borrow().amplification_limit(), left);
+}
+
+/// A Handshake packet validates the client address (RFC 9000, Section 8.1), even if it causes an
+/// error.
+#[test]
+fn server_handshake_error_validates_path() {
+    let mut client = new_client(ConnectionParameters::default().mlkem(false));
+    let mut server = default_server();
+    server.process_input(client.process_output(now()).dgram().unwrap(), now());
+    while let Some(d) = server.process_output(now()).dgram() {
+        client.process_input(d, now());
+    }
+    client.test_frame_writer = Some(Box::new(GarbageWriter {}));
+    let (_, handshake) = split_datagram(&client.process_output(now()).dgram().unwrap());
+
+    server.process_input(handshake.unwrap(), now());
+    assert!(matches!(
+        server.state(),
+        State::Closing {
+            error: CloseReason::Transport(Error::UnknownFrameType),
+            ..
+        }
+    ));
+    assert!(server.paths.primary().unwrap().borrow().is_valid());
+}
+
+/// After the handshake, an error on a new path leaves it unvalidated, even if the packet uses the
+/// server's initial connection ID.
+#[test]
+fn server_error_on_new_path_not_validated() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let garbage = send_with_extra(&mut client, GarbageWriter {}, now());
+    let cid = &server.local_initial_source_cid;
+    assert_eq!(&garbage[1..=cid.len()], cid.as_ref());
+
+    let dgram = change_source_port(&garbage, 1);
+    let remote = dgram.source();
+    server.process_input(dgram, now());
+    let path = closing_path(&server);
+    assert_eq!(path.borrow().remote_address(), remote);
+    assert!(!path.borrow().is_valid());
 }
