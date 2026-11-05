@@ -1551,7 +1551,6 @@ impl Connection {
     fn preprocess_packet(
         &mut self,
         packet: &packet::Public,
-        path: &PathRef,
         dcid: Option<&ConnectionId>,
         now: Instant,
     ) -> Res<PreprocessResult> {
@@ -1559,17 +1558,6 @@ impl Connection {
             self.stats
                 .borrow_mut()
                 .pkt_dropped("Coalesced packet has different DCID");
-            return Ok(PreprocessResult::Next);
-        }
-
-        if (packet.packet_type() == packet::Type::Initial
-            || packet.packet_type() == packet::Type::Handshake)
-            && self.role == Role::Client
-            && !path.borrow().is_primary()
-        {
-            // If we have received a packet from a different address than we have sent to
-            // we should ignore the packet. In such a case a path will be a newly created
-            // temporary path, not the primary path.
             return Ok(PreprocessResult::Next);
         }
 
@@ -1767,7 +1755,6 @@ impl Connection {
         if self.state.connected() {
             self.handle_migration(path, remote, migrate, now);
         } else if self.role != Role::Client
-            && path.borrow().is_primary()
             && (packet.packet_type() == packet::Type::Handshake
                 || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
         {
@@ -1791,6 +1778,17 @@ impl Connection {
         received: Instant,
         now: Instant,
     ) {
+        if self.state < State::Confirmed
+            && self
+                .paths
+                .primary()
+                .is_some_and(|p| !p.borrow().received_on(d.destination(), d.source()))
+        {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Address changed during handshake");
+            return;
+        }
         // First determine the path.
         let path = self
             .paths
@@ -1832,7 +1830,7 @@ impl Connection {
                         break;
                     }
                 };
-            match self.preprocess_packet(&packet, path, dcid.as_ref(), now)? {
+            match self.preprocess_packet(&packet, dcid.as_ref(), now)? {
                 PreprocessResult::Continue => (),
                 PreprocessResult::Next => break,
                 PreprocessResult::End => return Ok(()),
@@ -3496,10 +3494,6 @@ impl Connection {
             }
             Frame::PathChallenge { data } => {
                 self.stats.borrow_mut().frame_rx.path_challenge += 1;
-                // Only allow one path during setup.
-                if !self.state.connected() && !path.borrow().is_primary() {
-                    return Ok(());
-                }
                 // If we were challenged, try to make the path permanent.
                 // Report an error if we don't have enough connection IDs.
                 self.ensure_permanent(path, now)?;
