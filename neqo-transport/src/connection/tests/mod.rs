@@ -100,19 +100,23 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // test_fixture because they produce different - and incompatible - types.
 //
 // These are a direct copy of those functions.
-fn new_client_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
+fn new_client_with_addr(params: ConnectionParameters, addr: SocketAddr) -> Connection {
     fixture_init();
-    let (log, contents) = new_neqo_qlog();
-    let mut client = Connection::new_client(
+    Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        addr,
+        addr,
         params,
         now(),
     )
-    .expect("create a default client");
+    .expect("create a default client")
+}
+
+fn new_client_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
+    let (log, contents) = new_neqo_qlog();
+    let mut client = new_client_with_addr(params, DEFAULT_ADDR);
     client.set_qlog(log);
     (client, contents)
 }
@@ -790,13 +794,9 @@ fn assert_default_stats(stats: &Stats) {
 }
 
 fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
-    let path = c.paths.find_path(
-        d.source(),
-        d.destination(),
-        &c.conn_params,
-        now,
-        &mut c.stats.borrow_mut(),
-    );
+    let path = c
+        .paths
+        .find_path(d.source(), d.destination(), &c.conn_params, now);
     if path.borrow().amplification_limit() < path.borrow().plpmtu() {
         // If the amplification limit is less than the PLPMTU, then the path
         // challenge will not have been padded.
