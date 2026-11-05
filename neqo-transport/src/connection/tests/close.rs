@@ -6,14 +6,18 @@
 
 use std::time::Duration;
 
+use nss::AuthenticationStatus;
 use test_fixture::{datagram, now};
 
 use super::{
-    super::{Connection, Output, State},
-    connect, connect_force_idle, default_client, default_server, send_something,
+    super::{Connection, Output, State, test_internal::FrameWriter},
+    AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, flush_to,
+    maybe_authenticate, send_something,
 };
 use crate::{
     AppError, CloseReason, ERROR_APPLICATION_CLOSE, Error,
+    frame::FrameType,
+    packet,
     stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
 };
@@ -97,6 +101,91 @@ fn early_application_close() {
 
     client.process_input(dgram.unwrap(), now());
     assert_draining(&client, &Error::Peer(ERROR_APPLICATION_CLOSE));
+}
+
+/// Deliver the server's flight to the client, which then needs to authenticate the server.
+fn handshake_until_authentication(client: &mut Connection, server: &mut Connection) {
+    let mut now = now();
+    flush_to(client, server, &mut now);
+    flush_to(server, client, &mut now);
+}
+
+/// A verdict that arrives after the server closed the connection is ignored.
+#[test]
+fn authenticated_after_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    handshake_until_authentication(&mut client, &mut server);
+
+    server.close(now(), 77, "");
+    flush_to(&mut server, &mut client, &mut now());
+    assert_draining(&client, &Error::Peer(ERROR_APPLICATION_CLOSE));
+
+    assert!(maybe_authenticate(&mut client));
+    assert_draining(&client, &Error::Peer(ERROR_APPLICATION_CLOSE));
+    assert!(client.tls_info().is_none());
+}
+
+/// A verdict that arrives after a local close is ignored.
+#[test]
+fn authenticated_after_local_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    handshake_until_authentication(&mut client, &mut server);
+
+    client.close(now(), 77, "");
+    client.authenticated(AuthenticationStatus::Ok, now());
+    assert!(matches!(client.state(), State::Closing { .. }));
+    assert!(client.tls_info().is_none());
+}
+
+/// Writes `CONNECTION_CLOSE`, then a frame from the varints in `.0` followed by the data in `.1`.
+struct CloseThen(Vec<u64>, Vec<u8>);
+
+impl FrameWriter for CloseThen {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        let close = FrameType::ConnectionCloseTransport.into();
+        builder.write_varint_frame(&[close, Error::None.code(), 0, 0]); // Frame type, reason.
+        builder.write_varint_frame(&self.0);
+        builder.encode_vvec(&self.1);
+    }
+}
+
+/// Frames that follow `CONNECTION_CLOSE` in the same packet are ignored.
+#[test]
+fn crypto_after_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    handshake_until_authentication(&mut client, &mut server);
+    flush_to(&mut client, &mut server, &mut now()); // Discard Initial keys.
+
+    // Take the client's Finished from TLS, so that only `CloseThen` carries it.
+    let tls = client.crypto.tls_mut();
+    tls.authenticated(AuthenticationStatus::Ok);
+    let records = tls.handshake_raw(now(), None).unwrap();
+    let finished = records.into_iter().flat_map(|r| r.data).collect();
+
+    let now = now() + AT_LEAST_PTO; // The client has nothing else to send.
+    let crypto = CloseThen(vec![FrameType::Crypto.into(), 0], finished); // Type, offset.
+    let dgram = client.test_write_frames(crypto, now);
+    server.process_input(dgram.dgram().unwrap(), now);
+    assert_draining(&server, &Error::Peer(Error::None.code()));
+    assert!(server.tls_info().is_none());
+}
+
+/// A `STREAM` frame that follows `CONNECTION_CLOSE` does not create a stream.
+#[test]
+fn stream_after_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let stream = CloseThen(vec![FrameType::StreamWithLen.into(), 0], vec![0]); // Type, ID.
+    let dgram = client.test_write_frames(stream, now());
+    server.process_input(dgram.dgram().unwrap(), now());
+    assert_draining(&server, &Error::Peer(Error::None.code()));
+    let res = server.stream_recv(0.into(), &mut []);
+    assert_eq!(res, Err(Error::InvalidStreamId));
 }
 
 #[test]
