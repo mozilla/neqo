@@ -1597,10 +1597,17 @@ fn server_pto_respects_amplification_limit() {
     }
     now += timer;
 
-    // The probe takes a full datagram, and the rest of the budget goes to another.
-    let (last, timer) = send(&mut server, now);
+    // A full probe, then the rest of the budget as Handshake only.
+    let mut last = Vec::new();
+    let Output::Callback(timer) = drain(&mut server, &mut now, |d, _| last.push(d)) else {
+        panic!("the server should have a timer");
+    };
     let rest = budget - first.iter().sum::<usize>() - 5 * mtu;
-    assert_eq!(last, vec![mtu, rest]);
+    assert_eq!(
+        last.iter().map(Datagram::len).collect::<Vec<_>>(),
+        vec![mtu, rest]
+    );
+    assert_handshake(&last[1]);
     // Amplification-limited, so only the idle timer is left.
     assert_eq!(timer + 7 * pto, server.conn_params.get_idle_timeout());
 }
