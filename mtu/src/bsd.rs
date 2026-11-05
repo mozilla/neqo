@@ -117,8 +117,12 @@ struct IfAddrPtr<'a> {
 }
 
 impl IfAddrPtr<'_> {
-    fn addr(&self) -> sockaddr {
-        unsafe { *self.ifa_addr }
+    fn addr(&self) -> Option<sockaddr> {
+        if self.ifa_addr.is_null() {
+            None
+        } else {
+            Some(unsafe { *self.ifa_addr })
+        }
     }
 
     fn name(&self) -> &CStr {
@@ -165,7 +169,7 @@ fn if_name_mtu(idx: u32) -> Result<(String, Option<usize>)> {
     let name = CStr::from_bytes_until_nul(&name).map_err(Error::other)?;
     let mtu = IfAddrs::new()?
         .iter()
-        .find(|ifa| ifa.addr().sa_family == AF_LINK && ifa.name() == name)
+        .find(|ifa| ifa.addr().is_some_and(|sa| sa.sa_family == AF_LINK) && ifa.name() == name)
         .and_then(|ifa| ifa.data())
         .and_then(|ifa_data| usize::try_from(ifa_data.ifi_mtu).ok());
     // Convert to Rust string.
@@ -397,7 +401,7 @@ pub fn interface_and_mtu_impl(remote: IpAddr) -> Result<(String, usize)> {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod test {
-    use std::mem::offset_of;
+    use std::mem::{offset_of, zeroed};
 
     use super::*;
 
@@ -469,5 +473,15 @@ mod test {
         let sa = sdl();
         let sa = &sa[..sa.len() - 1];
         assert!(is_default_err(sdl_index(addrs(1), sa)));
+    }
+
+    #[test]
+    fn null_ifa_addr() {
+        let mut entry: ifaddrs = unsafe { zeroed() };
+        let ifa = IfAddrPtr {
+            ptr: ptr::from_mut(&mut entry),
+            _ref: PhantomData,
+        };
+        assert!(ifa.addr().is_none());
     }
 }
