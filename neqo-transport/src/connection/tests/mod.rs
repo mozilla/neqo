@@ -142,6 +142,16 @@ fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Conne
     .unwrap()
 }
 
+fn zero_len_cid_server() -> Connection {
+    Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
+    )
+    .unwrap()
+}
+
 fn new_server_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
     fixture_init();
     let (log, contents) = new_neqo_qlog();
