@@ -449,10 +449,7 @@ impl Connection {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
-            paths: Paths::new(
-                conn_params.pmtud_enabled(),
-                conn_params.pmtud_enabled() && conn_params.pmtud_iface_mtu_enabled(),
-            ),
+            paths: Paths::new(&conn_params),
             cid_manager,
             tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,

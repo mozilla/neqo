@@ -5,9 +5,7 @@
 // except according to those terms.
 
 use std::{
-    cell::RefCell,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    rc::Rc,
     time::Duration,
 };
 
@@ -18,8 +16,8 @@ use super::Connection;
 use crate::{
     ConnectionParameters, Output, Pmtud, Stats, StreamType,
     connection::tests::{
-        CountingConnectionIdGenerator, DEFAULT_RTT, connect, default_server, fill_stream,
-        new_client, new_server, send_something,
+        DEFAULT_RTT, connect, default_server, fill_stream, new_client, new_client_with_addr,
+        new_server, send_something,
     },
 };
 
@@ -27,19 +25,12 @@ use crate::{
 #[test]
 fn gso_with_max_mtu() {
     neqo_common::log::init(None);
-    fixture_init();
-    let mut client = Connection::new_client(
-        test_fixture::DEFAULT_SERVER_NAME,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR_V4,
-        DEFAULT_ADDR_V4,
+    let mut client = new_client_with_addr(
         ConnectionParameters::default()
             .pmtud(true)
             .pmtud_iface_mtu(false),
-        now(),
-    )
-    .expect("create a default client");
+        DEFAULT_ADDR_V4,
+    );
 
     let mut server = default_server();
 
@@ -305,25 +296,21 @@ fn probe_waits_for_budget_covering_probe_size() {
 
 const LOOPBACK: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 443);
 
-fn loopback_client(params: ConnectionParameters) -> Connection {
-    fixture_init();
-    Connection::new_client(
-        test_fixture::DEFAULT_SERVER_NAME,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        LOOPBACK,
-        LOOPBACK,
-        params,
-        now(),
-    )
-    .expect("create a default client")
+fn connected_loopback(params: ConnectionParameters) -> (Connection, Connection) {
+    let mut client = new_client_with_addr(params, LOOPBACK);
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    (client, server)
+}
+
+fn loopback_iface_mtu() -> usize {
+    mtu::interface_and_mtu(LOOPBACK.ip()).unwrap().1
 }
 
 #[test]
 fn iface_mtu_for_first_path() {
-    let client = loopback_client(ConnectionParameters::default().pmtud(true));
-    let (_, mtu) = mtu::interface_and_mtu(LOOPBACK.ip()).unwrap();
-    assert_eq!(client.stats().pmtud_iface_mtu, mtu);
+    let client = new_client_with_addr(ConnectionParameters::default().pmtud(true), LOOPBACK);
+    assert_eq!(client.stats().pmtud_iface_mtu, loopback_iface_mtu());
 }
 
 #[test]
@@ -342,19 +329,14 @@ fn no_iface_mtu_for_junk_from_unknown_address() {
 /// PMTUD settles where it would if the path dropped packets above the interface MTU.
 #[test]
 fn iface_mtu_caps_pmtud() {
-    let (_, iface_mtu) = mtu::interface_and_mtu(LOOPBACK.ip()).unwrap();
-    let mut client = loopback_client(ConnectionParameters::default().pmtud(true));
-    let mut server = default_server();
-    connect(&mut client, &mut server);
+    let (mut client, mut server) = connected_loopback(ConnectionParameters::default().pmtud(true));
     drive_pmtud(&mut client, &mut server, usize::MAX, now());
-    let mut lossy = loopback_client(
+    let (mut lossy, mut server) = connected_loopback(
         ConnectionParameters::default()
             .pmtud(true)
             .pmtud_iface_mtu(false),
     );
-    let mut server = default_server();
-    connect(&mut lossy, &mut server);
-    let path_mtu = iface_mtu - Pmtud::header_size(LOOPBACK.ip());
+    let path_mtu = loopback_iface_mtu() - Pmtud::header_size(LOOPBACK.ip());
     drive_pmtud(&mut lossy, &mut server, path_mtu, now());
     assert_eq!(client.plpmtu(), lossy.plpmtu());
 }
@@ -362,8 +344,6 @@ fn iface_mtu_caps_pmtud() {
 #[test]
 fn no_iface_mtu_without_pmtud() {
     let iface_mtu = Stats::default().pmtud_iface_mtu;
-    let mut client = loopback_client(ConnectionParameters::default().pmtud(false));
-    let mut server = default_server();
-    connect(&mut client, &mut server);
+    let (client, _) = connected_loopback(ConnectionParameters::default().pmtud(false));
     assert_eq!(client.stats().pmtud_iface_mtu, iface_mtu);
 }

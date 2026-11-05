@@ -100,19 +100,23 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // test_fixture because they produce different - and incompatible - types.
 //
 // These are a direct copy of those functions.
-fn new_client_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
+fn new_client_with_addr(params: ConnectionParameters, addr: SocketAddr) -> Connection {
     fixture_init();
-    let (log, contents) = new_neqo_qlog();
-    let mut client = Connection::new_client(
+    Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        addr,
+        addr,
         params,
         now(),
     )
-    .expect("create a default client");
+    .expect("create a default client")
+}
+
+fn new_client_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
+    let (log, contents) = new_neqo_qlog();
+    let mut client = new_client_with_addr(params, DEFAULT_ADDR);
     client.set_qlog(log);
     (client, contents)
 }

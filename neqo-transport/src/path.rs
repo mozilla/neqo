@@ -73,7 +73,8 @@ pub struct Paths {
 
 impl Paths {
     #[must_use]
-    pub fn new(pmtud: bool, pmtud_iface_mtu: bool) -> Self {
+    pub fn new(conn_params: &ConnectionParameters) -> Self {
+        let pmtud = conn_params.pmtud_enabled();
         Self {
             paths: Vec::new(),
             primary: None,
@@ -81,7 +82,7 @@ impl Paths {
             to_retire: Vec::new(),
             qlog: Qlog::disabled(),
             pmtud,
-            pmtud_iface_mtu,
+            pmtud_iface_mtu: pmtud && conn_params.pmtud_iface_mtu_enabled(),
         }
     }
 
@@ -611,7 +612,7 @@ impl Path {
         qlog: Qlog,
         now: Instant,
     ) -> Self {
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), None), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
