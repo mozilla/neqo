@@ -329,11 +329,14 @@ impl Paths {
     }
 
     /// Select a path to send on.  This will select the first path that has
-    /// probes to send, then fall back to the primary path.
+    /// probes to send and is not blocked, then fall back to the primary path.
     pub fn select_path(&self) -> Option<PathRef> {
         self.paths
             .iter()
-            .find_map(|p| p.borrow().has_probe().then(|| Rc::clone(p)))
+            .find_map(|p| {
+                let p_ref = p.borrow();
+                (p_ref.has_probe() && p_ref.probe_blocked_since.is_none()).then(|| Rc::clone(p))
+            })
             .or_else(|| self.primary.clone())
     }
 
@@ -573,6 +576,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
+    /// When a probe on this path could not be sent, until more bytes arrive.
+    probe_blocked_since: Option<Instant>,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
     /// SCONE info for this path.
@@ -627,6 +632,7 @@ impl Path {
             sender,
             received_bytes: 0,
             sent_bytes: 0,
+            probe_blocked_since: None,
             ecn_info: ecn::Info::default(),
             scone: None,
             qlog,
@@ -691,6 +697,7 @@ impl Path {
         debug!("[{self}] Path validated {now:?}");
         self.state = ProbeState::Valid;
         self.validated = Some(now);
+        self.probe_blocked_since = None;
     }
 
     /// Apply updated SCONE information to this path.
@@ -866,6 +873,21 @@ impl Path {
         !self.challenges.is_empty() || self.state.probe_needed()
     }
 
+    /// Handle probing frames that cannot be sent: drop any `PATH_RESPONSE`, and hold back a
+    /// `PATH_CHALLENGE` until more bytes arrive.  Returns true if the path was not blocked before.
+    pub fn block_probe(&mut self, now: Instant) -> bool {
+        self.challenges.clear();
+        let newly_blocked = self.probe_blocked_since.is_none();
+        self.probe_blocked_since.get_or_insert(now);
+        newly_blocked
+    }
+
+    /// When a blocked probe fails the path.
+    fn probe_blocked_deadline(&self, pto: Duration) -> Option<Instant> {
+        let count = u32::try_from(Self::MAX_PROBES).expect("result fits in u32");
+        self.probe_blocked_since.map(|since| since + pto * count)
+    }
+
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
@@ -959,6 +981,10 @@ impl Path {
         {
             self.probe(stats);
         }
+        if self.probe_blocked_deadline(pto).is_some_and(|t| now >= t) {
+            info!("[{self}] Probing blocked for too long");
+            self.state = ProbeState::Failed;
+        }
         if matches!(self.state, ProbeState::Failed) {
             // Retire failed paths immediately.
             false
@@ -979,15 +1005,19 @@ impl Path {
     }
 
     /// Return the next time that this path needs servicing.
-    /// This only considers retransmissions of probes, not cleanup of the path.
+    /// This only considers retransmissions and blocked probes, not cleanup of the path.
     /// If there is no other activity, then there is no real need to schedule a
     /// timer to cleanup old paths.
     pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
-        if let ProbeState::Probing { sent, .. } = &self.state {
+        let probe = if let ProbeState::Probing { sent, .. } = &self.state {
             Some(*sent + pto)
         } else {
             None
-        }
+        };
+        probe
+            .into_iter()
+            .chain(self.probe_blocked_deadline(pto))
+            .min()
     }
 
     /// Get the RTT estimator for this path.
@@ -1051,6 +1081,7 @@ impl Path {
     /// Record received bytes for the path.
     pub const fn add_received(&mut self, count: usize) {
         self.received_bytes = self.received_bytes.saturating_add(count);
+        self.probe_blocked_since = None;
     }
 
     /// Record sent bytes for the path.
@@ -1162,7 +1193,7 @@ impl Path {
                         // If we have received absolutely nothing thus far, then this endpoint
                         // is the one initiating communication on this path.  Allow enough space for
                         // probing.
-                        self.plpmtu() * 5
+                        self.plpmtu() * 2 * Self::MAX_PROBES
                     } else {
                         limit
                     };
