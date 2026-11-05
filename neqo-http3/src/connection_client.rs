@@ -3213,18 +3213,12 @@ mod tests {
     #[test]
     fn multiple_goaways_single_event() {
         let (mut client, mut server) = connect();
-        _ = server
-            .conn
-            .stream_send(
-                server.control_stream_id.unwrap(),
-                &[0x7, 0x1, 0x8, 0x7, 0x1, 0x4, 0x7, 0x1, 0x0],
-            )
-            .unwrap();
-        let out = server.conn.process_output(now());
-        client.process(out.dgram(), now());
-
-        let goaway_received = |e: &_| matches!(e, Http3ClientEvent::GoawayReceived);
-        assert_eq!(client.events().filter(goaway_received).count(), 1);
+        let goaways = [8, 4, 0]
+            .into_iter()
+            .flat_map(|id| send_goaway(&mut client, &mut server, StreamId::new(id)))
+            .filter(|e| matches!(e, Http3ClientEvent::GoawayReceived))
+            .count();
+        assert_eq!(goaways, 1);
         assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(0)));
     }
 
