@@ -16,8 +16,9 @@
 
 use std::{num::NonZeroUsize, ops::RangeInclusive};
 
-use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT};
 use strum::FromRepr;
+use tracing::trace;
 
 use crate::{
     AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
@@ -598,10 +599,10 @@ impl<'a> Frame<'a> {
                 };
                 let fill = !t.is_stream_with_length();
                 let data = if fill {
-                    qtrace!("STREAM frame, extends to the end of the packet");
+                    trace!("STREAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    qtrace!("STREAM frame, with length");
+                    trace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
                 if o + u64::try_from(data.len())? > MAX_VARINT {
@@ -705,11 +706,8 @@ impl<'a> Frame<'a> {
                     return Err(Error::FrameEncoding);
                 }
                 let delay = dv(dec)?;
-                let ignore_order = match d(dec.decode_uint::<u8>())? {
-                    0 => false,
-                    1 => true,
-                    _ => return Err(Error::FrameEncoding),
-                };
+                let ignore_order = bool::try_from(d(dec.decode_uint::<u8>())?)
+                    .map_err(|_| Error::FrameEncoding)?;
                 Ok(Self::AckFrequency {
                     seqno,
                     tolerance,
@@ -718,14 +716,14 @@ impl<'a> Frame<'a> {
                 })
             }
             FrameType::Datagram => {
-                qtrace!("DATAGRAM frame, extends to the end of the packet");
+                trace!("DATAGRAM frame, extends to the end of the packet");
                 Ok(Self::Datagram {
                     data: dec.decode_remainder(),
                     len_field_len: None,
                 })
             }
             FrameType::DatagramWithLen => {
-                qtrace!("DATAGRAM frame, with length");
+                trace!("DATAGRAM frame, with length");
                 let len_start = dec.offset();
                 let data = d(dec.decode_vvec())?;
                 let len_field_len = dec.offset() - len_start - data.len();

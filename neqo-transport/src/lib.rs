@@ -6,9 +6,9 @@
 
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
-use neqo_common::qdebug;
 use nss::Error as CryptoError;
 use thiserror::Error;
+use tracing::debug;
 
 mod ackrate;
 #[cfg(fuzzing)]
@@ -223,7 +223,7 @@ impl Error {
             Self::FinalSize => 6,
             Self::FrameEncoding => 7,
             Self::TransportParameter => 8,
-            Self::ProtocolViolation => 10,
+            Self::ProtocolViolation | Self::AckedUnsentPacket => 10,
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::Application => ERROR_APPLICATION_CLOSE,
@@ -242,7 +242,7 @@ impl Error {
 
 impl From<CryptoError> for Error {
     fn from(err: CryptoError) -> Self {
-        qdebug!("Crypto operation failed {err:?}");
+        debug!("Crypto operation failed {err:?}");
         match err {
             CryptoError::EchRetry(config) => Self::EchRetry(config),
             _ => Self::Crypto(err),
@@ -296,6 +296,7 @@ mod tests {
             (Error::FrameEncoding, 7),
             (Error::TransportParameter, 8),
             (Error::ProtocolViolation, 10),
+            (Error::AckedUnsentPacket, 10),
             (Error::InvalidToken, 11),
             (Error::KeysExhausted, 15),
             (Error::Application, 12),

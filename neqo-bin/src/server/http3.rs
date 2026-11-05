@@ -13,13 +13,14 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, Header, header::HeadersExt as _, qdebug, qerror};
+use neqo_common::{Datagram, Header, header::HeadersExt as _};
 use neqo_http3::{
     Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, StreamId,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
 use rustc_hash::FxHashMap as HashMap;
+use tracing::{debug, error};
 
 use super::Args;
 use crate::{
@@ -54,7 +55,7 @@ impl HttpServer {
             ])
             .is_err()
         {
-            qerror!("Stream {stream} closed by peer, not sending response");
+            error!("Stream {stream} closed by peer, not sending response");
             _ = stream.stream_reset_send(neqo_http3::Error::HttpNone.code());
             return;
         }
@@ -72,7 +73,7 @@ impl HttpServer {
     ) -> Option<SendData> {
         match response.send(|chunk| stream.send_data(chunk, now)) {
             SendResult::StreamClosed => {
-                qerror!("Stream {stream} closed");
+                error!("Stream {stream} closed");
                 _ = stream.stream_reset_send(neqo_http3::Error::HttpNone.code());
                 None
             }
@@ -140,7 +141,7 @@ impl super::HttpServer for HttpServer {
                     headers,
                     fin,
                 } => {
-                    qdebug!("Headers (request={stream} fin={fin}): {headers:?}");
+                    debug!("Headers (request={stream} fin={fin}): {headers:?}");
 
                     if headers.contains_header(":method", b"POST") {
                         let response_size = headers.find_header(":path").and_then(|path| {

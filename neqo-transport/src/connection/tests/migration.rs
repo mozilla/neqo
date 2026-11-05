@@ -17,26 +17,30 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, qdebug, to_u64};
+use neqo_common::{Datagram, Decoder, event::Provider as _, to_u64};
 use test_fixture::{
     DEFAULT_ADDR, DEFAULT_ADDR_V4,
-    assertions::{assert_v4_path, assert_v6_path},
+    assertions::{assert_initial, assert_v4_path, assert_v6_path},
     fixture_init, new_neqo_qlog, now,
 };
+use tracing::debug;
 
 use super::{
     super::{Connection, Output, State, StreamType},
-    CountingConnectionIdGenerator, connect_fail, connect_force_idle, connect_rtt_idle,
-    default_client, default_server, maybe_authenticate, new_client, new_server, send_something,
-    zero_len_cid_client,
+    CountingConnectionIdGenerator, assert_error, connect_fail, connect_force_idle,
+    connect_rtt_idle, cwnd_avail, default_client, default_server, exchange_ticket, fill_stream,
+    maybe_authenticate, new_client, new_server, resumed_server, send_something,
+    zero_len_cid_client, zero_len_cid_server,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
     ConnectionIdRef, ConnectionParameters, EmptyConnectionIdGenerator, Error,
     MIN_INITIAL_PACKET_SIZE,
+    addr_valid::{AddressValidation, ValidateAddress},
     cid::ConnectionIdManager,
-    connection::tests::{
-        assert_path_challenge_min_len, connect, send_something_paced, send_with_extra,
+    connection::{
+        test_internal,
+        tests::{assert_path_challenge_min_len, connect, send_something_paced, send_with_extra},
     },
     frame::FrameType,
     packet,
@@ -76,10 +80,6 @@ impl ConnectionIdGenerator for ExhaustibleConnectionIdGenerator {
         );
         self.attempts_left -= 1;
         self.inner.take()?.generate_cid()
-    }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
 }
 
@@ -202,10 +202,10 @@ fn rebind(
     new_path: fn(&Datagram) -> Datagram,
     mut now: Instant,
 ) -> Instant {
-    qdebug!("Rebinding");
+    debug!("Rebinding");
     let c1 = send_something(client, now);
     let c1_new = new_path(&c1);
-    qdebug!("Rebinding to {}", c1_new.source());
+    debug!("Rebinding to {}", c1_new.source());
 
     // Server will reply to modified datagram with a PATH_CHALLENGE.
     // Due to the amplification limit, this will not be padded to MIN_INITIAL_PACKET_SIZE.
@@ -329,7 +329,7 @@ fn rebind(
         now += server.process_output(now).callback();
     }
 
-    qdebug!("Rebinding done");
+    debug!("Rebinding done");
     now
 }
 
@@ -341,10 +341,10 @@ fn inc_port(port: u16, i: usize) -> u16 {
 fn inc_addr(ip: IpAddr, i: usize) -> IpAddr {
     let inc: u8 = i.overflowing_mul(11).0.try_into().unwrap();
     match ip {
-        IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from(
+        IpAddr::V4(ip) => IpAddr::V4(Ipv4Addr::from_octets(
             ip.octets().map(|b| b.overflowing_add(inc).0),
         )),
-        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from(
+        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from_octets(
             ip.octets().map(|b| b.overflowing_add(inc).0),
         )),
     }
@@ -1040,13 +1040,7 @@ fn preferred_address_empty_cid() {
 #[test]
 fn preferred_address_server_empty_cid() {
     let mut client = default_client();
-    let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
-        ConnectionParameters::default(),
-    )
-    .unwrap();
+    let mut server = zero_len_cid_server();
 
     server
         .set_local_tparam(
@@ -1195,7 +1189,7 @@ fn migration_invalid_address() {
 
 /// Writes `count` `NEW_CONNECTION_ID` frames with consecutive sequence numbers,
 /// each retiring every previously issued connection ID.
-struct NewConnectionIds {
+pub struct NewConnectionIds {
     count: u64,
     cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>,
 }
@@ -1211,13 +1205,16 @@ impl NewConnectionIds {
 
     /// A single `NEW_CONNECTION_ID` frame that retires every previously issued
     /// connection ID.
-    fn retire_all(cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
+    pub fn retire_all(cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>>) -> Self {
         Self::new(1, cid_gen)
     }
 }
 
-impl crate::connection::test_internal::FrameWriter for NewConnectionIds {
+impl test_internal::FrameWriter for NewConnectionIds {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        if builder.packet_empty() {
+            return; // E.g., the Initial ahead of 0-RTT, which can't carry NEW_CONNECTION_ID.
+        }
         for i in 0..self.count {
             let seqno = Self::SEQNO + i;
             let cid = self.cid_gen.borrow_mut().generate_cid().unwrap();
@@ -1268,6 +1265,58 @@ fn retire_all() {
     assert_ne!(get_cid(&retire), original_cid);
 }
 
+/// Sends one `NEW_CONNECTION_ID` frame from `sender`.
+fn send_new_connection_id(sender: &mut Connection) -> Datagram {
+    let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
+        Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
+    send_with_extra(sender, NewConnectionIds::new(1, cid_gen), now())
+}
+
+/// Delivers `dgram` from `sender` to `receiver` and checks that both close with
+/// `PROTOCOL_VIOLATION`.
+fn assert_protocol_violation(sender: &mut Connection, receiver: &mut Connection, dgram: Datagram) {
+    let close = receiver.process(Some(dgram), now()).dgram();
+    assert_error(receiver, &CloseReason::Transport(Error::ProtocolViolation));
+    sender.process_input(close.unwrap(), now());
+    let peer_error = Error::Peer(Error::ProtocolViolation.code());
+    assert_error(sender, &CloseReason::Transport(peer_error));
+}
+
+/// RFC 9000, Section 19.15: an endpoint that is sending packets with a zero-length
+/// Destination Connection ID treats receipt of a `NEW_CONNECTION_ID` frame as a
+/// connection error of type `PROTOCOL_VIOLATION`.
+#[test]
+fn new_connection_id_to_zero_len_cid_client() {
+    let mut client = default_client();
+    let mut server = zero_len_cid_server();
+    connect_force_idle(&mut client, &mut server);
+    let ncid = send_new_connection_id(&mut server);
+    assert_protocol_violation(&mut server, &mut client, ncid);
+}
+
+#[test]
+fn new_connection_id_to_zero_len_cid_server() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let ncid = send_new_connection_id(&mut client);
+    assert_protocol_violation(&mut client, &mut server, ncid);
+}
+
+/// An endpoint that provides a zero-length connection ID still sends a non-empty
+/// Destination Connection ID to a peer that does not, so it accepts `NEW_CONNECTION_ID`.
+#[test]
+fn new_connection_id_from_non_zero_len_cid_server() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let before = client.stats().frame_rx.new_connection_id;
+    let ncid = send_new_connection_id(&mut server);
+    client.process_input(ncid, now());
+    assert_eq!(client.stats().frame_rx.new_connection_id, before + 1);
+    assert_eq!(*client.state(), State::Confirmed);
+}
+
 /// RFC 9000, Section 5.1.2: an endpoint SHOULD bound the number of connection IDs it
 /// has retired but not yet had acknowledged, and MAY treat exceeding that bound as a
 /// `CONNECTION_ID_LIMIT_ERROR`.  A peer that streams `NEW_CONNECTION_ID` frames with an
@@ -1306,10 +1355,10 @@ fn retire_cid_queue_bounded() {
     ));
 }
 
-/// Injects a `RETIRE_CONNECTION_ID` frame for a sequence number that was never issued.
-struct RetireUnissued(u64);
+/// Injects a `RETIRE_CONNECTION_ID` frame for a given sequence number.
+struct RetireConnectionId(u64);
 
-impl crate::connection::test_internal::FrameWriter for RetireUnissued {
+impl test_internal::FrameWriter for RetireConnectionId {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         builder
             .encode_varint(FrameType::RetireConnectionId)
@@ -1327,7 +1376,7 @@ fn retire_unissued_connection_id() {
 
     // The largest sequence number the client could have issued is far below this,
     // so it has never been sent to the server.
-    let retire = send_with_extra(&mut server, RetireUnissued(1000), now());
+    let retire = send_with_extra(&mut server, RetireConnectionId(1000), now());
     client.process_input(retire, now());
     assert!(matches!(
         client.state(),
@@ -1336,6 +1385,27 @@ fn retire_unissued_connection_id() {
             ..
         }
     ));
+}
+
+/// RFC 9000, Section 19.16: an endpoint that provides a zero-length connection ID
+/// treats receipt of a `RETIRE_CONNECTION_ID` frame as a connection error.
+#[test]
+fn retire_zero_len_connection_id() {
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let retire = send_with_extra(&mut server, RetireConnectionId(0), now()); // Sequence number of the zero-length ID.
+    assert_protocol_violation(&mut server, &mut client, retire);
+}
+
+/// As `retire_zero_len_connection_id`, for a server that uses zero-length connection IDs.
+#[test]
+fn retire_zero_len_connection_id_server() {
+    let mut client = default_client();
+    let mut server = zero_len_cid_server();
+    connect_force_idle(&mut client, &mut server);
+    let retire = send_with_extra(&mut client, RetireConnectionId(0), now()); // Sequence number of the zero-length ID.
+    assert_protocol_violation(&mut client, &mut server, retire);
 }
 
 /// During a graceful migration, if the probed path can't get a new connection ID due
@@ -1447,7 +1517,7 @@ fn retire_prior_to_migration_success() {
 
 struct GarbageWriter {}
 
-impl crate::connection::test_internal::FrameWriter for GarbageWriter {
+impl test_internal::FrameWriter for GarbageWriter {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
         // Not a valid frame type.
         builder.encode_varint(u32::MAX);
@@ -1494,4 +1564,145 @@ fn error_on_new_path_with_no_connection_id() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::UnknownFrameType))
     ));
+}
+
+struct PathChallengeWriter {}
+
+impl test_internal::FrameWriter for PathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        builder.encode_varint(FrameType::PathChallenge);
+        builder.encode([0; 8]);
+    }
+}
+
+/// A `PATH_RESPONSE` does not cause padding in a packet limited by the congestion window.
+#[test]
+fn path_response_not_padded_when_cwnd_limited() {
+    let mut client = new_client(ConnectionParameters::default().pacing(false));
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    // Leave less than a full MTU of congestion window, with nothing left to send.
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    while cwnd_avail(&client) >= client.plpmtu() {
+        client.stream_send(id, &[0; 500]).unwrap();
+        while client.process_output(now()).dgram().is_some() {}
+    }
+
+    let challenge = send_with_extra(&mut server, PathChallengeWriter {}, now());
+    client.process_input(challenge, now());
+    let before = client.stats().frame_tx;
+    client.stream_send(id, &[0; 10]).unwrap();
+    assert!(client.process_output(now()).dgram().is_some());
+    let after = client.stats().frame_tx;
+    assert_eq!(after.path_response, before.path_response + 1);
+    assert_eq!(after.padding, before.padding);
+}
+
+/// Writes a `PATH_CHALLENGE` into every packet but the first, which is an Initial.
+struct ZeroRttPathChallenge {
+    initial: bool,
+}
+
+impl test_internal::FrameWriter for ZeroRttPathChallenge {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        if self.initial {
+            self.initial = false;
+        } else {
+            builder
+                .encode_varint(FrameType::PathChallenge)
+                .encode([7; 8]);
+        }
+    }
+}
+
+/// A 0-RTT `PATH_CHALLENGE` from a new address that uses the server's connection ID
+/// does not add a path, let alone a validated one, before the handshake completes.
+#[test]
+fn zero_rtt_path_challenge_on_new_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram();
+    let s2 = server.process_output(now()).dgram();
+
+    // The client learns the server's connection ID from its first packet.
+    let ack = client.process(s1, now()).dgram();
+    server.process_input(ack.unwrap(), now());
+
+    let challenge = send_with_extra(&mut client, ZeroRttPathChallenge { initial: true }, now());
+    let challenge = change_source_address_and_port(&challenge, 1);
+    server.process_input(challenge.clone(), now());
+    assert_eq!(server.stats().frame_rx.path_challenge, 1);
+    assert_eq!(*server.state(), State::Handshaking);
+
+    // The handshake completes on the original path and the challenge is not answered.
+    client.process_input(s2.unwrap(), now());
+    connect(&mut client, &mut server);
+    assert_eq!(server.stats().frame_tx.path_response, 0);
+
+    // If the client moves to the other address, the server validates it.
+    let c3 = change_source_address_and_port(&send_something(&mut client, now()), 1);
+    let before = server.stats().frame_tx;
+    let s3 = server.process(Some(c3), now()).dgram().unwrap();
+    assert_path_challenge(&server, &s3, &before, challenge.source(), false);
+}
+
+/// Ask the server to send a ticket and check that it doesn't provide a `NEW_TOKEN` token
+/// for the address of its primary path, which has not been validated.
+fn assert_no_new_token(server: &mut Connection) {
+    assert!(!server.paths.primary().unwrap().borrow().is_valid());
+    let validation = AddressValidation::new(now(), ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(&validation);
+    server.send_ticket(now(), &[]).unwrap();
+    while server.process_output(now()).dgram().is_some() {}
+    assert_eq!(server.stats().frame_tx.new_token, 0);
+}
+
+/// A server follows the client to a new address before it validates that address,
+/// so it cannot issue a token for that address in the meantime.
+#[test]
+fn no_new_token_for_unvalidated_path() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    // Send a full datagram so that the amplification limit doesn't stop the server.
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream);
+    let dgram = client.process_output(now()).dgram().unwrap();
+    server.process_input(change_source_address_and_port(&dgram, 1), now());
+    assert_no_new_token(&mut server);
+}
+
+/// Handshake packets, or Initial packets with the server's connection ID,
+/// validate the handshake path, not the address they come from.
+#[test]
+fn no_new_token_for_handshake_from_new_address() {
+    let mut client = default_client();
+    let mut server = default_server();
+    while let Some(dgram) = client.process_output(now()).dgram() {
+        server.process_input(dgram, now());
+    }
+    while let Some(dgram) = server.process_output(now()).dgram() {
+        client.process_input(dgram, now());
+    }
+    assert!(maybe_authenticate(&mut client));
+
+    // The Initial packet in front of the Finished uses the server's connection ID.
+    let dgram = client.process_output(now()).dgram().unwrap();
+    assert_initial(&dgram, false);
+    server.process_input(change_source_address_and_port(&dgram, 1), now());
+    assert_eq!(*server.state(), State::Confirmed);
+    assert_no_new_token(&mut server);
 }

@@ -1,16 +1,13 @@
 name: Clippy
 on:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, edited]
   merge_group:
   push:
     branches: ["main"] # Only to populate the Rust cache
   workflow_dispatch:
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -19,7 +16,6 @@ permissions:
 jobs:
   toolchains:
     name: Determine toolchains
-    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     runs-on: ubuntu-24.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
@@ -30,7 +26,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+        uses: mozilla/actions/toolchains@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -64,6 +60,9 @@ jobs:
 
       # Run clippy across all meaningful feature combinations.
       - run: cargo hack clippy --locked --feature-powerset --all-targets --exclude-features gecko,ci --mutually-exclusive-features bench,blapi,build-fuzzing-corpus,default,disable-encryption -- -D warnings
+      # Fuzz targets and fuzzing-only APIs only build with `--cfg fuzzing`, and not on Windows.
+      - if: runner.os != 'Windows'
+        run: RUSTFLAGS="--cfg fuzzing $RUSTFLAGS" cargo clippy --locked -p fuzz --bins -- -D warnings
       - run: cargo doc --locked --workspace --no-deps --document-private-items
         env:
           RUSTDOCFLAGS: "--deny rustdoc::broken_intra_doc_links --deny warnings"

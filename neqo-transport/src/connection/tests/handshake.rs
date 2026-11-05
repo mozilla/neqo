@@ -17,8 +17,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, qdebug, to_u64};
-use nss::{AuthenticationStatus, constants::TLS_CHACHA20_POLY1305_SHA256, generate_ech_keys};
+use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, to_u64};
+use nss::{
+    AuthenticationStatus, HandshakeMessage,
+    constants::TLS_CHACHA20_POLY1305_SHA256,
+    ext::{ExtensionHandler, ExtensionWriterResult},
+    generate_ech_keys,
+};
 #[cfg(not(feature = "disable-encryption"))]
 use test_fixture::datagram;
 use test_fixture::{
@@ -26,24 +31,30 @@ use test_fixture::{
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
     damage_ech_config, fixture_init, now, split_datagram, strip_padding,
 };
+use tracing::debug;
 
 use super::{
-    super::{Connection, Output, State},
+    super::{Connection, Output, State, test_internal},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
-    assert_error, connect, connect_force_idle, connect_with_rtt, default_client, default_server,
-    drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram, resumed_server,
-    send_something, zero_len_cid_client,
+    assert_error, connect, connect_fail, connect_force_idle, connect_with_rtt, default_client,
+    default_server, drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram,
+    resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamType,
-    Version,
+    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamId,
+    StreamType, Version,
     connection::{
         AddressValidation,
         tests::{exchange_ticket, new_client, new_server, new_server_with_qlog},
     },
+    datagram_queue::DatagramQueueOutcome,
     events::ConnectionEvent,
+    frame::FrameType,
+    packet,
+    quic_datagrams::DATAGRAM_FRAME_TYPE_VARINT_LEN,
     server::ValidateAddress,
     stats::FrameStats,
+    streams::SendGroupId,
     tparams::{TransportParameter, TransportParameterId::*},
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
@@ -52,7 +63,7 @@ const ECH_CONFIG_ID: u8 = 7;
 const ECH_PUBLIC_NAME: &str = "public.example";
 
 fn full_handshake(pmtud: bool) {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = new_client(ConnectionParameters::default().pmtud(pmtud));
     let out = client.process_output(now());
     let out2 = client.process_output(now());
@@ -60,14 +71,14 @@ fn full_handshake(pmtud: bool) {
     assert_eq!(out.as_dgram_ref().unwrap().len(), client.plpmtu());
     assert_eq!(out2.as_dgram_ref().unwrap().len(), client.plpmtu());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = new_server(ConnectionParameters::default().pmtud(pmtud));
     server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(out.as_dgram_ref().unwrap().len(), server.plpmtu());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
@@ -79,17 +90,17 @@ fn full_handshake(pmtud: bool) {
 
     assert!(maybe_authenticate(&mut client));
 
-    qdebug!("---- client: SH..FIN -> FIN");
+    debug!("---- client: SH..FIN -> FIN");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*client.state(), State::Connected);
 
-    qdebug!("---- server: FIN -> ACKS");
+    debug!("---- server: FIN -> ACKS");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_eq!(*server.state(), State::Confirmed);
 
-    qdebug!("---- client: ACKS -> 0");
+    debug!("---- client: ACKS -> 0");
     let out = client.process(out.dgram(), now());
     if pmtud {
         // PMTUD causes a PING probe to be sent here
@@ -113,19 +124,19 @@ fn handshake_pmtud() {
 
 #[test]
 fn handshake_failed_authentication() {
-    qdebug!("---- client: generate CH");
+    debug!("---- client: generate CH");
     let mut client = default_client();
     let out = client.process_output(now());
     let out2 = client.process_output(now());
     assert!(out.as_dgram_ref().is_some() && out2.as_dgram_ref().is_some());
 
-    qdebug!("---- server: CH -> SH, EE, CERT, CV, FIN");
+    debug!("---- server: CH -> SH, EE, CERT, CV, FIN");
     let mut server = default_server();
     server.process_input(out.dgram().unwrap(), now());
     let out = server.process(out2.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- client: cert verification");
+    debug!("---- client: cert verification");
     let out = client.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
 
@@ -138,14 +149,14 @@ fn handshake_failed_authentication() {
 
     let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
     assert!(client.events().any(authentication_needed));
-    qdebug!("---- client: Alert(certificate_revoked)");
+    debug!("---- client: Alert(certificate_revoked)");
     client.authenticated(AuthenticationStatus::CertRevoked, now());
 
-    qdebug!("---- client: -> Alert(certificate_revoked)");
+    debug!("---- client: -> Alert(certificate_revoked)");
     let out = client.process_output(now());
     assert!(out.as_dgram_ref().is_some());
 
-    qdebug!("---- server: Alert(certificate_revoked)");
+    debug!("---- server: Alert(certificate_revoked)");
     let out = server.process(out.dgram(), now());
     assert!(out.as_dgram_ref().is_some());
     assert_error(&client, &CloseReason::Transport(Error::CryptoAlert(44)));
@@ -2051,7 +2062,7 @@ fn retry_for(initial: &[u8]) -> Datagram {
     let mut server_scid = dcid.clone();
     server_scid[0] ^= 0xff;
     datagram(
-        crate::packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+        packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
             .expect("build retry"),
     )
 }
@@ -2067,7 +2078,7 @@ fn retry_scid_matching_initial_dcid() {
     let mut client = default_client();
     let initial = client_initial(&mut client);
     let (dcid, scid) = initial_cids(&initial);
-    let retry = crate::packet::Builder::retry(
+    let retry = packet::Builder::retry(
         Version::default(),
         &scid,   // Destination CID: copied from the client as required
         &dcid,   // Source CID: copied from client (bad!)
@@ -2092,37 +2103,14 @@ fn retry_scid_matching_initial_dcid() {
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn client_initial_with_token() {
-    use neqo_common::Encoder;
-
-    use crate::crypto::{CryptoDxDirection, CryptoDxState};
+    use super::forged_server_initial;
+    use crate::frame::FrameType;
 
     // A server Initial addressed to the client, encrypted with the Initial keys
     // seeded by the client's original Destination CID, carrying `token` and a PING.
     fn server_initial(client_initial: &[u8], token: &[u8]) -> Vec<u8> {
-        // Skip the first byte and 4-byte version, then read the length-prefixed
-        // original Destination CID (the Initial-key seed) and Source CID (which the
-        // client expects as the Destination CID of packets sent back to it).
-        let mut dec = Decoder::from(&client_initial[5..]);
-        let seed = dec.decode_vec(1).expect("client DCID").to_vec();
-        let dcid = dec.decode_vec(1).expect("client SCID").to_vec();
-
-        let version = Version::default();
-        let mut write =
-            CryptoDxState::new_initial(version, CryptoDxDirection::Write, "server in", &seed, 0)
-                .expect("initial keys");
-        let mut builder = crate::packet::Builder::long(
-            Encoder::default(),
-            crate::packet::Type::Initial,
-            version,
-            Some(dcid.as_slice()),
-            Some(b"fakescid"),
-            crate::packet::LIMIT,
-        );
-        builder.initial_token(token);
-        builder.pn(0, 1);
-        builder.encode([0x01_u8]); // PING, so the packet is ack-eliciting
-        builder.encode([0_u8; 20]); // PADDING, ample sample for header protection
-        builder.build(&mut write).expect("build").as_ref().to_vec()
+        let ping = [FrameType::Ping.into()]; // PING, so the packet is ack-eliciting
+        forged_server_initial(client_initial, Version::default(), 0, token, &ping)
     }
 
     // A token-free server Initial decrypts and is processed (also confirming the
@@ -2279,4 +2267,172 @@ fn crypto_resend_chance_survives_useless_duplicate() {
     now += DEFAULT_RTT;
     let dup = make_dummy_crypto(&mut client, &mut now);
     assert!(crypto_sent_for(&mut server, dup, &mut now) >= 2);
+}
+
+/// Returns a client whose next datagram carries Initial, Handshake, and 1-RTT packets, and its
+/// server.
+fn client_coalescing_1rtt(
+    server_params: ConnectionParameters,
+) -> (Connection, Connection, Instant) {
+    // No NEW_CONNECTION_ID frames, so the 1-RTT packet carries only an ACK.
+    let mut client = zero_len_cid_client(DEFAULT_ADDR, DEFAULT_ADDR);
+    let mut server = new_server(server_params);
+
+    let c1 = client.process_output(now()).dgram();
+    let c2 = client.process_output(now()).dgram();
+    server.process_input(c1.unwrap(), now());
+    let s1 = server.process(c2, now()).dgram().unwrap();
+
+    // Two 0.5-RTT packets, so the client acknowledges them immediately.
+    let s2 = send_something(&mut server, now());
+    let s3 = send_something(&mut server, now() + DEFAULT_RTT);
+    let t = now() + DEFAULT_RTT;
+    client.process_input(s1, t);
+    client.process_input(s2, t);
+    client.process_input(s3, t);
+    assert!(maybe_authenticate(&mut client));
+    (client, server, t)
+}
+
+/// Asserts that `server` decrypts every packet in `dgram`.
+fn assert_decrypts(server: &mut Connection, dgram: Datagram, now: Instant) {
+    let dropped = server.stats().dropped_rx;
+    server.process_input(dgram, now);
+    assert_eq!(server.stats().dropped_rx, dropped);
+}
+
+/// An Initial datagram that ends in a short header packet is expanded inside that packet.
+#[test]
+fn expand_datagram_that_ends_in_short_header() {
+    let (mut client, mut server, t) = client_coalescing_1rtt(ConnectionParameters::default());
+
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(c3.len(), client.plpmtu()); // Padded for the Initial.
+    let (_, rest) = split_datagram(&c3);
+    let rest = rest.expect("Handshake is coalesced");
+    let (_, short) = split_datagram(&rest);
+    let short = short.expect("a 1-RTT packet is coalesced");
+    assert_eq!(short[0] & 0x80, 0); // Ends in a short header packet.
+    assert_eq!(client.stats().frame_tx.padding, 1); // Inside the 1-RTT packet.
+    assert_eq!(client.stats().cc.bytes_in_flight, rest.len()); // Handshake and 1-RTT in flight.
+    assert_decrypts(&mut server, c3, t);
+}
+
+/// Fills the third packet it writes to, short of its limit, and marks it full.
+struct FillShortWriter(usize);
+
+impl test_internal::FrameWriter for FillShortWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        self.0 += 1;
+        if self.0 == 3 {
+            while builder.remaining() > 2 {
+                builder.encode_varint(FrameType::Ping);
+            }
+            builder.mark_full();
+        }
+    }
+}
+
+/// Nothing is added after a short header packet that is full short of its limit.
+#[test]
+fn no_padding_after_full_short_header() {
+    let (mut client, mut server, t) = client_coalescing_1rtt(ConnectionParameters::default());
+    client.test_frame_writer = Some(Box::new(FillShortWriter(0)));
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(c3.len(), client.plpmtu() - 2);
+    assert_decrypts(&mut server, c3, t);
+}
+
+/// A STREAM frame without a length that falls short of the end of the packet is padded before.
+#[test]
+fn expand_datagram_that_ends_in_short_stream_frame() {
+    // A fixed first packet number keeps the size of the client's ACKs the same.
+    let params = ConnectionParameters::default().randomize_first_pn(false);
+
+    // Learn how much stream data fills the 1-RTT packet.
+    let (mut client, mut server, t) = client_coalescing_1rtt(params.clone());
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    let mut buf = [0; 2000];
+    client.stream_send(id, &buf).unwrap();
+    server.process_input(client.process_output(t).dgram().unwrap(), t);
+    let (fill, _) = server.stream_recv(id, &mut buf).unwrap();
+
+    // One byte less is still sent without a length, as there is no room for one.
+    let (mut client, mut server, t) = client_coalescing_1rtt(params);
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(id, &buf[..fill - 1]).unwrap();
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(c3.len(), client.plpmtu());
+    assert_decrypts(&mut server, c3, t);
+    assert_eq!(client.stats().frame_tx.padding, 1);
+    assert_eq!(server.stream_recv(id, &mut buf).unwrap(), (fill - 1, false));
+}
+
+/// A DATAGRAM frame without a length that falls short of the end of the packet is padded before.
+#[test]
+fn expand_datagram_that_ends_in_short_datagram_frame() {
+    const MAX_FRAME: usize = 100;
+    let (mut client, mut server, t) =
+        client_coalescing_1rtt(ConnectionParameters::default().datagram_size(to_u64(MAX_FRAME)));
+    // A length would make the frame exceed the peer's limit, so it has none.
+    let data = vec![0; MAX_FRAME - DATAGRAM_FRAME_TYPE_VARINT_LEN];
+    assert_eq!(
+        client.enqueue_datagram(StreamId::new(0), data, Some(1), t, SendGroupId::new(0), 0),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+    let c3 = client.process_output(t).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.datagram, 1);
+    assert_eq!(c3.len(), client.plpmtu());
+    let received = server.stats().frame_rx.datagram;
+    assert_decrypts(&mut server, c3, t);
+    assert_eq!(server.stats().frame_rx.datagram, received + 1);
+    assert_eq!(client.stats().frame_tx.padding, 1);
+}
+
+struct OmitExtension;
+
+impl ExtensionHandler for OmitExtension {
+    fn write(&mut self, _: HandshakeMessage, _: bool, _: &mut [u8]) -> ExtensionWriterResult {
+        ExtensionWriterResult::Skip
+    }
+}
+
+/// Overwrite the QUIC transport parameters extension handler in TLS
+/// with one that does not write an extension.
+/// Must be called before the client writes its `ClientHello`.
+fn omit_transport_parameters(client: &mut Connection) {
+    client
+        .crypto
+        .tls_mut()
+        .extension_handler(0x39, Rc::new(RefCell::new(OmitExtension)))
+        .unwrap();
+}
+
+#[test]
+fn client_omits_transport_parameters() {
+    let mut client = default_client();
+    omit_transport_parameters(&mut client);
+    let mut server = default_server();
+    let alert = Error::CryptoAlert(109); // missing_extension
+    connect_fail(&mut client, &mut server, Error::Peer(alert.code()), alert);
+}
+
+#[test]
+fn client_omits_transport_parameters_0rtt() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    omit_transport_parameters(&mut client);
+    client.enable_resumption(now(), token).unwrap();
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    let mut server = resumed_server(&client);
+    while let Some(d) = client.process_output(now()).dgram() {
+        server.process_input(d, now());
+    }
+    assert_eq!(server.stats().frame_rx.stream, 0);
+    assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(109)));
 }
