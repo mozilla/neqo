@@ -644,6 +644,31 @@ fn wt_goaway_draining_active_session() {
     assert!(!has_closed, "active session should not be closed by GOAWAY");
 }
 
+#[test]
+fn wt_goaway_keeps_streams_of_active_session() {
+    const BUF: &[u8] = &[0; 10];
+    let (mut wt, session_id) = wt_with_session();
+    let wt_stream = wt.create_wt_stream_client(session_id, StreamType::BiDi);
+    wt.send_data_client(wt_stream, BUF);
+    wt.receive_data_server(wt_stream, true, BUF, false);
+    wt.client.events().for_each(drop);
+
+    wt.server.send_goaway(wt_stream);
+    wt.exchange_packets();
+    assert_eq!(
+        wt.client.events().collect::<Vec<_>>(),
+        [
+            Http3ClientEvent::WebTransport(WebTransportEvent::Draining {
+                stream_id: session_id
+            }),
+            Http3ClientEvent::GoawayReceived
+        ]
+    );
+
+    wt.send_data_client(wt_stream, BUF);
+    wt.receive_data_server(wt_stream, false, BUF, false);
+}
+
 /// Repeated GOAWAYs with decreasing stream IDs (per RFC 9114 §5.2) should
 /// not produce duplicate Draining events for the same session.
 #[test]
