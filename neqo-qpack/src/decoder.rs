@@ -188,6 +188,7 @@ impl Decoder {
                 .map_err(|_| Error::DecoderStream)?;
             debug!("[{self}] {r} bytes sent");
             self.send_buf.skip(r);
+            self.send_buf.compact();
         }
         Ok(())
     }
@@ -298,8 +299,10 @@ pub(crate) fn map_error(err: Error) -> Error {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use neqo_common::{Header, to_u64};
-    use neqo_transport::{StreamId, StreamType};
-    use test_fixture::now;
+    use neqo_transport::{ConnectionParameters, StreamDataLimit, StreamId, StreamType};
+    use test_fixture::{
+        CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, handshake, new_server, now,
+    };
 
     use super::{Connection, Decoder, Error, Res, map_error};
     use crate::Settings;
@@ -320,7 +323,19 @@ mod tests {
     }
 
     fn connect_param(max_table_size_decoder: u64) -> TestDecoder {
-        let (mut conn, mut peer_conn) = test_fixture::connect();
+        connect_generic(max_table_size_decoder, None)
+    }
+
+    fn connect_generic(max_table_size_decoder: u64, max_data: Option<u64>) -> TestDecoder {
+        let (mut conn, mut peer_conn) = max_data.map_or_else(test_fixture::connect, |max| {
+            let mut conn = default_client();
+            let mut peer_conn = new_server::<CountingConnectionIdGenerator, &str>(
+                DEFAULT_ALPN,
+                ConnectionParameters::default().max_stream_data(StreamDataLimit::UniDi, max),
+            );
+            handshake(&mut conn, &mut peer_conn);
+            (conn, peer_conn)
+        });
 
         // create a stream
         let recv_stream_id = peer_conn.stream_create(StreamType::UniDi).unwrap();
@@ -908,6 +923,39 @@ mod tests {
         let mut decoder = connect_param(0);
         decoder.decoder.cancel_stream(STREAM_0);
         send_instructions_and_check(&mut decoder, &[0x03]);
+    }
+
+    /// A peer that keeps the decoder stream flow-control limited must not make the send buffer
+    /// grow with the total number of bytes sent.
+    #[test]
+    fn send_buf_bounded_when_flow_control_limited() {
+        const WINDOW: usize = 100;
+        let mut decoder = connect_generic(300, Some(to_u64(WINDOW)));
+
+        let mut total = 0;
+        let mut queue = 2 * WINDOW; // Keep more pending than the peer allows.
+        for _ in 0..100 {
+            for _ in 0..queue {
+                decoder.decoder.cancel_stream(STREAM_0);
+            }
+            let before = decoder.decoder.send_buf.len();
+            decoder.decoder.send(&mut decoder.conn).unwrap();
+            assert!(!decoder.decoder.send_buf.is_empty());
+            queue = before - decoder.decoder.send_buf.len();
+            total += queue;
+
+            let out = decoder.conn.process_output(now());
+            drop(decoder.peer_conn.process(out.dgram(), now()));
+            let mut buf = [0; 2 * WINDOW];
+            _ = decoder
+                .peer_conn
+                .stream_recv(decoder.send_stream_id, &mut buf)
+                .unwrap();
+            let out = decoder.peer_conn.process_output(now());
+            drop(decoder.conn.process(out.dgram(), now()));
+        }
+        assert!(total > 50 * WINDOW);
+        assert!(decoder.decoder.send_buf.capacity() < 8 * WINDOW);
     }
 
     #[test]
