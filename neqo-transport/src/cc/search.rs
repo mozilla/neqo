@@ -15,7 +15,9 @@ use std::{
 use neqo_common::to_u64;
 use tracing::debug;
 
-use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
+use crate::{
+    cc::classic_cc::SlowStart, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats,
+};
 
 /// The outcome of a single SEARCH evaluation.
 #[derive(Debug, PartialEq, Eq)]
@@ -377,7 +379,7 @@ impl SlowStart for Search {
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,
-        _largest_acked: packet::Number,
+        _largest_acked: &sent::Packet,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
         now: Instant,
@@ -447,8 +449,8 @@ impl SlowStart for Search {
         self.acked_bytes = self.acked_bytes.saturating_add(to_u64(new_acked_bytes));
     }
 
-    fn on_packet_sent(&mut self, _sent_pn: packet::Number, sent_bytes: usize) {
-        self.sent_bytes = self.sent_bytes.saturating_add(to_u64(sent_bytes));
+    fn on_packet_sent(&mut self, pkt: &sent::Packet) {
+        self.sent_bytes = self.sent_bytes.saturating_add(to_u64(pkt.len()));
     }
 
     fn reset(&mut self) {
