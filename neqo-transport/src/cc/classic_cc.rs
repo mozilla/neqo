@@ -398,11 +398,13 @@ where
             }
         }
 
-        // Congestion avoidance, above the slow start threshold.
-        if self
-            .current
-            .ssthresh
-            .is_some_and(|s| self.current.congestion_window >= s)
+        // Congestion avoidance, above the slow start threshold, for packets sent after recovery.
+        // <https://datatracker.ietf.org/doc/html/rfc9002#section-7.3.2>
+        if new_acked > 0
+            && self
+                .current
+                .ssthresh
+                .is_some_and(|s| self.current.congestion_window >= s)
         {
             // The following function returns the amount of acked bytes a controller
             // needs to collect to be allowed to increase its cwnd by one datagram.
