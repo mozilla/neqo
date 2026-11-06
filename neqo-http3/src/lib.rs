@@ -172,7 +172,7 @@ pub use connection_client::Http3Client;
 use frames::HFrame;
 pub use neqo_common::Header;
 use neqo_common::MessageType;
-use neqo_qpack::Error as QpackError;
+use neqo_qpack::{Error as QpackError, H3_CLOSED_CRITICAL_STREAM};
 use neqo_transport::{AppError, Connection, Error as TransportError, recv_stream, send_stream};
 pub use neqo_transport::{
     Output, StreamId,
@@ -189,6 +189,33 @@ use thiserror::Error;
 use crate::{features::extended_connect, priority::PriorityHandler};
 
 type Res<T> = Result<T, Error>;
+
+#[repr(u64)]
+enum H3ErrorCode {
+    NoError = 0x100,
+    GeneralProtocolError = 0x101,
+    InternalError = 0x102,
+    StreamCreationError = 0x103,
+    ClosedCriticalStream = H3_CLOSED_CRITICAL_STREAM,
+    FrameUnexpected = 0x105,
+    FrameError = 0x106,
+    ExcessiveLoad = 0x107,
+    IdError = 0x108,
+    SettingsError = 0x109,
+    MissingSettings = 0x10a,
+    RequestRejected = 0x10b,
+    RequestCancelled = 0x10c,
+    RequestIncomplete = 0x10d,
+    MessageError = 0x10e,
+    ConnectError = 0x10f,
+    VersionFallback = 0x110,
+}
+
+impl H3ErrorCode {
+    const fn code(self) -> AppError {
+        self as AppError
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum Error {
@@ -278,25 +305,25 @@ impl Error {
     #[must_use]
     pub const fn code(&self) -> AppError {
         match self {
-            Self::HttpNone => 0x100,
+            Self::HttpNone => H3ErrorCode::NoError.code(),
             Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
-                0x101
+                H3ErrorCode::GeneralProtocolError.code()
             }
-            Self::HttpInternal(..) => 0x102,
-            Self::HttpStreamCreation => 0x103,
-            Self::HttpClosedCriticalStream => 0x104,
-            Self::HttpFrameUnexpected => 0x105,
-            Self::HttpFrame => 0x106,
-            Self::HttpExcessiveLoad => 0x107,
-            Self::HttpId => 0x108,
-            Self::HttpSettings => 0x109,
-            Self::HttpMissingSettings => 0x10a,
-            Self::HttpRequestRejected => 0x10b,
-            Self::HttpRequestCancelled => 0x10c,
-            Self::HttpRequestIncomplete => 0x10d,
-            Self::HttpMessage => 0x10e,
-            Self::HttpConnect => 0x10f,
-            Self::HttpVersionFallback => 0x110,
+            Self::HttpInternal(..) => H3ErrorCode::InternalError.code(),
+            Self::HttpStreamCreation => H3ErrorCode::StreamCreationError.code(),
+            Self::HttpClosedCriticalStream => H3ErrorCode::ClosedCriticalStream.code(),
+            Self::HttpFrameUnexpected => H3ErrorCode::FrameUnexpected.code(),
+            Self::HttpFrame => H3ErrorCode::FrameError.code(),
+            Self::HttpExcessiveLoad => H3ErrorCode::ExcessiveLoad.code(),
+            Self::HttpId => H3ErrorCode::IdError.code(),
+            Self::HttpSettings => H3ErrorCode::SettingsError.code(),
+            Self::HttpMissingSettings => H3ErrorCode::MissingSettings.code(),
+            Self::HttpRequestRejected => H3ErrorCode::RequestRejected.code(),
+            Self::HttpRequestCancelled => H3ErrorCode::RequestCancelled.code(),
+            Self::HttpRequestIncomplete => H3ErrorCode::RequestIncomplete.code(),
+            Self::HttpMessage => H3ErrorCode::MessageError.code(),
+            Self::HttpConnect => H3ErrorCode::ConnectError.code(),
+            Self::HttpVersionFallback => H3ErrorCode::VersionFallback.code(),
             Self::Qpack(e) => e.code(),
             // These are all internal errors.
             _ => 3,

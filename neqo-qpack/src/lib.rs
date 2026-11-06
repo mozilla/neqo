@@ -22,12 +22,18 @@ mod static_table;
 mod stats;
 mod table;
 
+use neqo_transport::AppError;
 pub use stats::Stats;
 use thiserror::Error;
 
 pub use crate::{decoder::Decoder, encoder::Encoder};
 
 type Res<T> = Result<T, Error>;
+
+pub const H3_CLOSED_CRITICAL_STREAM: AppError = 0x104;
+const QPACK_DECOMPRESSION_FAILED: AppError = 0x200;
+const QPACK_ENCODER_STREAM_ERROR: AppError = 0x201;
+const QPACK_DECODER_STREAM_ERROR: AppError = 0x202;
 
 #[derive(Debug, PartialEq, PartialOrd, Ord, Eq, Clone, Copy)]
 #[expect(clippy::struct_field_names, reason = "That's how they are called.")]
@@ -157,12 +163,12 @@ pub enum Error {
 
 impl Error {
     #[must_use]
-    pub const fn code(&self) -> neqo_transport::AppError {
+    pub const fn code(&self) -> AppError {
         match self {
-            Self::Decompression => 0x200,
-            Self::EncoderStream => 0x201,
-            Self::DecoderStream => 0x202,
-            Self::ClosedCriticalStream => 0x104,
+            Self::Decompression => QPACK_DECOMPRESSION_FAILED,
+            Self::EncoderStream => QPACK_ENCODER_STREAM_ERROR,
+            Self::DecoderStream => QPACK_DECODER_STREAM_ERROR,
+            Self::ClosedCriticalStream => H3_CLOSED_CRITICAL_STREAM,
             // These are all internal errors.
             _ => 3,
         }

@@ -18,7 +18,10 @@ use enum_map::{Enum, EnumMap};
 use neqo_common::{Buffer, Decoder, Encoder, Role, hex::Hex, to_u64};
 use nss::{
     HandshakeMessage, ZeroRttCheckResult, ZeroRttChecker,
-    constants::{TLS_HS_CLIENT_HELLO, TLS_HS_ENCRYPTED_EXTENSIONS},
+    constants::{
+        TLS_ALERT_ILLEGAL_PARAMETER, TLS_ALERT_UNSUPPORTED_EXTENSION, TLS_HS_CLIENT_HELLO,
+        TLS_HS_ENCRYPTED_EXTENSIONS,
+    },
     ext::{ExtensionHandler, ExtensionHandlerResult, ExtensionWriterResult},
     random,
 };
@@ -916,7 +919,7 @@ impl ExtensionHandler for TransportParametersHandler {
         );
 
         if !matches!(msg, TLS_HS_CLIENT_HELLO | TLS_HS_ENCRYPTED_EXTENSIONS) {
-            return ExtensionHandlerResult::Alert(110); // unsupported_extension
+            return ExtensionHandlerResult::Alert(TLS_ALERT_UNSUPPORTED_EXTENSION);
         }
 
         let mut dec = Decoder::from(d);
@@ -930,7 +933,7 @@ impl ExtensionHandler for TransportParametersHandler {
             }
             Err(e) => {
                 self.error = Some(e);
-                ExtensionHandlerResult::Alert(47) // illegal_parameter
+                ExtensionHandlerResult::Alert(TLS_ALERT_ILLEGAL_PARAMETER)
             }
         }
     }
