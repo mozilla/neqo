@@ -386,6 +386,9 @@ impl WindowAdjustment for Cubic {
             let acked_bytes_used = increase * curr_cwnd / Self::ALPHA;
             self.current.reno_acked_bytes -= acked_bytes_used;
         }
+        // Keep the increase rate below that of slow start, as `target_cubic` does.
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2>
+        self.current.w_est = f64::min(self.current.w_est, curr_cwnd * 1.5);
 
         // > When receiving a new ACK in congestion avoidance (where cwnd could be greater than
         // > or less than w_max), CUBIC checks whether W_cubic(t) is less than w_est.  If so, CUBIC
