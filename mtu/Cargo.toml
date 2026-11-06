@@ -18,7 +18,6 @@ maintenance = { status = "actively-developed", branch = "main" }
 
 [dependencies]
 libc = { workspace = true }
-static_assertions = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = [

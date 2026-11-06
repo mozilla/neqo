@@ -46,8 +46,8 @@ runs:
           case "$PLATFORM" in
             freebsd)    pkg update -f && pkg install -y curl llvm nss pkgconf rust-bindgen-cli
                         ;;
-            openbsd)    # renovate: depName=llvm datasource=custom.openbsd-packages registryUrl=https://cdn.openbsd.org/pub/OpenBSD/7.9/packages/amd64/
-                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm%21 nss # rustup does not support OpenBSD at all
+            openbsd)    # renovate: depName=llvm datasource=custom.openbsd-packages registryUrl=https://cdn.openbsd.org/pub/OpenBSD/8.0/packages/amd64/
+                        pkg_add rust rust-clippy rust-rustfmt rust-bindgen llvm%22 nss # rustup does not support OpenBSD at all
                         ;;
             netbsd)     /usr/sbin/pkg_add pkgin && /usr/pkg/bin/pkgin -y update && /usr/pkg/bin/pkgin -y install curl clang nss pkgconf rust-bindgen cmake ninja                        ;;
             solaris)    pkg refresh && pkg install clang-libs nss pkg-config
@@ -79,9 +79,9 @@ runs:
             fi
           fi
           case "$PLATFORM" in
-            openbsd)    export LIBCLANG_PATH=/usr/local/llvm21/lib
-                        export LLVM_COV=/usr/local/llvm21/bin/llvm-cov
-                        export LLVM_PROFDATA=/usr/local/llvm21/bin/llvm-profdata
+            openbsd)    export LIBCLANG_PATH=/usr/local/llvm22/lib
+                        export LLVM_COV=/usr/local/llvm22/bin/llvm-cov
+                        export LLVM_PROFDATA=/usr/local/llvm22/bin/llvm-profdata
                         export PATH="\$HOME/.cargo/bin:\$PATH"
                         ;;
             *)          # rustup >= 1.29.2 is built with a std lacking File::lock on Solaris.
@@ -159,9 +159,9 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'openbsd' }}
-      uses: vmactions/openbsd-vm@5f7b2c933b8846a138361d6843c52af4bef5d945 # v1.4.8
+      uses: vmactions/openbsd-vm@f1ca8bc8ecc5b6ef7218e5b914836e067e1546d3 # v1.4.9
       with:
-        release: "7.9"
+        release: "8.0"
         usesh: true
         disable-cache: true
         copyback: true
@@ -181,7 +181,7 @@ runs:
         run: ${{ steps.prep.outputs.run }}
 
     - if: ${{ inputs.platform == 'solaris' }}
-      uses: vmactions/solaris-vm@87d3c436511cef802cd1637f86f73b1a97715c8c # v1.4.1
+      uses: vmactions/solaris-vm@1c166978f5a2c1f87f1c9d4d8dd85ae3d1eff6f7 # v1.4.2
       with:
         release: "11.4-gcc"
         usesh: true

@@ -1,3 +1,10 @@
+[advisories]
+ignore = [
+    # Same as Gecko, see https://bugzilla.mozilla.org/show_bug.cgi?id=2089569
+    { id = "RUSTSEC-2026-0386", reason = "tokio AsyncFd is unused, and tokio is only in neqo-bin" },
+    { id = "RUSTSEC-2026-0441", reason = "pin-utils is unmaintained, with no known vulnerability" },
+]
+
 [bans]
 multiple-versions = "allow"
 

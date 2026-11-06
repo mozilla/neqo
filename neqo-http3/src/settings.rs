@@ -308,27 +308,12 @@ impl ZeroRttChecker for HttpZeroRttChecker {
             HSettingType::MaxTableCapacity => {
                 self.settings.get_max_table_size_decoder() >= setting.value
             }
-            HSettingType::EnableWebTransport => {
-                if setting.value > 1 {
-                    return false;
-                }
-                let value = setting.value == 1;
-                self.settings.webtransport_enabled() || !value
-            }
-            HSettingType::EnableH3Datagram => {
-                if setting.value > 1 {
-                    return false;
-                }
-                let value = setting.value == 1;
-                self.settings.get_http3_datagram() || !value
-            }
-            HSettingType::EnableConnect => {
-                if setting.value > 1 {
-                    return false;
-                }
-                let value = setting.value == 1;
-                self.settings.connect_enabled() || !value
-            }
+            HSettingType::EnableWebTransport => bool::try_from(setting.value)
+                .is_ok_and(|value| self.settings.webtransport_enabled() || !value),
+            HSettingType::EnableH3Datagram => bool::try_from(setting.value)
+                .is_ok_and(|value| self.settings.get_http3_datagram() || !value),
+            HSettingType::EnableConnect => bool::try_from(setting.value)
+                .is_ok_and(|value| self.settings.connect_enabled() || !value),
             HSettingType::MaxHeaderListSize => true,
         }) {
             ZeroRttCheckResult::Accept

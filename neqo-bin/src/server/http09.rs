@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     rc::Rc,
-    slice, str,
+    slice,
     time::Instant,
 };
 
@@ -30,6 +30,7 @@ use crate::{
     server::StatsReporter,
 };
 
+/// Create only in `NewStream`; `or_default()` elsewhere re-creates state dropped on `STOP_SENDING`.
 #[derive(Default)]
 struct HttpStreamState {
     writable: bool,
@@ -38,8 +39,8 @@ struct HttpStreamState {
 
 pub struct HttpServer {
     server: Server,
-    write_state: HashMap<StreamId, HttpStreamState>,
-    read_state: HashMap<StreamId, Vec<u8>>,
+    write_state: HashMap<(ConnectionRef, StreamId), HttpStreamState>,
+    read_state: HashMap<(ConnectionRef, StreamId), Vec<u8>>,
     is_qns_test: bool,
     read_buffer: Vec<u8>,
     stats: StatsReporter,
@@ -76,7 +77,7 @@ impl HttpServer {
     fn save_partial(&mut self, stream_id: StreamId, partial: Vec<u8>, conn: &ConnectionRef) {
         if partial.len() < 4096 {
             debug!("Saving partial URL: {}", String::from_utf8_lossy(&partial));
-            self.read_state.insert(stream_id, partial);
+            self.read_state.insert((conn.clone(), stream_id), partial);
         } else {
             debug!(
                 "Giving up on partial URL {}",
@@ -120,7 +121,8 @@ impl HttpServer {
             return;
         }
 
-        let mut buf = self.read_state.remove(&stream_id).unwrap_or_default();
+        let key = (conn.clone(), stream_id);
+        let mut buf = self.read_state.remove(&key).unwrap_or_default();
         buf.extend_from_slice(&self.read_buffer[..sz]);
 
         // HQ requests are terminated by stream FIN. Never process a request
@@ -134,7 +136,7 @@ impl HttpServer {
         // FIN is set: the request is complete. If no data was received (either
         // now or buffered from a prior read), there is nothing to serve.
         if buf.is_empty() {
-            self.write_state.remove(&stream_id);
+            self.write_state.remove(&key);
             return;
         }
 
@@ -142,7 +144,7 @@ impl HttpServer {
         // more data; reset the stream so the client gets a clean signal.
         let Some(path) = Self::parse_path(&buf, self.is_qns_test) else {
             _ = conn.borrow_mut().stream_reset_send(stream_id, 0);
-            self.write_state.remove(&stream_id);
+            self.write_state.remove(&key);
             return;
         };
 
@@ -150,7 +152,10 @@ impl HttpServer {
         let resp = super::response_for_path(path, self.is_qns_test)
             .unwrap_or_else(|()| b"404".as_slice().into());
 
-        let stream_state = self.write_state.entry(stream_id).or_default();
+        let Some(stream_state) = self.write_state.get_mut(&key) else {
+            debug!("Stream {stream_id} no longer sendable, dropping request");
+            return;
+        };
         if stream_state.data_to_send.is_none() {
             stream_state.data_to_send = Some(resp);
         } else {
@@ -163,7 +168,8 @@ impl HttpServer {
     }
 
     fn stream_writable(&mut self, stream_id: StreamId, conn: &ConnectionRef) {
-        let Some(stream_state) = self.write_state.get_mut(&stream_id) else {
+        let key = (conn.clone(), stream_id);
+        let Some(stream_state) = self.write_state.get_mut(&key) else {
             warn!("Unknown stream {stream_id}, ignoring event");
             return;
         };
@@ -188,7 +194,7 @@ impl HttpServer {
             false
         };
         if remove {
-            self.write_state.remove(&stream_id);
+            self.write_state.remove(&key);
         }
     }
 }
@@ -220,13 +226,23 @@ impl super::HttpServer for HttpServer {
                 };
                 match event {
                     ConnectionEvent::NewStream { stream_id } => {
-                        self.write_state.entry(stream_id).or_default();
+                        self.write_state
+                            .entry((acr.clone(), stream_id))
+                            .or_default();
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         self.stream_readable(stream_id, &acr);
                     }
                     ConnectionEvent::SendStreamWritable { stream_id } => {
                         self.stream_writable(stream_id, &acr);
+                    }
+                    ConnectionEvent::RecvStreamReset { stream_id, .. } => {
+                        let key = (acr.clone(), stream_id);
+                        self.read_state.remove(&key);
+                        self.write_state.remove(&key);
+                    }
+                    ConnectionEvent::SendStreamStopSending { stream_id, .. } => {
+                        self.write_state.remove(&(acr.clone(), stream_id));
                     }
                     ConnectionEvent::StateChange(State::Connected) => {
                         acr.connection()
@@ -248,6 +264,10 @@ impl super::HttpServer for HttpServer {
                 }
             }
         }
+        self.read_state
+            .retain(|(conn, _), _| !conn.borrow().state().closed());
+        self.write_state
+            .retain(|(conn, _), _| !conn.borrow().state().closed());
     }
 
     fn has_events(&self) -> bool {
@@ -265,11 +285,13 @@ impl Display for HttpServer {
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use neqo_transport::RandomConnectionIdGenerator;
-    use test_fixture::{ProcessServer, anti_replay, fixture_init};
+    use neqo_transport::{Connection, RandomConnectionIdGenerator, StreamId, StreamType};
+    use test_fixture::{ProcessServer, anti_replay, fixture_init, now};
 
     use super::{Args, HttpServer};
-    use crate::server::test_support::{StatsServer, reported_on_close};
+    use crate::server::test_support::{
+        StatsServer, alpn_args, blocked_path, connect, deliver, reported_on_close,
+    };
 
     fn make_server(args: &Args) -> HttpServer {
         fixture_init();
@@ -287,9 +309,91 @@ mod tests {
         }
     }
 
+    fn setup() -> (HttpServer, Connection) {
+        let mut server = make_server(&alpn_args());
+        let client = connect(&mut server);
+        (server, client)
+    }
+
+    fn request(server: &mut HttpServer, client: &mut Connection, data: &str) -> StreamId {
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, data.as_bytes()).unwrap();
+        deliver(server, client);
+        stream_id
+    }
+
+    fn entries(server: &HttpServer) -> (usize, usize) {
+        (server.read_state.len(), server.write_state.len())
+    }
+
     #[test]
     fn reports_stats_once_on_close() {
         assert_eq!(reported_on_close(make_server), 1);
+    }
+
+    #[test]
+    fn request_state_per_connection() {
+        let mut server = make_server(&alpn_args());
+        let mut clients = [connect(&mut server), connect(&mut server)];
+        for client in &mut clients {
+            request(&mut server, client, "GET /1");
+        }
+        assert_eq!(entries(&server), (clients.len(), clients.len()));
+    }
+
+    #[test]
+    fn reset_request_is_dropped() {
+        let (mut server, mut client) = setup();
+        let stream_id = request(&mut server, &mut client, "GET /1");
+        assert_eq!(entries(&server), (1, 1));
+        client.stream_reset_send(stream_id, 0).unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn stop_sending_drops_response() {
+        let (mut server, mut client) = setup();
+        let stream_id = request(&mut server, &mut client, &format!("GET {}", blocked_path()));
+        client.stream_close_send(stream_id).unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 1));
+        client.stream_stop_sending(stream_id, 0).unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn stop_sending_before_fin_drops_request() {
+        let (mut server, mut client) = setup();
+        let stream_id = request(&mut server, &mut client, "GET /1");
+        client.stream_stop_sending(stream_id, 0).unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (1, 0));
+        client.stream_close_send(stream_id).unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn closed_connection_drops_state() {
+        let (mut server, mut client) = setup();
+        request(&mut server, &mut client, "GET /1");
+        assert_eq!(entries(&server), (1, 1));
+        client.close(now(), 0, "bye");
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn readable_stream_closed_before_events() {
+        let (mut server, mut client) = setup();
+        let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+        client.stream_send(stream_id, b"GET /1").unwrap();
+        let data = client.process_output(now()).dgram();
+        client.close(now(), 0, "bye");
+        _ = server.server.process(data, now());
+        deliver(&mut server, &mut client);
     }
 
     // Issue 1 (FIN-only frame after buffered partial data) is exercised by

@@ -352,7 +352,10 @@ impl Http3ClientEvents {
     pub(crate) fn connection_state_change(&self, state: Http3State) {
         match state {
             // If closing, existing events no longer relevant.
-            Http3State::Closing { .. } | Http3State::Closed(_) => self.events.clear(),
+            // The session ticket in a queued resumption token cannot be retrieved again.
+            Http3State::Closing { .. } | Http3State::Closed(_) => self
+                .events
+                .remove_matching(|evt| !matches!(evt, Http3ClientEvent::ResumptionToken(_))),
             Http3State::Connected => {
                 self.events.remove_matching(|evt| {
                     matches!(evt, Http3ClientEvent::StateChange(Http3State::ZeroRtt))

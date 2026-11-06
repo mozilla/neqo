@@ -1188,8 +1188,8 @@ impl RecvStream {
             } => {
                 let bytes_read = recv_buf.read(buf);
                 Self::flow_control_retire_data(u64::try_from(bytes_read)?, fc, session_fc);
-                let fin_read = if data_recvd_state {
-                    if recv_buf.buffered() == 0 {
+                let fin_read = data_recvd_state
+                    && if recv_buf.buffered() == 0 {
                         let received = recv_buf.received();
                         let read = recv_buf.retired();
                         self.set_state(RecvStreamState::DataRead {
@@ -1199,10 +1199,7 @@ impl RecvStream {
                         true
                     } else {
                         false
-                    }
-                } else {
-                    false
-                };
+                    };
                 Ok((bytes_read, fin_read))
             }
             RecvStreamState::SizeKnownAt {
@@ -1407,7 +1404,6 @@ mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
     use neqo_common::{Encoder, event::Provider as _, expect_usize, to_u64};
-    use static_assertions::const_assert;
     use test_fixture::now;
     use tracing::trace;
 
@@ -2141,7 +2137,7 @@ mod tests {
     }
 
     fn create_stream_session_flow_control() -> (RecvStream, Rc<RefCell<ReceiverFlowControl<()>>>) {
-        static_assertions::const_assert!(INITIAL_LOCAL_MAX_STREAM_DATA > SESSION_WINDOW);
+        const _: () = assert!(INITIAL_LOCAL_MAX_STREAM_DATA > SESSION_WINDOW);
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             to_u64(SESSION_WINDOW),
@@ -2404,7 +2400,7 @@ mod tests {
         const STREAM_WINDOW_US: usize = CONNECTION_WINDOW_US / 2;
         const STREAM_WINDOW: u64 = to_u64(STREAM_WINDOW_US);
 
-        const_assert!(WINDOW_UPDATE_FRACTION <= to_u64(usize::MAX));
+        const _: () = assert!(WINDOW_UPDATE_FRACTION <= to_u64(usize::MAX));
         #[expect(
             clippy::cast_possible_truncation,
             reason = "value is statically checked"

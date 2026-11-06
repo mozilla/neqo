@@ -51,9 +51,7 @@ fn assert_update_blocked(c: &mut Connection) {
 }
 
 fn overwrite_invocations(n: packet::Number) {
-    OVERWRITE_INVOCATIONS.with(|v| {
-        *v.borrow_mut() = Some(n);
-    });
+    OVERWRITE_INVOCATIONS.set(Some(n));
 }
 
 #[test]
