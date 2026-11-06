@@ -24,7 +24,7 @@ defaults:
 jobs:
   bench-matrix:
     name: Determine bench matrix
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       benches: ${{ steps.matrix.outputs.benches }}
       batches: ${{ steps.matrix.outputs.batches }}
@@ -65,7 +65,7 @@ jobs:
 
   build-bench:
     name: Build ${{ matrix.bench.bench }} (${{ matrix.bench.mode }})
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: bench-matrix
     if: ${{ needs.bench-matrix.outputs.benches != '[]' }}
     strategy:
@@ -162,7 +162,7 @@ jobs:
   # commit's results land in a single CodSpeed run: CodSpeed groups them by GitHub Actions run.
   build-neqo:
     name: Build neqo
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -190,7 +190,7 @@ jobs:
 
   build-others:
     name: Build ${{ matrix.impl }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         impl: [quiche, s2n]

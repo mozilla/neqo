@@ -3,6 +3,9 @@ self-hosted-runner:
   # Labels of self-hosted runner in array of strings.
   labels:
     - codspeed-macro-x86-ryzen-9950x-ubuntu-24-04
+    # GitHub-hosted, but unknown to actionlint 1.7.12.
+    - ubuntu-26.04
+    - ubuntu-26.04-arm
 
 # actionlint 1.7.12 does not know the `$/` syntax, see https://github.com/rhysd/actionlint/issues/711
 paths:

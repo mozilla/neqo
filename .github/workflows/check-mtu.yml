@@ -29,7 +29,7 @@ env:
 jobs:
   check-netns:
     name: Network namespace tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -49,10 +49,10 @@ jobs:
       matrix:
         include:
           - os: linux
-            runner: ubuntu-24.04
+            runner: ubuntu-26.04
             header: linux.h
           - os: macos
-            runner: macos-15
+            runner: macos-26
             header: bsd.h
     runs-on: ${{ matrix.runner }}
     steps:
@@ -75,7 +75,7 @@ jobs:
 
   check-android:
     name: Check Android
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         target:
@@ -96,7 +96,7 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
     strategy:
@@ -119,7 +119,7 @@ jobs:
     name: Check bindings
     needs: [generate-bindings, check-vm]
     if: always() && !cancelled()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       pull-requests: write # to create PRs for binding updates
       contents: write # to push branches for binding updates
