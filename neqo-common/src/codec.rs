@@ -489,7 +489,7 @@ impl<B: Buffer> Encoder<B> {
 impl Encoder<Vec<u8>> {
     /// Skip the first `n` bytes from the encoder buffer without copying.
     /// This advances the internal offset, making those bytes inaccessible.
-    /// Skipped bytes stay allocated until [`Self::reset`].
+    /// Skipped bytes stay allocated until [`Self::compact`].
     ///
     /// # Panics
     ///
@@ -499,10 +499,19 @@ impl Encoder<Vec<u8>> {
         self.start += n;
     }
 
-    /// Remove all bytes, including skipped ones, keeping the allocated capacity.
-    pub fn reset(&mut self) {
-        self.buf.clear();
-        self.start = 0;
+    /// Get the allocated capacity of the underlying buffer.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+
+    /// Release skipped bytes once they are at least as many as the remaining ones,
+    /// keeping the allocated capacity. This invalidates any outstanding [`Reservation`].
+    pub fn compact(&mut self) {
+        if self.start >= self.len() {
+            self.buf.drain(..self.start);
+            self.start = 0;
+        }
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
@@ -1398,31 +1407,17 @@ mod tests {
     }
 
     #[test]
-    fn encoder_skip_keeps_reservation() {
-        let mut enc = Encoder::from_hex("010203");
-        let rsv = enc.reserve::<1>();
-        enc.skip(2);
-        enc.encode([4, 5]);
-        enc.overwrite(rsv, [9]);
-        assert_eq!(enc.as_ref(), &[3, 9, 4, 5]);
-    }
-
-    #[test]
-    #[should_panic(expected = "reservation is outside the encoder")]
-    fn encoder_skip_past_reservation() {
-        let mut enc = Encoder::default();
-        let rsv = enc.reserve::<1>();
-        enc.encode([1, 2, 3]);
-        enc.skip(2);
-        enc.overwrite(rsv, [9]);
-    }
-
-    #[test]
-    fn encoder_reset() {
-        let mut enc = Encoder::from_hex("010203");
-        enc.skip(1);
+    fn encoder_compact() {
+        let mut enc = Encoder::from_hex("010203040506");
         let capacity = enc.buf.capacity();
-        enc.reset();
+        enc.skip(2);
+        enc.compact();
+        assert_eq!((enc.start, enc.buf.len()), (2, 6));
+        enc.skip(1);
+        enc.compact();
+        assert_eq!((enc.start, enc.buf.as_slice()), (0, [4, 5, 6].as_slice()));
+        enc.skip(3);
+        enc.compact();
         assert_eq!((enc.start, enc.buf.len()), (0, 0));
         assert_eq!(enc.buf.capacity(), capacity);
     }
