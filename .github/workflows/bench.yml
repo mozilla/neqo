@@ -33,7 +33,7 @@ permissions:
 jobs:
   targets:
     name: Determine bench targets
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       targets: ${{ steps.matrix.outputs.all }}
     steps:
@@ -102,7 +102,7 @@ jobs:
 
   bench-variants:
     name: Determine benchmarks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     needs: build
     if: ${{ !cancelled() }} # A failed build must not skip the other targets.
     outputs:
@@ -301,7 +301,7 @@ jobs:
     name: Assemble benchmark results
     if: ${{ !cancelled() }}
     needs: bench
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         shell: bash
