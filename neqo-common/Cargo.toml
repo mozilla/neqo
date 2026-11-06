@@ -22,7 +22,6 @@ log = { workspace = true }
 qlog = { workspace = true }
 serde = { workspace = true }
 sha1 = { version = "0.10", default-features = false, optional = true }
-static_assertions = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -30,7 +29,7 @@ tracing-subscriber = { workspace = true }
 
 [target."cfg(target_os = \"macos\")".dependencies]
 libc = { workspace = true }
-mach2 = { version = "0.4.1", default-features = false } # 0.4.1 adds `thread_policy`.
+mach2 = { version = "0.6", default-features = false }
 
 [target."cfg(windows)".dependencies]
 windows = { workspace = true, features = ["Win32_Media"] }

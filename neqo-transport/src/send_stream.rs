@@ -21,7 +21,6 @@ use indexmap::IndexMap;
 use neqo_common::{Buffer, Encoder, Role, expect_usize, to_u64};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
-use static_assertions::const_assert;
 use tracing::{debug, error, trace};
 
 use crate::{
@@ -467,7 +466,7 @@ pub struct TxBuffer {
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
 
-const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
+const _: () = assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
 
 impl TxBuffer {
     /// The maximum stream send buffer size.
@@ -1422,7 +1421,7 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub(crate) fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         debug!("[{self}] low watermark {watermark}, avail {}", self.avail());
         self.writable_event_low_watermark = watermark;
     }
@@ -1926,6 +1925,8 @@ pub struct SendStreams {
     // hash lookup) while still resuming after the last-served stream when the packet
     // builder fills mid-pass, preserving fairness.
     fair_rr_next: usize,
+
+    max_low_watermark: Option<NonZeroUsize>, // Upper bound of the streams' low watermarks.
 }
 
 impl SendStreams {
@@ -2099,7 +2100,11 @@ impl SendStreams {
                 // fall back to binary-search insertion.
                 let null_grp = self.per_group.entry(NULL_GROUP_ID).or_default();
                 let grp = null_grp.group_mut(sendorder);
-                if matches!(grp.stream_ids().last(), Some(last) if stream_id > *last) {
+                if grp
+                    .stream_ids()
+                    .last()
+                    .is_some_and(|last| stream_id > *last)
+                {
                     grp.push(stream_id);
                 } else {
                     grp.insert(stream_id);
@@ -2400,6 +2405,33 @@ impl SendStreams {
             };
             ss.set_max_stream_data(limit);
         }
+    }
+
+    pub(crate) fn set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        self.get_mut(stream_id)?
+            .set_writable_event_low_watermark(watermark);
+        self.max_low_watermark = max(self.max_low_watermark, Some(watermark));
+        Ok(())
+    }
+
+    pub(crate) fn maybe_emit_writable_events(
+        &mut self,
+        previous_limit: usize,
+        current_limit: usize,
+    ) {
+        if self.max_low_watermark.unwrap_or(NonZeroUsize::MIN).get() < previous_limit {
+            return; // No stream was waiting for connection flow control.
+        }
+        let mut max_low_watermark = NonZeroUsize::MIN;
+        for ss in self.map.values() {
+            ss.maybe_emit_writable_event(previous_limit, current_limit);
+            max_low_watermark = max(max_low_watermark, ss.writable_event_low_watermark);
+        }
+        self.max_low_watermark = Some(max_low_watermark);
     }
 }
 

@@ -10,7 +10,6 @@ use std::{
 };
 
 use neqo_common::{Buffer, qlog::Qlog};
-use static_assertions::const_assert;
 use tracing::{debug, info};
 
 use crate::{
@@ -32,12 +31,12 @@ const MTU_SIZES_V6: &[usize] = &[
     1420, // 1420 is not in the paper for v6, but adding it makes the arrays the same length
     1470, 1500, 2047, 4095, 8191, 16383, 32767, 65535,
 ];
-const_assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
+const _: () = assert!(MTU_SIZES_V4.len() == MTU_SIZES_V6.len());
 const SEARCH_TABLE_LEN: usize = MTU_SIZES_V4.len();
 
 // From https://datatracker.ietf.org/doc/html/rfc8899#section-5.1
 const MAX_PROBES: usize = 3;
-const PMTU_RAISE_TIMER: Duration = Duration::from_secs(600);
+const PMTU_RAISE_TIMER: Duration = Duration::from_mins(10);
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum Probe {
@@ -82,14 +81,14 @@ impl Pmtud {
     }
 
     #[must_use]
-    pub fn new(remote_ip: IpAddr, iface_mtu: Option<usize>) -> Self {
+    pub fn new(remote_ip: IpAddr) -> Self {
         let search_table = Self::search_table(remote_ip);
         let probe_index = 0;
         Self {
             search_table,
             header_size: Self::header_size(remote_ip),
             mtu: search_table[probe_index],
-            iface_mtu: iface_mtu.unwrap_or(usize::MAX),
+            iface_mtu: usize::MAX,
             peer_max_udp_payload: None,
             probe_index,
             probe_count: 0,
@@ -112,6 +111,11 @@ impl Pmtud {
             let done = !self.needs_probe();
             qlog::mtu_updated(&mut self.qlog, old_mtu, new_mtu, done, now);
         }
+    }
+
+    /// Set the local interface MTU as an upper bound for probing.
+    pub const fn set_iface_mtu(&mut self, iface_mtu: usize) {
+        self.iface_mtu = iface_mtu;
     }
 
     /// Set the peer's `max_udp_payload_size` transport parameter as an upper bound for probing.
@@ -364,6 +368,14 @@ mod tests {
         Some(u16::MAX as usize),
     ];
 
+    fn new_pmtud(addr: IpAddr, iface_mtu: Option<usize>) -> Pmtud {
+        let mut pmtud = Pmtud::new(addr);
+        if let Some(iface_mtu) = iface_mtu {
+            pmtud.set_iface_mtu(iface_mtu);
+        }
+        pmtud
+    }
+
     /// Asserts that the PMTUD process has stopped at the given MTU.
     #[cfg(test)]
     fn assert_mtu(pmtud: &Pmtud, mtu: usize) {
@@ -427,7 +439,7 @@ mod tests {
     ) -> (Pmtud, Stats, CryptoDxState, Instant) {
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr, iface_mtu);
+        let mut pmtud = new_pmtud(addr, iface_mtu);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default_write();
 
@@ -550,7 +562,7 @@ mod tests {
     fn non_probe_loss_ignored() {
         const MTU: usize = 1500;
         let now = now();
-        let mut pmtud = Pmtud::new(V4, Some(MTU));
+        let mut pmtud = new_pmtud(V4, Some(MTU));
         let mut stats = Stats::default();
 
         // Complete PMTUD at MTU 1500.
@@ -590,7 +602,7 @@ mod tests {
     ) -> Pmtud {
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(addr, iface_mtu);
+        let mut pmtud = new_pmtud(addr, iface_mtu);
         pmtud.set_peer_max_udp_payload(peer_max_udp_payload);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default_write();
@@ -638,7 +650,7 @@ mod tests {
 
     #[test]
     fn peer_max_udp_payload_accessor() {
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         assert_eq!(pmtud.peer_max_udp_payload(), None);
 
         pmtud.set_peer_max_udp_payload(1452);
@@ -650,7 +662,7 @@ mod tests {
     fn send_probe_increments_count() {
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
         pmtud.next(now, &mut stats);
         assert!(pmtud.needs_probe());
@@ -672,7 +684,7 @@ mod tests {
         const PATH_MTU: usize = 1200; // Below all probes in the search table
         fixture_init();
         let now = now();
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
         let mut prot = CryptoDxState::test_default_write();
         pmtud.next(now, &mut stats);
@@ -694,7 +706,7 @@ mod tests {
     fn non_probe_ack_ignored() {
         const MTU: usize = 1500;
         let now = now();
-        let mut pmtud = Pmtud::new(V4, Some(MTU));
+        let mut pmtud = new_pmtud(V4, Some(MTU));
         let mut stats = Stats::default();
 
         // Complete PMTUD at MTU 1500.
@@ -730,7 +742,7 @@ mod tests {
     #[test]
     fn retried_probe_ack_does_not_confirm_next_size() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
         pmtud.next(now, &mut stats);
         let first = pmtud.probe_size();
@@ -760,7 +772,7 @@ mod tests {
     #[test]
     fn stale_probe_ack_does_not_disturb_probe_in_flight() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
         pmtud.next(now, &mut stats);
         let first = pmtud.probe_size();
@@ -794,7 +806,7 @@ mod tests {
     #[test]
     fn mixed_probe_acks_only_count_current_size() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
         pmtud.next(now, &mut stats);
         let original_size = pmtud.probe_size();
@@ -827,7 +839,7 @@ mod tests {
     #[test]
     fn stale_probe_ack_after_search_stopped_ignored() {
         let now = now();
-        let mut pmtud = Pmtud::new(V4, None);
+        let mut pmtud = Pmtud::new(V4);
         let mut stats = Stats::default();
         pmtud.next(now, &mut stats);
         let first = pmtud.search_table[1];

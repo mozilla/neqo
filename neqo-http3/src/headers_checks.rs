@@ -49,19 +49,12 @@ impl TryFrom<(MessageType, &str)> for PseudoHeaderState {
 /// Returns an error if response headers do not contain
 /// a status header or if the value of the header is 101 or cannot be parsed.
 pub fn is_interim(headers: &[Header]) -> Res<bool> {
-    if let Some(h) = headers.iter().take(1).find_header(":status") {
-        let status_code = std::str::from_utf8(h.value())
-            .map_err(|_| Error::InvalidHeader)?
-            .parse::<u16>()
-            .map_err(|_| Error::InvalidHeader)?;
-        if status_code == 101 {
-            // https://datatracker.ietf.org/doc/html/draft-ietf-quic-http#section-4.3
-            Err(Error::InvalidHeader)
-        } else {
-            Ok((100..200).contains(&status_code))
-        }
-    } else {
-        Err(Error::InvalidHeader)
+    let status = headers.iter().take(1).find_header(":status");
+    match status.map(Header::value) {
+        // https://datatracker.ietf.org/doc/html/rfc9114#section-4.5
+        Some(b"101") => Err(Error::InvalidHeader),
+        Some([d @ b'1'..=b'5', b'0'..=b'9', b'0'..=b'9']) => Ok(*d == b'1'),
+        _ => Err(Error::InvalidHeader), // RFC 9110, Section 15.
     }
 }
 
@@ -88,6 +81,32 @@ fn track_pseudo(
     }
 }
 
+/// Whether `b` is a `tchar` other than ALPHA or DIGIT (RFC 9110, Section 5.6.2).
+const fn is_tchar_symbol(b: u8) -> bool {
+    matches!(
+        b,
+        b'!' | b'#'
+            | b'$'
+            | b'%'
+            | b'&'
+            | b'\''
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'.'
+            | b'^'
+            | b'_'
+            | b'`'
+            | b'|'
+            | b'~'
+    )
+}
+
+/// Whether `b` may appear in an HTTP/3 field name (RFC 9114, Section 4.2).
+const fn is_field_name_char(b: u8) -> bool {
+    b.is_ascii_lowercase() || b.is_ascii_digit() || is_tchar_symbol(b)
+}
+
 /// Checks if request/response headers are well formed, i.e. contain
 /// allowed pseudo headers and in a right order, etc.
 ///
@@ -102,7 +121,6 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     for header in headers {
         let is_pseudo = track_pseudo(header.name(), &mut pseudo_state, message_type)?;
 
-        let mut bytes = header.name().bytes();
         if is_pseudo {
             if header.name() == ":method" {
                 method_value = Some(header.value());
@@ -111,17 +129,23 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
             } else if header.name() == ":scheme" {
                 scheme_value = Some(header.value());
             }
-            _ = bytes.next();
         }
 
-        if bytes.any(|b| matches!(b, 0 | 0x0a | 0x0d | 0x3a | 0x41..=0x5a)) {
+        let name = header.name();
+        let name = name.strip_prefix(':').unwrap_or(name);
+        if name.is_empty() || !name.bytes().all(is_field_name_char) {
             return Err(Error::InvalidHeader); // illegal characters.
         }
 
         // CR, LF, and NUL are not permitted in a field value either (RFC 9114,
         // Section 4.3); carried verbatim into an HTTP/1.1 serialization they
         // would split the message.
-        if header.value().iter().any(|b| matches!(b, 0 | 0x0a | 0x0d)) {
+        // Other CTLs are accepted, as in Firefox's HTTP/2 stack and Fetch (httpwg/http-core#215).
+        if header
+            .value()
+            .iter()
+            .any(|b| matches!(b, b'\0' | b'\n' | b'\r'))
+        {
             return Err(Error::InvalidHeader); // illegal characters.
         }
 
@@ -195,7 +219,7 @@ mod tests {
     use neqo_common::Header;
 
     use super::{headers_valid, is_interim};
-    use crate::MessageType;
+    use crate::{Error, MessageType};
 
     fn create_connect_headers() -> Vec<Header> {
         vec![
@@ -268,6 +292,20 @@ mod tests {
     fn is_interim_not_a_number() {
         let headers = vec![Header::new(":status", "not-a-number")];
         assert!(is_interim(&headers).is_err());
+    }
+
+    #[test]
+    fn is_interim_not_three_digits() {
+        // A status code is a three-digit integer (RFC 9110, Section 15).
+        for bad in [
+            "+200", "0200", "20", "7", "65535", "+150", "x00", "1x0", "10x", "001", "099", "600",
+            "700", "999",
+        ] {
+            let headers = vec![Header::new(":status", bad)];
+            assert_eq!(is_interim(&headers), Err(Error::InvalidHeader));
+        }
+        assert_eq!(is_interim(&[Header::new(":status", "103")]), Ok(true));
+        assert_eq!(is_interim(&[Header::new(":status", "200")]), Ok(false));
     }
 
     #[test]
@@ -357,6 +395,53 @@ mod tests {
             Header::new(":path", b"/\r\nx".as_slice()),
         ];
         assert!(headers_valid(&headers, MessageType::Request).is_err());
+    }
+
+    #[test]
+    fn reject_non_token_field_name() {
+        // A non-token field name is malformed (RFC 9114, Section 10.3), in either direction.
+        for bad in [
+            "", "x y", "x\ty", "te ", "x\x0by", "x\x7fy", "x\u{e9}y", "x(y)", "X", "xY",
+        ] {
+            let response = vec![Header::new(":status", "200"), Header::new(bad, "1")];
+            assert_eq!(
+                headers_valid(&response, MessageType::Response),
+                Err(Error::InvalidHeader)
+            );
+
+            let request = vec![
+                Header::new(":method", "GET"),
+                Header::new(":scheme", "https"),
+                Header::new(":path", "/"),
+                Header::new(bad, "1"),
+            ];
+            assert_eq!(
+                headers_valid(&request, MessageType::Request),
+                Err(Error::InvalidHeader)
+            );
+        }
+
+        // Every lowercase tchar is allowed.
+        let response = vec![
+            Header::new(":status", "200"),
+            Header::new("abcdefghijklmnopqrstuvwxyz0123456789!#$%&'*+-.^_`|~", "1"),
+        ];
+        assert_eq!(headers_valid(&response, MessageType::Response), Ok(()));
+    }
+
+    #[test]
+    fn accept_other_ctl_in_field_value() {
+        let value = b"1\x0b\x7f2".as_slice();
+        let response = vec![Header::new(":status", "200"), Header::new("x", value)];
+        assert_eq!(headers_valid(&response, MessageType::Response), Ok(()));
+
+        let request = vec![
+            Header::new(":method", "GET"),
+            Header::new(":scheme", "https"),
+            Header::new(":path", "/"),
+            Header::new("x", value),
+        ];
+        assert_eq!(headers_valid(&request, MessageType::Request), Ok(()));
     }
 
     #[test]

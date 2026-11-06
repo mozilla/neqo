@@ -172,9 +172,10 @@ impl ConnectionEvents {
 
     pub fn connection_state_change(&self, state: State) {
         // If closing, existing events no longer relevant.
-        match state {
-            State::Closing { .. } | State::Closed(_) => self.events.clear(),
-            _ => (),
+        // The session ticket in a queued resumption token cannot be retrieved again.
+        if state.closed() {
+            self.events
+                .remove_matching(|evt| !matches!(evt, ConnectionEvent::ResumptionToken(_)));
         }
         self.events.push_unique(ConnectionEvent::StateChange(state));
     }

@@ -144,7 +144,7 @@ fn retry_expired() {
     let dgram = client.process(dgram, now).dgram(); // Initial w/token
     assert!(dgram.is_some());
 
-    now += Duration::from_secs(60); // Too long for Retry.
+    now += Duration::from_mins(1); // Too long for Retry.
     let dgram = server.process(dgram, now).dgram(); // Initial, HS
     assert!(dgram.is_none());
     assert_dscp(&client.stats());
@@ -260,7 +260,7 @@ fn new_token_expired() {
     // Now move into the future.
     // We can't go too far or we'll overflow our field.  Not when checking,
     // but when trying to generate another Retry.  A month is fine.
-    let the_future = now() + Duration::from_secs(60 * 60 * 24 * 30);
+    let the_future = now() + Duration::from_hours(24 * 30);
     let d = dgram.unwrap();
     let src = SocketAddr::new(d.source().ip(), d.source().port() + 1);
     let dgram = Some(Datagram::new(src, d.destination(), d.tos(), &d[..]));
