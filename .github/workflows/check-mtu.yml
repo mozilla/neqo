@@ -40,7 +40,7 @@ jobs:
           nss: "false"
 
       - name: Run network namespace tests
-        run: sudo -E env "PATH=$PATH" cargo test --locked --package mtu --test netns -- --nocapture
+        run: sudo env "PATH=$PATH" "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" cargo test --locked --package mtu --test netns -- --nocapture
 
   generate-bindings:
     name: Generate ${{ matrix.os }} bindings
