@@ -126,6 +126,11 @@ impl SendProfile {
     pub const fn full_mtu(&self) -> bool {
         self.full_mtu
     }
+
+    /// Lower the limit, even below the one for ACK-only packets.
+    pub(crate) fn cap(&mut self, limit: usize) {
+        self.limit = min(self.limit, limit);
+    }
 }
 
 #[derive(Debug)]
@@ -932,6 +937,10 @@ impl Loss {
         lost: &mut Vec<sent::Packet>,
         has_handshake_keys: bool,
     ) {
+        // As in `next_timeout`, which does not arm the timer then (RFC 9002, Section 6.2.2.1).
+        if !primary_path.borrow().pto_possible() {
+            return;
+        }
         let mut pto_space = None;
         // The spaces in which we will allow probing.
         let mut allow_probes = PacketNumberSpaceSet::default();
@@ -1034,15 +1043,17 @@ impl Loss {
 
     /// Check how packets should be sent, based on whether there is a PTO,
     /// what the current congestion window is, and what the pacer says.
-    #[expect(clippy::option_if_let_else, reason = "Alternative is less readable.")]
     pub fn send_profile(&mut self, path: &Path, now: Instant) -> SendProfile {
         trace!("[{self}] get send profile {now:?}");
         let sender = path.sender();
         let mtu = path.plpmtu();
-        if let Some(profile) = self
-            .pto_state
-            .as_mut()
-            .and_then(|pto| pto.send_profile(mtu))
+        // Probes count against the anti-amplification limit (RFC 9002, Section 6.2.2.1).
+        let pto_possible = path.pto_possible();
+        if pto_possible
+            && let Some(profile) = self
+                .pto_state
+                .as_mut()
+                .and_then(|pto| pto.send_profile(mtu))
         {
             profile
         } else {
@@ -1057,7 +1068,7 @@ impl Loss {
                 } else {
                     SendProfile::new_limited(mtu, mtu)
                 }
-            } else if sender.recovery_packet() {
+            } else if sender.recovery_packet() && pto_possible {
                 // After entering recovery, allow a packet to be sent immediately.
                 // This uses the PTO machinery, probing in all spaces. This will
                 // result in a PING being sent in every active space.
@@ -1175,7 +1186,6 @@ mod tests {
                 &ConnectionParameters::default(),
                 Qlog::default(),
                 now(),
-                &mut stats.borrow_mut(),
             );
             path.make_permanent(
                 None,

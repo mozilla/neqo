@@ -975,14 +975,14 @@ mod tests {
         WindowAdjustment,
     };
     use crate::{
-        MIN_INITIAL_PACKET_SIZE, Pmtud,
+        MIN_INITIAL_PACKET_SIZE,
         cc::{
             CWND_INITIAL_PKTS, ClassicSlowStart, CongestionController,
             CongestionTrigger::{self, Ecn, Loss},
             classic_cc::Phase,
             cubic::Cubic,
             new_reno::NewReno,
-            tests::{IP_ADDR, MTU, RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno},
+            tests::{RTT, make_cc_cubic, make_cc_hystart, make_cc_newreno, pmtud},
         },
         packet,
         recovery::{self, sent},
@@ -1731,7 +1731,7 @@ mod tests {
         let mut cc = ClassicCongestionController::new(
             ClassicSlowStart::default(),
             Cubic::default(),
-            Pmtud::new(IP_ADDR, MTU),
+            pmtud(),
             false,
         );
         let now = now();

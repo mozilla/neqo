@@ -29,7 +29,7 @@ defaults:
 jobs:
   toolchains:
     name: Determine toolchains
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
       cacheable: ${{ steps.cacheable.outputs.toolchains }}
@@ -55,25 +55,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+        os:
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+          - macos-26
+          - windows-2025
+          - windows-11-arm
         rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             rust-toolchain: stable
             type: release
-          - os: macos-15
+          - os: macos-26
             rust-toolchain: stable
             type: release
           - os: windows-2025
             rust-toolchain: stable
             type: release
           # Also do some debug builds on the oldest OS versions.
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             rust-toolchain: stable
             type: debug
-          - os: macos-14
+          - os: ubuntu-24.04-arm
+            rust-toolchain: stable
+            type: debug
+          - os: macos-15
             rust-toolchain: stable
             type: debug
           - os: windows-2022
@@ -108,8 +116,9 @@ jobs:
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
+          # Coverage is broken on Windows ARM64, see https://github.com/rust-lang/rust/issues/150123
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "stable" ]; then
+          if [ "$TOOLCHAIN" == "stable" ] && [ "$RUNNER_OS-$RUNNER_ARCH" != "Windows-ARM64" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
             if [ "$RUNNER_OS" == "Linux" ] && [ -z "$BUILD_TYPE" ]; then
               cargo llvm-cov report --lcov --include-ffi --output-path lcov.info
@@ -146,7 +155,7 @@ jobs:
           touch C:/msys64/home/runneradmin/.gitconfig
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
+        if: matrix.os == 'ubuntu-26.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
         with:
           name: lcov-coverage
           path: lcov.info
@@ -175,7 +184,7 @@ jobs:
     name: CRAP analysis
     needs: check
     if: ${{ !cancelled() && github.event_name != 'push' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       security-events: write # for uploading SARIF to code scanning
@@ -204,7 +213,7 @@ jobs:
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
     if: ${{ github.event_name != 'push' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -221,7 +230,7 @@ jobs:
   check-android:
     name: Check Android
     if: ${{ github.event_name != 'push' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         target: ["x86_64-linux-android", "aarch64-linux-android"]
@@ -238,7 +247,7 @@ jobs:
   check-i686:
     name: Check i686-unknown-linux-gnu
     if: ${{ github.event_name != 'push' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -258,7 +267,7 @@ jobs:
   check-vm:
     name: Run checks for VM-only platforms
     if: ${{ github.event_name != 'push' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
     strategy:

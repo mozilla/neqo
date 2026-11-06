@@ -70,7 +70,7 @@ jobs:
 
   units:
     name: Determine comparison units
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       units: ${{ steps.units.outputs.units }}
     steps:
@@ -180,7 +180,7 @@ jobs:
     name: Assemble comparison
     if: ${{ !cancelled() }}
     needs: perfcompare
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     defaults:
       run:
         shell: bash

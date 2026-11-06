@@ -6,14 +6,16 @@
 
 use std::time::Duration;
 
+use neqo_common::event::Provider as _;
 use test_fixture::{datagram, now};
 
 use super::{
     super::{Connection, Output, State},
     connect, connect_force_idle, default_client, default_server, send_something,
+    ticket_with_new_token,
 };
 use crate::{
-    AppError, CloseReason, ERROR_APPLICATION_CLOSE, Error,
+    AppError, CloseReason, ConnectionEvent, ERROR_APPLICATION_CLOSE, Error, StreamType,
     stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
 };
@@ -52,6 +54,86 @@ fn connection_close() {
 
     server.process_input(out.dgram().unwrap(), now);
     assert_draining(&server, &Error::PeerApplication(42));
+}
+
+#[test]
+fn draining_clears_events() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    server.events().for_each(drop);
+
+    let stream_id = client.stream_create(StreamType::BiDi).unwrap();
+    client.stream_send(stream_id, &[0; 10]).unwrap();
+    let data = client.process_output(now()).dgram().unwrap();
+    client.close(now(), 42, "");
+    let close = client.process_output(now()).dgram().unwrap();
+
+    server.process_multiple_input([data, close], now());
+    assert_draining(&server, &Error::PeerApplication(42));
+    let state_change = ConnectionEvent::StateChange(server.state().clone());
+    assert_eq!(server.events().collect::<Vec<_>>(), [state_change]);
+}
+
+fn drain_with_ticket(client: &mut Connection, server: &mut Connection) {
+    let ticket = ticket_with_new_token(server, now());
+    server.close(now(), 42, "");
+    let close = server.process_output(now()).dgram().unwrap();
+    client.process_multiple_input([ticket, close], now());
+    assert_draining(client, &Error::PeerApplication(42));
+}
+
+fn assert_only_resumption_token(client: &mut Connection) {
+    let state_change = ConnectionEvent::StateChange(client.state().clone());
+    let events = client.events().collect::<Vec<_>>();
+    assert!(
+        matches!(&events[..], [ConnectionEvent::ResumptionToken(_), e] if *e == state_change),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn draining_keeps_resumption_token() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    client.events().for_each(drop);
+
+    drain_with_ticket(&mut client, &mut server);
+    assert_only_resumption_token(&mut client);
+}
+
+#[test]
+fn closing_keeps_resumption_token() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    client.events().for_each(drop);
+
+    client.process_input(ticket_with_new_token(&mut server, now()), now());
+    client.close(now(), 42, "");
+    assert!(matches!(client.state(), State::Closing { .. }));
+    assert_only_resumption_token(&mut client);
+}
+
+#[test]
+fn closed_keeps_resumption_token() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    client.events().for_each(drop);
+
+    drain_with_ticket(&mut client, &mut server);
+    let State::Draining { timeout, .. } = *client.state() else {
+        panic!("not draining: {:?}", client.state());
+    };
+    drop(client.process_output(timeout));
+
+    assert_eq!(
+        *client.state(),
+        State::Closed(CloseReason::Transport(Error::PeerApplication(42)))
+    );
+    assert_only_resumption_token(&mut client);
 }
 
 #[test]
@@ -204,6 +286,25 @@ fn closing_and_draining() {
         *server.state(),
         State::Closed(CloseReason::Transport(Error::PeerApplication(APP_ERROR)))
     );
+}
+
+/// The closing state limits the rate of responses to incoming packets (RFC 9000, Section 10.2.1).
+#[test]
+fn closing_rate_limited() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    client.close(now(), 7, "");
+    assert!(client.process_output(now()).dgram().is_some());
+
+    let trigger = send_something(&mut server, now());
+    let responses: Vec<_> = (1..=16)
+        .filter(|_| {
+            client.process_input(trigger.clone(), now());
+            client.process_output(now()).dgram().is_some()
+        })
+        .collect();
+    assert_eq!(responses, [1, 2, 4, 8, 16]);
 }
 
 /// Test that a client can handle a stateless reset correctly.

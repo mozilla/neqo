@@ -22,7 +22,8 @@ use super::{
 #[cfg(not(feature = "disable-encryption"))]
 use crate::frame::FrameType;
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
+    ConnectionParameters, ERROR_VERSION_NEGOTIATION, Error, MIN_INITIAL_PACKET_SIZE, Stats,
+    Version,
     connection::tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
     packet,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -332,6 +333,27 @@ fn compatible_downgrade() {
     assert_eq!(server.version(), Version::Version1);
 }
 
+/// A client configured for version 1 but resuming from a version 2 ticket downgrades to version 1.
+#[test]
+fn compatible_downgrade_resumed() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    assert_eq!(client.version(), Version::Version2);
+    let mut server = new_server(ConnectionParameters::default().versions(
+        Version::Version2,
+        vec![Version::Version1, Version::Version2],
+    ));
+
+    connect(&mut client, &mut server);
+    assert_eq!(client.version(), Version::Version1);
+    assert_eq!(server.version(), Version::Version1);
+}
+
 /// Inject a Version Negotiation packet, which the client detects when it validates the
 /// server `version_negotiation` transport parameter.
 #[test]
@@ -356,7 +378,7 @@ fn version_negotiation_downgrade() {
         &mut client,
         &mut server,
         Error::VersionNegotiation,
-        Error::Peer(Error::VersionNegotiation.code()),
+        Error::Peer(ERROR_VERSION_NEGOTIATION),
     );
 }
 

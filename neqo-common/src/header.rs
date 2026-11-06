@@ -62,6 +62,12 @@ impl Header {
         &self.value
     }
 
+    /// Size of the field line, per RFC 9114, Section 4.2.2.
+    #[must_use]
+    pub const fn field_size(&self) -> usize {
+        self.name.len() + self.value.len() + 32
+    }
+
     /// Try to interpret the header value as UTF-8.
     ///
     /// # Errors

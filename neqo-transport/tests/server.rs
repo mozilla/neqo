@@ -17,8 +17,8 @@ use neqo_transport::{
     version,
 };
 use nss::{
-    AllowZeroRtt, AuthenticationStatus, RecordProtectionOps as _, ZeroRttCheckResult,
-    ZeroRttChecker, generate_ech_keys,
+    AllowZeroRtt, AuthenticationStatus, RecordProtectionOps as _, TLS_AES_256_GCM_SHA384,
+    ZeroRttCheckResult, ZeroRttChecker, generate_ech_keys,
 };
 use test_fixture::{
     CountingConnectionIdGenerator, assertions, datagram, default_client,
@@ -964,4 +964,28 @@ fn saved_datagrams() {
         .process_multiple(Vec::<Datagram>::new(), now(), NonZeroUsize::MIN)
         .dgram()
         .expect("fourth packet triggers third vn");
+}
+
+#[test]
+fn server_ciphers() {
+    let mut server = default_server();
+    server.set_ciphers([TLS_AES_256_GCM_SHA384]);
+    let mut client = default_client();
+    let server_instance = connect(&mut client, &mut server);
+
+    let client_cipher = client.tls_info().unwrap().cipher_suite();
+    assert_eq!(client_cipher, TLS_AES_256_GCM_SHA384);
+    let server_cipher = server_instance.borrow().tls_info().unwrap().cipher_suite();
+    assert_eq!(server_cipher, TLS_AES_256_GCM_SHA384);
+}
+
+#[test]
+fn server_ciphers_unknown() {
+    let mut server = default_server();
+    server.set_ciphers([0x0a0a]); // RFC 8701 GREASE value, unknown to NSS.
+    let mut client = default_client();
+
+    let initial = client.process_output(now()).dgram();
+    assert!(server.process(initial, now()).dgram().is_none());
+    assert!(!server.has_active_connections());
 }

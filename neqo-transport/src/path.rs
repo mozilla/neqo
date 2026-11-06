@@ -66,11 +66,15 @@ pub struct Paths {
 
     /// Whether PMTUD is enabled for this connection.
     pmtud: bool,
+
+    /// Whether PMTUD is limited to the local interface MTU.
+    pmtud_iface_mtu: bool,
 }
 
 impl Paths {
     #[must_use]
-    pub fn new(pmtud: bool) -> Self {
+    pub fn new(conn_params: &ConnectionParameters) -> Self {
+        let pmtud = conn_params.pmtud_enabled();
         Self {
             paths: Vec::new(),
             primary: None,
@@ -78,6 +82,7 @@ impl Paths {
             to_retire: Vec::new(),
             qlog: Qlog::disabled(),
             pmtud,
+            pmtud_iface_mtu: pmtud && conn_params.pmtud_iface_mtu_enabled(),
         }
     }
 
@@ -89,14 +94,12 @@ impl Paths {
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
         now: Instant,
-        stats: &mut Stats,
     ) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
-                let mut p =
-                    Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
+                let mut p = Path::temporary(local, remote, conn_params, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
                     if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
@@ -137,6 +140,7 @@ impl Paths {
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
         now: Instant,
+        stats: &mut Stats,
     ) {
         debug_assert!(self.is_temporary(path));
 
@@ -162,6 +166,19 @@ impl Paths {
 
         debug!("[{}] Make permanent", path.borrow());
         path.borrow_mut().make_permanent(local_cid, remote_cid);
+        if self.pmtud_iface_mtu {
+            let ip = path.borrow().remote.ip();
+            match mtu::interface_and_mtu(ip) {
+                Ok((name, mtu)) => {
+                    debug!("Outbound interface {name} for destination {ip} has MTU {mtu}");
+                    stats.pmtud_iface_mtu = mtu;
+                    path.borrow_mut().pmtud_mut().set_iface_mtu(mtu);
+                }
+                Err(e) => {
+                    warn!("Failed to determine outbound interface for destination {ip}: {e}");
+                }
+            }
+        }
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
             assert!(self.select_primary(path, now).is_none());
@@ -312,11 +329,14 @@ impl Paths {
     }
 
     /// Select a path to send on.  This will select the first path that has
-    /// probes to send, then fall back to the primary path.
+    /// probes to send and is not blocked, then fall back to the primary path.
     pub fn select_path(&self) -> Option<PathRef> {
         self.paths
             .iter()
-            .find_map(|p| p.borrow().has_probe().then(|| Rc::clone(p)))
+            .find_map(|p| {
+                let p_ref = p.borrow();
+                (p_ref.has_probe() && p_ref.probe_blocked_since.is_none()).then(|| Rc::clone(p))
+            })
             .or_else(|| self.primary.clone())
     }
 
@@ -556,6 +576,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
+    /// When a probe on this path could not be sent, until more bytes arrive.
+    probe_blocked_since: Option<Instant>,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
     /// SCONE info for this path.
@@ -594,30 +616,8 @@ impl Path {
         conn_params: &ConnectionParameters,
         qlog: Qlog,
         now: Instant,
-        stats: &mut Stats,
     ) -> Self {
-        let iface_mtu = if conn_params.pmtud_iface_mtu_enabled() {
-            match mtu::interface_and_mtu(remote.ip()) {
-                Ok((name, mtu)) => {
-                    debug!(
-                        "Outbound interface {name} for destination {ip} has MTU {mtu}",
-                        ip = remote.ip()
-                    );
-                    stats.pmtud_iface_mtu = mtu;
-                    Some(mtu)
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to determine outbound interface for destination {ip}: {e}",
-                        ip = remote.ip()
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -632,6 +632,7 @@ impl Path {
             sender,
             received_bytes: 0,
             sent_bytes: 0,
+            probe_blocked_since: None,
             ecn_info: ecn::Info::default(),
             scone: None,
             qlog,
@@ -670,7 +671,7 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+    pub fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
         self.local == local && self.remote == remote
     }
 
@@ -696,6 +697,7 @@ impl Path {
         debug!("[{self}] Path validated {now:?}");
         self.state = ProbeState::Valid;
         self.validated = Some(now);
+        self.probe_blocked_since = None;
     }
 
     /// Apply updated SCONE information to this path.
@@ -871,6 +873,21 @@ impl Path {
         !self.challenges.is_empty() || self.state.probe_needed()
     }
 
+    /// Handle probing frames that cannot be sent: drop any `PATH_RESPONSE`, and hold back a
+    /// `PATH_CHALLENGE` until more bytes arrive.  Returns true if the path was not blocked before.
+    pub fn block_probe(&mut self, now: Instant) -> bool {
+        self.challenges.clear();
+        let newly_blocked = self.probe_blocked_since.is_none();
+        self.probe_blocked_since.get_or_insert(now);
+        newly_blocked
+    }
+
+    /// When a blocked probe fails the path.
+    fn probe_blocked_deadline(&self, pto: Duration) -> Option<Instant> {
+        let count = u32::try_from(Self::MAX_PROBES).expect("result fits in u32");
+        self.probe_blocked_since.map(|since| since + pto * count)
+    }
+
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
@@ -964,6 +981,10 @@ impl Path {
         {
             self.probe(stats);
         }
+        if self.probe_blocked_deadline(pto).is_some_and(|t| now >= t) {
+            info!("[{self}] Probing blocked for too long");
+            self.state = ProbeState::Failed;
+        }
         if matches!(self.state, ProbeState::Failed) {
             // Retire failed paths immediately.
             false
@@ -984,15 +1005,19 @@ impl Path {
     }
 
     /// Return the next time that this path needs servicing.
-    /// This only considers retransmissions of probes, not cleanup of the path.
+    /// This only considers retransmissions and blocked probes, not cleanup of the path.
     /// If there is no other activity, then there is no real need to schedule a
     /// timer to cleanup old paths.
     pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
-        if let ProbeState::Probing { sent, .. } = &self.state {
+        let probe = if let ProbeState::Probing { sent, .. } = &self.state {
             Some(*sent + pto)
         } else {
             None
-        }
+        };
+        probe
+            .into_iter()
+            .chain(self.probe_blocked_deadline(pto))
+            .min()
     }
 
     /// Get the RTT estimator for this path.
@@ -1056,6 +1081,7 @@ impl Path {
     /// Record received bytes for the path.
     pub const fn add_received(&mut self, count: usize) {
         self.received_bytes = self.received_bytes.saturating_add(count);
+        self.probe_blocked_since = None;
     }
 
     /// Record sent bytes for the path.
@@ -1167,7 +1193,7 @@ impl Path {
                         // If we have received absolutely nothing thus far, then this endpoint
                         // is the one initiating communication on this path.  Allow enough space for
                         // probing.
-                        self.plpmtu() * 5
+                        self.plpmtu() * 2 * Self::MAX_PROBES
                     } else {
                         limit
                     };
@@ -1217,9 +1243,7 @@ mod tests {
     use test_fixture::{DEFAULT_ADDR, now};
 
     use super::Path;
-    use crate::{
-        ConnectionParameters, Stats, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
-    };
+    use crate::{ConnectionParameters, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats};
 
     fn path() -> Path {
         Path::temporary(
@@ -1228,7 +1252,6 @@ mod tests {
             &ConnectionParameters::default().pmtud_iface_mtu(false),
             Qlog::disabled(),
             now(),
-            &mut Stats::default(),
         )
     }
 
