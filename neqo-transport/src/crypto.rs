@@ -32,12 +32,12 @@ use neqo_common::{
 };
 pub use nss::Epoch;
 use nss::{
-    Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
-    Record, RecordList, RecordProtection as Aead, RecordProtectionOps as _, ResumptionToken,
-    SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256,
-    TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1, TLS_GRP_EC_SECP521R1,
-    TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3, ZeroRttChecker, hkdf, hp,
-    random,
+    Agent, AntiReplay, Cipher, Error as CryptoError, Group, HandshakeState, Mode, PrivateKey,
+    PublicKey, Record, RecordList, RecordProtection as Aead, RecordProtectionOps as _,
+    ResumptionToken, SecretAgent, SymKey, TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384,
+    TLS_CHACHA20_POLY1305_SHA256, TLS_CT_HANDSHAKE, TLS_GRP_EC_SECP256R1, TLS_GRP_EC_SECP384R1,
+    TLS_GRP_EC_SECP521R1, TLS_GRP_EC_X25519, TLS_GRP_KEM_MLKEM768X25519, TLS_VERSION_1_3,
+    ZeroRttChecker, cert::CertificateCompressor, hkdf, hp, random,
 };
 use tracing::{debug, info, trace};
 
@@ -69,11 +69,14 @@ pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 #[cfg(test)]
 thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
 
-#[derive(Debug)]
+/// A TLS setting applied after construction, which Version Negotiation re-applies.
+type TlsSetting = Box<dyn Fn(&mut Agent) -> nss::Res<()>>;
+
 pub struct Crypto {
     version: Version,
     protocols: Vec<String>,
     tls: Agent,
+    tls_settings: Vec<TlsSetting>,
     streams: CryptoStreams,
     states: CryptoStates,
     /// Whether the resend-early allowance in Section 6.2.3 of RFC 9002 has been used.
@@ -133,6 +136,7 @@ impl Crypto {
             version,
             protocols,
             tls: agent,
+            tls_settings: Vec::new(),
             streams: CryptoStreams::default(),
             states: CryptoStates::default(),
             early_resend_used: false,
@@ -156,6 +160,50 @@ impl Crypto {
     /// Whether the local role is that of a server.
     const fn is_server(&self) -> bool {
         matches!(self.tls, Agent::Server(_))
+    }
+
+    /// Applies a TLS setting and remembers it for Version Negotiation.
+    fn apply_tls_setting(
+        &mut self,
+        setting: impl Fn(&mut Agent) -> nss::Res<()> + 'static,
+    ) -> Res<()> {
+        setting(&mut self.tls)?;
+        self.tls_settings.push(Box::new(setting));
+        Ok(())
+    }
+
+    /// Re-applies the TLS settings of `other` and takes them over.
+    pub fn take_tls_settings(&mut self, other: &mut Self) -> Res<()> {
+        for setting in &other.tls_settings {
+            setting(&mut self.tls)?;
+        }
+        self.tls_settings = mem::take(&mut other.tls_settings);
+        Ok(())
+    }
+
+    pub fn set_alpn<A: AsRef<[u8]>>(&mut self, protocols: &[A]) -> Res<()> {
+        let protocols: Vec<_> = protocols.iter().map(|p| p.as_ref().to_vec()).collect();
+        self.apply_tls_setting(move |tls| tls.set_alpn(&protocols))
+    }
+
+    pub fn set_ciphers(&mut self, ciphers: &[Cipher]) -> Res<()> {
+        let ciphers = ciphers.to_vec();
+        self.apply_tls_setting(move |tls| tls.set_ciphers(&ciphers))
+    }
+
+    pub fn set_groups(&mut self, groups: &[Group]) -> Res<()> {
+        let groups = groups.to_vec();
+        self.apply_tls_setting(move |tls| tls.set_groups(&groups))
+    }
+
+    pub fn send_additional_key_shares(&mut self, count: usize) -> Res<()> {
+        self.apply_tls_setting(move |tls| tls.send_additional_key_shares(count))
+    }
+
+    pub fn set_certificate_compression<T: CertificateCompressor>(&mut self) -> Res<()> {
+        let set: fn(&mut SecretAgent) -> nss::Res<()> =
+            SecretAgent::set_certificate_compression::<T>;
+        self.apply_tls_setting(move |tls| set(tls))
     }
 
     pub fn server_enable_0rtt<Z: ZeroRttChecker + 'static>(
@@ -191,12 +239,14 @@ impl Crypto {
     }
 
     pub fn client_enable_ech<A: AsRef<[u8]>>(&mut self, ech_config_list: A) -> Res<()> {
-        if let Agent::Client(c) = &mut self.tls {
-            c.enable_ech(ech_config_list)?;
-            Ok(())
-        } else {
-            panic!("not a client");
-        }
+        let ech_config_list = ech_config_list.as_ref().to_vec();
+        self.apply_tls_setting(move |tls| {
+            if let Agent::Client(c) = tls {
+                c.enable_ech(&ech_config_list)
+            } else {
+                panic!("not a client");
+            }
+        })
     }
 
     /// Get the active ECH configuration, which is empty if ECH is disabled.
