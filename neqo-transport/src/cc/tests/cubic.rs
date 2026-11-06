@@ -22,7 +22,7 @@ use super::{RTT, make_cc_cubic, make_cc_cubic_with};
 use crate::{
     cc::{
         ClassicSlowStart, CongestionController as _,
-        classic_cc::ClassicCongestionController,
+        classic_cc::{ClassicCongestionController, WindowAdjustment as _},
         cubic::{Cubic, convert_to_f64},
     },
     recovery::sent,
@@ -539,6 +539,68 @@ fn cwnd_growth_independent_of_ack_ratio() {
             "unexpected CWND growth for ACK ratio {ack_ratio}"
         );
     }
+}
+
+/// RFC 9438 section 5.8: `t` excludes app-limited periods, which keep `w_max`.
+#[test]
+fn app_limited_period_excluded_from_epoch() {
+    let mut cc = make_cc_cubic();
+    let mut cc_stats = CongestionControlStats::default();
+    let mtu = cc.max_datagram_size();
+    cc.set_ssthresh(1);
+    let mut now = now();
+    let mut next_pn_send = fill_cwnd(&mut cc, 0, now);
+    let mut next_pn_ack = 0;
+
+    // Grow `cwnd` past `w_max` into the convex region.
+    while cc
+        .congestion_control()
+        .w_max()
+        .is_none_or(|w_max| w_max >= convert_to_f64(cc.cwnd()))
+    {
+        now += RTT;
+        ack_packet(&mut cc, next_pn_ack, now, &mut cc_stats);
+        next_pn_ack += 1;
+        next_pn_send = fill_cwnd(&mut cc, next_pn_send, now);
+    }
+    for pn in next_pn_ack..next_pn_send {
+        ack_packet(&mut cc, pn, now, &mut cc_stats);
+    }
+    let w_max = cc.congestion_control().w_max();
+    let t_epoch = cc.congestion_control().t_epoch().unwrap();
+
+    // A single packet in flight is app-limited.
+    cc.on_packet_sent(&sent::make_packet(next_pn_send, now, mtu), now);
+    now += RTT;
+    ack_packet(&mut cc, next_pn_send, now, &mut cc_stats);
+    let app_limited_start = now;
+
+    now += RTT * 10;
+    let pn = next_pn_send + 1;
+    _ = fill_cwnd(&mut cc, pn, now);
+    now += RTT;
+    ack_packet(&mut cc, pn, now, &mut cc_stats);
+
+    let shifted = t_epoch + (now - app_limited_start);
+    assert_eq!(cc.congestion_control().t_epoch(), Some(shifted));
+    assert_eq!(cc.congestion_control().w_max(), w_max);
+}
+
+/// An undo restores the epoch shifted by the app-limited period up to the congestion event only.
+#[test]
+fn undo_excludes_app_limited_period_before_loss() {
+    let mut cc = make_cc_cubic();
+    let mut cc_stats = CongestionControlStats::default();
+    let (cwnd, mtu) = (cc.cwnd(), cc.max_datagram_size());
+    let cubic = cc.congestion_control_mut();
+    let t_epoch = now();
+    cubic.bytes_for_cwnd_increase(cwnd, mtu, RTT, mtu, t_epoch);
+    let app_limited_start = t_epoch + RTT;
+    cubic.on_app_limited(app_limited_start);
+    let loss = app_limited_start + RTT * 10;
+    cubic.save_undo_state(loss);
+    cubic.restore_undo_state(&mut cc_stats);
+    assert_eq!(cubic.t_epoch(), Some(t_epoch + (loss - app_limited_start)));
 }
 
 #[test]

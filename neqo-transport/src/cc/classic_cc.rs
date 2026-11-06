@@ -101,15 +101,15 @@ pub trait WindowAdjustment: Display + Debug {
         congestion_trigger: CongestionTrigger,
         cc_stats: &mut CongestionControlStats,
     ) -> (usize, usize);
-    /// Cubic needs this signal to reset its epoch.
-    fn on_app_limited(&mut self);
+    /// Cubic needs this signal to exclude app-limited periods from its epoch.
+    fn on_app_limited(&mut self, now: Instant);
     /// Cubic needs this signal to reset its epoch and `w_max`.
     fn on_persistent_congestion(&mut self, cc_stats: &mut CongestionControlStats);
     /// The `ssthresh` to set on persistent congestion, if any.
     fn persistent_congestion_ssthresh(&self, flight_size: usize) -> Option<usize>;
     /// Store the current congestion controller state, to be recovered in the case of a spurious
     /// congestion event.
-    fn save_undo_state(&mut self);
+    fn save_undo_state(&mut self, now: Instant);
 
     /// Restore the previously stored congestion controller state, to recover from a spurious
     /// congestion event.
@@ -361,7 +361,7 @@ where
         }
 
         if is_app_limited {
-            self.congestion_control.on_app_limited();
+            self.congestion_control.on_app_limited(now);
             debug!(
                 "on_packets_acked this={self:p}, limited=1, bytes_in_flight={}, cwnd={}, phase={:?}, new_acked={new_acked}",
                 self.bytes_in_flight, self.current.congestion_window, self.current.phase
@@ -936,7 +936,7 @@ where
             self.stored = None; // ECN-CE cannot be spurious, so it must not be undone.
         } else {
             self.stored = Some(self.current.clone());
-            self.congestion_control.save_undo_state();
+            self.congestion_control.save_undo_state(now);
             self.maybe_lost_packets.clear(); // Older losses cannot confirm this event spurious.
         }
 
