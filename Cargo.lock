@@ -889,7 +889,7 @@ dependencies = [
 [[package]]
 name = "nss-rs"
 version = "0.16.3"
-source = "git+https://github.com/mozilla/nss-rs#65265508dd0ac48f39fcbf2ddb43116ec10ff391"
+source = "git+https://github.com/mozilla/nss-rs#cc5a70a7f8b9362e93162b98797d8c915add210a"
 dependencies = [
  "bindgen",
  "derive_more",
@@ -1250,7 +1250,7 @@ dependencies = [
 [[package]]
 name = "test-fixture"
 version = "0.1.0"
-source = "git+https://github.com/mozilla/nss-rs#65265508dd0ac48f39fcbf2ddb43116ec10ff391"
+source = "git+https://github.com/mozilla/nss-rs#cc5a70a7f8b9362e93162b98797d8c915add210a"
 dependencies = [
  "log",
  "nss-rs",
