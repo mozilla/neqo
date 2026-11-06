@@ -116,8 +116,9 @@ jobs:
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
+          # Coverage is broken on Windows ARM64, see https://github.com/rust-lang/rust/issues/150123
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "stable" ]; then
+          if [ "$TOOLCHAIN" == "stable" ] && [ "$RUNNER_OS-$RUNNER_ARCH" != "Windows-ARM64" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
             if [ "$RUNNER_OS" == "Linux" ] && [ -z "$BUILD_TYPE" ]; then
               cargo llvm-cov report --lcov --include-ffi --output-path lcov.info
