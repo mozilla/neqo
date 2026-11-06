@@ -7,7 +7,7 @@
 use std::ops::{AddAssign, Deref, DerefMut, Sub};
 
 use enum_map::{Enum, EnumMap};
-use neqo_common::Ecn;
+use neqo_common::{Ecn, to_u64};
 use serde::{Serialize, Serializer};
 use tracing::{debug, info};
 
@@ -303,6 +303,7 @@ impl Info {
             | ValidationState::Failed(_) => return,
             ValidationState::Unknown | ValidationState::Capable => {}
         }
+        self.largest_acked = largest_acked.pn();
 
         // RFC 9000, Section 13.4.2.1:
         //
@@ -313,18 +314,13 @@ impl Info {
         // > If an ACK frame newly acknowledges a packet that the endpoint sent with
         // > either the ECT(0) or ECT(1) codepoint set, ECN validation fails if the
         // > corresponding ECN counts are not present in the ACK frame.
-        let newly_acked_sent_with_ect0: u64 = acked_packets
-            .iter()
-            .filter(|p| p.ecn_marked_ect0())
-            .count()
-            .try_into()
-            .expect("usize fits into u64");
+        let newly_acked_sent_with_ect0 =
+            to_u64(acked_packets.iter().filter(|p| p.ecn_marked_ect0()).count());
         let Some(ack_ecn) = ack_ecn else {
             if newly_acked_sent_with_ect0 > 0 {
                 info!("ECN validation failed, no ECN counts in ACK frame");
                 self.disable_ecn(stats, ValidationError::Bleaching);
             }
-            self.largest_acked = largest_acked.pn();
             return;
         };
         let ack_ecn = *ack_ecn;
@@ -348,7 +344,6 @@ impl Info {
             self.state.set(ValidationState::Capable, stats);
         }
         self.baseline = ack_ecn;
-        self.largest_acked = largest_acked.pn();
     }
 
     pub(crate) const fn is_marking(&self) -> bool {
