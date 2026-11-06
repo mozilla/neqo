@@ -16,7 +16,7 @@ use test_fixture::{
 
 use super::{
     AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
-    get_tokens, maybe_authenticate, new_client, resumed_server, send_something,
+    get_tokens, maybe_authenticate, new_client, resumed_server, send_something, v1_only,
 };
 use crate::{
     Connection, ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State,
@@ -89,12 +89,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     const ACK_FRAME_1: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
     // This test needs to predicts the exact shape of an ACK frame, so disable randomization.
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .versions(Version::Version1, vec![Version::Version1])
-            .mlkem(false)
-            .randomize_first_pn(false),
-    );
+    let mut client = new_client(v1_only().mlkem(false).randomize_first_pn(false));
     let mut server = default_server();
     let mut now = now();
 
@@ -349,9 +344,7 @@ fn ticket_before_handshake_done() {
 /// If a version is selected and subsequently disabled, resumption fails.
 #[test]
 fn resume_disabled_version() {
-    let mut client = new_client(
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
-    );
+    let mut client = new_client(v1_only());
     let mut server = default_server();
     connect(&mut client, &mut server);
     let token = exchange_ticket(&mut client, &mut server, now());
