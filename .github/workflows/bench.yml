@@ -45,7 +45,7 @@ jobs:
 
   build:
     name: Build ${{ matrix.target.bench }} (${{ matrix.ref }})
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     needs: targets
     strategy:
       fail-fast: false
@@ -128,7 +128,7 @@ jobs:
                      | gsub("[^A-Za-z0-9._-]+"; "_")),
               runner: (if .mode == "walltime"
                        then "codspeed-macro-x86-ryzen-9950x-ubuntu-24-04"
-                       else "ubuntu-26.04" end)})' > benchmarks.json
+                       else "ubuntu-24.04" end)})' > benchmarks.json
 
           echo "benchmarks=$(<benchmarks.json)" >> "$GITHUB_OUTPUT"
 

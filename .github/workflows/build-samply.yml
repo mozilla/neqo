@@ -12,7 +12,7 @@ env:
 jobs:
   build-samply:
     name: Build samply
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     steps:
       # Keyed on the revision, so it is built once per bump. Restored first, so a hit skips below.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

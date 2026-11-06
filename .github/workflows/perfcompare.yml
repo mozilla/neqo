@@ -30,7 +30,7 @@ permissions:
 jobs:
   build-neqo:
     name: Build neqo
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     defaults:
       run:
         shell: bash
@@ -50,7 +50,7 @@ jobs:
 
   build-others:
     name: Build ${{ matrix.impl }}
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         impl: [google, quiche, s2n]
