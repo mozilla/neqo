@@ -271,7 +271,8 @@ impl Http3Server {
                         stream_id,
                         priority,
                     } => {
-                        self.events.priority_update(stream_id, priority);
+                        self.events
+                            .priority_update(conn.clone(), stream_id, priority);
                     }
                     Http3ServerConnEvent::WebTransport(WebTransportEvent::Session {
                         stream_id,
@@ -450,8 +451,8 @@ mod tests {
         fixture_init, now,
     };
 
-    use super::{Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
-    use crate::{Error, HFrame, Header, Http3Parameters, Priority};
+    use super::{ConnectionRef, Http3Server, Http3ServerEvent, Http3State, Rc, RefCell};
+    use crate::{Error, HFrame, Header, Http3Parameters, Priority, frames::HFrameType};
 
     fn qpack_defaults() -> qpack::Settings {
         qpack::Settings::default()
@@ -880,6 +881,92 @@ mod tests {
         priority_update_check_id(StreamId::new(1_000_000_000), false);
     }
 
+    /// Connect a client to `server` and return it with the server's `ConnectionRef` for it.
+    fn connect_peer(server: &mut Http3Server) -> (PeerConnection, ConnectionRef) {
+        let known: Vec<_> = server.http3_handlers.keys().cloned().collect();
+        let (peer, _) = connect_to(server);
+        let new: Vec<_> = server
+            .http3_handlers
+            .keys()
+            .filter(|c| !known.contains(c))
+            .cloned()
+            .collect();
+        assert_eq!(new.len(), 1);
+        (peer, new[0].clone())
+    }
+
+    /// Send `updates` from `peer` in one packet.
+    fn send_priority_updates(
+        server: &mut Http3Server,
+        peer: &mut PeerConnection,
+        updates: &[(StreamId, Priority)],
+    ) {
+        let mut e = Encoder::default();
+        for &(stream_id, priority) in updates {
+            HFrame::PriorityUpdateRequest {
+                element_id: stream_id.as_u64(),
+                priority,
+            }
+            .encode(&mut e);
+        }
+        peer.control_send(e.as_ref());
+        let out = peer.process_output(now());
+        server.process(out.dgram(), now());
+    }
+
+    /// Take the queued `PriorityUpdate` events.
+    fn priority_update_events(server: &Http3Server) -> Vec<(ConnectionRef, StreamId, Priority)> {
+        server
+            .events()
+            .filter_map(|e| match e {
+                Http3ServerEvent::PriorityUpdate {
+                    conn,
+                    stream_id,
+                    priority,
+                } => Some((conn, stream_id, priority)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn priority_update_same_stream_coalesced() {
+        let mut server = default_server();
+        let (mut peer, conn) = connect_peer(&mut server);
+        let id = StreamId::new(0);
+        let updates: Vec<_> = (1..4).map(|u| (id, Priority::new(u, false))).collect();
+        send_priority_updates(&mut server, &mut peer, &updates);
+        assert_eq!(priority_update_events(&server), [(conn, id, updates[2].1)]);
+    }
+
+    #[test]
+    fn priority_update_two_streams() {
+        let mut server = default_server();
+        let (mut peer, conn) = connect_peer(&mut server);
+        let (a, b) = (StreamId::new(0), StreamId::new(4));
+        let (p1, p2, p3) = (
+            Priority::new(1, false),
+            Priority::new(2, true),
+            Priority::new(3, false),
+        );
+        send_priority_updates(&mut server, &mut peer, &[(a, p1), (b, p2), (a, p3)]);
+        let expected = [(conn.clone(), b, p2), (conn, a, p3)];
+        assert_eq!(priority_update_events(&server), expected);
+    }
+
+    #[test]
+    fn priority_update_same_stream_two_connections() {
+        let mut server = default_server();
+        let (mut peer_a, conn_a) = connect_peer(&mut server);
+        let (mut peer_b, conn_b) = connect_peer(&mut server);
+        let id = StreamId::new(0);
+        let (pa, pb) = (Priority::new(1, false), Priority::new(2, true));
+        send_priority_updates(&mut server, &mut peer_a, &[(id, pa)]);
+        send_priority_updates(&mut server, &mut peer_b, &[(id, pb)]);
+        let expected = [(conn_a, id, pa), (conn_b, id, pb)];
+        assert_eq!(priority_update_events(&server), expected);
+    }
+
     fn test_wrong_frame_on_control_stream(v: &[u8]) {
         let (mut hconn, mut peer_conn) = connect();
 
@@ -903,11 +990,10 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x1, 0x2, 0x1, 0x2]);
     }
 
-    // Server push is not supported. A server that does not push has nothing to do with CANCEL_PUSH,
-    // so it is unexpected.
+    // No push ID has been mentioned by a PUSH_PROMISE frame (RFC 9114, Section 7.2.3).
     #[test]
     fn server_cancel_push_frame_on_control_stream() {
-        test_wrong_frame_on_control_stream(&[0x03, 0x01, 0x05]);
+        push_id_frame_on_control_stream(HFrameType::CANCEL_PUSH);
     }
 
     // Server: a server that does not push ignores MAX_PUSH_ID (RFC 9114, Section 7.2.7) rather than
@@ -919,6 +1005,26 @@ mod tests {
         let out = peer_conn.process_output(now());
         hconn.process(out.dgram(), now());
         assert_not_closed(&hconn);
+    }
+
+    /// Send a `frame_type` frame for push ID 0 and expect `Error::HttpId`.
+    fn push_id_frame_on_control_stream(frame_type: HFrameType) {
+        const PUSH_ID: u64 = 0;
+        let (mut hconn, mut peer_conn) = connect();
+        let mut e = Encoder::default();
+        e.encode_varint(frame_type).encode_vvec_with(|e| {
+            e.encode_varint(PUSH_ID);
+        });
+        peer_conn.control_send(e.as_ref());
+        let out = peer_conn.process_output(now());
+        hconn.process(out.dgram(), now());
+        assert_closed(&hconn, &Error::HttpId);
+    }
+
+    // No push ID has been promised (RFC 9218, Section 7.2).
+    #[test]
+    fn server_priority_update_push_frame_on_control_stream() {
+        push_id_frame_on_control_stream(HFrameType::PRIORITY_UPDATE_PUSH);
     }
 
     // Server: receive unknown stream type
