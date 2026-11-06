@@ -123,7 +123,7 @@ pub trait WindowAdjustment: Display + Debug {
 /// growth rate during slow start is.
 pub trait SlowStart: Display + Debug {
     /// Enables a trait implementor to ingest info about sent packets.
-    fn on_packet_sent(&mut self, _sent_pn: packet::Number, _sent_bytes: usize) {}
+    fn on_packet_sent(&mut self, _pkt: &sent::Packet) {}
 
     /// This is needed by SEARCH to keep its cumulative byte counters in sync during app-limited
     /// periods, when [`SlowStart::on_packets_acked`] is not called.
@@ -134,7 +134,7 @@ pub trait SlowStart: Display + Debug {
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,
-        largest_acked: packet::Number,
+        largest_acked: &sent::Packet,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
         now: Instant,
@@ -383,7 +383,7 @@ where
             // Check if the slow start algorithm wants to exit.
             if let Some(exit_cwnd) = self.slow_start.on_packets_acked(
                 rtt_est,
-                largest_packet_acked.pn(),
+                largest_packet_acked,
                 self.current.congestion_window,
                 cc_stats,
                 now,
@@ -603,7 +603,7 @@ where
 
         // Pass next packet number to send into slow start algorithm during slow start.
         if self.current.phase.in_slow_start() {
-            self.slow_start.on_packet_sent(pkt.pn(), pkt.len());
+            self.slow_start.on_packet_sent(pkt);
         }
 
         // Update bytes in flight first; a fully consumed congestion window is not app-limited.
@@ -2477,8 +2477,13 @@ mod tests {
         let mut cc_stats = CongestionControlStats::default();
 
         // Dirty HyStart state so current_round_min_rtt is non-None.
-        cc.slow_start
-            .on_packets_acked(&RttEstimate::new(RTT), 0, cc.cwnd(), &mut cc_stats, now());
+        cc.slow_start.on_packets_acked(
+            &RttEstimate::new(RTT),
+            &sent::make_packet(0, now(), MIN_INITIAL_PACKET_SIZE),
+            cc.cwnd(),
+            &mut cc_stats,
+            now(),
+        );
         assert!(cc.slow_start.current_round_min_rtt().is_some());
 
         check_persistent_congestion(&mut cc, Some(by_pto(0)), None, &lost, &mut cc_stats);
