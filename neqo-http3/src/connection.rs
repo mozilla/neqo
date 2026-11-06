@@ -1694,9 +1694,25 @@ impl Http3Connection {
         send_group_id: SendGroupId,
         send_order: SendOrder,
     ) -> Res<DatagramQueueOutcome> {
+        // QUIC DATAGRAM needs SETTINGS_H3_DATAGRAM = 1 sent and received (RFC 9297, Section 2.1.1).
+        let quic_datagrams = conn.remote_datagram_size() > 0
+            && matches!(
+                &self.settings_state,
+                // Not `ZeroRtt`: no extended CONNECT session is negotiated from 0-RTT settings.
+                Http3RemoteSettingsState::Received(s) if s.get(HSettingType::EnableH3Datagram) == 1
+            )
+            && self.local_params.get_http3_datagram();
         self.validate_extended_connect_session(session_id)?
             .borrow_mut()
-            .send_datagram(conn, buf, id, now, send_group_id, send_order)
+            .send_datagram(
+                conn,
+                buf,
+                id,
+                now,
+                send_group_id,
+                send_order,
+                quic_datagrams,
+            )
     }
 
     pub(crate) fn webtransport_session_set_max_buffered_datagrams(
@@ -1812,12 +1828,8 @@ impl Http3Connection {
                     HSettingType::MaxTableCapacity,
                     HSettingType::BlockedStreams,
                     HSettingType::EnableConnect,
-                    // [RFC 9297, Section 2.1.1](https://www.rfc-editor.org/rfc/rfc9297.html#section-2.1.1)
-                    // requires a client that stored SETTINGS_H3_DATAGRAM with its
-                    // 0-RTT state to terminate the connection with H3_SETTINGS_ERROR
-                    // if the server's new value is smaller than the stored one.
-                    // [draft-ietf-webtrans-http3, Section 3.2](https://datatracker.ietf.org/doc/html/draft-ietf-webtrans-http3#section-3.2)
-                    // states the same rule for the WebTransport setting.
+                    // A client rejects a lower value than stored for 0-RTT with H3_SETTINGS_ERROR
+                    // (RFC 9297, Section 2.1.1; draft-ietf-webtrans-http3, Section 3.2).
                     HSettingType::EnableWebTransport,
                     HSettingType::EnableH3Datagram,
                 ] {
