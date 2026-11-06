@@ -16,8 +16,8 @@ use super::{
         super::{CloseReason, ERROR_AEAD_LIMIT_REACHED},
         Connection, ConnectionParameters, Error, Output, State, StreamType,
     },
-    AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, maybe_authenticate,
-    send_and_receive, send_something,
+    AT_LEAST_PTO, connect, connect_force_idle, default_client, default_server, exchange_ticket,
+    maybe_authenticate, resumed_server, send_and_receive, send_something,
 };
 use crate::{
     MIN_INITIAL_PACKET_SIZE,
@@ -416,6 +416,47 @@ fn automatic_update_write_keys_blocked() {
         client.state(),
         State::Closed(CloseReason::Transport(Error::KeysExhausted))
     ));
+}
+
+/// A key update from the peer, with the read-key timer still running, also blocks the
+/// automatic update.
+#[test]
+fn automatic_update_write_keys_after_peer_update() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    assert!(server.initiate_key_update().is_ok());
+    client.process_input(send_something(&mut server, now()), now());
+    assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+
+    overwrite_invocations(UPDATE_WRITE_KEYS_AT);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    assert!(client.stream_send(stream_id, b"explode!").is_ok());
+    let dgram = client.process_output(now()).dgram();
+    assert!(dgram.is_none());
+    assert!(matches!(
+        client.state(),
+        State::Closed(CloseReason::Transport(Error::KeysExhausted))
+    ));
+}
+
+/// The server's automatic update while it still retains 0-RTT read keys.
+#[test]
+fn automatic_update_write_keys_zero_rtt() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+    connect(&mut client, &mut server);
+    assert!(server.tls_info().unwrap().early_data_accepted());
+
+    overwrite_invocations(UPDATE_WRITE_KEYS_AT);
+    drop(send_something(&mut server, now()));
+    assert_eq!(server.get_epochs(), (Some(4), Some(3)));
 }
 
 /// Test that when both Initial and Handshake packets are sent together due to PTO,

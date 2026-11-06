@@ -12,8 +12,9 @@ use test_fixture::{assertions, now};
 use tracing::debug;
 
 use super::{
-    super::Connection, CountingConnectionIdGenerator, Output, connect, default_client,
-    default_server, exchange_ticket, migration::NewConnectionIds, new_server, resumed_server,
+    super::Connection, AT_LEAST_PTO, CountingConnectionIdGenerator, Output, connect,
+    default_client, default_server, exchange_ticket, migration::NewConnectionIds, new_server,
+    resumed_server, send_and_receive, send_something,
 };
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamDataLimit, StreamType,
@@ -562,4 +563,30 @@ fn zero_rtt_retire_handshake_cid() {
         server.stats().frame_tx.retire_connection_id,
         retire_cid_before + 2 // The handshake CID and the client's first NEW_CONNECTION_ID.
     );
+}
+
+/// A key update that arrives while the server still retains 0-RTT read keys.
+#[test]
+fn zero_rtt_key_update() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    let mut server = resumed_server(&client);
+    connect(&mut client, &mut server);
+    assert!(server.tls_info().unwrap().early_data_accepted());
+
+    // Everything happens at `now()`, before the server discards its 0-RTT keys.
+    let ack = send_and_receive(&mut client, &mut server, now()).unwrap();
+    client.process_input(ack, now());
+    client.initiate_key_update().unwrap();
+    assert_eq!(client.get_epochs(), (Some(4), Some(3)));
+
+    server.process_input(send_something(&mut client, now()), now());
+    assert_eq!(server.get_epochs(), (Some(4), Some(3)));
+
+    drop(server.process_output(now() + AT_LEAST_PTO));
+    assert_eq!(server.get_epochs(), (Some(4), Some(4)));
 }
