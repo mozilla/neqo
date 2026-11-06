@@ -163,6 +163,48 @@ fn handshake_failed_authentication() {
     assert_error(&server, &CloseReason::Transport(Error::Peer(300)));
 }
 
+/// This inserts CRYPTO data at offset 0 that extends the server flight with garbage, into the
+/// first packet only.
+struct BadCryptoWriter {
+    done: bool,
+}
+
+impl test_internal::FrameWriter for BadCryptoWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        if !self.done {
+            builder.encode_varint(FrameType::Crypto);
+            builder.encode_varint(0_u64); // Offset
+            builder.encode_vvec(&[0xff; 1100]); // Longer than the server flight.
+            self.done = true;
+        }
+    }
+}
+
+/// A verdict that arrives after TLS failed is ignored.
+#[test]
+fn authenticated_after_tls_failure() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let out = client.process_output(now());
+    let out2 = client.process_output(now());
+    server.process_input(out.dgram().unwrap(), now());
+    let out = server.process(out2.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    let out = server.process(out.dgram(), now());
+    let out = client.process(out.dgram(), now());
+    server.process_input(out.dgram().unwrap(), now());
+    let authentication_needed = |e| matches!(e, ConnectionEvent::AuthenticationNeeded);
+    assert!(client.events().any(authentication_needed));
+
+    let bad_crypto = server.test_write_frames(BadCryptoWriter { done: false }, now());
+    client.process_input(bad_crypto.dgram().unwrap(), now());
+    let error = CloseReason::Transport(Error::CryptoAlert(50)); // decode_error
+    assert_error(&client, &error);
+
+    client.authenticated(AuthenticationStatus::Ok, now());
+    assert_error(&client, &error);
+}
+
 #[test]
 fn no_alpn() {
     let mut client = default_client();
@@ -1401,18 +1443,22 @@ fn implicit_rtt_server() {
     assert_eq!(server.stats().rtt, RTT);
 }
 
-#[test]
-fn emit_authentication_needed_once() {
-    let mut client = default_client();
-
-    let mut server = Connection::new_server(
+fn large_flight_server() -> Connection {
+    Connection::new_server(
         test_fixture::LONG_CERT_KEYS,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         // Disable pacing to allow sending multiple packets without inter-packet delays.
         ConnectionParameters::default().pacing(false),
     )
-    .expect("create a server");
+    .expect("create a server")
+}
+
+#[test]
+fn emit_authentication_needed_once() {
+    let mut client = default_client();
+
+    let mut server = large_flight_server();
 
     let client1 = client.process_output(now());
     let client2 = client.process_output(now());
@@ -1456,6 +1502,37 @@ fn emit_authentication_needed_once() {
     // `ConnectionEvent::AuthenticationNeeded`.
     _ = client.process(server3.dgram(), now());
     assert_eq!(0, authentication_needed_count(&mut client));
+}
+
+#[test]
+fn emit_ech_fallback_authentication_needed_once() {
+    let mut client = default_client();
+    let mut server = large_flight_server();
+    let (sk, pk) = generate_ech_keys().unwrap();
+    server
+        .server_enable_ech(ECH_CONFIG_ID, ECH_PUBLIC_NAME, &sk, &pk)
+        .unwrap();
+    client
+        .client_enable_ech(damage_ech_config(server.ech_config()))
+        .unwrap();
+
+    let client1 = client.process_output(now()).dgram();
+    let client2 = client.process_output(now()).dgram();
+    server.process_input(client1.unwrap(), now());
+    let server1 = server.process(client2, now()).dgram();
+    let server2 = server.process_output(now()).dgram();
+    let server3 = server.process_output(now()).dgram();
+
+    let auth_event = ConnectionEvent::EchFallbackAuthenticationNeeded {
+        public_name: String::from(ECH_PUBLIC_NAME),
+    };
+    let auth_event_count =
+        |client: &mut Connection| client.events().filter(|e| *e == auth_event).count();
+    client.process_input(server1.unwrap(), now());
+    client.process_input(server2.unwrap(), now());
+    assert_eq!(auth_event_count(&mut client), 1);
+    client.process_input(server3.unwrap(), now());
+    assert_eq!(auth_event_count(&mut client), 0);
 }
 
 #[test]
