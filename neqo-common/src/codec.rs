@@ -487,10 +487,9 @@ impl<B: Buffer> Encoder<B> {
 }
 
 impl Encoder<Vec<u8>> {
-    /// Skip the first `n` bytes from the encoder buffer.
+    /// Skip the first `n` bytes from the encoder buffer without copying.
     /// This advances the internal offset, making those bytes inaccessible.
-    /// Skipped bytes are released once they are at least as many as the remaining bytes.
-    /// This invalidates any outstanding [`Reservation`].
+    /// Skipped bytes stay allocated until [`Self::reset`].
     ///
     /// # Panics
     ///
@@ -498,10 +497,12 @@ impl Encoder<Vec<u8>> {
     pub fn skip(&mut self, n: usize) {
         assert!(n <= self.len(), "Cannot skip beyond buffer length");
         self.start += n;
-        if self.start >= self.len() {
-            self.buf.drain(..self.start);
-            self.start = 0;
-        }
+    }
+
+    /// Remove all bytes, including skipped ones, keeping the allocated capacity.
+    pub fn reset(&mut self) {
+        self.buf.clear();
+        self.start = 0;
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
@@ -1396,16 +1397,34 @@ mod tests {
         enc.skip(3);
     }
 
-    /// [`Encoder::skip`] should release skipped bytes from the underlying buffer.
     #[test]
-    fn encoder_skip_releases_skipped_bytes() {
-        let mut enc = Encoder::from_hex("010203040506");
+    fn encoder_skip_keeps_reservation() {
+        let mut enc = Encoder::from_hex("010203");
+        let rsv = enc.reserve::<1>();
         enc.skip(2);
-        assert_eq!((enc.start, enc.buf.len()), (2, 6));
+        enc.encode([4, 5]);
+        enc.overwrite(rsv, [9]);
+        assert_eq!(enc.as_ref(), &[3, 9, 4, 5]);
+    }
+
+    #[test]
+    #[should_panic(expected = "reservation is outside the encoder")]
+    fn encoder_skip_past_reservation() {
+        let mut enc = Encoder::default();
+        let rsv = enc.reserve::<1>();
+        enc.encode([1, 2, 3]);
+        enc.skip(2);
+        enc.overwrite(rsv, [9]);
+    }
+
+    #[test]
+    fn encoder_reset() {
+        let mut enc = Encoder::from_hex("010203");
         enc.skip(1);
-        assert_eq!((enc.start, enc.buf.as_slice()), (0, [4, 5, 6].as_slice()));
-        enc.skip(3);
+        let capacity = enc.buf.capacity();
+        enc.reset();
         assert_eq!((enc.start, enc.buf.len()), (0, 0));
+        assert_eq!(enc.buf.capacity(), capacity);
     }
 
     /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this

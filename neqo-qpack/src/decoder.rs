@@ -188,6 +188,9 @@ impl Decoder {
                 .map_err(|_| Error::DecoderStream)?;
             debug!("[{self}] {r} bytes sent");
             self.send_buf.skip(r);
+            if self.send_buf.is_empty() {
+                self.send_buf.reset(); // `skip` doesn't free skipped bytes.
+            }
         }
         Ok(())
     }
