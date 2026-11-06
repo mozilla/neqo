@@ -60,7 +60,7 @@ jobs:
           - ubuntu-26.04-arm
           - macos-26
           - windows-2025
-          # TODO: Add windows-11-arm once nss-rs requires NSS 3.130, the first to build there.
+          - windows-11-arm
         rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
