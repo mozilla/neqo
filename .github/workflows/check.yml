@@ -55,7 +55,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-26.04, ubuntu-26.04-arm, macos-26, windows-2025, windows-11-arm]
+        os:
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+          - macos-26
+          - windows-2025
+          - windows-11-arm
         rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
