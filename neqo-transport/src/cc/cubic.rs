@@ -303,7 +303,7 @@ impl WindowAdjustment for Cubic {
         &mut self,
         curr_cwnd: usize,
         new_acked_bytes: usize,
-        min_rtt: Duration,
+        smoothed_rtt: Duration,
         max_datagram_size: usize,
         now: Instant,
     ) -> usize {
@@ -348,7 +348,7 @@ impl WindowAdjustment for Cubic {
             .expect("w_max must be set in self.start_epoch");
         // cwnd <= target_cubic <= cwnd * 1.5
         let target_cubic = f64::clamp(
-            self.w_cubic((t + min_rtt).as_secs_f64(), w_max, max_datagram_size),
+            self.w_cubic((t + smoothed_rtt).as_secs_f64(), w_max, max_datagram_size),
             curr_cwnd,
             curr_cwnd * 1.5,
         );
@@ -384,9 +384,9 @@ impl WindowAdjustment for Cubic {
         // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.3-8>
         //
         // While the RFC specifies that we should compare `w_cubic(t)` with `w_est` we are rather
-        // comparing the previously calculated `target` here (`w_cubic(t + min_rtt)` with clamping
-        // to `cwnd <= target <= cwnd * 1.5` applied), since that is the value that would actually
-        // be used if we are in the cubic region.
+        // comparing the previously calculated `target` here (`w_cubic(t + smoothed_rtt)` with
+        // clamping to `cwnd <= target <= cwnd * 1.5` applied), since that is the value that would
+        // actually be used if we are in the cubic region.
         //
         // That is in line with what e.g. the Linux Kernel CUBIC implementation is doing.
         //

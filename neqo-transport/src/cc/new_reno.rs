@@ -31,7 +31,7 @@ impl WindowAdjustment for NewReno {
         &mut self,
         curr_cwnd: usize,
         _new_acked_bytes: usize,
-        _min_rtt: Duration,
+        _smoothed_rtt: Duration,
         _max_datagram_size: usize,
         _now: Instant,
     ) -> usize {

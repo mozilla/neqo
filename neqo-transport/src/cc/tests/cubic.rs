@@ -15,7 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::to_u64;
+use neqo_common::{qlog::Qlog, to_u64};
 use test_fixture::now;
 
 use super::{RTT, make_cc_cubic, make_cc_cubic_with};
@@ -26,7 +26,7 @@ use crate::{
         cubic::{Cubic, convert_to_f64},
     },
     recovery::sent,
-    rtt::RttEstimate,
+    rtt::{RttEstimate, RttSource},
     stats::CongestionControlStats,
 };
 
@@ -493,7 +493,7 @@ fn cwnd_growth_independent_of_ack_ratio() {
         let cwnd_initial_f64 = convert_to_f64(cc.cwnd_initial());
         // Low ssthresh to put us into congestion avoidance phase.
         cc.set_ssthresh(1);
-        // Put `w_max` out of reach, so that `w_cubic(t + min_rtt)` always exceeds the
+        // Put `w_max` out of reach, so that `w_cubic(t + smoothed_rtt)` always exceeds the
         // `cwnd * 1.5` upper bound of RFC 9438 section 4.2 and `target` is pinned to that
         // bound, which makes the expected growth below exact. This also keeps Cubic out
         // of the Reno-friendly region.
@@ -533,6 +533,39 @@ fn cwnd_growth_independent_of_ack_ratio() {
             "unexpected CWND growth for ACK ratio {ack_ratio}"
         );
     }
+}
+
+/// RFC 9438 section 4.2: the target window is `W_cubic(t + RTT)`, where RTT is the smoothed RTT.
+#[test]
+fn cubic_target_uses_smoothed_rtt() {
+    fn cwnd_after_acks(rtt_est: &RttEstimate) -> usize {
+        let mut cc = make_cc_cubic();
+        let mut cc_stats = CongestionControlStats::default();
+        let cwnd_initial_f64 = convert_to_f64(cc.cwnd_initial());
+        cc.set_ssthresh(1);
+        cc.congestion_control_mut()
+            .set_w_max(cwnd_initial_f64 * 10.0);
+        let mut now = now();
+        let mut next_pn_send = fill_cwnd(&mut cc, 0, now);
+        let acks = cc.cwnd() / cc.max_datagram_size();
+        for pn in 0..to_u64(acks) {
+            now += RTT / u32::try_from(acks).unwrap();
+            let acked = sent::make_packet(pn, now, cc.max_datagram_size());
+            cc.on_packets_acked(&[acked], rtt_est, now, &mut cc_stats);
+            next_pn_send = fill_cwnd(&mut cc, next_pn_send, now);
+        }
+        cc.cwnd()
+    }
+
+    let mut qlog = Qlog::default();
+    let mut rtt_est = RttEstimate::new(RTT);
+    for sample in [RTT, RTT * 9] {
+        rtt_est.update(&mut qlog, sample, Duration::ZERO, RttSource::Ack, now());
+    }
+    assert_eq!(rtt_est.minimum(), RTT);
+    assert_eq!(rtt_est.estimate(), RTT * 2);
+    let srtt_only = RttEstimate::new(rtt_est.estimate());
+    assert_eq!(cwnd_after_acks(&rtt_est), cwnd_after_acks(&srtt_only));
 }
 
 #[test]

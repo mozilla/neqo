@@ -83,7 +83,7 @@ pub trait WindowAdjustment: Display + Debug {
         &mut self,
         curr_cwnd: usize,
         new_acked_bytes: usize,
-        min_rtt: Duration,
+        smoothed_rtt: Duration,
         max_datagram_size: usize,
         now: Instant,
     ) -> usize;
@@ -409,7 +409,8 @@ where
             let bytes_for_increase = self.congestion_control.bytes_for_cwnd_increase(
                 self.current.congestion_window,
                 new_acked,
-                rtt_est.minimum(),
+                // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2>
+                rtt_est.estimate(),
                 self.max_datagram_size(),
                 now,
             );
