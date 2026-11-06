@@ -188,6 +188,7 @@ impl Default for ConnectionParameters {
         Self {
             versions: version::Config::default(),
             congestion_control: CongestionControl::Cubic,
+            // Not HyStart++ (RFC 9438, Section 4.10) until Firefox experiments evaluate it.
             slow_start: SlowStart::Classic,
             hystart_css_baseline: HyStartCssBaseline::CurrentRoundMinRtt,
             max_data: INITIAL_LOCAL_MAX_DATA,
