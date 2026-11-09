@@ -1041,6 +1041,9 @@ mod tests {
 
     const RESPONSE_BODY: &[u8] = &[0x67, 0x68, 0x69];
 
+    // HEADERS frame carrying only `:method: GET`.
+    const REQUEST_METHOD_ONLY: &[u8] = &[0x01, 0x03, 0x00, 0x00, 0xd1];
+
     fn check_request_header(header: &[Header]) {
         let expected_request_header = &[
             Header::new(":method", "GET"),
@@ -1113,6 +1116,33 @@ mod tests {
         }
         assert_eq!(headers_frames, 1);
         assert_eq!(data_received, 1);
+    }
+
+    #[test]
+    fn server_malformed_request_reset() {
+        let (mut hconn, mut peer_conn) = connect();
+
+        let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
+        peer_conn
+            .stream_send(stream_id, REQUEST_METHOD_ONLY)
+            .unwrap();
+        let out = peer_conn.process_output(now());
+        let out = hconn.process(out.dgram(), now());
+        drop(peer_conn.process(out.dgram(), now()));
+
+        let app_error = Error::InvalidHeader.code();
+        let events = peer_conn.events().collect::<Vec<_>>();
+        assert!(events.contains(&ConnectionEvent::SendStreamStopSending {
+            stream_id,
+            app_error
+        }));
+        assert!(events.contains(&ConnectionEvent::RecvStreamReset {
+            stream_id,
+            app_error
+        }));
+        assert!(hconn.events().any(|e| matches!(e,
+            Http3ServerEvent::StreamStopSending { stream, error }
+                if stream.stream_id() == stream_id && error == app_error)));
     }
 
     #[test]
