@@ -22,8 +22,9 @@ use std::{
 use http::Uri as Url;
 use neqo_common::{Datagram, event::Provider};
 use neqo_transport::{
-    CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator, EmptyConnectionIdGenerator,
-    Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId, StreamType,
+    AppError, CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator,
+    EmptyConnectionIdGenerator, Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId,
+    StreamType,
 };
 use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
@@ -191,6 +192,8 @@ impl TryFrom<&State> for CloseState {
 }
 
 impl super::Client for Connection {
+    const NO_ERROR: AppError = 0;
+
     fn process_multiple_output(
         &mut self,
         now: Instant,
@@ -207,7 +210,7 @@ impl super::Client for Connection {
         self.process_multiple_input(dgrams, now);
     }
 
-    fn close<S>(&mut self, now: Instant, app_error: neqo_transport::AppError, msg: S)
+    fn close<S>(&mut self, now: Instant, app_error: AppError, msg: S)
     where
         S: AsRef<str> + Display,
     {
