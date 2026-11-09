@@ -255,7 +255,7 @@ impl Http3ServerHandler {
                     self.base_handler.add_new_stream(stream_id);
                 }
                 ConnectionEvent::RecvStreamReadable { stream_id } => {
-                    self.handle_stream_readable(conn, stream_id, now)?;
+                    while self.handle_stream_readable(conn, stream_id, now)? {}
                 }
                 ConnectionEvent::RecvStreamReset {
                     stream_id,
@@ -303,12 +303,13 @@ impl Http3ServerHandler {
         Ok(())
     }
 
+    /// Returns `true` if a control frame was read, i.e., there may be more to read.
     fn handle_stream_readable(
         &mut self,
         conn: &mut Connection,
         stream_id: StreamId,
         now: Instant,
-    ) -> Res<()> {
+    ) -> Res<bool> {
         match self
             .base_handler
             .handle_stream_readable(conn, stream_id, now)?
@@ -339,7 +340,7 @@ impl Http3ServerHandler {
                     .base_handler
                     .handle_stream_readable(conn, stream_id, now)?;
                 assert_eq!(ReceiveOutput::NoOutput, res);
-                Ok(())
+                Ok(false)
             }
             ReceiveOutput::NewStream(NewStreamType::WebTransportStream(session_id)) => {
                 self.base_handler.webtransport_create_stream_remote(
@@ -352,7 +353,7 @@ impl Http3ServerHandler {
                     .base_handler
                     .handle_stream_readable(conn, stream_id, now)?;
                 assert_eq!(ReceiveOutput::NoOutput, res);
-                Ok(())
+                Ok(false)
             }
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
@@ -387,9 +388,9 @@ impl Http3ServerHandler {
                         ),
                     }?;
                 }
-                Ok(())
+                Ok(true)
             }
-            _ => Ok(()),
+            _ => Ok(false),
         }
     }
 

@@ -223,9 +223,9 @@ impl Http3State {
 ///
 /// The [`ControlStreamRemote`] handler uses [`FrameReader`] to read and decode frames received on
 /// the control frame. The [`RecvStream::receive`] implementation returns
-/// [`ReceiveOutput::ControlFrames`] with a list of control frames read (the list may be empty). The
-/// control frames are handled by [`Http3Connection`] and/or by [`Http3Client`] and
-/// [`Http3ServerHandler`].
+/// [`ReceiveOutput::ControlFrames`] with the next control frame, or [`ReceiveOutput::NoOutput`] if
+/// there is none. The control frames are handled by [`Http3Connection`] and/or by [`Http3Client`]
+/// and [`Http3ServerHandler`], which read again until there are no more frames.
 ///
 /// ### [`DecoderRecvStream`] and [`EncoderRecvStream`]
 ///
