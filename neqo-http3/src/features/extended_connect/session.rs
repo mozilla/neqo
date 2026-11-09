@@ -269,7 +269,7 @@ impl Session {
         // was refused, tell the sender it can resume.
         if self.datagram_capsule_blocked {
             self.datagram_capsule_blocked = false;
-            self.events.capsule_space_available();
+            self.events.capsule_space_available(self.id);
         }
     }
 

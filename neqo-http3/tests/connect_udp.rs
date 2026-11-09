@@ -713,7 +713,7 @@ fn outgoing_datagram_space_available_forwarded() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired before the queue drained"
     );
 
@@ -721,7 +721,7 @@ fn outgoing_datagram_space_available_forwarded() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "OutgoingDatagramSpaceAvailable was not forwarded through connect-udp"
     );
 }
@@ -760,7 +760,7 @@ fn server_session_has_the_built_in_max_buffered_datagrams() {
     assert!(
         proxy
             .events()
-            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
+            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { session_id, .. } if session_id == proxy_session.stream_id())),
         "OutgoingDatagramSpaceAvailable was not forwarded to the connect-udp server"
     );
 }
@@ -878,7 +878,7 @@ fn datagram_capsule_flow_control_error_and_resume() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired before the window reopened"
     );
 
@@ -888,7 +888,7 @@ fn datagram_capsule_flow_control_error_and_resume() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "resume event not emitted after control-stream flow control reopened"
     );
 }
@@ -915,7 +915,7 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired while the window was still closed"
     );
 
@@ -939,7 +939,7 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "resume event not emitted after the window reopened"
     );
 }

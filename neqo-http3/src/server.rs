@@ -264,8 +264,9 @@ impl Http3Server {
                             remove = true;
                         }
                     }
-                    Http3ServerConnEvent::OutgoingDatagramSpaceAvailable => {
-                        self.events.datagram_space_available(conn.clone());
+                    Http3ServerConnEvent::OutgoingDatagramSpaceAvailable { session_id } => {
+                        self.events
+                            .datagram_space_available(conn.clone(), session_id);
                     }
                     Http3ServerConnEvent::PriorityUpdate {
                         stream_id,
