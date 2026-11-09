@@ -74,7 +74,13 @@ impl RecvStream for WebTransportRecvStream {
     }
 
     fn reset(&mut self, close_type: CloseType) -> Res<()> {
-        if !matches!(close_type, CloseType::ResetApp(_)) {
+        if !matches!(close_type, CloseType::ResetApp(_))
+            && !self.session.borrow_mut().defer_close(
+                self.stream_info.stream_id(),
+                true,
+                close_type,
+            )
+        {
             self.events.recv_closed(&self.stream_info, close_type);
         }
         self.session
@@ -185,7 +191,13 @@ impl WebTransportSendStream {
 
     fn set_done(&mut self, close_type: CloseType) {
         self.state = WebTransportSenderStreamState::Done;
-        self.events.send_closed(&self.stream_info, close_type);
+        if !self
+            .session
+            .borrow_mut()
+            .defer_close(self.stream_info.stream_id(), false, close_type)
+        {
+            self.events.send_closed(&self.stream_info, close_type);
+        }
         self.session
             .borrow_mut()
             .remove_send_stream(self.stream_info.stream_id());
