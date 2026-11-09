@@ -583,7 +583,7 @@ impl Http3Connection {
     ) -> Res<()> {
         info!("[{self}] Handle a stream reset stream_id={stream_id} app_err={app_error}");
 
-        // TODO: A client could also reset the request's send side here (RFC 9114 Section 4.1.1).
+        // TODO: https://github.com/mozilla/neqo/issues/4322
         self.close_recv(stream_id, CloseType::ResetRemote(app_error), conn)
     }
 
