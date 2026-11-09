@@ -473,9 +473,7 @@ impl Http3Client {
             let res = self
                 .base_handler
                 .set_0rtt_settings(&mut self.conn, settings);
-            if self.check_result(now, &res) {
-                return Err(Error::Fatal);
-            }
+            self.check_result(now, res).map_err(|_| Error::Fatal)?;
             self.events
                 .connection_state_change(self.base_handler.state().clone());
         }
@@ -769,16 +767,16 @@ impl Http3Client {
                 self.base_handler
                     .expire_datagram_queues(&mut self.conn, now);
                 let res = self.check_connection_events(now);
-                if self.check_result(now, &res) {
+                if self.check_result(now, res).is_err() {
                     return;
                 }
                 let res = self.base_handler.process_sending(&mut self.conn, now);
-                self.check_result(now, &res);
+                _ = self.check_result(now, res);
             }
             Http3State::Closed { .. } => {}
             _ => {
                 let res = self.check_connection_events(now);
-                _ = self.check_result(now, &res);
+                _ = self.check_result(now, res);
             }
         }
     }
@@ -839,15 +837,12 @@ impl Http3Client {
 
     /// This function takes the provided result and check for an error.
     /// An error results in closing the connection.
-    fn check_result<ERR>(&mut self, now: Instant, res: &Res<ERR>) -> bool {
-        match &res {
-            Err(e) => {
-                info!("[{self}] Connection error: {e}");
-                self.close(now, e.code(), format!("{e}"));
-                true
-            }
-            _ => false,
+    fn check_result<T>(&mut self, now: Instant, res: Res<T>) -> Res<T> {
+        if let Err(e) = &res {
+            info!("[{self}] Connection error: {e}");
+            self.close(now, e.code(), format!("{e}"));
         }
+        res
     }
 
     /// This function checks [`ConnectionEvent`][2]s emitted by the QUIC layer, e.g. connection

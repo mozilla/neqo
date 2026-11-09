@@ -198,9 +198,9 @@ impl Http3ServerHandler {
 
         self.base_handler.expire_datagram_queues(conn, now);
         let res = self.check_connection_events(conn, now);
-        if !self.check_result(conn, now, &res) && self.base_handler.state().active() {
+        if self.check_result(conn, now, res).is_ok() && self.base_handler.state().active() {
             let res = self.base_handler.process_sending(conn, now);
-            self.check_result(conn, now, &res);
+            _ = self.check_result(conn, now, res);
         }
     }
 
@@ -227,14 +227,11 @@ impl Http3ServerHandler {
 
     // This function takes the provided result and check for an error.
     // An error results in closing the connection.
-    fn check_result<ERR>(&mut self, conn: &mut Connection, now: Instant, res: &Res<ERR>) -> bool {
-        match &res {
-            Err(e) => {
-                self.close(conn, now, e);
-                true
-            }
-            _ => false,
+    fn check_result<T>(&mut self, conn: &mut Connection, now: Instant, res: Res<T>) -> Res<T> {
+        if let Err(e) = &res {
+            self.close(conn, now, e);
         }
+        res
     }
 
     fn close(&mut self, conn: &mut Connection, now: Instant, err: &Error) {
