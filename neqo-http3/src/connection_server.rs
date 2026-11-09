@@ -286,8 +286,8 @@ impl Http3ServerHandler {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => self.base_handler.handle_datagram(dgram),
-                ConnectionEvent::OutgoingDatagramSpaceAvailable => {
-                    self.events.datagram_space_available();
+                ConnectionEvent::OutgoingDatagramSpaceAvailable { stream_id } => {
+                    self.events.datagram_space_available(stream_id);
                 }
                 ConnectionEvent::AuthenticationNeeded
                 | ConnectionEvent::EchFallbackAuthenticationNeeded { .. }

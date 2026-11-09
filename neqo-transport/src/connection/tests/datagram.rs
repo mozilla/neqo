@@ -1042,9 +1042,37 @@ fn expiring_a_blocked_queue_via_the_session_sweep_signals_space_available() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { stream_id } if stream_id == session)),
         "a queue emptied by the per-session sweep must resume the sender"
     );
+}
+
+#[test]
+fn space_available_only_for_unblocked_session() {
+    let (mut client, _server) = connect_datagram();
+    let now = now();
+    let [first, second, still_blocked] = [0, 4, 8].map(StreamId::new);
+
+    for session in [first, second, still_blocked] {
+        client.set_max_buffered_datagrams(session, Some(NonZeroUsize::new(1).unwrap()));
+        client.set_datagram_max_age(session, Some(Duration::from_millis(5)), now);
+        assert_eq!(
+            client.enqueue_datagram(session, vec![1], None, now, SendGroupId::new(0), 0),
+            Ok(DatagramQueueOutcome::MaxBufferedReached)
+        );
+    }
+
+    let later = now + Duration::from_millis(10);
+    assert_eq!(client.expire_session_datagrams(first, later), 1);
+    assert_eq!(client.expire_session_datagrams(second, later), 1);
+    let resumed: Vec<_> = client
+        .events()
+        .filter_map(|e| match e {
+            ConnectionEvent::OutgoingDatagramSpaceAvailable { stream_id } => Some(stream_id),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resumed, [first, second]);
 }
 
 #[test]
@@ -1197,7 +1225,7 @@ fn enqueue_expires_stale_datagrams_before_charging_the_new_one() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
         "shedding the stale datagram unblocked the queue, which the sender must be told"
     );
 }
@@ -1243,7 +1271,7 @@ fn expiring_a_blocked_session_queue_signals_space_available() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
         "a queue emptied by expiry must resume the sender"
     );
 }
@@ -1270,7 +1298,7 @@ fn shrinking_max_age_signals_space_available() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
         "a queue emptied by a shrunken max age must resume the sender"
     );
 }
@@ -1289,7 +1317,7 @@ fn resume_signal_fires_once_a_blocked_queue_drains_below_max_buffered() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired before the queue drained"
     );
 
@@ -1302,7 +1330,7 @@ fn resume_signal_fires_once_a_blocked_queue_drains_below_max_buffered() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
         "draining a blocked queue back below its max-buffered limit must fire a resume signal"
     );
 }
@@ -1358,7 +1386,7 @@ fn partial_drain_at_the_max_buffered_limit_does_not_resume() {
 
     let resumed = |c: &mut Connection| {
         c.events()
-            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
+            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. }))
             .count()
     };
 
@@ -1433,7 +1461,7 @@ fn space_available_event_fires_on_each_fill_drain_cycle() {
         assert!(
             client
                 .events()
-                .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+                .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
             "resume not signalled on fill/drain cycle {cycle}"
         );
     }
@@ -1463,7 +1491,7 @@ fn no_space_available_event_when_never_blocked() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume signalled although the queue was never above the mark"
     );
 
@@ -1509,7 +1537,7 @@ fn dropped_too_big_unblocks() {
     assert_eq!(
         client
             .events()
-            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable))
+            .filter(|e| matches!(e, ConnectionEvent::OutgoingDatagramSpaceAvailable { .. }))
             .count(),
         1,
         "resume must be signalled exactly once after the queue was emptied by a drop"

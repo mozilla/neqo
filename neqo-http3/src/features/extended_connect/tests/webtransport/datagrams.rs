@@ -271,7 +271,7 @@ fn outgoing_datagram_space_available_forwarded() {
     assert!(
         !wt.client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "client resume event fired before the queue drained"
     );
 
@@ -294,13 +294,13 @@ fn outgoing_datagram_space_available_forwarded() {
     assert!(
         wt.client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "OutgoingDatagramSpaceAvailable was not forwarded to the HTTP/3 client"
     );
     assert!(
         wt.server
             .events()
-            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
+            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { session_id: id, .. } if id == session_id)),
         "OutgoingDatagramSpaceAvailable was not forwarded to the HTTP/3 server"
     );
 }
@@ -664,7 +664,7 @@ fn client_changing_the_max_buffered_limit_resumes_only_a_blocked_queue() {
         wt.client.connection_mut().events().any(|e| {
             matches!(
                 e,
-                neqo_transport::ConnectionEvent::OutgoingDatagramSpaceAvailable
+                neqo_transport::ConnectionEvent::OutgoingDatagramSpaceAvailable { .. }
             )
         })
     };
