@@ -814,9 +814,9 @@ impl Http3Connection {
     ///  - if the stream is not done and there is no error, return `output` and the caller will
     ///    handle it.
     ///  - in case of an error:
-    ///    - if it is only a stream error and the stream is not critical, send `STOP_SENDING` frame,
-    ///      remove the stream from `recv_streams` and inform the listener that the stream has been
-    ///      reset. Both roles also reset the sending side and remove it from `send_streams`.
+    ///    - if it is only a stream error and the stream is not critical, send `STOP_SENDING` and
+    ///      `RESET_STREAM` frames, remove the stream from `recv_streams` and `send_streams`, and
+    ///      inform the listener that the stream has been reset.
     ///    - otherwise this is a connection error. In this case, propagate the error to the caller
     ///      that will handle it properly.
     fn handle_stream_manipulation_output<U>(

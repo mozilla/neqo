@@ -5672,16 +5672,17 @@ mod tests {
             false,
         );
 
+        let error = Error::InvalidHeader.code();
         let reset = Http3ClientEvent::Reset {
             stream_id: request_stream_id,
-            error: Error::InvalidHeader.code(),
+            error,
             local: true,
         };
         assert_eq!(client.events().collect::<Vec<_>>(), [reset]);
         assert!(!has_send_stream(&client));
         let reset_stream = ConnectionEvent::RecvStreamReset {
             stream_id: request_stream_id,
-            app_error: Error::InvalidHeader.code(),
+            app_error: error,
         };
         assert!(server.conn.events().any(|e| e == reset_stream));
     }

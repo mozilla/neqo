@@ -1041,6 +1041,9 @@ mod tests {
 
     const RESPONSE_BODY: &[u8] = &[0x67, 0x68, 0x69];
 
+    // HEADERS frame carrying only `:method: GET`.
+    const REQUEST_METHOD_ONLY: &[u8] = &[0x01, 0x03, 0x00, 0x00, 0xd1];
+
     fn check_request_header(header: &[Header]) {
         let expected_request_header = &[
             Header::new(":method", "GET"),
@@ -1120,9 +1123,8 @@ mod tests {
         let (mut hconn, mut peer_conn) = connect();
 
         let stream_id = peer_conn.stream_create(StreamType::BiDi).unwrap();
-        // HEADERS frame carrying only `:method: GET`.
         peer_conn
-            .stream_send(stream_id, &[0x01, 0x03, 0x00, 0x00, 0xd1])
+            .stream_send(stream_id, REQUEST_METHOD_ONLY)
             .unwrap();
         let out = peer_conn.process_output(now());
         let out = hconn.process(out.dgram(), now());
