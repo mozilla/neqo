@@ -23,7 +23,7 @@ env:
 jobs:
   baseline:
     name: Baseline test
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       timeout: ${{ steps.baseline.outputs.timeout }}
       shards: ${{ steps.baseline.outputs.shards }}
@@ -52,7 +52,7 @@ jobs:
   mutants:
     name: Find mutants (shard ${{ matrix.shard }}/${{ needs.baseline.outputs.max_shard }})
     needs: baseline
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # An aborted runner fails the job outright, skipping even always() steps;
     # if only the child is SIGTERM'd we see 143 below. actions/runner-images#6680
     continue-on-error: true
@@ -101,7 +101,7 @@ jobs:
     name: Results
     if: ${{ !cancelled() }}
     needs: mutants
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

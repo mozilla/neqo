@@ -7,10 +7,10 @@
 use neqo_common::{
     Bytes, Header,
     event::{Provider as EventProvider, Queue as EventQueue},
-    qtrace,
 };
 use neqo_transport::{AppError, StreamId, StreamType};
 use nss::ResumptionToken;
+use tracing::trace;
 
 use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
@@ -352,7 +352,10 @@ impl Http3ClientEvents {
     pub(crate) fn connection_state_change(&self, state: Http3State) {
         match state {
             // If closing, existing events no longer relevant.
-            Http3State::Closing { .. } | Http3State::Closed(_) => self.events.clear(),
+            // The session ticket in a queued resumption token cannot be retrieved again.
+            Http3State::Closing { .. } | Http3State::Closed(_) => self
+                .events
+                .remove_matching(|evt| !matches!(evt, Http3ClientEvent::ResumptionToken(_))),
             Http3State::Connected => {
                 self.events.remove_matching(|evt| {
                     matches!(evt, Http3ClientEvent::StateChange(Http3State::ZeroRtt))
@@ -408,7 +411,7 @@ impl Http3ClientEvents {
                         succeeded,
                     )));
             }
-            _ => qtrace!("HSetting {feature_type:?} {succeeded} not handled"),
+            _ => trace!("HSetting {feature_type:?} {succeeded} not handled"),
         }
     }
 }

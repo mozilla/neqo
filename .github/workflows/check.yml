@@ -1,8 +1,6 @@
 name: CI
 on:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, edited]
   merge_group:
   push:
     branches: ["main"] # Only to populate the Rust cache
@@ -18,8 +16,7 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -32,8 +29,7 @@ defaults:
 jobs:
   toolchains:
     name: Determine toolchains
-    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       toolchains: ${{ steps.toolchains.outputs.toolchains }}
       cacheable: ${{ steps.cacheable.outputs.toolchains }}
@@ -43,7 +39,7 @@ jobs:
           persist-credentials: false
 
       - id: toolchains
-        uses: mozilla/actions/toolchains@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+        uses: mozilla/actions/toolchains@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
 
       # Nightly never uses a cache, so main runs have no reason to build it.
       - id: cacheable
@@ -59,25 +55,33 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025]
+        os:
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+          - macos-26
+          - windows-2025
+          - windows-11-arm
         rust-toolchain: ${{ fromJSON(github.event_name == 'push' && needs.toolchains.outputs.cacheable || needs.toolchains.outputs.toolchains) }}
         type: [debug]
         # Include some dynamically-linked release builds, to check that that works on all platforms.
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-26.04
             rust-toolchain: stable
             type: release
-          - os: macos-15
+          - os: macos-26
             rust-toolchain: stable
             type: release
           - os: windows-2025
             rust-toolchain: stable
             type: release
           # Also do some debug builds on the oldest OS versions.
-          - os: ubuntu-22.04
+          - os: ubuntu-24.04
             rust-toolchain: stable
             type: debug
-          - os: macos-14
+          - os: ubuntu-24.04-arm
+            rust-toolchain: stable
+            type: debug
+          - os: macos-15
             rust-toolchain: stable
             type: debug
           - os: windows-2022
@@ -112,8 +116,9 @@ jobs:
         run: |
           DUMP_SIMULATION_SEEDS="$(pwd)/simulation-seeds"
           export DUMP_SIMULATION_SEEDS
+          # Coverage is broken on Windows ARM64, see https://github.com/rust-lang/rust/issues/150123
           # shellcheck disable=SC2086
-          if [ "$TOOLCHAIN" == "stable" ]; then
+          if [ "$TOOLCHAIN" == "stable" ] && [ "$RUNNER_OS-$RUNNER_ARCH" != "Windows-ARM64" ]; then
             cargo llvm-cov test $BUILD_TYPE --locked --include-ffi --codecov --output-path codecov.json
             if [ "$RUNNER_OS" == "Linux" ] && [ -z "$BUILD_TYPE" ]; then
               cargo llvm-cov report --lcov --include-ffi --output-path lcov.info
@@ -150,7 +155,7 @@ jobs:
           touch C:/msys64/home/runneradmin/.gitconfig
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: matrix.os == 'ubuntu-24.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
+        if: matrix.os == 'ubuntu-26.04' && matrix.rust-toolchain == 'stable' && matrix.type == 'debug' && github.event_name != 'push'
         with:
           name: lcov-coverage
           path: lcov.info
@@ -178,8 +183,8 @@ jobs:
   crap:
     name: CRAP analysis
     needs: check
-    if: ${{ !cancelled() && github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
-    runs-on: ubuntu-24.04
+    if: ${{ !cancelled() && github.event_name != 'push' }}
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       security-events: write # for uploading SARIF to code scanning
@@ -192,7 +197,7 @@ jobs:
         with:
           name: lcov-coverage
 
-      - uses: mozilla/actions/crap@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+      - uses: mozilla/actions/crap@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
         with:
           lcov-path: lcov.info
           threshold: "30"
@@ -200,15 +205,15 @@ jobs:
 
       - # merge_group's ref is often gone by upload time: github/codeql-action#1572
         if: ${{ github.event_name != 'merge_group' }}
-        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: crap.sarif
           category: cargo-crap
 
   check-cargo-lock:
     name: Ensure `Cargo.lock` contains all required dependencies
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,8 +229,8 @@ jobs:
 
   check-android:
     name: Check Android
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         target: ["x86_64-linux-android", "aarch64-linux-android"]
@@ -241,8 +246,8 @@ jobs:
   # not i686-pc-windows-msvc or Windows-specific neqo-udp/mtu paths.
   check-i686:
     name: Check i686-unknown-linux-gnu
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -261,8 +266,8 @@ jobs:
 
   check-vm:
     name: Run checks for VM-only platforms
-    if: ${{ github.event_name != 'push' && (github.event.action != 'edited' || github.event.changes.base) }}
-    runs-on: ubuntu-24.04
+    if: ${{ github.event_name != 'push' }}
+    runs-on: ubuntu-26.04
     # TODO: Restore `environment: codecov` once GitHub supports filtering deployment messages.
     # environment: codecov
     strategy:
