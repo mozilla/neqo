@@ -21,6 +21,7 @@ use crate::{
 };
 
 pub const QPACK_UNI_STREAM_TYPE_DECODER: u64 = 0x3;
+const MAX_UNSENT_INSTRUCTIONS: usize = 1 << 16;
 
 #[derive(Debug)]
 pub struct Decoder {
@@ -150,24 +151,37 @@ impl Decoder {
         self.table.set_capacity(cap)
     }
 
-    fn header_ack(&mut self, stream_id: StreamId, required_inserts: u64) {
+    fn header_ack(&mut self, stream_id: StreamId, required_inserts: u64) -> Res<()> {
         DecoderInstruction::HeaderAck { stream_id }.marshal(&mut self.send_buf);
         if required_inserts > self.acked_inserts {
             self.acked_inserts = required_inserts;
         }
+        self.check_unsent()
     }
 
-    pub fn cancel_stream(&mut self, stream_id: StreamId) {
+    /// # Errors
+    ///
+    /// May return [`Error::ExcessiveLoad`] if too many instructions are unsent.
+    pub fn cancel_stream(&mut self, stream_id: StreamId) -> Res<()> {
         self.blocked_streams.retain(|(id, _)| *id != stream_id);
         if self.max_table_size > 0 {
             DecoderInstruction::StreamCancellation { stream_id }.marshal(&mut self.send_buf);
         }
+        self.check_unsent()
+    }
+
+    fn check_unsent(&self) -> Res<()> {
+        if self.send_buf.len() > MAX_UNSENT_INSTRUCTIONS {
+            return Err(Error::ExcessiveLoad);
+        }
+        Ok(())
     }
 
     /// # Errors
     ///
     /// May return [`Error::Internal`] if the decoder stream is not initialized,
-    /// or [`Error::DecoderStream`] if sending on the decoder stream fails.
+    /// [`Error::DecoderStream`] if sending on the decoder stream fails,
+    /// or [`Error::ExcessiveLoad`] if too many instructions are unsent.
     ///
     /// # Panics
     ///
@@ -189,6 +203,7 @@ impl Decoder {
             debug!("[{self}] {r} bytes sent");
             self.send_buf.skip(r);
             self.send_buf.compact();
+            self.check_unsent()?;
         }
         Ok(())
     }
@@ -238,7 +253,7 @@ impl Decoder {
             }
             Ok(HeaderDecoderResult::Headers(h)) => {
                 if decoder.get_req_insert_cnt() != 0 {
-                    self.header_ack(stream_id, decoder.get_req_insert_cnt());
+                    self.header_ack(stream_id, decoder.get_req_insert_cnt())?;
                     self.stats.dynamic_table_references += 1;
                 }
                 Ok(Some(h))
@@ -304,7 +319,7 @@ mod tests {
         CountingConnectionIdGenerator, DEFAULT_ALPN, default_client, handshake, new_server, now,
     };
 
-    use super::{Connection, Decoder, Error, Res, map_error};
+    use super::{Connection, Decoder, Error, MAX_UNSENT_INSTRUCTIONS, Res, map_error};
     use crate::Settings;
 
     const STREAM_0: StreamId = StreamId::new(0);
@@ -903,6 +918,21 @@ mod tests {
         );
     }
 
+    /// The decoder must not queue unlimited instructions while the peer withholds credit.
+    #[test]
+    fn unsent_instructions_limit() {
+        let mut decoder = connect_generic(100, Some(1));
+        let TestDecoder { decoder, conn, .. } = &mut decoder;
+        assert_eq!(decoder.send(conn), Ok(())); // Uses up the credit for the stream type.
+
+        for _ in 0..MAX_UNSENT_INSTRUCTIONS {
+            assert_eq!(decoder.cancel_stream(STREAM_0), Ok(())); // One byte each.
+        }
+        assert_eq!(decoder.send(conn), Ok(()));
+        assert_eq!(decoder.cancel_stream(STREAM_0), Err(Error::ExcessiveLoad));
+        assert_eq!(decoder.send(conn), Err(Error::ExcessiveLoad));
+    }
+
     #[test]
     fn cancel_blocked_stream_before_capacity() {
         let mut decoder = connect();
@@ -913,7 +943,7 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-        decoder.decoder.cancel_stream(STREAM_0);
+        decoder.decoder.cancel_stream(STREAM_0).unwrap();
         assert!(decoder.decoder.blocked_streams.is_empty());
         send_instructions_and_check(&mut decoder, &[0x03, 0x40]);
     }
@@ -921,7 +951,7 @@ mod tests {
     #[test]
     fn cancel_stream_max_table_size_zero() {
         let mut decoder = connect_param(0);
-        decoder.decoder.cancel_stream(STREAM_0);
+        decoder.decoder.cancel_stream(STREAM_0).unwrap();
         send_instructions_and_check(&mut decoder, &[0x03]);
     }
 
@@ -936,7 +966,7 @@ mod tests {
         let mut queue = 2 * WINDOW; // Keep more pending than the peer allows.
         for _ in 0..100 {
             for _ in 0..queue {
-                decoder.decoder.cancel_stream(STREAM_0);
+                decoder.decoder.cancel_stream(STREAM_0).unwrap();
             }
             let before = decoder.decoder.send_buf.len();
             decoder.decoder.send(&mut decoder.conn).unwrap();

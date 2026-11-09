@@ -119,6 +119,8 @@ pub enum Error {
     DecoderStream,
     #[error("Critical stream closed")]
     ClosedCriticalStream,
+    #[error("Excessive load")]
+    ExcessiveLoad,
     #[error("Internal error")]
     Internal,
 
@@ -163,6 +165,7 @@ impl Error {
             Self::EncoderStream => 0x201,
             Self::DecoderStream => 0x202,
             Self::ClosedCriticalStream => 0x104,
+            Self::ExcessiveLoad => 0x107,
             // These are all internal errors.
             _ => 3,
         }
@@ -194,6 +197,7 @@ mod tests {
         assert_eq!(Error::EncoderStream.code(), 0x201);
         assert_eq!(Error::DecoderStream.code(), 0x202);
         assert_eq!(Error::ClosedCriticalStream.code(), 0x104);
+        assert_eq!(Error::ExcessiveLoad.code(), 0x107);
         for err in [
             Error::Internal,
             Error::NeedMoreData,

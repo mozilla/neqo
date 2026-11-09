@@ -346,6 +346,7 @@ impl From<QpackError> for Error {
     fn from(err: QpackError) -> Self {
         match err {
             QpackError::ClosedCriticalStream => Self::HttpClosedCriticalStream,
+            QpackError::ExcessiveLoad => Self::HttpExcessiveLoad,
             e => Self::Qpack(e),
         }
     }
@@ -671,7 +672,13 @@ impl CloseType {
 mod tests {
     use neqo_transport::StreamId;
 
-    use super::{Error, Http3StreamInfo, Http3StreamType};
+    use super::{Error, Http3StreamInfo, Http3StreamType, QpackError};
+
+    #[test]
+    fn qpack_excessive_load() {
+        let err = Error::from(QpackError::ExcessiveLoad);
+        assert_eq!((err.code(), err.connection_error()), (0x107, true));
+    }
 
     #[test]
     fn stream_info_is_http() {
