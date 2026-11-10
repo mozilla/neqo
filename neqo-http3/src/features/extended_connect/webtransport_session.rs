@@ -133,7 +133,7 @@ impl Protocol for Session {
             &mut StreamReaderRecvStreamWrapper::new(conn, control_stream_recv),
             now,
         ) {
-            Err(Error::HttpMessage | Error::HttpExcessiveLoad) => {
+            Err(Error::HttpMessage) => {
                 drop(conn.stream_reset_send(self.id, Error::HttpMessage.code()));
                 drop(conn.stream_stop_sending(self.id, WT_SESSION_GONE));
                 events.session_end(
@@ -144,7 +144,11 @@ impl Protocol for Session {
                 );
                 return Ok(Some(State::Done));
             }
-            r => r.map_err(|_| Error::HttpGeneralProtocolStream)?,
+            Err(_) => {
+                drop(conn.stream_reset_send(self.id, Error::HttpGeneralProtocolStream.code()));
+                return Err(Error::HttpGeneralProtocolStream);
+            }
+            Ok(r) => r,
         };
         trace!("[{self}] Received frame: {f:?} fin={fin}");
         if let Some(WebTransportFrame::CloseSession { error, message }) = f {
@@ -164,7 +168,7 @@ impl Protocol for Session {
                 drop(conn.stream_reset_send(self.id, error));
                 drop(conn.stream_stop_sending(self.id, WT_SESSION_GONE));
             }
-            Ok(Some(State::Done))
+            Ok(Some(if fin { State::FinPending } else { State::Done }))
         } else if fin {
             events.session_end(
                 ExtendedConnectType::WebTransport,
@@ -175,7 +179,7 @@ impl Protocol for Session {
                 },
                 None,
             );
-            Ok(Some(State::Done))
+            Ok(Some(State::FinPending))
         } else {
             Ok(None)
         }
