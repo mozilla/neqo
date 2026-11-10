@@ -467,17 +467,16 @@ fn wt_unknown_session_frame_client() {
 
     wt.check_events_after_closing_session_client(
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        None,
         &[],
         None,
-        false,
         None,
     );
     wt.check_events_after_closing_session_server(
         &[],
         None,
         &[unidi_server.stream_id()],
-        Some(Error::HttpRequestCancelled.code()),
+        None,
         Some(&(
             wt_session.stream_id(),
             CloseReason::Clean {
@@ -592,8 +591,7 @@ fn wt_close_session_cannot_be_sent_at_once() {
         &[],
         None,
         &[unidi_client],
-        Some(Error::HttpRequestCancelled.code()),
-        false,
+        None,
         Some(&(
             wt_session.stream_id(),
             CloseReason::Clean {

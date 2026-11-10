@@ -185,6 +185,7 @@ pub use server_events::{Http3OrWebTransportStream, Http3ServerEvent};
 pub use settings::HSettings;
 use stream_type_reader::NewStreamType;
 use thiserror::Error;
+pub use webtransport::WebTransportError;
 
 use crate::{features::extended_connect, priority::PriorityHandler};
 

@@ -27,7 +27,7 @@ use tracing::{debug, error, info, trace, warn};
 use crate::{
     CloseType, Error, Http3Parameters, Http3StreamType, HttpRecvStreamEvents, NewStreamType,
     Priority, PriorityHandler, ReceiveOutput, RecvStream, RecvStreamEvents, Res, SendStream,
-    SendStreamEvents,
+    SendStreamEvents, WebTransportError,
     client_events::Http3ClientEvents,
     control_stream_local::ControlStreamLocal,
     control_stream_remote::ControlStreamRemote,
@@ -1028,12 +1028,19 @@ impl Http3Connection {
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        debug!("[{self}] Reset sending side of stream {stream_id} error={error}");
-
-        if self.send_stream_is_critical(stream_id) {
+        if self.send_stream_is_critical(stream_id) || self.send_stream_is_webtransport(stream_id) {
             return Err(Error::InvalidStreamId);
         }
+        self.reset_send(conn, stream_id, error)
+    }
 
+    fn reset_send(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        error: AppError,
+    ) -> Res<()> {
+        debug!("[{self}] Reset sending side of stream {stream_id} error={error}");
         self.close_send(stream_id, CloseType::ResetApp(error), conn);
         conn.stream_reset_send(stream_id, error)?;
         Ok(())
@@ -1067,16 +1074,48 @@ impl Http3Connection {
         stream_id: StreamId,
         error: AppError,
     ) -> Res<()> {
-        debug!("[{self}] Send stop sending for stream {stream_id} error={error}");
-        if self.recv_stream_is_critical(stream_id) {
+        if self.recv_stream_is_critical(stream_id) || self.recv_stream_is_webtransport(stream_id) {
             return Err(Error::InvalidStreamId);
         }
+        self.stop_sending(conn, stream_id, error)
+    }
 
+    fn stop_sending(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        error: AppError,
+    ) -> Res<()> {
+        debug!("[{self}] Send stop sending for stream {stream_id} error={error}");
         self.close_recv(stream_id, CloseType::ResetApp(error), conn)?;
 
         // Stream may be already be closed and we may get an error here, but we do not care.
         conn.stream_stop_sending(stream_id, error)?;
         Ok(())
+    }
+
+    pub(crate) fn webtransport_stream_reset_send(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        error: WebTransportError,
+    ) -> Res<()> {
+        if !self.send_stream_is_webtransport(stream_id) {
+            return Err(Error::InvalidStreamId);
+        }
+        self.reset_send(conn, stream_id, error.into())
+    }
+
+    pub(crate) fn webtransport_stream_stop_sending(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+        error: WebTransportError,
+    ) -> Res<()> {
+        if !self.recv_stream_is_webtransport(stream_id) {
+            return Err(Error::InvalidStreamId);
+        }
+        self.stop_sending(conn, stream_id, error.into())
     }
 
     /// Set the stream `SendOrder`.
@@ -1916,6 +1955,18 @@ impl Http3Connection {
             .chain(self.qpack_decoder.borrow().local_stream_id().iter())
             .chain(self.control_stream_local.stream_id().iter())
             .any(|id| stream_id == *id)
+    }
+
+    fn send_stream_is_webtransport(&self, stream_id: StreamId) -> bool {
+        self.send_streams
+            .get(&stream_id)
+            .is_some_and(|s| matches!(s.stream_type(), Http3StreamType::WebTransport(_)))
+    }
+
+    fn recv_stream_is_webtransport(&self, stream_id: StreamId) -> bool {
+        self.recv_streams
+            .get(&stream_id)
+            .is_some_and(|s| matches!(s.stream_type(), Http3StreamType::WebTransport(_)))
     }
 
     fn close_send(&mut self, stream_id: StreamId, close_type: CloseType, conn: &mut Connection) {
