@@ -1430,7 +1430,7 @@ mod tests {
                     }
                     ConnectionEvent::RecvStreamReadable { stream_id } => {
                         if stream_id == CLIENT_SIDE_CONTROL_STREAM_ID {
-                            self.check_control_stream();
+                            self.check_control_stream(expect_request);
                             control_stream = true;
                         } else if stream_id == CLIENT_SIDE_ENCODER_STREAM_ID {
                             // the qpack encoder stream
@@ -1466,11 +1466,12 @@ mod tests {
         }
 
         // Check that the control stream contains default values.
-        // Expect a SETTINGS frame and some grease.
+        // Expect a SETTINGS frame and some grease, followed by the initial PRIORITY_UPDATE frame
+        // for request stream 0 if a request is expected.
         // The default test configuration uses:
         //  - max_table_capacity = 100
         //  - max_blocked_streams = 100
-        fn check_control_stream(&mut self) {
+        fn check_control_stream(&mut self, expect_priority_update: bool) {
             let mut buf = [0_u8; 100];
             let (amount, fin) = self
                 .conn
@@ -1489,6 +1490,11 @@ mod tests {
 
             assert_eq!((dec.decode_varint().unwrap() - 0x21) % 0x1f, 0); // Grease
             assert!(dec.decode_vvec().unwrap().len() < 8);
+
+            if expect_priority_update {
+                let expected = expected_priority_update_frame(StreamId::new(0));
+                assert_eq!(dec.decode(expected.len()).unwrap(), expected);
+            }
 
             assert_eq!(dec.remaining(), 0);
             assert!(!fin);
@@ -1646,6 +1652,17 @@ mod tests {
         0x43, 0xd3, 0xc1,
     ];
 
+    // `PRIORITY_UPDATE` frame for a request with default priority
+    fn expected_priority_update_frame(stream_id: StreamId) -> Vec<u8> {
+        let mut enc = Encoder::default();
+        HFrame::PriorityUpdateRequest {
+            element_id: stream_id.as_u64(),
+            priority: Priority::default(),
+        }
+        .encode(&mut enc);
+        enc.into()
+    }
+
     // For fetch request fetch("GET", "https", "something.com", "/", &[(String::from("myheaders",
     // "myvalue"))]) the following request header frame will be sent:
     const EXPECTED_REQUEST_HEADER_FRAME_VERSION2: &[u8] = &[
@@ -1735,6 +1752,12 @@ mod tests {
                         server.read_and_check_stream_data(
                             stream_id,
                             ENCODER_STREAM_CAP_INSTRUCTION,
+                            false,
+                        );
+                    } else if stream_id == CLIENT_SIDE_CONTROL_STREAM_ID {
+                        server.read_and_check_stream_data(
+                            stream_id,
+                            &expected_priority_update_frame(request_stream_id),
                             false,
                         );
                     } else {
