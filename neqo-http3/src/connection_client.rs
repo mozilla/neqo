@@ -918,7 +918,7 @@ impl Http3Client {
                     }
                 }
                 ConnectionEvent::Datagram(dgram) => {
-                    self.base_handler.handle_datagram(dgram);
+                    self.base_handler.handle_datagram(dgram, &mut self.conn)?;
                 }
                 ConnectionEvent::OutgoingDatagramSpaceAvailable { stream_id } => {
                     self.events.datagram_space_available(stream_id);
@@ -1192,9 +1192,9 @@ mod tests {
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
-        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamDataLimit,
-        StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, DatagramQueueOutcome,
+        Error as TransportError, INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output,
+        State, StreamDataLimit, StreamId, StreamType, Version, streams::SendGroupId,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -1209,6 +1209,7 @@ mod tests {
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
+        connection::MAX_QUARTER_STREAM_ID,
         frames::{HFrame, HFrameType, hframe::MAX_HEADER_BYTES},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
@@ -6114,5 +6115,102 @@ mod tests {
                 client_stop_sending_and_stream_test(separate_packets, stop_sending_first);
             }
         }
+    }
+
+    fn send_raw_datagram(client: &mut Http3Client, server: &mut TestServer, payload: Vec<u8>) {
+        let res = server.conn.enqueue_datagram(
+            StreamId::new(0),
+            payload,
+            None,
+            now(),
+            SendGroupId::new(0),
+            0,
+        );
+        assert_eq!(res, Ok(DatagramQueueOutcome::Ok));
+        client.process_input(server.conn.process_output(now()).dgram().unwrap(), now());
+    }
+
+    fn client_receive_raw_datagram(payload: Vec<u8>) -> Http3Client {
+        let (mut client, mut server) = connect();
+        send_raw_datagram(&mut client, &mut server, payload);
+        client
+    }
+
+    fn quarter_stream_id(id: u64) -> Vec<u8> {
+        let mut enc = Encoder::default();
+        enc.encode_varint(id);
+        enc.into()
+    }
+
+    fn send_datagram_on_stream(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: StreamId,
+    ) {
+        send_raw_datagram(client, server, quarter_stream_id(stream_id.as_u64() / 4));
+    }
+
+    /// RFC 9297, Section 2: a datagram on a request without datagram semantics is an error.
+    #[test]
+    fn datagram_on_request_stream() {
+        let (mut client, mut server, stream_id) = connect_and_send_request(false);
+        send_datagram_on_stream(&mut client, &mut server, stream_id);
+        assert_closed(&client, &Error::HttpDatagram);
+    }
+
+    /// RFC 9297, Section 2.1: a datagram after the receive side is closed is silently dropped,
+    /// one for a stream the client never opened is an error.
+    #[test]
+    fn datagram_on_request_stream_recv_closed() {
+        let (mut client, mut server, stream_id) = connect_and_send_request(false);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            stream_id,
+            HTTP_RESPONSE_2,
+            true,
+        );
+        let (_, fin) = client.read_data(now(), stream_id, &mut [0; 100]).unwrap();
+        assert!(fin);
+        send_datagram_on_stream(&mut client, &mut server, stream_id);
+        assert_eq!(client.state(), Http3State::Connected);
+        let unopened = StreamId::from(stream_id.as_u64() + 4);
+        send_datagram_on_stream(&mut client, &mut server, unopened);
+        assert_closed(&client, &Error::HttpId);
+    }
+
+    #[test]
+    fn datagram_on_request_stream_fin_unread() {
+        let (mut client, mut server, stream_id) = connect_and_send_request(false);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            stream_id,
+            HTTP_RESPONSE_2,
+            true,
+        );
+        send_datagram_on_stream(&mut client, &mut server, stream_id);
+        assert_eq!(client.state(), Http3State::Connected);
+        let mut buf = [0; 100];
+        assert_eq!(client.read_data(now(), stream_id, &mut buf), Ok((3, true)));
+        assert_eq!(&buf[..3], b"abc");
+    }
+
+    /// RFC 9297, Section 2.1: a Quarter Stream ID that cannot be parsed or exceeds 2^60-1.
+    #[test]
+    fn datagram_invalid_quarter_stream_id() {
+        let too_large = quarter_stream_id(MAX_QUARTER_STREAM_ID + 1);
+        for payload in [vec![], vec![0x40], too_large] {
+            let client = client_receive_raw_datagram(payload);
+            assert_closed(&client, &Error::HttpDatagram);
+        }
+    }
+
+    /// RFC 9297, Section 2.1: 2^60-1 is the largest legal Quarter Stream ID, but the client never
+    /// opened that stream.
+    #[test]
+    fn datagram_max_quarter_stream_id() {
+        let client = client_receive_raw_datagram(quarter_stream_id(MAX_QUARTER_STREAM_ID));
+        assert_closed(&client, &Error::HttpId);
     }
 }
