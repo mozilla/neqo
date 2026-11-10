@@ -101,14 +101,18 @@ impl fmt::Display for Priority {
 #[derive(Debug)]
 pub struct PriorityHandler {
     priority: Priority,
-    last_send_priority: Priority,
+    last_sent_priority_update: Option<Priority>,
 }
 
 impl PriorityHandler {
-    pub const fn new(priority: Priority) -> Self {
+    pub const fn new(priority: Priority, send_initial_priority_update: bool) -> Self {
         Self {
             priority,
-            last_send_priority: priority,
+            last_sent_priority_update: if send_initial_priority_update {
+                None
+            } else {
+                Some(priority)
+            },
         }
     }
 
@@ -127,12 +131,13 @@ impl PriorityHandler {
     }
 
     pub const fn priority_update_sent(&mut self) {
-        self.last_send_priority = self.priority;
+        self.last_sent_priority_update = Some(self.priority);
     }
 
-    /// Returns `HFrame` if an priority update is outstanding
+    /// Returns `HFrame` if an priority update is outstanding or an initial `PRIORITY_UPDATE` frame
+    /// should be sent.
     pub fn maybe_encode_frame(&self, stream_id: StreamId) -> Option<HFrame> {
-        if self.priority == self.last_send_priority {
+        if Some(self.priority) == self.last_sent_priority_update {
             None
         } else {
             Some(HFrame::PriorityUpdateRequest {
