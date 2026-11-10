@@ -416,7 +416,7 @@ fn forged_server_initial(
         packet::LIMIT,
     );
     builder.initial_token(token);
-    builder.pn(pn, 1);
+    builder.set_pn(pn, 1);
     assert!(builder.write_varint_frame(frames));
     builder.encode([0; 20]); // PADDING, for the header protection sample.
     builder.build(&mut write).unwrap().into()

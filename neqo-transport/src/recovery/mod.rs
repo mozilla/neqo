@@ -239,12 +239,15 @@ impl LossRecoverySpace {
             self.last_ack_eliciting = Some(sent_packet.time_sent());
         }
         self.sent_packets.track(sent_packet);
-        if !ack_eliciting
-            && self.sent_packets.len() - self.in_flight_outstanding > MAX_TRACKED_ACK_ONLY
-        {
+        if !ack_eliciting && self.ack_only_count() > MAX_TRACKED_ACK_ONLY {
             self.sent_packets
                 .remove_oldest_ack_only(MAX_TRACKED_ACK_ONLY / 2);
         }
+    }
+
+    /// The number of tracked packets that are not ack-eliciting.
+    fn ack_only_count(&self) -> usize {
+        self.sent_packets.len() - self.in_flight_outstanding
     }
 
     /// If we are only sending ACK frames, send a PING frame after 2 PTOs so that
@@ -1324,16 +1327,21 @@ mod tests {
         );
     }
 
+    fn short_packet(pn: packet::Number, time: Instant, ack_eliciting: bool) -> sent::Packet {
+        let tokens = recovery::Tokens::new();
+        sent::Packet::new(
+            packet::Type::Short,
+            pn,
+            time,
+            ack_eliciting,
+            tokens,
+            ON_SENT_SIZE,
+        )
+    }
+
     fn add_sent(lrs: &mut LossRecoverySpace, max_pn: packet::Number) {
         for pn in 0..=max_pn {
-            lrs.on_packet_sent(sent::Packet::new(
-                packet::Type::Short,
-                pn,
-                pn_time(pn),
-                true,
-                recovery::Tokens::new(),
-                ON_SENT_SIZE,
-            ));
+            lrs.on_packet_sent(short_packet(pn, pn_time(pn), true));
         }
     }
 
@@ -2090,6 +2098,8 @@ mod tests {
 
     /// More ACK-only packets than are tracked.
     const N: packet::Number = 2 * to_u64(MAX_TRACKED_ACK_ONLY);
+    /// One more ACK-only packet than are tracked, sent after the first `N`.
+    const REFILL: Range<packet::Number> = N..N + to_u64(MAX_TRACKED_ACK_ONLY) + 1;
     /// A cleanup delay that outlasts every test.
     const NEVER: Duration = Duration::from_hours(1);
 
@@ -2099,15 +2109,8 @@ mod tests {
         let mut most = 0;
         for pn in pns {
             lrs.detect_lost_packets(pn_time(pn), Duration::ZERO, NEVER, &mut Vec::new());
-            most = max(most, lrs.sent_packets.len() - lrs.in_flight_outstanding);
-            lrs.on_packet_sent(sent::Packet::new(
-                packet::Type::Short,
-                pn,
-                pn_time(pn),
-                false,
-                recovery::Tokens::new(),
-                ON_SENT_SIZE,
-            ));
+            most = max(most, lrs.ack_only_count());
+            lrs.on_packet_sent(short_packet(pn, pn_time(pn), false));
         }
         most
     }
@@ -2126,8 +2129,7 @@ mod tests {
         let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
         send_ack_only(&mut lrs, 0..N);
         lrs.remove_acked(vec![0..=N], &mut Stats::default());
-        let refill = N..N + to_u64(MAX_TRACKED_ACK_ONLY) + 1;
-        assert_eq!(send_ack_only(&mut lrs, refill), MAX_TRACKED_ACK_ONLY);
+        assert_eq!(send_ack_only(&mut lrs, REFILL), MAX_TRACKED_ACK_ONLY);
     }
 
     /// Expired lost ACK-only packets no longer count towards the limit.
@@ -2138,8 +2140,7 @@ mod tests {
         lrs.largest_acked = Some(N);
         lrs.detect_lost_packets(pn_time(N), Duration::ZERO, Duration::ZERO, &mut Vec::new());
         lrs.remove_old_lost(pn_time(N), Duration::ZERO);
-        let refill = N..N + to_u64(MAX_TRACKED_ACK_ONLY) + 1;
-        assert_eq!(send_ack_only(&mut lrs, refill), MAX_TRACKED_ACK_ONLY);
+        assert_eq!(send_ack_only(&mut lrs, REFILL), MAX_TRACKED_ACK_ONLY);
     }
 
     /// Ack-eliciting packets stay tracked when ACK-only packets are no longer tracked.
@@ -2159,7 +2160,7 @@ mod tests {
         let mut lrs = LossRecoverySpace::new(PacketNumberSpace::ApplicationData);
         add_sent(&mut lrs, 0);
         assert_eq!(send_ack_only(&mut lrs, 1..2 * N), MAX_TRACKED_ACK_ONLY);
-        let tracked = lrs.sent_packets.len() - lrs.in_flight_outstanding;
+        let tracked = lrs.ack_only_count();
         let kept = (2 * N - to_u64(tracked))..2 * N;
         let pns = lrs.sent_packets.iter_mut().map(|p| p.pn());
         assert!(pns.eq(iter::once(0).chain(kept)));
@@ -2229,13 +2230,11 @@ mod tests {
             let ptos = lr.pto_count();
             lr.timeout(now);
             let lrs = lr.spaces.get_mut(app).unwrap();
-            most = max(most, lrs.sent_packets.len() - lrs.in_flight_outstanding);
+            most = max(most, lrs.ack_only_count());
             let pto = lr.path.borrow().rtt().pto(true);
             let probe = pn == 0 || lr.pto_count() > ptos || lr.should_probe(pto, now);
             let eliciting = probe || pn % every == 0;
-            let t = recovery::Tokens::new();
-            let p = sent::Packet::new(packet::Type::Short, pn, now, eliciting, t, ON_SENT_SIZE);
-            lr.on_packet_sent(p, now);
+            lr.on_packet_sent(short_packet(pn, now, eliciting), now);
             let arrival = now + rtt / 2;
             if eliciting && pending.is_none_or(|sent| sent <= arrival) {
                 pending = Some(arrival + delay);
@@ -2289,8 +2288,8 @@ mod tests {
     /// A peer that never sends an ACK frame can't make us track ACK-only packets without bound.
     #[test]
     fn ack_only_tracking_no_ack() {
-        let mut lr = confirmed(DEFAULT_REMOTE_ACK_DELAY);
         let delay = DEFAULT_REMOTE_ACK_DELAY;
+        let mut lr = confirmed(delay);
         let (most, acked) = exchange(&mut lr, 2 * N, ms(1), u64::MAX, TEST_RTT, delay, |_| true);
         assert_eq!((most, acked), (MAX_TRACKED_ACK_ONLY, 0));
     }
@@ -2301,9 +2300,8 @@ mod tests {
         let app = PacketNumberSpace::ApplicationData;
         let mut lr = confirmed(DEFAULT_REMOTE_ACK_DELAY);
         for pn in 0..N {
-            let t = recovery::Tokens::new();
-            let p = sent::Packet::new(packet::Type::Short, pn, pn_time(pn), false, t, ON_SENT_SIZE);
-            lr.on_packet_sent(p.with_padding(pn == 0), pn_time(pn));
+            let p = short_packet(pn, pn_time(pn), false).with_padding(pn == 0);
+            lr.on_packet_sent(p, pn_time(pn));
         }
         assert_eq!(lr.path.borrow().sender().bytes_in_flight(), ON_SENT_SIZE);
         let ack_time = pn_time(N) + TEST_RTT;

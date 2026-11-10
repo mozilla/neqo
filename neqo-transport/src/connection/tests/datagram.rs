@@ -1171,7 +1171,7 @@ fn datagram_is_too_big_only_for_an_empty_full_mtu_packet() {
         None::<&[u8]>,
         60,
     );
-    builder.pn(0, 1);
+    builder.set_pn(0, 1);
     client
         .quic_datagrams
         .write_frames(&mut builder, &mut tokens, &mut stats, false);

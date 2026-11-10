@@ -390,6 +390,12 @@ impl<B: Buffer> Builder<B> {
         }
     }
 
+    /// The packet number set by [`Self::set_pn`].
+    #[must_use]
+    pub const fn pn(&self) -> Number {
+        self.pn
+    }
+
     /// Add a packet number of the given size.
     /// For a long header packet, this also inserts a dummy length.
     /// The length is filled in after calling `build`.
@@ -399,7 +405,7 @@ impl<B: Buffer> Builder<B> {
     /// # Panics
     ///
     /// This will panic if the packet number length is too large.
-    pub fn pn(&mut self, pn: Number, pn_len: usize) {
+    pub fn set_pn(&mut self, pn: Number, pn_len: usize) {
         if self.remaining() < MAX_PACKET_NUMBER_LEN {
             self.limit = 0;
             return;
@@ -1219,7 +1225,7 @@ mod tests {
             packet::LIMIT,
         );
         builder.initial_token(&[]);
-        builder.pn(1, 2);
+        builder.set_pn(1, 2);
         builder.encode(SAMPLE_INITIAL_PAYLOAD);
         let packet = builder.build(&mut prot).expect("build");
         assert_eq!(packet.as_ref(), SAMPLE_INITIAL);
@@ -1286,7 +1292,7 @@ mod tests {
             packet::LIMIT,
         );
         assert!(!builder.is_empty());
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         builder.encode(SAMPLE_SHORT_PAYLOAD); // Enough payload for sampling.
         let packet = builder
             .build(&mut CryptoDxState::test_default_write())
@@ -1306,7 +1312,7 @@ mod tests {
                 packet::LIMIT,
             );
             builder.scramble(true);
-            builder.pn(0, 1);
+            builder.set_pn(0, 1);
             firsts.push(builder.as_ref()[0]);
         }
         let is_set = |bit| move |v| v & bit == bit;
@@ -1399,7 +1405,7 @@ mod tests {
                 Some(ConnectionId::from(SERVER_CID)),
                 packet::LIMIT,
             );
-            builder.pn(0, 1);
+            builder.set_pn(0, 1);
             builder.encode(SAMPLE_SHORT_PAYLOAD);
             reject_reserved_bit(builder, bit);
         }
@@ -1419,7 +1425,7 @@ mod tests {
                 packet::LIMIT,
             );
             builder.initial_token(&[]);
-            builder.pn(0, 1);
+            builder.set_pn(0, 1);
             builder.encode(SAMPLE_INITIAL_PAYLOAD);
             reject_reserved_bit(builder, bit);
         }
@@ -1437,7 +1443,7 @@ mod tests {
             Some(ConnectionId::from(CLIENT_CID)),
             packet::LIMIT,
         );
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         builder.encode([0; 3]);
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(encoder.len(), 45);
@@ -1449,7 +1455,7 @@ mod tests {
             Some(ConnectionId::from(SERVER_CID)),
             packet::LIMIT,
         );
-        builder.pn(1, 3);
+        builder.set_pn(1, 3);
         builder.encode([0]); // Minimal size (packet number is big enough).
         let encoder = builder.build(&mut prot).expect("build");
         assert_eq!(
@@ -1477,7 +1483,7 @@ mod tests {
             None::<&[u8]>,
             packet::LIMIT,
         );
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         builder.encode([1, 2, 3]);
         let packet = builder
             .build(&mut CryptoDxState::test_default_write())
@@ -1499,7 +1505,7 @@ mod tests {
                 None::<&[u8]>,
                 packet::LIMIT,
             );
-            builder.pn(0, 1);
+            builder.set_pn(0, 1);
             builder.scramble(true);
             if (builder.as_ref()[0] & packet::BIT_FIXED_QUIC) == 0 {
                 found_unset = true;
@@ -1524,7 +1530,7 @@ mod tests {
         assert_ne!(builder.remaining(), 0);
         builder.initial_token(&[]);
         assert_ne!(builder.remaining(), 0);
-        builder.pn(1, 2);
+        builder.set_pn(1, 2);
         assert_ne!(builder.remaining(), 0);
         let encoder = builder.abort();
         assert!(encoder.is_empty());
@@ -1545,7 +1551,7 @@ mod tests {
             Some(ConnectionId::from(SERVER_CID)),
             LIMIT_FIRST,
         );
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         builder.enable_padding(true);
         assert!(builder.pad());
         let encoder = builder
@@ -1575,7 +1581,7 @@ mod tests {
             Some(ConnectionId::from(SERVER_CID)),
             100,
         );
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         builder.enable_padding(true);
         builder.mark_full();
         let len = builder.len();
@@ -1617,7 +1623,7 @@ mod tests {
         // Builder::pn needs 2 bytes for the dummy packet length and 4 bytes for
         // the maximum packet number, but only 5 bytes remain. The builder
         // should now be full and needs to be aborted.
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         assert!(builder.is_full());
     }
 
@@ -1637,7 +1643,7 @@ mod tests {
             Some(ConnectionId::from(SERVER_CID)),
             SMALL_LIMIT,
         );
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
 
         // Add more data than the limit allows. This will exceed the limit when
         // combined with header.
