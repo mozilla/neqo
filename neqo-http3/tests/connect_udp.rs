@@ -395,7 +395,7 @@ fn send_dgram_on_non_active_session() {
     );
 }
 
-/// A server datagram, arriving before the server accepted the session, is dropped.
+/// A server datagram, arriving before the server accepted the session, is buffered.
 #[test]
 fn server_datagram_before_accept() {
     for in_order in [true, false] {
@@ -433,12 +433,6 @@ fn server_datagram_before_accept() {
                 ))
             ));
             client.process_input(proxy_dgram, now());
-            assert!(matches!(
-                client.events().next(),
-                Some(Http3ClientEvent::ConnectUdp(
-                    ConnectUdpEvent::Datagram { .. }
-                ))
-            ));
         } else {
             client.process_input(proxy_dgram, now());
             assert_eq!(client.events().next(), None,);
@@ -449,8 +443,13 @@ fn server_datagram_before_accept() {
                     ConnectUdpEvent::NewSession { .. }
                 ))
             ));
-            assert_eq!(client.events().next(), None,);
         }
+        assert!(matches!(
+            client.events().next(),
+            Some(Http3ClientEvent::ConnectUdp(
+                ConnectUdpEvent::Datagram { .. }
+            ))
+        ));
     }
 }
 
