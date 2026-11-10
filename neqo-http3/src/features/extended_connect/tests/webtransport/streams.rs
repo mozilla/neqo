@@ -372,6 +372,43 @@ fn wt_server_stream_bidi_stop_sending() {
     wt.receive_stop_sending_client(wt_server_stream.stream_id());
 }
 
+#[test]
+fn wt_client_stream_bidi_stop_sending_before_header() {
+    const BUF_CLIENT: &[u8] = &[0; 10];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_client_stream = wt.create_wt_stream_client(wt_session.stream_id(), StreamType::BiDi);
+
+    assert_eq!(
+        wt.client.send_data(wt_client_stream, BUF_CLIENT, now()),
+        Ok(BUF_CLIENT.len())
+    );
+    wt.stream_stop_sending_client(wt_client_stream);
+    wt.receive_stop_sending_server(wt_client_stream, Error::HttpNone.code());
+}
+
+#[test]
+fn wt_server_stream_bidi_stop_sending_before_header() {
+    const BUF_SERVER: &[u8] = &[1; 20];
+
+    let mut wt = WtTest::new();
+    let wt_session = wt.create_wt_session();
+    let wt_server_stream = WtTest::create_wt_stream_server(&wt_session, StreamType::BiDi);
+    let stream_id = wt_server_stream.stream_id();
+
+    assert_eq!(
+        wt_server_stream.send_data(BUF_SERVER, now()),
+        Ok(BUF_SERVER.len())
+    );
+    wt.stream_stop_sending_server(&wt_server_stream);
+    wt.receive_stop_sending_client(stream_id);
+    assert_eq!(
+        wt.client.send_data(stream_id, BUF_SERVER, now()),
+        Err(Error::InvalidStreamId)
+    );
+}
+
 // For the following tests the client cancels a session. The streams are in different states:
 //  1) Both sides of a bidirectional client stream are opened.
 //  2) A client unidirectional stream is opened.
