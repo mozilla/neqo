@@ -516,7 +516,7 @@ impl Http3Client {
         &mut self,
         now: Instant,
         method: &'t str,
-        target: T,
+        target: &T,
         headers: &'t [Header],
         priority: Priority,
     ) -> Res<StreamId>
@@ -527,25 +527,8 @@ impl Http3Client {
             warn!("Invalid method CONNECT in fetch. Use Http3Client::connect instead.");
             return Err(Error::InvalidInput);
         }
-        let output = self.base_handler.request(
-            &mut self.conn,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-            &RequestDescription {
-                method,
-                connect_type: None,
-                target,
-                headers,
-                priority,
-            },
-            now,
-        );
-        if let Err(e) = &output
-            && e.connection_error()
-        {
-            self.close(now, e.code(), "");
-        }
-        output
+        let request = RequestDescription::new(method, target, headers, None, priority)?;
+        self.request(&request, now)
     }
 
     /// The function establishes a classic HTTP CONNECT tunnel on top of this
@@ -567,18 +550,22 @@ impl Http3Client {
     where
         A: AsRef<str>,
     {
+        let request = RequestDescription::new(
+            "CONNECT",
+            &("", authority.as_ref(), ""),
+            headers,
+            Some(ConnectType::Classic),
+            priority,
+        )?;
+        self.request(&request, now)
+    }
+
+    fn request(&mut self, request: &RequestDescription, now: Instant) -> Res<StreamId> {
         let output = self.base_handler.request(
             &mut self.conn,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
-            &RequestDescription {
-                method: "CONNECT",
-                connect_type: Some(ConnectType::Classic),
-
-                target: ("", authority.as_ref(), ""),
-                headers,
-                priority,
-            },
+            request,
             now,
         );
         if let Err(e) = &output
@@ -3111,7 +3098,7 @@ mod tests {
             client.fetch(
                 now(),
                 "GET",
-                ("https", "something.com", "/"),
+                &("https", "something.com", "/"),
                 &[],
                 Priority::default()
             ),
@@ -4069,7 +4056,7 @@ mod tests {
                 .fetch(
                     now(),
                     "GET",
-                    ("https", "something.com", "/"),
+                    &("https", "something.com", "/"),
                     &[],
                     Priority::default()
                 )

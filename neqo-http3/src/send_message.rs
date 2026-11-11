@@ -62,15 +62,15 @@ impl MessageState {
     fn new_headers(&mut self, headers: &[Header], message_type: MessageType) -> Res<()> {
         match &self {
             Self::WaitingForHeaders => {
-                // This is only a debug assertion because we expect that application will
-                // do the right thing here and performing the check costs.
-                debug_assert!(headers_valid(headers, message_type).is_ok());
                 match message_type {
                     MessageType::Request => {
-                        *self = Self::WaitingForData;
+                        *self = Self::WaitingForData; // Validated by `RequestDescription::new`.
                     }
                     MessageType::Response => {
-                        if !is_interim(headers)? {
+                        let interim = headers_valid(headers, message_type)
+                            .and_then(|()| is_interim(headers))
+                            .map_err(|_| Error::InvalidInput)?;
+                        if !interim {
                             *self = Self::WaitingForData;
                         }
                     }
