@@ -6,13 +6,14 @@
 
 use std::time::Duration;
 
-use neqo_common::event::Provider as _;
+use neqo_common::{Datagram, event::Provider as _};
 use test_fixture::{datagram, now};
 
 use super::{
     super::{Connection, Output, State},
-    connect, connect_force_idle, default_client, default_server, send_something,
-    ticket_with_new_token,
+    connect, connect_force_idle, default_client, default_server,
+    migration::change_source_port,
+    send_something, ticket_with_new_token,
 };
 use crate::{
     AppError, CloseReason, ConnectionEvent, ERROR_APPLICATION_CLOSE, Error, StreamType,
@@ -305,6 +306,31 @@ fn closing_rate_limited() {
         })
         .collect();
     assert_eq!(responses, [1, 2, 4, 8, 16]);
+}
+
+/// A closing endpoint only answers packets that it attributes to the connection.
+#[test]
+fn closing_ignores_unattributed_packets() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    server.close(now(), 0, "");
+    assert!(server.process_output(now()).dgram().is_some());
+    let dropped = server.stats().dropped_rx;
+
+    let p = send_something(&mut client, now());
+    let mut junk = p.to_vec();
+    junk[2] ^= 0xff; // First connection ID byte after the length.
+    let junk = Datagram::new(p.source(), p.destination(), p.tos(), junk);
+    assert!(server.process(Some(junk), now()).dgram().is_none());
+    assert_eq!(server.stats().dropped_rx, dropped + 1);
+
+    let moved = change_source_port(&p, 1);
+    assert!(server.process(Some(moved), now()).dgram().is_none());
+    assert_eq!(server.stats().dropped_rx, dropped + 2);
+
+    assert!(server.process(Some(p), now()).dgram().is_some());
 }
 
 /// Test that a client can handle a stateless reset correctly.
