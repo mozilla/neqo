@@ -67,7 +67,7 @@ pub enum ConnectionEvent {
     },
     /// Connection state change.
     StateChange(State),
-    /// The server rejected 0-RTT.
+    /// The server rejected 0-RTT, or Version Negotiation discarded it.
     /// This event invalidates all state in streams that has been created.
     /// Any data written to streams needs to be written again.
     ZeroRttRejected,
