@@ -374,6 +374,10 @@ fn change_destination_port(d: &Datagram) -> Datagram {
     Datagram::new(d.source(), new_port(d.destination()), d.tos(), &d[..])
 }
 
+fn change_destination(d: &Datagram, a: SocketAddr) -> Datagram {
+    Datagram::new(d.source(), a, d.tos(), &d[..])
+}
+
 fn change_source_address_and_port(d: &Datagram, i: usize) -> Datagram {
     Datagram::new(
         SocketAddr::new(inc_addr(d.source().ip(), i), inc_port(d.source().port(), i)),
@@ -827,6 +831,40 @@ fn drain(c: &mut Connection, now: Instant) -> (Vec<Datagram>, Duration) {
             Output::None => panic!("there should be a timer"),
         }
     }
+}
+
+/// Old-path packets don't contribute to congestion control for the new path (RFC 9000 §9.4).
+#[test]
+fn old_path_loss_is_not_a_congestion_event() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let now = now();
+    let loss_events = server.stats().cc.congestion_events.loss;
+    let lost = server.stats().lost;
+
+    // Lost on the old path.
+    for _ in 0..3 {
+        drop(send_something(&mut server, now));
+    }
+
+    let dgram = change_source_port(&send_something(&mut client, now), 1);
+    let new_addr = dgram.source();
+    server.process_input(dgram, now);
+    while let Some(d) = server.process_output(now).dgram() {
+        // Drop old-path datagrams; the NAT maps new-path ones to the client.
+        if d.destination() == new_addr {
+            client.process_input(change_destination(&d, DEFAULT_ADDR), now);
+        }
+    }
+
+    // The ACK for the packet carrying the new path's `PATH_CHALLENGE` declares the first old-path
+    // packet lost.
+    while let Some(d) = client.process_output(now).dgram() {
+        server.process_input(change_source_port(&d, 1), now);
+    }
+    assert_eq!(server.stats().lost, lost + 1);
+    assert_eq!(server.stats().cc.congestion_events.loss, loss_events);
 }
 
 #[test]
