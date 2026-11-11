@@ -67,8 +67,10 @@ impl MessageState {
                         *self = Self::WaitingForData; // Validated by `RequestDescription::new`.
                     }
                     MessageType::Response => {
-                        headers_valid(headers, message_type).map_err(|_| Error::InvalidInput)?;
-                        if !is_interim(headers).map_err(|_| Error::InvalidInput)? {
+                        let interim = headers_valid(headers, message_type)
+                            .and_then(|()| is_interim(headers))
+                            .map_err(|_| Error::InvalidInput)?;
+                        if !interim {
                             *self = Self::WaitingForData;
                         }
                     }

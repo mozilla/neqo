@@ -528,19 +528,7 @@ impl Http3Client {
             return Err(Error::InvalidInput);
         }
         let request = RequestDescription::new(method, target, headers, None, priority)?;
-        let output = self.base_handler.request(
-            &mut self.conn,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-            &request,
-            now,
-        );
-        if let Err(e) = &output
-            && e.connection_error()
-        {
-            self.close(now, e.code(), "");
-        }
-        output
+        self.request(&request, now)
     }
 
     /// The function establishes a classic HTTP CONNECT tunnel on top of this
@@ -569,11 +557,15 @@ impl Http3Client {
             Some(ConnectType::Classic),
             priority,
         )?;
+        self.request(&request, now)
+    }
+
+    fn request(&mut self, request: &RequestDescription, now: Instant) -> Res<StreamId> {
         let output = self.base_handler.request(
             &mut self.conn,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
-            &request,
+            request,
             now,
         );
         if let Err(e) = &output

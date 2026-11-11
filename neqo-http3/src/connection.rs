@@ -83,52 +83,38 @@ impl RequestDescription {
         connect_type: Option<ConnectType>,
         priority: Priority,
     ) -> Res<Self> {
-        info!("Request method={method} target: {target:?}");
+        info!("Request method={method} target={target:?}");
         match connect_type {
             Some(_) if method != "CONNECT" => {
-                warn!("Method CONNECT without CONNECT type");
+                warn!("Method {method} with CONNECT type {connect_type:?}");
                 return Err(Error::InvalidInput);
             }
             None if method == "CONNECT" => {
-                warn!("Method {method} with CONNECT type {connect_type:?}");
+                warn!("Method CONNECT without CONNECT type");
                 return Err(Error::InvalidInput);
             }
             _ => {}
         }
 
-        let mut final_headers = match connect_type {
-            None => {
-                vec![
-                    Header::new(":method", method),
-                    Header::new(":scheme", target.scheme()?),
-                    Header::new(":authority", target.authority()),
-                    Header::new(":path", target.path()?),
-                ]
+        let mut final_headers = vec![Header::new(":method", method)];
+        if connect_type == Some(ConnectType::Classic) {
+            // > The :scheme and :path pseudo-header fields are omitted
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
+            final_headers.push(Header::new(":authority", target.authority()));
+        } else {
+            final_headers.extend([
+                Header::new(":scheme", target.scheme()?),
+                Header::new(":authority", target.authority()),
+                Header::new(":path", target.path()?),
+            ]);
+        }
+        if let Some(ConnectType::Extended(protocol)) = connect_type {
+            final_headers.push(Header::new(":protocol", protocol.to_string()));
+            if protocol == ExtendedConnectType::ConnectUdp {
+                final_headers.push(Header::new("capsule-protocol", "?1"));
             }
-            Some(ConnectType::Classic) => {
-                // > The :scheme and :path pseudo-header fields are omitted
-                //
-                // <https://datatracker.ietf.org/doc/html/rfc9114#section-4.4>
-                vec![
-                    Header::new(":method", method),
-                    Header::new(":authority", target.authority()),
-                ]
-            }
-            Some(ConnectType::Extended(protocol)) => {
-                let mut h = vec![
-                    Header::new(":method", method),
-                    Header::new(":scheme", target.scheme()?),
-                    Header::new(":authority", target.authority()),
-                    Header::new(":path", target.path()?),
-                    Header::new(":protocol", protocol.to_string()),
-                ];
-                if protocol == ExtendedConnectType::ConnectUdp {
-                    h.push(Header::new("capsule-protocol", "?1"));
-                }
-                h
-            }
-        };
-
+        }
         final_headers.extend_from_slice(headers);
         headers_valid(&final_headers, MessageType::Request).map_err(|_| Error::InvalidInput)?;
         Ok(Self {

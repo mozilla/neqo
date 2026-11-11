@@ -4,7 +4,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{net::Ipv6Addr, str::from_utf8};
+use std::{
+    net::Ipv6Addr,
+    str::{FromStr, from_utf8},
+};
 
 use enumset::{EnumSet, EnumSetType, enum_set};
 use neqo_common::{Header, header::HeadersExt as _};
@@ -109,6 +112,11 @@ const fn is_tchar(b: u8) -> bool {
     b.is_ascii_alphanumeric() || is_tchar_symbol(b)
 }
 
+/// Whether `s` is a `token` (RFC 9110, Section 5.6.2).
+fn is_token(s: &[u8]) -> bool {
+    !s.is_empty() && s.iter().copied().all(is_tchar)
+}
+
 /// Whether `b` may appear in an HTTP/3 field name (RFC 9114, Section 4.2).
 const fn is_field_name_char(b: u8) -> bool {
     b.is_ascii_lowercase() || b.is_ascii_digit() || is_tchar_symbol(b)
@@ -126,21 +134,21 @@ pub fn request_authority_valid(authority: &[u8]) -> bool {
     authority_valid(authority, false)
 }
 
-/// Whether a request path is in origin form (RFC 9112, Section 3.2.1).
+/// Whether a request path is in origin-form (RFC 9112, Section 3.2.1).
 #[must_use]
 pub fn request_path_valid(path: &[u8]) -> bool {
     // Other VCHARs are accepted, as Firefox sends them unescaped (RFC 3986 allows only pchar).
     path.starts_with(b"/") && path.iter().all(|&b| b.is_ascii_graphic() && b != b'#')
 }
 
-/// Whether a classic CONNECT authority is valid (RFC 9114, Section 4.4).
+/// Whether a CONNECT target is in authority-form (RFC 9112, Section 3.2.3).
 #[must_use]
 pub fn connect_authority_valid(authority: &[u8]) -> bool {
     authority_valid(authority, true)
 }
 
-/// Whether `s` is `*( unreserved / pct-encoded / sub-delims )` (RFC 3986, Section 2).
-fn uri_chars_valid(s: &[u8]) -> bool {
+/// Whether `s` is a `reg-name` (RFC 3986, Section 3.2.2).
+fn is_reg_name(s: &[u8]) -> bool {
     let mut bytes = s.iter();
     while let Some(&b) = bytes.next() {
         let valid = if b == b'%' {
@@ -174,21 +182,25 @@ fn uri_chars_valid(s: &[u8]) -> bool {
 }
 
 /// Whether `a` is `host [ ":" port ]` (RFC 3986, Section 3.2; RFC 9110, Sections 4.2 and 9.3.6).
-fn authority_valid(a: &[u8], connect: bool) -> bool {
+fn authority_valid(a: &[u8], port_required: bool) -> bool {
     let (host, port) = match a.iter().rposition(|&b| b == b':') {
+        Some(i) if i + 1 == a.len() => (&a[..i], None),
         Some(i) if !a[i..].contains(&b']') => (&a[..i], Some(&a[i + 1..])),
         _ => (a, None),
     };
     let host_valid = match host {
-        [b'[', ip @ .., b']'] => from_utf8(ip).is_ok_and(|ip| ip.parse::<Ipv6Addr>().is_ok()),
-        _ => !host.is_empty() && uri_chars_valid(host),
+        [b'[', ip @ .., b']'] => parse::<Ipv6Addr>(ip).is_some(),
+        // TODO: Require a WHATWG valid host string <https://github.com/mozilla/neqo/issues/4328>.
+        _ => !host.is_empty() && is_reg_name(host),
     };
     host_valid
-        && port.map_or(!connect, |p| {
-            (p.is_empty() && !connect)
-                || (p.iter().all(u8::is_ascii_digit)
-                    && from_utf8(p).is_ok_and(|p| p.parse::<u16>().is_ok())) // RFC 6335, Section 6.
+        && port.map_or(!port_required, |p| {
+            p.first().is_some_and(u8::is_ascii_digit) && parse::<u16>(p).is_some_and(|p| p != 0) // RFC 6335, Section 6.
         })
+}
+
+fn parse<T: FromStr>(b: &[u8]) -> Option<T> {
+    from_utf8(b).ok()?.parse().ok()
 }
 
 /// Checks if request/response headers are well formed, i.e. contain
@@ -256,10 +268,11 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
     }
     // Clear the regular header bit, since we only check pseudo headers below.
     pseudo_state.remove(PseudoHeaderState::Regular);
+    let is_connect = method_value == Some(b"CONNECT".as_ref());
     let pseudo_header_mask = match message_type {
         MessageType::Response => enum_set!(PseudoHeaderState::Status),
         MessageType::Request => {
-            if method_value == Some(b"CONNECT".as_ref()) {
+            if is_connect {
                 let connect_mask = PseudoHeaderState::Method | PseudoHeaderState::Authority;
                 if let Some(protocol) = protocol_value {
                     // For a webtransport CONNECT, the :scheme field must be set to https.
@@ -280,7 +293,7 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
 
     if (MessageType::Request == message_type)
         && pseudo_state.contains(PseudoHeaderState::Protocol)
-        && method_value != Some(b"CONNECT".as_ref())
+        && !is_connect
     {
         return Err(Error::InvalidHeader);
     }
@@ -291,29 +304,26 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
 
     let valid = match message_type {
         MessageType::Response => true,
-        MessageType::Request
-            if method_value == Some(b"CONNECT".as_ref()) && protocol_value.is_none() =>
-        {
+        MessageType::Request if is_connect && protocol_value.is_none() => {
             scheme_value.is_none()
                 && path_value.is_none()
                 && authority_value.is_some_and(connect_authority_valid)
         }
         MessageType::Request => match (method_value, scheme_value, authority_value, path_value) {
             (Some(m), Some(s), Some(a), Some(p)) => {
-                !m.is_empty()
-                    && m.iter().all(|&b| is_tchar(b))
+                is_token(m)
                     && request_scheme_valid(s)
                     && request_authority_valid(a)
-                    && (request_path_valid(p) || (p == b"*" && m == b"OPTIONS"))
+                    && (request_path_valid(p) || (p == b"*" && m == b"OPTIONS")) // RFC 9112, Section 3.2.4.
             }
             _ => false,
         },
     };
-    if !valid {
-        return Err(Error::InvalidHeader);
+    if valid {
+        Ok(())
+    } else {
+        Err(Error::InvalidHeader)
     }
-
-    Ok(())
 }
 
 /// Checks if trailers are well formed, i.e. pseudo headers are not
@@ -468,13 +478,8 @@ mod tests {
 
     #[test]
     fn regular_request_valid() {
-        let headers = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "something.com"),
-            Header::new(":path", "/index.html"),
-        ];
-        assert!(headers_valid(&headers, MessageType::Request).is_ok());
+        let headers = request("GET", "https", "something.com", "/index.html");
+        assert_eq!(check(&headers), Ok(()));
     }
 
     #[test]
@@ -483,25 +488,13 @@ mod tests {
         // (RFC 9114, Section 4.3), otherwise they can be carried verbatim into a
         // downstream HTTP/1.1 serialization and split the message.
         for bad in ["x\rname", "x\nname", "x\r\nname"] {
-            let headers = vec![
-                Header::new(":method", "GET"),
-                Header::new(":scheme", "https"),
-                Header::new(":authority", "something.com"),
-                Header::new(":path", "/"),
-                Header::new(bad, "value"),
-            ];
-            assert!(headers_valid(&headers, MessageType::Request).is_err());
+            let headers = [get_request(), field(bad, "value")].concat();
+            assert_eq!(check(&headers), Err(Error::InvalidHeader));
         }
 
         // The same request with a clean field name is accepted.
-        let headers = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "something.com"),
-            Header::new(":path", "/"),
-            Header::new("xname", "value"),
-        ];
-        assert!(headers_valid(&headers, MessageType::Request).is_ok());
+        let headers = [get_request(), field("xname", "value")].concat();
+        assert_eq!(check(&headers), Ok(()));
     }
 
     #[test]
@@ -510,24 +503,13 @@ mod tests {
         // as malformed (RFC 9114, Section 4.3), otherwise they can be carried
         // verbatim into a downstream HTTP/1.1 serialization and split the message.
         for bad in [b"v\rx".as_slice(), b"v\nx", b"v\r\nx", b"v\0x"] {
-            let headers = vec![
-                Header::new(":method", "GET"),
-                Header::new(":scheme", "https"),
-                Header::new(":authority", "something.com"),
-                Header::new(":path", "/"),
-                Header::new("name", bad),
-            ];
-            assert!(headers_valid(&headers, MessageType::Request).is_err());
+            let headers = [get_request(), field("name", bad)].concat();
+            assert_eq!(check(&headers), Err(Error::InvalidHeader));
         }
 
         // The same bytes in a pseudo-header value are rejected too.
-        let headers = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "something.com"),
-            Header::new(":path", b"/\r\nx".as_slice()),
-        ];
-        assert!(headers_valid(&headers, MessageType::Request).is_err());
+        let headers = request("GET", "https", "something.com", "/\r\nx");
+        assert_eq!(check(&headers), Err(Error::InvalidHeader));
     }
 
     #[test]
@@ -542,17 +524,8 @@ mod tests {
                 Err(Error::InvalidHeader)
             );
 
-            let request = vec![
-                Header::new(":method", "GET"),
-                Header::new(":scheme", "https"),
-                Header::new(":authority", "something.com"),
-                Header::new(":path", "/"),
-                Header::new(bad, "1"),
-            ];
-            assert_eq!(
-                headers_valid(&request, MessageType::Request),
-                Err(Error::InvalidHeader)
-            );
+            let request = [get_request(), field(bad, "1")].concat();
+            assert_eq!(check(&request), Err(Error::InvalidHeader));
         }
 
         // Every lowercase tchar is allowed.
@@ -569,14 +542,12 @@ mod tests {
         let response = vec![Header::new(":status", "200"), Header::new("x", value)];
         assert_eq!(headers_valid(&response, MessageType::Response), Ok(()));
 
-        let request = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "something.com"),
-            Header::new(":path", "/"),
-            Header::new("x", value),
-        ];
-        assert_eq!(headers_valid(&request, MessageType::Request), Ok(()));
+        let request = [get_request(), field("x", value)].concat();
+        assert_eq!(check(&request), Ok(()));
+    }
+
+    fn get_request() -> Vec<Header> {
+        request("GET", "https", "something.com", "/")
     }
 
     fn request(method: &str, scheme: &str, authority: &str, path: &str) -> Vec<Header> {
@@ -603,7 +574,7 @@ mod tests {
         ]
     }
 
-    fn field(name: &str, value: &str) -> Vec<Header> {
+    fn field(name: &str, value: impl Into<Vec<u8>>) -> Vec<Header> {
         vec![Header::new(name, value)]
     }
 
@@ -701,6 +672,9 @@ mod tests {
             request("GET", "https", "[v1F.a:b]", "/"),
             request("GET", "https", "[V1.x]", "/"),
             request("GET", "https", "a.example:+443", "/"),
+            request("GET", "https", "a.example:0", "/"),
+            request("GET", "https", "a.example:00", "/"),
+            connect("a.example:0"),
             [no_authority("https"), field("host", "a.example:abc")].concat(),
             connect(":443"),
             connect("a.example:65536"),
@@ -730,7 +704,6 @@ mod tests {
             request("GET", "https", "a.example", "/x?%zz"),
             request("GET", "https", "a.example", &format!("/{vchars}")),
             request("GET", "https", "a.example:", "/"),
-            request("GET", "https", "a.example:0", "/"),
             request("GET", "https", "a.example:0443", "/"),
             request("GET", "https", "a.example:65535", "/"),
             request("GET", "https", "a_b-c~!$&'()*+,;=%2E", "/"),
@@ -738,11 +711,25 @@ mod tests {
             request("GET", "https", "[::1]", "/"),
             request("GET", "https", "[2001:db8::192.0.2.1]:443", "/"),
             [no_authority("https"), field("host", "a.example:443")].concat(),
-            connect("a.example:0"),
             connect("a.example:65535"),
         ] {
             assert_eq!(check(&good), Ok(()));
         }
+    }
+
+    #[test]
+    fn reject_unknown_pseudo_header() {
+        let request = [
+            request("GET", "https", "a.example", "/"),
+            field(":foo", "x"),
+        ]
+        .concat();
+        assert_eq!(check(&request), Err(Error::InvalidHeader));
+        let response = [Header::new(":status", "200"), Header::new(":path", "/")];
+        assert_eq!(
+            headers_valid(&response, MessageType::Response),
+            Err(Error::InvalidHeader)
+        );
     }
 
     #[test]
@@ -760,25 +747,13 @@ mod tests {
             let response = vec![Header::new(":status", "200"), Header::new(name, "x")];
             assert!(headers_valid(&response, MessageType::Response).is_err());
 
-            let request = vec![
-                Header::new(":method", "GET"),
-                Header::new(":scheme", "https"),
-                Header::new(":authority", "something.com"),
-                Header::new(":path", "/"),
-                Header::new(name, "x"),
-            ];
-            assert!(headers_valid(&request, MessageType::Request).is_err());
+            let request = [get_request(), field(name, "x")].concat();
+            assert_eq!(check(&request), Err(Error::InvalidHeader));
         }
 
         // TE is the sole exception, but only carrying the value "trailers".
-        let ok = vec![
-            Header::new(":method", "GET"),
-            Header::new(":scheme", "https"),
-            Header::new(":authority", "something.com"),
-            Header::new(":path", "/"),
-            Header::new("te", "trailers"),
-        ];
-        assert!(headers_valid(&ok, MessageType::Request).is_ok());
+        let ok = [get_request(), field("te", "trailers")].concat();
+        assert_eq!(check(&ok), Ok(()));
     }
 
     #[test]
