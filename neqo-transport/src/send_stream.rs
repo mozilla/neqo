@@ -2604,7 +2604,7 @@ mod tests {
 
         // Higher-priority sendordered stream with only a few bytes: it easily fits
         // alongside the regular stream if the scheduler gives it a turn.
-        let mut s = SendStream::new(sendordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(sendordered, 1 << 20, conn_fc, conn_events);
         s.send(&[0; 8]).unwrap();
         ss.insert(sendordered, s);
         ss.set_fairness(sendordered, true).unwrap();
@@ -2667,7 +2667,7 @@ mod tests {
 
         // Group 2: a separate group so the multi-group scheduler path is taken.
         let other = StreamId::from(8);
-        let mut s = SendStream::new(other, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(other, 1 << 20, conn_fc, conn_events);
         s.send(&[0; 8]).unwrap();
         ss.insert(other, s);
         ss.set_fairness(other, true).unwrap();
@@ -2732,7 +2732,7 @@ mod tests {
         ss.insert(data_high, s);
         ss.set_sendorder(data_high, Some(100)).unwrap();
 
-        let mut s = SendStream::new(low, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(low, 1 << 20, conn_fc, conn_events);
         s.send(&[0; 8]).unwrap();
         ss.insert(low, s);
         ss.set_sendorder(low, Some(50)).unwrap();
@@ -2790,7 +2790,7 @@ mod tests {
         // A drained sendordered stream makes `sendordered` non-empty so write_frames takes
         // the general path and reaches the regular bucket after the (empty) ordered pass.
         let ordered = StreamId::from(8);
-        let s = SendStream::new(ordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let s = SendStream::new(ordered, 1 << 20, conn_fc, conn_events);
         ss.insert(ordered, s);
         ss.set_sendorder(ordered, Some(100)).unwrap();
 
