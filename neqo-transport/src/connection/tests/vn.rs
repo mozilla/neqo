@@ -15,7 +15,7 @@ use test_fixture::{
 use super::{
     super::{CloseReason, Connection, ConnectionEvent, Output, State, ZeroRttState},
     CryptoWriter, connect, connect_fail, default_client, default_server, exchange_ticket,
-    new_client, new_server, send_something,
+    new_client, new_server, send_something, v1_only,
 };
 #[cfg(not(feature = "disable-encryption"))]
 use super::{assert_error, forged_server_initial};
@@ -369,10 +369,7 @@ fn version_negotiation_downgrade() {
         new_server(ConnectionParameters::default().versions(DOWNGRADE, Version::all()));
 
     // Start the handshake and spoof a VN packet.
-    let initial = client.process_output(now()).dgram().unwrap();
-    let vn = create_vn(&initial, &[DOWNGRADE.wire_version()]);
-    let dgram = datagram(vn);
-    client.process_input(dgram, now());
+    vn_to_client(&mut client, &[DOWNGRADE]);
 
     connect_fail(
         &mut client,
@@ -475,10 +472,8 @@ fn invalid_current_version_server() {
 /// The server chooses a version that the client knows but did not offer.
 #[test]
 fn chosen_version_not_offered_by_client() {
-    let just_v1 =
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]);
-    let mut client = new_client(just_v1.clone());
-    let mut server = new_server(just_v1);
+    let mut client = new_client(v1_only());
+    let mut server = new_server(v1_only());
     server
         .set_local_tparam(
             VersionInformation,
@@ -588,17 +583,19 @@ fn version_negotiation_empty_available_versions() {
 /// if the server's Version Information is missing, even for version 1.
 #[test]
 fn version_negotiation_missing_version_information() {
+    let v1_server_without_vi = || {
+        let server = new_server(v1_only());
+        server
+            .tps
+            .borrow_mut()
+            .local_mut()
+            .remove(VersionInformation);
+        server
+    };
+
     let mut client =
         new_client(ConnectionParameters::default().versions(Version::Version2, Version::all()));
-    let mut server = new_server(
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
-    );
-    server
-        .tps
-        .borrow_mut()
-        .local_mut()
-        .remove(VersionInformation);
-
+    let mut server = v1_server_without_vi();
     vn_to_client(&mut client, &[Version::Version1]);
     connect_fail(
         &mut client,
@@ -609,14 +606,7 @@ fn version_negotiation_missing_version_information() {
 
     // Without Version Negotiation, version 1 does not need Version Information.
     let mut client = default_client();
-    let mut server = new_server(
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
-    );
-    server
-        .tps
-        .borrow_mut()
-        .local_mut()
-        .remove(VersionInformation);
+    let mut server = v1_server_without_vi();
     connect(&mut client, &mut server);
 }
 
@@ -667,9 +657,7 @@ fn compatible_upgrade_0rtt_rejected() {
     );
     let mut client = new_client(prefer_v2.clone());
     // The server will start with this so that the client resumes with v1.
-    let just_v1 =
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]);
-    let mut server = new_server(just_v1);
+    let mut server = new_server(v1_only());
 
     connect(&mut client, &mut server);
     assert_eq!(client.version(), Version::Version1);

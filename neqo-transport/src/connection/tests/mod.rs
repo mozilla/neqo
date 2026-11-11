@@ -174,6 +174,9 @@ pub fn new_server(params: ConnectionParameters) -> Connection {
 pub fn default_server() -> Connection {
     new_server(ConnectionParameters::default())
 }
+fn v1_only() -> ConnectionParameters {
+    ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1])
+}
 pub fn resumed_server(client: &Connection) -> Connection {
     new_server(ConnectionParameters::default().versions(client.version(), Version::all()))
 }

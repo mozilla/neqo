@@ -47,7 +47,7 @@ use crate::{
     Pmtud, StreamId, StreamType, Version,
     connection::{
         AddressValidation,
-        tests::{exchange_ticket, new_client, new_server, new_server_with_qlog},
+        tests::{exchange_ticket, new_client, new_server, new_server_with_qlog, v1_only},
     },
     datagram_queue::DatagramQueueOutcome,
     events::ConnectionEvent,
@@ -1358,12 +1358,7 @@ fn duplicate_tp_client() {
     // `InitialMaxData` as a four-byte varint, so the rewrite keeps all lengths.
     const INITIAL_MAX_DATA: &[u8] = &[0x80, 0x00, 0x00, 0x04];
 
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .versions(Version::Version1, vec![Version::Version1])
-            .mlkem(false)
-            .sni_slicing(false),
-    );
+    let mut client = new_client(v1_only().mlkem(false).sni_slicing(false));
     let mut server = default_server();
     client
         .set_local_tparam(TestTransportParameter, TransportParameter::Bytes(vec![1]))

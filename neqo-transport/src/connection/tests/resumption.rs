@@ -7,16 +7,16 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{Datagram, Decoder, Role, event::Provider as _};
-use nss::{AuthenticationStatus, RecordProtectionOps as _};
+use nss::AuthenticationStatus;
 use test_fixture::{
     assertions,
-    header_protection::{self, decode_initial_header, initial_aead_and_hp},
+    header_protection::{decode_initial_header, rewrite_initial},
     now, split_datagram,
 };
 
 use super::{
     AT_LEAST_PTO, connect, connect_with_rtt, default_client, default_server, exchange_ticket,
-    get_tokens, maybe_authenticate, new_client, resumed_server, send_something,
+    get_tokens, maybe_authenticate, new_client, resumed_server, send_something, v1_only,
 };
 use crate::{
     Connection, ConnectionParameters, DEFAULT_INITIAL_RTT, Error, MIN_INITIAL_PACKET_SIZE, State,
@@ -89,12 +89,7 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     const ACK_FRAME_1: &[u8] = &[0x02, 0x00, 0x00, 0x00, 0x00];
 
     // This test needs to predicts the exact shape of an ACK frame, so disable randomization.
-    let mut client = new_client(
-        ConnectionParameters::default()
-            .versions(Version::Version1, vec![Version::Version1])
-            .mlkem(false)
-            .randomize_first_pn(false),
-    );
+    let mut client = new_client(v1_only().mlkem(false).randomize_first_pn(false));
     let mut server = default_server();
     let mut now = now();
 
@@ -106,36 +101,19 @@ fn ticket_rtt(rtt: Duration) -> Duration {
     now += rtt / 2;
     let server_packet = server.process(client_initial.dgram(), now).dgram();
     let (server_initial, server_hs) = split_datagram(server_packet.as_ref().unwrap());
-    let (protected_header, _, _, payload) =
-        decode_initial_header(&server_initial, Role::Server).unwrap();
+    let mut packet = rewrite_initial(&server_initial, &client_dcid, Role::Server, |plaintext| {
+        // Now we need to find the frames.  Make some really strong assumptions.
+        let mut dec = Decoder::new(plaintext);
+        assert_eq!(dec.decode(ACK_FRAME_1.len()), Some(ACK_FRAME_1));
+        assert_eq!(dec.decode_varint(), Some(0x06)); // CRYPTO
+        assert_eq!(dec.decode_varint(), Some(0x00)); // offset
+        dec.skip_vvec(); // Skip over the payload.
 
-    // Now decrypt the packet.
-    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(&client_dcid, Role::Server);
-    let (header, pn) = header_protection::remove(&hp, protected_header, payload);
-    let pn_len = header.len() - protected_header.len();
-    let mut buf = vec![0; payload.len()];
-    let mut plaintext = aead_dec
-        .decrypt(pn, &header, &payload[pn_len..], &mut buf)
-        .unwrap()
-        .to_owned();
-
-    // Now we need to find the frames.  Make some really strong assumptions.
-    let mut dec = Decoder::new(&plaintext[..]);
-    assert_eq!(dec.decode(ACK_FRAME_1.len()), Some(ACK_FRAME_1));
-    assert_eq!(dec.decode_varint(), Some(0x06)); // CRYPTO
-    assert_eq!(dec.decode_varint(), Some(0x00)); // offset
-    dec.skip_vvec(); // Skip over the payload.
-
-    // Replace the ACK frame with PADDING.
-    plaintext[..ACK_FRAME_1.len()].fill(u8::from(FrameType::Padding));
-
-    // And rebuild a packet.
-    let mut packet = header.clone();
+        // Replace the ACK frame with PADDING.
+        plaintext[..ACK_FRAME_1.len()].fill(u8::from(FrameType::Padding));
+    })
+    .to_vec();
     packet.resize(MIN_INITIAL_PACKET_SIZE, 0);
-    aead_enc
-        .encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
-        .unwrap();
-    header_protection::apply(&hp, &mut packet, protected_header.len()..header.len());
     let si = Datagram::new(
         server_initial.source(),
         server_initial.destination(),
@@ -366,9 +344,7 @@ fn ticket_before_handshake_done() {
 /// If a version is selected and subsequently disabled, resumption fails.
 #[test]
 fn resume_disabled_version() {
-    let mut client = new_client(
-        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]),
-    );
+    let mut client = new_client(v1_only());
     let mut server = default_server();
     connect(&mut client, &mut server);
     let token = exchange_ticket(&mut client, &mut server, now());
