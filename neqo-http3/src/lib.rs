@@ -133,6 +133,7 @@ while let Some(event) = client.next_event() {
 
 */
 
+mod authority_validation;
 mod buffered_send_stream;
 mod client_events;
 mod conn_params;

@@ -7,7 +7,7 @@
 use enumset::{EnumSet, EnumSetType, enum_set};
 use neqo_common::{Header, header::HeadersExt as _};
 
-use crate::{Error, MessageType, Res};
+use crate::{Error, MessageType, Res, authority_validation::authority_is_valid};
 
 #[derive(EnumSetType, Debug)]
 enum PseudoHeaderState {
@@ -128,6 +128,14 @@ pub fn headers_valid(headers: &[Header], message_type: MessageType) -> Res<()> {
                 protocol_value = Some(header.value());
             } else if header.name() == ":scheme" {
                 scheme_value = Some(header.value());
+            } else if header.name() == ":authority" {
+                // The value is the request target's host (with an optional
+                // port). Reject a host that WHATWG URL host processing would
+                // reject, so a malformed authority is an error here rather than
+                // in the consumer that eventually parses it.
+                if !core::str::from_utf8(header.value()).is_ok_and(authority_is_valid) {
+                    return Err(Error::InvalidHeader);
+                }
             }
         }
 
@@ -261,6 +269,19 @@ mod tests {
     #[test]
     fn valid_webtransport_connect() {
         assert!(headers_valid(&create_connect_headers(), MessageType::Request).is_ok());
+    }
+
+    #[test]
+    fn authority_host_is_validated() {
+        // A host WHATWG URL processing rejects is refused.
+        let mut headers = create_connect_headers();
+        headers[3] = Header::new(":authority", "-invalid.example.com");
+        assert!(headers_valid(&headers, MessageType::Request).is_err());
+
+        // A valid host, with or without a port, is accepted.
+        let mut headers = create_connect_headers();
+        headers[3] = Header::new(":authority", "example.com:443");
+        assert!(headers_valid(&headers, MessageType::Request).is_ok());
     }
 
     #[test]
