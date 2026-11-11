@@ -297,7 +297,7 @@ mod tests {
     fn fetch(client: &mut Http3Client, method: &str, path: &str) -> StreamId {
         let target = ("https", "something.com", path);
         client
-            .fetch(now(), method, target, &[], Priority::default())
+            .fetch(now(), method, &target, &[], Priority::default())
             .unwrap()
     }
 
