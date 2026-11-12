@@ -6,6 +6,8 @@
 
 #![cfg(test)]
 
+use std::time::Duration;
+
 use http::Uri;
 use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
@@ -15,7 +17,9 @@ use neqo_http3::{
     features::extended_connect::session::CloseReason,
     webtransport::ClientSession as _,
 };
-use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamDataLimit, StreamType};
+use neqo_transport::{
+    ConnectionParameters, DatagramQueueOutcome, Output, StreamDataLimit, StreamType,
+};
 use nss::AuthenticationStatus;
 use test_fixture::{
     DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
@@ -35,6 +39,13 @@ fn disabled_by_default() {
     // Connect client and proxy.
     let _out = test_fixture::connect_peers(&mut client, &mut server);
     assert!(!client.connect_udp_enabled());
+}
+
+/// The URI every connect-udp session in these tests connects to through the proxy.
+fn target_uri() -> Uri {
+    format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
+        .parse()
+        .unwrap()
 }
 
 fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
@@ -72,13 +83,7 @@ fn initiate_new_session_with_client_params(
 
     // Establish connect-udp session.
     let connect_udp_session_id = client
-        .connect_udp_create_session(
-            now(),
-            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
-                .parse::<Uri>()
-                .unwrap(),
-            &[],
-        )
+        .connect_udp_create_session(now(), &target_uri(), &[])
         .unwrap();
     (client, proxy, connect_udp_session_id)
 }
@@ -803,13 +808,7 @@ fn establish_capsule_session(
     }
 
     let session_id = client
-        .connect_udp_create_session(
-            now(),
-            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
-                .parse::<Uri>()
-                .unwrap(),
-            &[],
-        )
+        .connect_udp_create_session(now(), &target_uri(), &[])
         .unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
@@ -981,15 +980,205 @@ fn connect_udp_session_rejected_by_webtransport_datagram_setters() {
         Err(Error::InvalidStreamId)
     );
     assert_eq!(
-        client.webtransport_set_datagram_max_age(
-            session_id,
-            Some(std::time::Duration::from_millis(1)),
-            now()
-        ),
+        client.webtransport_set_datagram_max_age(session_id, Some(Duration::from_millis(1)), now()),
         Err(Error::InvalidStreamId)
     );
     assert_eq!(
         client.webtransport_datagram_queue_capacity(session_id),
         Err(Error::InvalidStreamId)
     );
+}
+
+/// Return a client and proxy with `n` established connect-udp sessions on a single connection.
+///
+/// `datagram_size == None` uses the HTTP DATAGRAM Capsule path.
+fn establish_sessions(
+    datagram_size: Option<u64>,
+    n: usize,
+) -> (Http3Client, Http3Server, Vec<neqo_http3::StreamId>) {
+    fixture_init();
+    let params = || {
+        Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(
+                ConnectionParameters::default().datagram_size(datagram_size.unwrap_or(0)),
+            )
+    };
+    let mut client = http3_client_with_params(params());
+    let mut proxy = http3_server_with_params(params());
+    let out = test_fixture::connect_peers(&mut client, &mut proxy);
+    exchange_packets(&mut client, &mut proxy, false, out);
+
+    let ids: Vec<_> = std::iter::repeat_with(|| {
+        client
+            .connect_udp_create_session(now(), &target_uri(), &[])
+            .unwrap()
+    })
+    .take(n)
+    .collect();
+    exchange_packets(&mut client, &mut proxy, false, None);
+    let mut accepted = 0;
+    while let Some(e) = proxy.next_event() {
+        if let Http3ServerEvent::ConnectUdp(ServerEvent::NewSession { session, .. }) = e {
+            session
+                .response(&SessionAcceptAction::Accept, now())
+                .unwrap();
+            accepted += 1;
+        }
+    }
+    assert_eq!(accepted, n);
+    exchange_packets(&mut client, &mut proxy, false, None);
+    let established = client
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { status: 200, .. })
+            )
+        })
+        .count();
+    assert_eq!(established, n);
+    (client, proxy, ids)
+}
+
+/// Drive client -> proxy one packet at a time until the proxy has surfaced
+/// `expected` UDP datagrams.
+///
+/// Returns the session of each UDP datagram the proxy surfaced, in arrival order.
+fn drain_to_proxy(
+    client: &mut Http3Client,
+    proxy: &mut Http3Server,
+    expected: usize,
+) -> Vec<neqo_http3::StreamId> {
+    assert!(expected < 10_000); // make sure we won't loop forever
+
+    let mut now = now();
+    let mut received = Vec::new();
+    while received.len() < expected {
+        match client.process_output(now) {
+            Output::Datagram(d) => {
+                let reply = proxy.process(Some(d), now).dgram();
+                while let Some(e) = proxy.next_event() {
+                    if let Http3ServerEvent::ConnectUdp(ServerEvent::Datagram { session, .. }) = e {
+                        received.push(session.stream_id());
+                    }
+                }
+                if let Some(r) = reply {
+                    // Send the proxy's ACKs back to the client
+                    client.process_input(r, now);
+                }
+            }
+            Output::Callback(t) => {
+                now += t;
+                if let Some(r) = proxy.process_output(now).dgram() {
+                    client.process_input(r, now);
+                }
+            }
+            Output::None => break,
+        }
+    }
+
+    assert_eq!(
+        received.len(),
+        expected,
+        "proxy received {} of {expected} datagrams",
+        received.len()
+    );
+    received
+}
+
+/// Convert the sequence of UDP datagrams into a string for friendlier assertions.
+///
+/// Each session id gets a letter that identifies it (`A` or `B`).
+fn arrival_order(
+    received: &[neqo_http3::StreamId],
+    session_ids: &[neqo_http3::StreamId],
+) -> String {
+    received
+        .iter()
+        .map(|s| match session_ids.iter().position(|id| id == s) {
+            Some(0) => 'A',
+            Some(1) => 'B',
+            _ => '?',
+        })
+        .collect()
+}
+
+fn send_ok(client: &mut Http3Client, id: neqo_http3::StreamId, len: usize) {
+    assert_eq!(
+        client.connect_udp_send_datagram(id, &vec![0; len], None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+}
+
+/// Session A queues its whole backlog before session B queues anything.
+fn queue_bulk(client: &mut Http3Client, ids: &[neqo_http3::StreamId], per_session: usize) {
+    for &id in ids {
+        for _ in 0..per_session {
+            send_ok(client, id, 1000);
+        }
+    }
+}
+
+/// Sessions take turns queuing one datagram each.
+fn queue_interleaved(client: &mut Http3Client, ids: &[neqo_http3::StreamId], per_session: usize) {
+    for _ in 0..per_session {
+        for &id in ids {
+            send_ok(client, id, 1000);
+        }
+    }
+}
+
+/// QUIC DATAGRAMs round-robin between sessions.
+#[test]
+fn fairness_quic_datagram() {
+    // Bulk
+    let (mut client, mut proxy, ids) = establish_sessions(Some(1500), 2);
+    queue_bulk(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    assert_eq!(arrival_order(&received[..8], &ids), "ABABABAB");
+
+    // Interleaved
+    let (mut client, mut proxy, ids) = establish_sessions(Some(1500), 2);
+    queue_interleaved(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    assert_eq!(arrival_order(&received[..8], &ids), "ABABABAB");
+}
+
+/// QUIC DATAGRAMs round-robin based on datagrams, not bytes: a session sending
+/// large datagrams gets a proportionally larger share of the bandwidth.
+#[test]
+fn fairness_quic_datagram_counts_datagrams_not_bytes() {
+    let (mut client, mut proxy, ids) = establish_sessions(Some(1500), 2);
+    for _ in 0..8 {
+        send_ok(&mut client, ids[0], 1100);
+        send_ok(&mut client, ids[1], 100);
+    }
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    assert_eq!(arrival_order(&received, &ids), "ABABABABABABABAB");
+}
+
+/// HTTP DATAGRAM Capsules have their sessions take turns filling packets.
+#[test]
+fn fairness_capsule() {
+    // Bulk, all datagrams of equal size
+    let (mut client, mut proxy, ids) = establish_sessions(None, 2);
+    queue_bulk(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    assert_eq!(arrival_order(&received[..8], &ids), "ABABABAB");
+
+    // Interleaved, all datagrams of equal size
+    let (mut client, mut proxy, ids) = establish_sessions(None, 2);
+    queue_interleaved(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    assert_eq!(arrival_order(&received[..8], &ids), "ABABABAB");
+
+    // Interleaved, different datagram sizes
+    let (mut client, mut proxy, ids) = establish_sessions(None, 2);
+    for _ in 0..8 {
+        send_ok(&mut client, ids[0], 1100);
+        send_ok(&mut client, ids[1], 550);
+    }
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    assert_eq!(arrival_order(&received, &ids), "ABBABBABBABBAAAA");
 }
