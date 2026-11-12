@@ -225,7 +225,7 @@ fn rebind(
     assert_path_challenge(server, &s1, &before, c1_new.source(), false);
 
     // Restore the original source address, so to the client it looks like the path has not changed.
-    let s1_reb = Datagram::new(s1.source(), local_address(client), s1.tos(), &s1[..]);
+    let s1_reb = change_destination(&s1, local_address(client));
 
     // The client should respond to the PATH_CHALLENGE, without changing paths.
     let before = client.stats().frame_tx;
@@ -240,7 +240,7 @@ fn rebind(
     assert_path_challenge(server, &s2, &before, c2_new.source(), true);
 
     // Restore the original source address, so to the client it looks like the path has not changed.
-    let s2_reb = Datagram::new(s2.source(), local_address(client), s2.tos(), &s2[..]);
+    let s2_reb = change_destination(&s2, local_address(client));
 
     // The client should respond to the PATH_CHALLENGE, without changing paths.
     let before = client.stats().frame_tx;
@@ -266,7 +266,7 @@ fn rebind(
     assert_eq!(s4.destination(), c3_new.source());
 
     // Restore the original source address, so to the client it looks like the path has not changed.
-    let s4_reb = Datagram::new(s4.source(), local_address(client), s4.tos(), &s4[..]);
+    let s4_reb = change_destination(&s4, local_address(client));
 
     // The client should process the ACK and go idle.
     let delay = client.process(Some(s4_reb), now).callback();
@@ -314,7 +314,7 @@ fn rebind(
                     }
                     // Restore the original source address, so to the client it looks like
                     // the path has not changed.
-                    let sx_r = Datagram::new(sx.source(), local_address(client), sx.tos(), &sx[..]);
+                    let sx_r = change_destination(&sx, local_address(client));
                     let before = client.stats().frame_tx;
                     let cx = client.process(Some(sx_r), now).dgram().unwrap();
                     let after = client.stats().frame_tx;
@@ -371,7 +371,7 @@ pub fn change_source_port(d: &Datagram, i: usize) -> Datagram {
 }
 
 fn change_destination_port(d: &Datagram) -> Datagram {
-    Datagram::new(d.source(), new_port(d.destination()), d.tos(), &d[..])
+    change_destination(d, new_port(d.destination()))
 }
 
 fn change_destination(d: &Datagram, a: SocketAddr) -> Datagram {
@@ -553,12 +553,7 @@ fn path_challenges_on_one_path_each_get_a_response() {
     assert_eq!(server.stats().frame_tx.path_challenge, 2);
 
     // The NAT maps the new path back to the client's address.
-    let new_probe = Datagram::new(
-        new_probe.source(),
-        DEFAULT_ADDR,
-        new_probe.tos(),
-        &new_probe[..],
-    );
+    let new_probe = change_destination(&new_probe, DEFAULT_ADDR);
     client.process_input(new_probe, now);
     client.process_input(old_probe, now);
     assert_eq!(client.stats().frame_rx.path_challenge, 2);
