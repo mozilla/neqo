@@ -19,6 +19,7 @@ impl Random {
     #[must_use]
     #[expect(clippy::missing_panics_doc, reason = "These are impossible.")]
     pub fn new(seed: &[u8; 32]) -> Self {
+        #[cfg(not(feature = "disable-random"))]
         assert!(seed.iter().any(|&x| x != 0));
         let mut dec = Decoder::from(&seed);
         Self {
@@ -59,11 +60,19 @@ impl Random {
             return range.start;
         }
 
-        let shift = (max - 1).leading_zeros();
-        loop {
-            let r = self.random() >> shift;
-            if r < max {
-                return range.start + r;
+        #[cfg(feature = "disable-random")]
+        {
+            return range.start + (self.random() % max);
+        }
+
+        #[cfg(not(feature = "disable-random"))]
+        {
+            let shift = (max - 1).leading_zeros();
+            loop {
+                let r = self.random() >> shift;
+                if r < max {
+                    return range.start + r;
+                }
             }
         }
     }
