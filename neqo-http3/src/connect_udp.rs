@@ -37,12 +37,16 @@ use crate::{
 /// backpressure signal PR #3859 added.
 const MAX_BUFFERED_DATAGRAMS: NonZeroUsize = NonZeroUsize::new(10).expect("nonzero");
 
-fn configure_datagram_queue(conn: &mut Connection, session_id: StreamId, now: Instant) {
+/// Transport settings for every connect-udp session.
+fn configure_transport(conn: &mut Connection, session_id: StreamId, now: Instant) -> Res<()> {
     conn.set_max_buffered_datagrams(session_id, Some(MAX_BUFFERED_DATAGRAMS));
 
     // This is equivalent to disabling datagram expiration, which is a
     // WebTransport concept that doesn't apply to connect-udp.
     conn.set_datagram_max_age(session_id, Some(Duration::MAX), now);
+
+    conn.stream_fairness(session_id, true)?;
+    Ok(())
 }
 
 pub trait ClientSession {
@@ -215,7 +219,7 @@ impl Handler for Http3Connection {
             headers,
             extended_connect::ExtendedConnectType::ConnectUdp,
         )?;
-        configure_datagram_queue(conn, id, now);
+        configure_transport(conn, id, now)?;
         Ok(id)
     }
 
@@ -240,7 +244,7 @@ impl Handler for Http3Connection {
             now,
         )?;
         if !matches!(accept_res, SessionAcceptAction::Reject(_)) {
-            configure_datagram_queue(conn, stream_id, now);
+            configure_transport(conn, stream_id, now)?;
         }
         Ok(())
     }
