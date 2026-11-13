@@ -82,8 +82,10 @@ pub struct State {
     ///
     /// <https://datatracker.ietf.org/doc/html/rfc9438#name-variables-of-interest>
     ///
-    /// This is also reset on being application limited.
+    /// This is shifted forward by the duration of application-limited periods.
     t_epoch: Option<Instant>,
+    /// Start of the current application-limited period, if any.
+    app_limited_start: Option<Instant>,
     /// New and unused leftover acked bytes for calculating the reno region increases to `w_est`.
     reno_acked_bytes: f64,
 }
@@ -264,6 +266,7 @@ impl Cubic {
         now: Instant,
     ) {
         self.current.t_epoch = Some(now);
+        self.current.app_limited_start = None;
         self.current.reno_acked_bytes = new_acked_bytes;
         self.current.w_est = curr_cwnd;
         // If `w_max < cwnd_epoch` we take the cubic root from a negative value in `calc_k()`. That
@@ -316,19 +319,22 @@ impl WindowAdjustment for Cubic {
         let new_acked_bytes = convert_to_f64(new_acked_bytes);
         let max_datagram_size = convert_to_f64(max_datagram_size);
 
-        let t_epoch = if let Some(t) = self.current.t_epoch {
+        let t_epoch = if let Some(mut t) = self.current.t_epoch {
             self.current.reno_acked_bytes += new_acked_bytes;
+            // Exclude the app-limited period from `t` as per RFC 9438 sections 4.2 and 5.8.
+            //
+            // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2>
+            // <https://datatracker.ietf.org/doc/html/rfc9438#section-5.8>
+            if let Some(start) = self.current.app_limited_start.take() {
+                t += now.saturating_duration_since(start);
+                self.current.t_epoch = Some(t);
+            }
             t
         } else {
             // If we get here with `self.t_epoch == None` this is a new congestion
             // avoidance stage. It's been set to `None` by
             // [`super::ClassicCongestionController::reduce_cwnd`] or needs to be
-            // initialized after slow start. It could also have been reset by
-            // [`super::ClassicCongestionController::on_app_limited`] in which case we also start a
-            // new congestion avoidance stage for the purpose of resetting
-            // timing as per RFC 9438 section 5.8.
-            //
-            // <https://datatracker.ietf.org/doc/html/rfc9438#app-limited>
+            // initialized after slow start.
             self.start_epoch(curr_cwnd, new_acked_bytes, max_datagram_size, now);
             self.current
                 .t_epoch
@@ -494,10 +500,11 @@ impl WindowAdjustment for Cubic {
         )
     }
 
-    fn on_app_limited(&mut self) {
-        // Reset t_epoch. Let it start again when the congestion controller
-        // exits the app-limited period.
-        self.current.t_epoch = None;
+    fn on_app_limited(&mut self, now: Instant) {
+        // `bytes_for_cwnd_increase` shifts `t_epoch` by the app-limited duration.
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.2>
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-5.8>
+        self.current.app_limited_start.get_or_insert(now);
     }
 
     fn on_persistent_congestion(&mut self, cc_stats: &mut CongestionControlStats) {
@@ -512,8 +519,15 @@ impl WindowAdjustment for Cubic {
         Some(flight_size * Self::BETA_USIZE_DIVIDEND / Self::BETA_USIZE_DIVISOR)
     }
 
-    fn save_undo_state(&mut self) {
-        self.stored = Some(self.current.clone());
+    fn save_undo_state(&mut self, now: Instant) {
+        let mut stored = self.current.clone();
+        // End a pending app-limited period here, so that `t` after an undo excludes it but still
+        // includes the recovery period, as RFC 9438 section 4.2 requires.
+        // <https://datatracker.ietf.org/doc/html/rfc9438#section-4.9.2>
+        if let (Some(t), Some(start)) = (stored.t_epoch, stored.app_limited_start.take()) {
+            stored.t_epoch = Some(t + now.saturating_duration_since(start));
+        }
+        self.stored = Some(stored);
     }
 
     fn restore_undo_state(&mut self, cc_stats: &mut CongestionControlStats) {
