@@ -282,9 +282,7 @@ impl Error {
     pub const fn code(&self) -> AppError {
         match self {
             Self::HttpNone => 0x100,
-            Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream | Self::InvalidHeader => {
-                0x101
-            }
+            Self::HttpGeneralProtocol | Self::HttpGeneralProtocolStream => 0x101,
             Self::HttpInternal(..) => 0x102,
             Self::HttpStreamCreation => 0x103,
             Self::HttpClosedCriticalStream => 0x104,
@@ -297,7 +295,7 @@ impl Error {
             Self::HttpRequestRejected => 0x10b,
             Self::HttpRequestCancelled => 0x10c,
             Self::HttpRequestIncomplete => 0x10d,
-            Self::HttpMessage => 0x10e,
+            Self::HttpMessage | Self::InvalidHeader => 0x10e,
             Self::HttpConnect => 0x10f,
             Self::HttpVersionFallback => 0x110,
             Self::Qpack(e) => e.code(),
@@ -697,7 +695,7 @@ mod tests {
             (Error::HttpNone, 0x100),
             (Error::HttpGeneralProtocol, 0x101),
             (Error::HttpGeneralProtocolStream, 0x101),
-            (Error::InvalidHeader, 0x101),
+            (Error::InvalidHeader, 0x10e),
             (Error::HttpInternal(0), 0x102),
             (Error::HttpStreamCreation, 0x103),
             (Error::HttpClosedCriticalStream, 0x104),

@@ -5611,7 +5611,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: Error::HttpMessage.code(),
                 local: true,
             }
         );
@@ -5624,7 +5624,7 @@ mod tests {
             matches!(e, ConnectionEvent::SendStreamStopSending {
             stream_id,
             app_error
-        } if stream_id == request_stream_id && app_error == Error::InvalidHeader.code())
+        } if stream_id == request_stream_id && app_error == Error::HttpMessage.code())
         };
         assert!(server.conn.events().any(stop_sending_event));
 
@@ -5659,7 +5659,7 @@ mod tests {
             false,
         );
 
-        let error = Error::InvalidHeader.code();
+        let error = Error::HttpMessage.code();
         let reset = Http3ClientEvent::Reset {
             stream_id: request_stream_id,
             error,
@@ -5727,7 +5727,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: Error::HttpMessage.code(),
                 local: true,
             }
         );
@@ -6044,7 +6044,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: Error::HttpGeneralProtocolStream.code(),
                 local: true,
             }
         );
