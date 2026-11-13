@@ -121,6 +121,8 @@ pub struct RangeTracker {
     used: BTreeMap<u64, (u64, RangeState)>,
     /// This is a cache for the output of `first_unmarked_range`, which we check a lot.
     first_unmarked: Option<(u64, Option<u64>)>,
+    /// Everything below this offset is marked, so `first_unmarked_range` resumes from here.
+    marked_below: u64,
 }
 
 impl RangeTracker {
@@ -141,17 +143,22 @@ impl RangeTracker {
             return first_unmarked;
         }
 
-        let mut prev_end = self.acked;
+        let mut prev_end = max(self.acked, self.marked_below);
+        if let Some((&off, &(len, _))) = self.used.range(..prev_end).next_back() {
+            prev_end = max(prev_end, off + len); // That range might have been extended.
+        }
 
-        for (&cur_off, &(cur_len, _)) in &self.used {
+        for (&cur_off, &(cur_len, _)) in self.used.range(prev_end..) {
             if prev_end == cur_off {
                 prev_end = cur_off + cur_len;
             } else {
                 let res = (prev_end, Some(cur_off - prev_end));
+                self.marked_below = prev_end;
                 self.first_unmarked = Some(res);
                 return res;
             }
         }
+        self.marked_below = prev_end;
         self.first_unmarked = Some((prev_end, None));
         (prev_end, None)
     }
@@ -162,16 +169,18 @@ impl RangeTracker {
         while let Some(e) = self.used.first_entry() {
             match self.acked.cmp(e.key()) {
                 Ordering::Greater => {
-                    let (off, (len, state)) = e.remove_entry();
+                    let (off, (len, state)) = (*e.key(), *e.get());
                     let overflow = (off + len).saturating_sub(self.acked);
-                    if overflow > 0 {
-                        if state == RangeState::Acked {
-                            self.acked += overflow;
-                        } else {
-                            self.used.insert(self.acked, (overflow, state));
-                        }
-                        break;
+                    if overflow == 0 {
+                        e.remove();
+                        continue;
                     }
+                    // A sent range that straddles `acked` keeps its key rather than being moved.
+                    if state == RangeState::Acked {
+                        e.remove();
+                        self.acked += overflow;
+                    }
+                    break;
                 }
                 Ordering::Equal => {
                     if e.get().1 == RangeState::Acked {
@@ -205,7 +214,10 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // Only an ACK that overlaps the first unmarked range can change it.
+        self.first_unmarked.take_if(|&mut (start, len)| {
+            end > start && len.is_none_or(|len| new_off < start + len)
+        });
         if new_off == self.acked {
             self.acked += new_len;
             self.coalesce_acked();
@@ -308,7 +320,25 @@ impl RangeTracker {
             return;
         }
 
-        self.first_unmarked = None;
+        // A send that starts at the first unmarked range but doesn't fill it just shrinks it.
+        self.first_unmarked = match self.first_unmarked {
+            Some((start, len)) if new_off == start && len.is_none_or(|len| new_len < len) => {
+                Some((start + new_len, len.map(|len| len - new_len)))
+            }
+            _ => None,
+        };
+        if let Some((start, _)) = self.first_unmarked {
+            self.marked_below = start;
+        }
+
+        // Sending right after the last range, which is sent, just extends it.
+        if let Some(mut last) = self.used.last_entry()
+            && last.get().1 == RangeState::Sent
+            && *last.key() + last.get().0 == new_off
+        {
+            last.get_mut().0 += new_len;
+            return;
+        }
 
         // Get all existing ranges that start within this new range.
         let covered = self
@@ -395,6 +425,10 @@ impl RangeTracker {
         self.first_unmarked = None;
         let len = to_u64(len);
         let end_off = off + len;
+        let off = max(off, self.acked); // The first range can start below `acked`.
+        if off >= end_off {
+            return false;
+        }
 
         let mut to_remove = SmallVec::<[_; 8]>::new();
         let mut to_add = None;
@@ -425,6 +459,7 @@ impl RangeTracker {
                 } else {
                     to_remove.push(*cur_off);
                 }
+                self.marked_below = min(self.marked_below, max(off, *cur_off));
             }
 
             if head {
@@ -2981,7 +3016,7 @@ mod tests {
             acked: 4,
             ..Default::default()
         };
-        canon.used.insert(4, (2, RangeState::Sent));
+        canon.used.insert(3, (3, RangeState::Sent)); // The straddling range keeps its key.
         assert_eq!(rt, canon);
     }
 
@@ -3339,6 +3374,61 @@ mod tests {
 
         assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
         assert_eq!(rt.highest_offset(), 30);
+    }
+
+    /// The search for the first unmarked range follows extended, lost and acked ranges.
+    #[test]
+    fn first_unmarked_range_resumes() {
+        let mut rt = RangeTracker::default();
+        rt.mark_sent(0, 10);
+        assert_eq!(rt.first_unmarked_range(), (10, None));
+
+        rt.mark_sent(10, 5); // Extends a range that starts before the last result.
+        assert_eq!(rt.first_unmarked_range(), (15, None));
+        rt.mark_acked(20, 5);
+        assert_eq!(rt.first_unmarked_range(), (15, Some(5)));
+        rt.mark_sent(15, 5);
+        assert_eq!(rt.first_unmarked_range(), (25, None));
+
+        rt.mark_acked(5, 5);
+        assert_eq!(rt.first_unmarked_range(), (25, None));
+        rt.unmark_range(7, 15); // Only 10..20 is `Sent`.
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+        rt.unmark_range(2, 2);
+        assert_eq!(rt.first_unmarked_range(), (2, Some(2)));
+        rt.mark_sent(2, 2);
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+
+        rt.mark_acked(0, 20); // The acknowledged prefix overtakes the last result.
+        assert_eq!(rt.acked_from_zero(), 25);
+        assert_eq!(rt.first_unmarked_range(), (25, None));
+    }
+
+    /// Sending at the first unmarked range and acknowledging outside it keep the cached result.
+    #[test]
+    fn first_unmarked_range_cache_kept() {
+        let mut rt = RangeTracker::default();
+        assert_eq!(rt.first_unmarked_range(), (0, None));
+        rt.mark_sent(0, 10); // Shrinks an unbounded unmarked range.
+        assert_eq!(rt.first_unmarked, Some((10, None)));
+        rt.mark_acked(20, 5); // Inside an unbounded unmarked range.
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (10, Some(10)));
+        rt.mark_sent(10, 4); // Shrinks a bounded unmarked range.
+        assert_eq!(rt.first_unmarked, Some((14, Some(6))));
+        rt.mark_acked(2, 5); // Below the unmarked range.
+        assert_eq!(rt.first_unmarked, Some((14, Some(6))));
+        rt.mark_acked(20, 10); // From the end of the unmarked range.
+        assert_eq!(rt.first_unmarked, Some((14, Some(6))));
+        rt.mark_acked(12, 4); // Overlaps the unmarked range.
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (16, Some(4)));
+        rt.mark_sent(16, 4); // Fills the unmarked range.
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (30, None));
+        rt.mark_sent(31, 1); // Not at the start of the unmarked range.
+        assert_eq!(rt.first_unmarked, None);
+        assert_eq!(rt.first_unmarked_range(), (30, Some(1)));
     }
 
     /// Losing a frame inside a coalesced range retransmits only that frame.
