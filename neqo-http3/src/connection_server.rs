@@ -16,7 +16,7 @@ use tracing::{debug, info, trace};
 
 use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, PriorityHandler,
-    ReceiveOutput, Res,
+    ReceiveOutput, Res, WebTransportError,
     connection::{Http3Connection, Http3State},
     frames::HFrame,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -169,6 +169,30 @@ impl Http3ServerHandler {
         info!("[{self}] stream_reset_send {stream_id} error={error}");
         self.needs_processing = true;
         self.base_handler.stream_reset_send(conn, stream_id, error)
+    }
+
+    pub(crate) fn webtransport_stream_stop_sending(
+        &mut self,
+        stream_id: StreamId,
+        error: WebTransportError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        info!("[{self}] webtransport_stream_stop_sending {stream_id} error={error:?}");
+        self.needs_processing = true;
+        self.base_handler
+            .webtransport_stream_stop_sending(conn, stream_id, error)
+    }
+
+    pub(crate) fn webtransport_stream_reset_send(
+        &mut self,
+        stream_id: StreamId,
+        error: WebTransportError,
+        conn: &mut Connection,
+    ) -> Res<()> {
+        info!("[{self}] webtransport_stream_reset_send {stream_id} error={error:?}");
+        self.needs_processing = true;
+        self.base_handler
+            .webtransport_stream_reset_send(conn, stream_id, error)
     }
 
     /// Commit to reliably delivering the stream data buffered so far.

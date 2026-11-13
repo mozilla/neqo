@@ -17,7 +17,8 @@ use neqo_transport::{AppError, Connection, StreamId, server::ConnectionRef};
 use tracing::debug;
 
 use crate::{
-    Http3StreamInfo, Priority, Res, connection::Http3State, connection_server::Http3ServerHandler,
+    Http3StreamInfo, Priority, Res, WebTransportError, connection::Http3State,
+    connection_server::Http3ServerHandler,
 };
 
 #[derive(Debug, Clone)]
@@ -219,6 +220,38 @@ impl Http3OrWebTransportStream {
     pub fn stream_close_send(&self, now: Instant) -> Res<()> {
         debug!("[{self}] Set new response");
         self.stream_handler.stream_close_send(now)
+    }
+
+    /// Reset the sending side of a WebTransport data stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream is not a WebTransport send stream.
+    pub fn webtransport_stream_reset_send(&self, error: WebTransportError) -> Res<()> {
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .webtransport_stream_reset_send(
+                self.stream_id(),
+                error,
+                &mut self.stream_handler.conn.borrow_mut(),
+            )
+    }
+
+    /// Ask the peer to stop sending on a WebTransport data stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream is not a WebTransport receive stream.
+    pub fn webtransport_stream_stop_sending(&self, error: WebTransportError) -> Res<()> {
+        self.stream_handler
+            .handler
+            .borrow_mut()
+            .webtransport_stream_stop_sending(
+                self.stream_id(),
+                error,
+                &mut self.stream_handler.conn.borrow_mut(),
+            )
     }
 }
 

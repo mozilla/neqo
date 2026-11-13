@@ -9,7 +9,7 @@ use neqo_transport::{AppError, StreamId};
 
 use crate::{
     CloseType, Http3StreamInfo, HttpRecvStreamEvents, Priority, RecvStreamEvents, Res,
-    SendStreamEvents,
+    SendStreamEvents, WebTransportError,
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
 };
@@ -69,6 +69,14 @@ pub enum WebTransportEvent {
         session_id: StreamId,
         datagram: Bytes,
     },
+    StreamReset {
+        stream_info: Http3StreamInfo,
+        error: Option<WebTransportError>,
+    },
+    StreamStopSending {
+        stream_info: Http3StreamInfo,
+        error: Option<WebTransportError>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -95,7 +103,16 @@ pub struct Http3ServerConnEvents {
 
 impl SendStreamEvents for Http3ServerConnEvents {
     fn send_closed(&self, stream_info: &Http3StreamInfo, close_type: CloseType) {
-        if close_type != CloseType::Done
+        if stream_info.session_id().is_some() {
+            if let CloseType::ResetRemote(error) = close_type {
+                self.events.push(Http3ServerConnEvent::WebTransport(
+                    WebTransportEvent::StreamStopSending {
+                        stream_info: *stream_info,
+                        error: error.try_into().ok(),
+                    },
+                ));
+            }
+        } else if close_type != CloseType::Done
             && let Some(error) = close_type.error()
         {
             self.events.push(Http3ServerConnEvent::StreamStopSending {
@@ -124,9 +141,16 @@ impl RecvStreamEvents for Http3ServerConnEvents {
         if close_type != CloseType::Done {
             self.remove_events_for_stream_id(stream_info);
             if let Some(error) = close_type.error() {
-                self.events.push(Http3ServerConnEvent::StreamReset {
-                    stream_info: *stream_info,
-                    error,
+                self.events.push(if stream_info.session_id().is_some() {
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::StreamReset {
+                        stream_info: *stream_info,
+                        error: error.try_into().ok(),
+                    })
+                } else {
+                    Http3ServerConnEvent::StreamReset {
+                        stream_info: *stream_info,
+                        error,
+                    }
                 });
             }
         }

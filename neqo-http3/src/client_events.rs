@@ -14,7 +14,7 @@ use tracing::trace;
 
 use crate::{
     CloseType, Error, Http3StreamInfo, HttpRecvStreamEvents, RecvStreamEvents, Res,
-    SendStreamEvents,
+    SendStreamEvents, WebTransportError,
     connection::Http3State,
     features::extended_connect::{self, ExtendedConnectEvents, ExtendedConnectType},
     settings::HSettingType,
@@ -46,6 +46,16 @@ pub enum WebTransportEvent {
     Datagram {
         session_id: StreamId,
         datagram: Bytes,
+    },
+    /// The peer reset a data stream; `None` if its error code has no WebTransport mapping.
+    StreamReset {
+        stream_id: StreamId,
+        error: Option<WebTransportError>,
+    },
+    /// The peer sent `STOP_SENDING`; `None` if its error code has no WebTransport mapping.
+    StreamStopSending {
+        stream_id: StreamId,
+        error: Option<WebTransportError>,
     },
 }
 
@@ -153,10 +163,17 @@ impl RecvStreamEvents for Http3ClientEvents {
             }
         };
 
-        self.events.push(Http3ClientEvent::Reset {
-            stream_id,
-            error,
-            local,
+        self.events.push(if stream_info.session_id().is_some() {
+            Http3ClientEvent::WebTransport(WebTransportEvent::StreamReset {
+                stream_id,
+                error: error.try_into().ok(),
+            })
+        } else {
+            Http3ClientEvent::Reset {
+                stream_id,
+                error,
+                local,
+            }
         });
     }
 }
@@ -191,8 +208,14 @@ impl SendStreamEvents for Http3ClientEvents {
         let stream_id = stream_info.stream_id();
         self.remove_send_stream_events(stream_id);
         if let CloseType::ResetRemote(error) = close_type {
-            self.events
-                .push(Http3ClientEvent::StopSending { stream_id, error });
+            self.events.push(if stream_info.session_id().is_some() {
+                Http3ClientEvent::WebTransport(WebTransportEvent::StreamStopSending {
+                    stream_id,
+                    error: error.try_into().ok(),
+                })
+            } else {
+                Http3ClientEvent::StopSending { stream_id, error }
+            });
         }
     }
 }
@@ -383,10 +406,9 @@ impl Http3ClientEvents {
             }
             Http3ClientEvent::DataReadable { stream_id: x }
             | Http3ClientEvent::Reset { stream_id: x, .. }
-                if *x == stream_id =>
-            {
-                true
-            }
+            | Http3ClientEvent::WebTransport(WebTransportEvent::StreamReset {
+                stream_id: x, ..
+            }) if *x == stream_id => true,
             _ => false,
         });
     }
@@ -395,7 +417,10 @@ impl Http3ClientEvents {
         self.events.remove_matching(|evt| {
             matches!(evt,
                 Http3ClientEvent::DataWritable { stream_id: x }
-                | Http3ClientEvent::StopSending { stream_id: x, .. } if *x == stream_id)
+                | Http3ClientEvent::StopSending { stream_id: x, .. }
+                | Http3ClientEvent::WebTransport(WebTransportEvent::StreamStopSending {
+                    stream_id: x, ..
+                }) if *x == stream_id)
         });
     }
 
