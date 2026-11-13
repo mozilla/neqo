@@ -603,6 +603,32 @@ fn undo_excludes_app_limited_period_before_loss() {
     assert_eq!(cubic.t_epoch(), Some(t_epoch + (loss - app_limited_start)));
 }
 
+/// A `w_est` far above `cwnd` caps `target` at `1.5 * cwnd`, so an increase still needs `2 * mtu`.
+#[test]
+fn stale_w_est_bounded_by_target() {
+    let mut cc = make_cc_cubic();
+    let (cwnd, mtu) = (cc.cwnd_min(), cc.max_datagram_size());
+    let cubic = cc.congestion_control_mut();
+    cubic.bytes_for_cwnd_increase(cwnd * (mtu + 1) + 1, 0, RTT, mtu, now());
+    let bytes_for_increase = cubic.bytes_for_cwnd_increase(cwnd, 0, RTT, mtu, now());
+    assert_eq!(bytes_for_increase, 2 * mtu);
+}
+
+/// A `w_est` far above `cwnd` neither panics nor grows `cwnd` on a single acked packet.
+#[test]
+fn stale_w_est_on_packets_acked() {
+    let mut cc = make_cc_cubic();
+    let mut cc_stats = CongestionControlStats::default();
+    let (cwnd, mtu) = (cc.cwnd(), cc.max_datagram_size());
+    cc.set_ssthresh(1);
+    cc.congestion_control_mut()
+        .bytes_for_cwnd_increase(cwnd * (mtu + 1) + 1, 0, RTT, mtu, now());
+    _ = fill_cwnd(&mut cc, 0, now());
+    ack_packet(&mut cc, 0, now(), &mut cc_stats);
+    assert_eq!(cc.cwnd(), cwnd);
+    assert_eq!(cc.acked_bytes(), mtu);
+}
+
 #[test]
 fn cubic_display() {
     let cubic = Cubic::default();
