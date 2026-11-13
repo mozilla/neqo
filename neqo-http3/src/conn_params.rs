@@ -176,7 +176,8 @@ impl Http3Parameters {
         self.http3_datagram
     }
 
-    /// Whether a `PRIORITY_UPDATE` frame should be sent on the HTTP/3 control stream at the beginning of each request.
+    /// Whether a `PRIORITY_UPDATE` frame should be sent on the HTTP/3 control stream at the
+    /// beginning of each request.
     ///
     /// This only affects clients.
     #[must_use]
