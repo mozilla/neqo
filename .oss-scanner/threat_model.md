@@ -58,8 +58,7 @@ protection or peer authentication.
 These should still be reported:
 
 - Denial of service: panics, aborts, infinite loops, and peer-driven unbounded memory or CPU use. A panic without
-  memory corruption is a denial of service, not a memory-safety issue (Mozilla rates these sec-low, see
-  https://wiki.mozilla.org/Security_Severity_Ratings/Client).
+  memory corruption is a denial of service, not a memory-safety issue.
 - Peer-reachable `debug_assert!` failures without the consequences above.
 - Issues that require the application to misuse neqo's API.
 - Protocol violations without a security impact.
