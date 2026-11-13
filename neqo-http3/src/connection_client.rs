@@ -1196,9 +1196,11 @@ mod tests {
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
+        connect_udp::ClientSession as _,
         frames::{HFrame, HFrameType, hframe::MAX_HEADER_BYTES},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
+        stream_type_reader::WEBTRANSPORT_UNI_STREAM,
     };
 
     fn assert_closed(client: &Http3Client, expected: &Error) {
@@ -1216,21 +1218,29 @@ mod tests {
     }
 
     pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
+        http3_client_with_params(default_http3_parameters(max_table_size))
+    }
+
+    fn default_http3_parameters(max_table_size: u64) -> Http3Parameters {
+        Http3Parameters::default()
+            .connection_parameters(
+                // Disable compatible upgrade, which complicates tests.
+                ConnectionParameters::default()
+                    .versions(Version::default(), vec![Version::default()]),
+            )
+            .max_table_size_encoder(max_table_size)
+            .max_table_size_decoder(max_table_size)
+            .max_blocked_streams(100)
+    }
+
+    fn http3_client_with_params(params: Http3Parameters) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
             Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
             DEFAULT_ADDR,
             DEFAULT_ADDR,
-            Http3Parameters::default()
-                .connection_parameters(
-                    // Disable compatible upgrade, which complicates tests.
-                    ConnectionParameters::default()
-                        .versions(Version::default(), vec![Version::default()]),
-                )
-                .max_table_size_encoder(max_table_size)
-                .max_table_size_decoder(max_table_size)
-                .max_blocked_streams(100),
+            params,
             now(),
         )
         .expect("create a default client")
@@ -1581,6 +1591,10 @@ mod tests {
 
         send_and_receive_client_settings(client, server);
 
+        receive_server_settings(client, server);
+    }
+
+    fn receive_server_settings(client: &mut Http3Client, server: &mut TestServer) {
         server.create_control_stream();
 
         server.create_qpack_streams();
@@ -1985,6 +1999,37 @@ mod tests {
         }
         assert!(stop_sending_event_found);
         assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    /// A WebTransport stream that names a connect-udp session closes the connection.
+    #[test]
+    fn client_webtransport_stream_on_connect_udp_session() {
+        let mut client = http3_client_with_params(default_http3_parameters(100).connect(true));
+        let mut server = TestServer::new_with_settings(&[
+            HSetting::new(HSettingType::MaxTableCapacity, 100),
+            HSetting::new(HSettingType::BlockedStreams, 100),
+            HSetting::new(HSettingType::MaxHeaderListSize, 10000),
+            HSetting::new(HSettingType::EnableConnect, 1),
+        ]);
+        connect_only_transport_with(&mut client, &mut server);
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        receive_server_settings(&mut client, &mut server);
+        assert!(client.connect_udp_enabled());
+        let session_id = client
+            .connect_udp_create_session(now(), &"https://example.com/".parse::<Uri>().unwrap(), &[])
+            .unwrap();
+        let out = client.process_output(now());
+        drop(server.conn.process(out.dgram(), now()));
+        let wt_stream_id = server.conn.stream_create(StreamType::UniDi).unwrap();
+        let mut enc = Encoder::default();
+        enc.encode_varint(WEBTRANSPORT_UNI_STREAM);
+        enc.encode_varint(session_id.as_u64());
+        _ = server.conn.stream_send(wt_stream_id, enc.as_ref()).unwrap();
+        let out = server.conn.process_output(now());
+        client.process_input(out.dgram().unwrap(), now());
+
+        assert_closed(&client, &Error::HttpStreamCreation);
     }
 
     // Test wrong frame on req/rec stream

@@ -814,13 +814,20 @@ impl Http3Connection {
                 info!("[{self}] A new http stream {stream_id}");
             }
             NewStreamType::WebTransportStream(session_id) => {
-                let session_exists = self
+                let session = StreamId::from(session_id);
+                let connect_type = self
                     .send_streams
-                    .get(&StreamId::from(session_id))
-                    .is_some_and(|s| s.stream_type() == Http3StreamType::ExtendedConnect);
-                if !session_exists {
-                    conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
-                    return Ok(ReceiveOutput::NoOutput);
+                    .get(&session)
+                    .filter(|s| s.stream_type() == Http3StreamType::ExtendedConnect)
+                    .and_then(|_| self.get_extended_connect_session(session).ok())
+                    .map(|s| s.borrow().connect_type());
+                match connect_type {
+                    Some(ExtendedConnectType::WebTransport) => {}
+                    Some(ExtendedConnectType::ConnectUdp) => return Err(Error::HttpStreamCreation),
+                    None => {
+                        conn.stream_stop_sending(stream_id, Error::HttpStreamCreation.code())?;
+                        return Ok(ReceiveOutput::NoOutput);
+                    }
                 }
                 // Set incoming WebTransport streams to be fair (share bandwidth).
                 // We may call this with an invalid stream ID, so ignore that error.
