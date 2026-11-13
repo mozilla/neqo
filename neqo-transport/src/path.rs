@@ -1275,7 +1275,7 @@ mod tests {
         }
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
-        builder.pn(0, 1);
+        builder.set_pn(0, 1);
         builder.set_limit(builder.len() + 2 * Path::PATH_FRAME_LEN);
 
         let mut stats = FrameStats::default();

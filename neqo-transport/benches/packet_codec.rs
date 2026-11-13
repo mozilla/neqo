@@ -34,7 +34,7 @@ fn make_builder() -> Builder<Vec<u8>> {
         MTU - AEAD_EXPANSION,
     );
     builder.scramble(false);
-    builder.pn(0, 1);
+    builder.set_pn(0, 1);
     builder
 }
 

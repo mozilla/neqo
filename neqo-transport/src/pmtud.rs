@@ -352,7 +352,7 @@ mod tests {
         assert!(pmtud.needs_probe());
         let len = pmtud.probe_size();
         let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, len);
-        builder.pn(pn, 4);
+        builder.set_pn(pn, 4);
         let mut tokens = recovery::Tokens::new();
         pmtud.send_probe(&mut builder, &mut tokens, stats);
         sent::Packet::new(packet::Type::Short, pn, now, true, tokens, len)
@@ -412,7 +412,7 @@ mod tests {
         };
         let mut builder = packet::Builder::short(Encoder::default(), false, None::<&[u8]>, limit);
         let pn = prot.next_pn();
-        builder.pn(pn, 4);
+        builder.set_pn(pn, 4);
         builder.enable_padding(true);
         let mut tokens = recovery::Tokens::new();
         pmtud.send_probe(&mut builder, &mut tokens, stats);
