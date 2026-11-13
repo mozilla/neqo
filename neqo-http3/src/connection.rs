@@ -932,7 +932,8 @@ impl Http3Connection {
             Http3StreamType::Http
         };
         let send_initial_priority_update = self.local_params.send_initial_priority_update_enabled()
-            && stream_type == Http3StreamType::Http;
+            && stream_type == Http3StreamType::Http
+            && request.priority != Priority::default();
 
         let mut send_message = SendMessage::new(
             MessageType::Request,

@@ -214,3 +214,25 @@ fn priority_update_before_initial_priority_update_sent() {
         .collect();
     assert_eq!(updates, [(stream_id, update_priority)]);
 }
+
+#[test]
+fn no_initial_priority_update_for_default() {
+    let (mut client, mut server) = connect();
+
+    client
+        .fetch(
+            now(),
+            "GET",
+            ("https", "something.com", "/"),
+            &[Header::new("priority", "u=3")],
+            Priority::default(),
+        )
+        .unwrap();
+    exchange_packets(&mut client, &mut server, false, None);
+
+    while let Some(event) = server.next_event() {
+        if matches!(event, Http3ServerEvent::PriorityUpdate { .. }) {
+            panic!("Initial priority update sent for default priority");
+        }
+    }
+}
