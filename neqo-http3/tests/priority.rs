@@ -169,7 +169,7 @@ fn no_initial_priority_update_when_disabled() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[Header::new("priority", "u=5")],
             Priority::new(5, false),
         )
@@ -190,7 +190,7 @@ fn priority_update_before_initial_priority_update_sent() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[Header::new("priority", "u=5")],
             Priority::new(5, false),
         )
@@ -223,7 +223,7 @@ fn no_initial_priority_update_for_default() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[Header::new("priority", "u=3")],
             Priority::default(),
         )
