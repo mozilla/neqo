@@ -7,12 +7,17 @@
 // A collection for sent packets.
 
 use std::{
+    cmp::min,
     collections::VecDeque,
-    ops::RangeInclusive,
+    ops::{Range, RangeInclusive},
     time::{Duration, Instant},
 };
 
 use crate::{packet, recovery, tracking::PacketNumberSpace};
+
+/// [`Packets::take_ranges`] drains acknowledged ranges one by one until the packets they move
+/// would exceed this many times the number of tracked packets, then takes the rest in one pass.
+const ACK_RANGE_DRAIN_FACTOR: usize = 4;
 
 /// The reason a packet was declared lost.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -339,23 +344,94 @@ impl Packets {
         //
         // <https://www.rfc-editor.org/rfc/rfc9000.html#section-19.3.1>
         let mut previous_range_start: Option<packet::Number> = None;
+        let mut moved = 0;
+        let mut ranges = acked_ranges.into_iter();
 
-        for range in acked_ranges {
+        while let Some(range) = ranges.next() {
             debug_assert!(
                 previous_range_start.is_none_or(|s| s > *range.end()),
                 "ACK ranges must be in descending order per RFC 9000 \u{a7}19.3.1"
             );
             previous_range_start = Some(*range.start());
 
-            let start_idx = self.packets.partition_point(|p| p.pn < *range.start());
-            let end_idx = self.packets.partition_point(|p| p.pn <= *range.end());
-            if start_idx == end_idx {
+            let acked = self.index_range(&range);
+            if acked.is_empty() {
                 continue;
             }
-            result.extend(self.packets.drain(start_idx..end_idx).rev());
+            let len = self.packets.len();
+            moved += min(acked.start, len - acked.end);
+            if moved > ACK_RANGE_DRAIN_FACTOR * len {
+                self.take_rest(acked, ranges, &mut result);
+                break;
+            }
+            result.extend(self.packets.drain(acked).rev());
         }
         self.lost -= result.iter().filter(|p| p.lost()).count();
         result
+    }
+
+    /// The indices of the tracked packets with packet numbers in `range`.
+    #[inline]
+    fn index_range(&self, range: &RangeInclusive<packet::Number>) -> Range<usize> {
+        self.packets.partition_point(|p| p.pn < *range.start())
+            ..self.packets.partition_point(|p| p.pn <= *range.end())
+    }
+
+    /// Append the packets at `first` and in the remaining `ranges` to `result`.
+    #[cold]
+    #[inline(never)]
+    fn take_rest(
+        &mut self,
+        first: Range<usize>,
+        ranges: impl Iterator<Item = RangeInclusive<packet::Number>>,
+        result: &mut Vec<Packet>,
+    ) {
+        let mut acked = vec![first];
+        acked.extend(
+            ranges
+                .map(|r| self.index_range(&r))
+                .filter(|r| !r.is_empty()),
+        );
+        self.take_acked(&acked, result);
+    }
+
+    /// Append the acknowledged packets at `acked`, which are disjoint and in descending order, to
+    /// `result`.
+    #[cold]
+    #[inline(never)]
+    fn take_acked(&mut self, acked: &[Range<usize>], result: &mut Vec<Packet>) {
+        debug_assert!(acked.windows(2).all(|w| w[1].end <= w[0].start));
+        let (Some(first), Some(last)) = (acked.first(), acked.last()) else {
+            return;
+        };
+        // One pass from the acknowledged packets to the nearer end, putting back the others.
+        let (lo, hi) = (last.start, first.end);
+        if hi <= self.packets.len() - lo {
+            let mut acked = acked.iter().peekable();
+            let mut head: Vec<_> = self.packets.drain(..hi).collect();
+            while let Some(p) = head.pop() {
+                let i = head.len();
+                while acked.next_if(|r| r.start > i).is_some() {}
+                if acked.peek().is_some_and(|r| r.contains(&i)) {
+                    result.push(p);
+                } else {
+                    self.packets.push_front(p);
+                }
+            }
+        } else {
+            let mut acked = acked.iter().rev().peekable();
+            let tail: Vec<_> = self.packets.drain(lo..).collect();
+            let taken = result.len();
+            for (i, p) in (lo..).zip(tail) {
+                while acked.next_if(|r| r.end <= i).is_some() {}
+                if acked.peek().is_some_and(|r| r.contains(&i)) {
+                    result.push(p);
+                } else {
+                    self.packets.push_back(p);
+                }
+            }
+            result[taken..].reverse();
+        }
     }
 
     /// Empty out all tracked packets.
@@ -403,10 +479,11 @@ pub const fn make_packet(pn: packet::Number, sent_time: Instant, len: usize) -> 
 mod tests {
     use std::{
         cell::{Cell, OnceCell},
+        ops::RangeInclusive,
         time::{Duration, Instant},
     };
 
-    use super::{LossTrigger, Packet, Packets};
+    use super::{ACK_RANGE_DRAIN_FACTOR, LossTrigger, Packet, Packets};
     use crate::{packet, recovery};
 
     const PACKET_GAP: Duration = Duration::from_secs(1);
@@ -467,6 +544,35 @@ mod tests {
         assert_eq!(it.next().unwrap().pn(), 0);
         assert_eq!(it.next().unwrap().pn(), 2);
         assert!(it.next().is_none());
+    }
+
+    /// Track `tracked`, take `ranges` and check the packets taken and the packets left.
+    fn assert_take_ranges(
+        tracked: &[u32],
+        ranges: impl IntoIterator<Item = RangeInclusive<packet::Number>>,
+    ) {
+        let ranges: Vec<_> = ranges.into_iter().collect();
+        let mut pkts = Packets::default();
+        for &i in tracked {
+            pkts.track(pkt(i));
+        }
+        let all = tracked.iter().map(|&i| packet::Number::from(i));
+        let (acked, remaining): (Vec<_>, Vec<_>) =
+            all.partition(|pn| ranges.iter().any(|r| r.contains(pn)));
+        let taken = pkts.take_ranges(ranges).into_iter().map(|p| p.pn);
+        assert!(taken.eq(acked.into_iter().rev()));
+        assert!(pkts.iter_mut().map(|p| p.pn).eq(remaining));
+    }
+
+    /// Packets 3k and 3k + 1 for the first `pairs` k, so that ranges of such pairs are adjacent in
+    /// the queue.
+    fn tracked_pairs(pairs: u32) -> Vec<u32> {
+        (0..3 * pairs).filter(|i| i % 3 != 2).collect()
+    }
+
+    /// The range of packets 3k and 3k + 1.
+    fn pair(k: u32) -> RangeInclusive<packet::Number> {
+        packet::Number::from(3 * k)..=packet::Number::from(3 * k + 1)
     }
 
     #[test]
@@ -568,6 +674,47 @@ mod tests {
             .map(|p| u32::try_from(p.pn).unwrap())
             .collect();
         assert_eq!(remaining, [0, 3]);
+    }
+
+    /// `take_ranges` with ranges that are adjacent in the queue, near either end of it.
+    #[test]
+    fn take_ranges_adjacent() {
+        let tracked = [0, 1, 3, 4, 5, 6, 7, 8, 10, 11];
+        assert_take_ranges(&tracked, [10..=11, 7..=8]);
+        assert_take_ranges(&tracked, [3..=4, 0..=1]);
+    }
+
+    /// `take_ranges` with many single-packet ranges over many packets, near either end of them.
+    #[test]
+    fn take_ranges_many() {
+        let count = u32::try_from(recovery::MAX_TRACKED_ACK_ONLY).unwrap();
+        let tracked: Vec<_> = (0..count).collect();
+        for largest in [count / 4, count / 4 * 3].map(packet::Number::from) {
+            let ranges = (0..570).map(|i| largest - 2 * i).map(|pn| pn..=pn);
+            assert_take_ranges(&tracked, ranges);
+        }
+    }
+
+    /// `take_ranges` with many ranges that are adjacent in the queue, near either end of it.
+    #[test]
+    fn take_ranges_many_adjacent() {
+        let ranges = 570;
+        let tracked = tracked_pairs(2 * ranges);
+        assert_take_ranges(&tracked, (ranges..2 * ranges).rev().map(pair));
+        assert_take_ranges(&tracked, (0..ranges).rev().map(pair));
+    }
+
+    /// `take_ranges` with adjacent ranges in the middle of the queue, which move enough packets to
+    /// take the rest in one pass, and with as many ranges at the back of it, which don't.
+    #[test]
+    fn take_ranges_moved() {
+        let pairs = 1000;
+        let tracked = tracked_pairs(pairs);
+        let ranges = 4 * u32::try_from(ACK_RANGE_DRAIN_FACTOR).unwrap();
+        for top in [pairs * 3 / 8, pairs * 5 / 8] {
+            assert_take_ranges(&tracked, (top - ranges..top).rev().map(pair));
+        }
+        assert_take_ranges(&tracked, (0..ranges).map(|i| pair(pairs - 1 - 2 * i)));
     }
 
     #[test]
