@@ -9,7 +9,9 @@ use std::{
     time::Instant,
 };
 
-use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
+use crate::{
+    cc::classic_cc::SlowStart, recovery::sent, rtt::RttEstimate, stats::CongestionControlStats,
+};
 
 /// Classic slow start as described in RFC 9002.
 ///
@@ -31,7 +33,7 @@ impl SlowStart for ClassicSlowStart {
     fn on_packets_acked(
         &mut self,
         _rtt_est: &RttEstimate,
-        _largest_acked: packet::Number,
+        _largest_acked: &sent::Packet,
         _curr_cwnd: usize,
         _cc_stats: &mut CongestionControlStats,
         _now: Instant,

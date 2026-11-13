@@ -10,9 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enum_map::EnumMap;
 use tracing::{debug, trace};
 
-use crate::{cc::classic_cc::SlowStart, packet, rtt::RttEstimate, stats::CongestionControlStats};
+use crate::{
+    cc::classic_cc::SlowStart, packet, recovery::sent, rtt::RttEstimate,
+    stats::CongestionControlStats, tracking::PacketNumberSpace,
+};
 
 /// Controls how the CSS baseline RTT is set when entering Conservative Slow Start (CSS).
 ///
@@ -50,7 +54,8 @@ pub struct HyStart {
     last_round_min_rtt: Option<Duration>,
     current_round_min_rtt: Option<Duration>,
     rtt_sample_count: u64,
-    window_end: Option<packet::Number>,
+    // <https://datatracker.ietf.org/doc/html/rfc9000#section-12.3>
+    window_end: EnumMap<PacketNumberSpace, Option<packet::Number>>,
     css_baseline_min_rtt: Option<Duration>,
     css_round_count: usize,
 }
@@ -76,7 +81,7 @@ impl HyStart {
 
     pub const NON_PACED_L: usize = 8;
 
-    pub const fn new(pacing: bool, css_baseline_mode: HyStartCssBaseline) -> Self {
+    pub fn new(pacing: bool, css_baseline_mode: HyStartCssBaseline) -> Self {
         let limit = if pacing {
             usize::MAX
         } else {
@@ -88,7 +93,7 @@ impl HyStart {
             last_round_min_rtt: None,
             current_round_min_rtt: None,
             rtt_sample_count: 0,
-            window_end: None,
+            window_end: EnumMap::default(),
             css_baseline_min_rtt: None,
             css_round_count: 0,
         }
@@ -129,7 +134,7 @@ impl HyStart {
     /// Called immediately when a round ends so that ACKs arriving before the next packet is sent
     /// are attributed to the new round rather than being in limbo.
     fn start_next_round(&mut self) {
-        self.window_end = None;
+        self.window_end = EnumMap::default();
         self.last_round_min_rtt = self.current_round_min_rtt;
         self.current_round_min_rtt = None;
         self.rtt_sample_count = 0;
@@ -139,15 +144,17 @@ impl HyStart {
         );
     }
 
-    /// Sets `window_end` to `sent_pn` to mark when the current round will end.
+    /// Sets `window_end` of the space of `pkt` to its packet number to mark when the current round
+    /// will end.
     ///
     /// Called from [`SlowStart::on_packet_sent`]. Only sets `window_end` if it is `None`,
     /// i.e., the previous round ended and the end marker for the current round hasn't been set yet.
-    fn maybe_set_window_end(&mut self, sent_pn: packet::Number) {
-        if self.window_end.is_some() {
+    fn maybe_set_window_end(&mut self, pkt: &sent::Packet) {
+        let window_end = &mut self.window_end[pkt.space()];
+        if window_end.is_some() {
             return;
         }
-        self.window_end = Some(sent_pn);
+        *window_end = Some(pkt.pn());
         debug!(
             "HyStart: maybe_set_window_end -> set window_end to {:?}",
             self.window_end
@@ -164,8 +171,8 @@ impl HyStart {
     }
 
     #[cfg(test)]
-    pub const fn window_end(&self) -> Option<packet::Number> {
-        self.window_end
+    pub fn window_end(&self, space: PacketNumberSpace) -> Option<packet::Number> {
+        self.window_end[space]
     }
 
     #[cfg(test)]
@@ -190,15 +197,15 @@ impl HyStart {
 }
 
 impl SlowStart for HyStart {
-    fn on_packet_sent(&mut self, sent_pn: packet::Number, _sent_bytes: usize) {
-        self.maybe_set_window_end(sent_pn);
+    fn on_packet_sent(&mut self, pkt: &sent::Packet) {
+        self.maybe_set_window_end(pkt);
     }
 
     fn reset(&mut self) {
         self.last_round_min_rtt = None;
         self.current_round_min_rtt = None;
         self.rtt_sample_count = 0;
-        self.window_end = None;
+        self.window_end = EnumMap::default();
         self.css_baseline_min_rtt = None;
         self.css_round_count = 0;
     }
@@ -228,7 +235,7 @@ impl SlowStart for HyStart {
     fn on_packets_acked(
         &mut self,
         rtt_est: &RttEstimate,
-        largest_acked: packet::Number,
+        largest_acked: &sent::Packet,
         curr_cwnd: usize,
         cc_stats: &mut CongestionControlStats,
         _now: Instant,
@@ -236,7 +243,8 @@ impl SlowStart for HyStart {
         self.collect_rtt_sample(rtt_est.latest_rtt());
 
         trace!(
-            "HyStart: on_packets_acked -> pn={largest_acked}, rtt={:?}, cur_min={:?}, last_min={:?}, samples={}, in_css={}, css_rounds={}, window_end={:?}",
+            "HyStart: on_packets_acked -> pn={}, rtt={:?}, cur_min={:?}, last_min={:?}, samples={}, in_css={}, css_rounds={}, window_end={:?}",
+            largest_acked.pn(),
             rtt_est.latest_rtt(),
             self.current_round_min_rtt,
             self.last_round_min_rtt,
@@ -299,15 +307,16 @@ impl SlowStart for HyStart {
         // Check for end of round. If `window_end` is acked, call `start_next_round` to immediately
         // begin the next round's RTT tracking. [`SlowStart::on_packet_sent`] will then call
         // `maybe_set_window_end` to mark when the new round will end.
-        if self
-            .window_end
-            .is_none_or(|window_end| largest_acked < window_end)
+        // <https://datatracker.ietf.org/doc/html/rfc9406#section-4.2>
+        if self.window_end[largest_acked.space()]
+            .is_none_or(|window_end| largest_acked.pn() < window_end)
         {
             return None;
         }
 
         trace!(
-            "HyStart: on_packets_acked -> round ended because largest_acked={largest_acked} >= window_end={:?}",
+            "HyStart: on_packets_acked -> round ended because largest_acked={} >= window_end={:?}",
+            largest_acked.pn(),
             self.window_end
         );
         self.start_next_round();
