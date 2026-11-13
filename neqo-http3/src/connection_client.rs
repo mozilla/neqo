@@ -25,6 +25,7 @@ use neqo_qpack::Stats as QpackStats;
 use neqo_transport::{
     AppError, Connection, ConnectionEvent, ConnectionId, ConnectionIdGenerator, Output,
     OutputBatch, Stats as TransportStats, StreamId, StreamType, Version, ZeroRttState,
+    tparams::TransportParameterId::InitialMaxStreamsUni,
 };
 use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, cert::CertificateInfo};
 use tracing::{debug, info, trace, warn};
@@ -33,7 +34,7 @@ use crate::{
     Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, ReceiveOutput, Res,
     SendGroupId, Stream,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
-    connection::{Http3Connection, Http3State, RequestDescription},
+    connection::{HTTP3_UNI_CONTROL_STREAMS, Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
     frames::HFrame,
     request_target::RequestTarget,
@@ -456,7 +457,10 @@ impl Http3Client {
         )?;
         let tok = dec.decode_remainder();
         trace!("[{self}]   Transport token {}", Hex::new(tok));
-        self.conn.enable_resumption(now, tok)?;
+        // Only require that the critical streams can be created, not flow control credit.
+        self.conn.enable_resumption_with(now, tok, |tp| {
+            tp.get_integer(InitialMaxStreamsUni) >= HTTP3_UNI_CONTROL_STREAMS
+        })?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();
             let res = self
@@ -466,8 +470,10 @@ impl Http3Client {
             return Err(Error::Fatal);
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
-            self.base_handler
-                .set_0rtt_settings(&mut self.conn, settings)?;
+            let res = self
+                .base_handler
+                .set_0rtt_settings(&mut self.conn, settings);
+            self.check_result(now, res).map_err(|_| Error::Fatal)?;
             self.events
                 .connection_state_change(self.base_handler.state().clone());
         }
@@ -748,16 +754,16 @@ impl Http3Client {
                 self.base_handler
                     .expire_datagram_queues(&mut self.conn, now);
                 let res = self.check_connection_events(now);
-                if self.check_result(now, &res) {
+                if self.check_result(now, res).is_err() {
                     return;
                 }
                 let res = self.base_handler.process_sending(&mut self.conn, now);
-                self.check_result(now, &res);
+                _ = self.check_result(now, res);
             }
             Http3State::Closed { .. } => {}
             _ => {
                 let res = self.check_connection_events(now);
-                _ = self.check_result(now, &res);
+                _ = self.check_result(now, res);
             }
         }
     }
@@ -818,15 +824,12 @@ impl Http3Client {
 
     /// This function takes the provided result and check for an error.
     /// An error results in closing the connection.
-    fn check_result<ERR>(&mut self, now: Instant, res: &Res<ERR>) -> bool {
-        match &res {
-            Err(e) => {
-                info!("[{self}] Connection error: {e}");
-                self.close(now, e.code(), format!("{e}"));
-                true
-            }
-            _ => false,
+    fn check_result<T>(&mut self, now: Instant, res: Res<T>) -> Res<T> {
+        if let Err(e) = &res {
+            info!("[{self}] Connection error: {e}");
+            self.close(now, e.code(), format!("{e}"));
         }
+        res
     }
 
     /// This function checks [`ConnectionEvent`][2]s emitted by the QUIC layer, e.g. connection
@@ -1181,7 +1184,7 @@ mod tests {
     use neqo_transport::{
         CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
         INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamDataLimit,
-        StreamId, StreamType, Version,
+        StreamId, StreamType, Version, ZeroRttState,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -1191,8 +1194,8 @@ mod tests {
     use tracing::trace;
 
     use super::{
-        AuthenticationStatus, Connection, Error, HSettings, Header, Http3Client, Http3ClientEvent,
-        Http3Parameters, Http3State, Rc, RefCell,
+        AuthenticationStatus, Connection, Error, HSettings, HTTP3_UNI_CONTROL_STREAMS, Header,
+        Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Rc, RefCell,
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
@@ -4062,6 +4065,102 @@ mod tests {
                 )
                 .is_err()
         );
+    }
+
+    /// A token from a server whose `initial_max_streams_uni` can't fit the control and QPACK
+    /// streams, but which raises the limit so that the connection works.
+    fn token_max_streams_uni_too_low() -> ResumptionToken {
+        let params = ConnectionParameters::default()
+            .max_streams(StreamType::UniDi, HTTP3_UNI_CONTROL_STREAMS - 1);
+        let mut conn = new_server::<CountingConnectionIdGenerator, &str>(DEFAULT_ALPN_H3, params);
+        conn.set_remote_max_streams(StreamType::UniDi, HTTP3_UNI_CONTROL_STREAMS);
+        let mut client = default_http3_client();
+        let mut server = TestServer::new_with_conn(conn);
+        connect_with(&mut client, &mut server);
+        exchange_token(&mut client, &mut server.conn)
+    }
+
+    /// A token that can't fit the control and QPACK streams resumes in 1-RTT.
+    #[test]
+    fn zero_rtt_stream_limit_too_low() {
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), token_max_streams_uni_too_low());
+        assert_eq!(res, Ok(()));
+        assert_eq!(client.state(), Http3State::Initializing);
+        assert_eq!(client.conn.zero_rtt_state(), ZeroRttState::Init);
+
+        let mut server = TestServer::new();
+        let out = client.process_output(now());
+        let out2 = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+        assert!(client.tls_info().unwrap().resumed());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        server.check_client_control_qpack_streams_no_resumption();
+    }
+
+    /// A valid token still enables 0-RTT on `client`.
+    fn assert_resumes_0rtt(client: &mut Http3Client) {
+        let (mut other, mut server) = connect();
+        let token = exchange_token(&mut other, &mut server.conn);
+        assert_eq!(client.enable_resumption(now(), token), Ok(()));
+        assert_eq!(client.state(), Http3State::ZeroRtt);
+    }
+
+    /// A token that is malformed after its transport parameters leaves 0-RTT enabled.
+    #[test]
+    fn zero_rtt_stream_limit_too_low_token_truncated() {
+        let bad = token_max_streams_uni_too_low();
+        let bad = bad.as_ref();
+        let mut dec = Decoder::from(bad);
+        dec.skip_vvec(); // HTTP/3 settings
+        dec.decode_uint::<u32>().unwrap(); // QUIC version
+        dec.decode_varint().unwrap(); // RTT
+        dec.skip_vvec(); // transport parameters
+
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), &bad[..dec.offset()]);
+        let err = TransportError::InvalidResumptionToken;
+        assert_eq!(res, Err(Error::Transport(err)));
+        assert_eq!(client.state(), Http3State::Initializing);
+        assert_eq!(*client.conn.state(), State::Init);
+        assert_resumes_0rtt(&mut client);
+    }
+
+    /// A transport token that doesn't decode is rejected by the transport.
+    #[test]
+    fn zero_rtt_transport_token_invalid() {
+        let mut enc = Encoder::default();
+        HSettings::new(&[]).encode_frame_contents(&mut enc);
+        let mut client = default_http3_client();
+        let res = client.enable_resumption(now(), enc);
+        let err = TransportError::InvalidResumptionToken;
+        assert_eq!(res, Err(Error::Transport(err)));
+        assert_eq!(client.state(), Http3State::Initializing);
+        assert_resumes_0rtt(&mut client);
+    }
+
+    /// Remembered QPACK settings that the encoder rejects close the connection.
+    #[test]
+    fn zero_rtt_qpack_settings_invalid() {
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+        let mut dec = Decoder::from(token.as_ref());
+        dec.skip_vvec(); // HTTP/3 settings
+        let settings = HSettings::new(&[HSetting::new(HSettingType::MaxTableCapacity, 1 << 30)]);
+        let mut enc = Encoder::default();
+        settings.encode_frame_contents(&mut enc);
+        enc.encode(dec.decode_remainder());
+
+        let mut client = default_http3_client();
+        assert_eq!(client.enable_resumption(now(), enc), Err(Error::Fatal));
+        assert_closed(&client, &Error::Qpack(qpack::Error::EncoderStream));
+        let closing = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::Closing(_)));
+        assert!(client.events().any(closing));
     }
 
     #[test]
