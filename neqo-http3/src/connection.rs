@@ -17,7 +17,7 @@ use neqo_common::{Bytes, Decoder, Header, MessageType, Role};
 use neqo_qpack as qpack;
 use neqo_transport::{
     AppError, CloseReason, Connection, DatagramQueueCapacity, DatagramQueueOutcome,
-    DatagramTracking, State, StreamId, StreamType, ZeroRttState,
+    DatagramTracking, State, StreamId, StreamType, ZeroRttState, send_stream,
     streams::{SendGroupId, SendOrder},
 };
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -364,6 +364,10 @@ pub struct Http3Connection {
     settings_state: Http3RemoteSettingsState,
     streams_with_pending_data: HashSet<StreamId>,
     send_streams: HashMap<StreamId, Box<dyn SendStream>>,
+    /// WebTransport send streams whose FIN has been queued, with their final
+    /// `bytes_written`.  They stay here until the transport reports all their
+    /// data acknowledged, so that their stats can still be read.
+    closed_webtransport_send_streams: HashMap<StreamId, (Box<dyn SendStream>, u64)>,
     recv_streams: HashMap<StreamId, Box<dyn RecvStream>>,
     webtransport: ExtendedConnectFeature,
     connect_udp: ExtendedConnectFeature,
@@ -403,6 +407,7 @@ impl Http3Connection {
             settings_state: Http3RemoteSettingsState::NotReceived,
             streams_with_pending_data: HashSet::default(),
             send_streams: HashMap::default(),
+            closed_webtransport_send_streams: HashMap::default(),
             recv_streams: HashMap::default(),
             send_group_generator: SendGroupGenerator::default(),
             role,
@@ -487,7 +492,7 @@ impl Http3Connection {
                 false
             };
             if done {
-                self.remove_send_stream(stream_id, conn);
+                self.remove_done_send_stream(stream_id, conn);
             }
         }
         Ok(())
@@ -657,6 +662,17 @@ impl Http3Connection {
         Ok(())
     }
 
+    /// Called when the transport reports that all data on a send stream,
+    /// including its FIN, has been acknowledged.  Returns the final stats of a
+    /// WebTransport send stream that was closed with a FIN.
+    pub(crate) fn handle_send_stream_complete(
+        &mut self,
+        stream_id: StreamId,
+    ) -> Option<send_stream::Stats> {
+        let (_, written) = self.closed_webtransport_send_streams.remove(&stream_id)?;
+        Some(send_stream::Stats::new(written, written, written))
+    }
+
     /// This is called when `neqo_transport::Connection` state has been change to take proper
     /// actions in the HTTP3 layer.
     pub(crate) fn handle_state_change(
@@ -729,6 +745,7 @@ impl Http3Connection {
             // feature is negotiated in 0-RTT (`set_0rtt_settings` never enables
             // them), and creating a session fails with `Unavailable` until one is.
             self.send_streams.clear();
+            self.closed_webtransport_send_streams.clear();
             self.recv_streams.clear();
             Ok(())
         } else {
@@ -854,6 +871,7 @@ impl Http3Connection {
             debug!("close(0) called when streams still active");
         }
         self.send_streams.clear();
+        self.closed_webtransport_send_streams.clear();
         self.recv_streams.clear();
     }
 
@@ -1178,7 +1196,7 @@ impl Http3Connection {
         // has been closed already. It is ok to ignore it here.
         drop(send_stream.close(conn, now));
         if send_stream.done() {
-            self.remove_send_stream(stream_id, conn);
+            self.remove_done_send_stream(stream_id, conn);
         } else if send_stream.has_data_to_send() {
             self.streams_with_pending_data.insert(stream_id);
         }
@@ -1905,7 +1923,11 @@ impl Http3Connection {
     }
 
     fn close_send(&mut self, stream_id: StreamId, close_type: CloseType, conn: &mut Connection) {
-        if let Some(mut s) = self.remove_send_stream(stream_id, conn) {
+        if let Some(mut s) = self.remove_send_stream(stream_id, conn).or_else(|| {
+            self.closed_webtransport_send_streams
+                .remove(&stream_id)
+                .map(|(s, _)| s)
+        }) {
             s.handle_stop_sending(close_type);
         }
     }
@@ -1955,6 +1977,16 @@ impl Http3Connection {
             }
             drop(conn.stream_reset_send(id, Error::HttpRequestCancelled.code()));
         }
+        // A stream closed with a FIN is no longer tracked by the session, and
+        // the application already closed it, so reset it without an event.
+        let session_type = Http3StreamType::WebTransport(wt.borrow().id());
+        for (id, _) in self
+            .closed_webtransport_send_streams
+            .extract_if(|_, (s, _)| s.stream_type() == session_type)
+        {
+            trace!("Reset the extended connect closed sub send stream {id}");
+            drop(conn.stream_reset_send(id, Error::HttpRequestCancelled.code()));
+        }
     }
 
     fn remove_recv_stream(
@@ -1972,6 +2004,39 @@ impl Http3Connection {
             }
         }
         stream
+    }
+
+    /// Removes a send stream that finished by sending its FIN.  A WebTransport
+    /// stream moves to `closed_webtransport_send_streams` until its data is
+    /// acknowledged.
+    fn remove_done_send_stream(&mut self, stream_id: StreamId, conn: &mut Connection) {
+        if let Some(mut s) = self.remove_send_stream(stream_id, conn)
+            && matches!(s.stream_type(), Http3StreamType::WebTransport(_))
+            && let Ok(stats) = s.stats(conn)
+        {
+            self.closed_webtransport_send_streams
+                .insert(stream_id, (s, stats.bytes_written()));
+        }
+    }
+
+    /// Returns the stats of a WebTransport send stream, including one whose
+    /// FIN has been queued but not yet acknowledged.
+    pub(crate) fn webtransport_send_stream_stats(
+        &mut self,
+        conn: &mut Connection,
+        stream_id: StreamId,
+    ) -> Res<send_stream::Stats> {
+        if let Some(s) = self.send_streams.get_mut(&stream_id) {
+            return s.stats(conn);
+        }
+        let (s, written) = self
+            .closed_webtransport_send_streams
+            .get_mut(&stream_id)
+            .ok_or(Error::InvalidStreamId)?;
+        // The transport drops the stream once everything is acknowledged,
+        // possibly before `handle_send_stream_complete` runs.
+        Ok(s.stats(conn)
+            .unwrap_or_else(|_| send_stream::Stats::new(*written, *written, *written)))
     }
 
     fn remove_send_stream(

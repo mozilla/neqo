@@ -399,11 +399,7 @@ impl ClientSession for Http3Client {
 
     fn webtransport_send_stream_stats(&mut self, stream_id: StreamId) -> Res<send_stream::Stats> {
         let (conn, handler) = self.connection_and_handler();
-        handler
-            .send_streams_mut()
-            .get_mut(&stream_id)
-            .ok_or(Error::InvalidStreamId)?
-            .stats(conn)
+        handler.webtransport_send_stream_stats(conn, stream_id)
     }
 
     fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<recv_stream::Stats> {
