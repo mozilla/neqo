@@ -421,11 +421,13 @@ where
             }
         }
 
-        // Congestion avoidance, above the slow start threshold.
-        if self
-            .current
-            .ssthresh
-            .is_some_and(|s| self.current.congestion_window >= s)
+        // Congestion avoidance, above the slow start threshold, for packets sent after recovery.
+        // <https://datatracker.ietf.org/doc/html/rfc9002#section-7.3.2>
+        if new_acked > 0
+            && self
+                .current
+                .ssthresh
+                .is_some_and(|s| self.current.congestion_window >= s)
         {
             // The following function returns the amount of acked bytes a controller
             // needs to collect to be allowed to increase its cwnd by one datagram.
@@ -1433,18 +1435,22 @@ mod tests {
     /// Persistent congestion starts a fresh Cubic epoch at the minimum window.
     #[test]
     fn persistent_congestion_resets_cubic_epoch() {
-        fn ack_cwnd(cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>, extra: usize) {
+        fn ack_cwnd(
+            cc: &mut ClassicCongestionController<ClassicSlowStart, Cubic>,
+            pn: packet::Number,
+            extra: usize,
+        ) {
             let mut cc_stats = CongestionControlStats::default();
-            let p = sent::make_packet(0, now(), cc.cwnd() + extra);
+            let p = sent::make_packet(pn, now(), cc.cwnd() + extra);
             cc.on_packet_sent(&p, now());
             cc.on_packets_acked(&[p], &RttEstimate::new(RTT), now(), &mut cc_stats);
         }
 
         let mut cc = make_cc_cubic();
         let stale = cc.cwnd_min() * (cc.max_datagram_size() + 1); // Zero increase at `cwnd_min`.
-        ack_cwnd(&mut cc, stale);
+        ack_cwnd(&mut cc, 0, stale);
         cc.set_ssthresh(cc.cwnd());
-        ack_cwnd(&mut cc, 0);
+        ack_cwnd(&mut cc, 0, 0);
 
         let lost = make_lost(&[1, PERSISTENT_CONG_THRESH + 2]);
         let mut cc_stats = CongestionControlStats::default();
@@ -1452,7 +1458,7 @@ mod tests {
         assert_eq!(cc.cwnd(), cc.cwnd_min());
 
         cc.set_ssthresh(cc.cwnd()); // A slow start algorithm can exit at any window.
-        ack_cwnd(&mut cc, 0);
+        ack_cwnd(&mut cc, 1, 0); // Sent after persistent congestion.
         assert_eq!(cc.cwnd(), cc.cwnd_min());
         let cwnd_min = convert_to_f64(cc.cwnd_min());
         assert_eq!(cc.congestion_control().w_max(), Some(cwnd_min));
