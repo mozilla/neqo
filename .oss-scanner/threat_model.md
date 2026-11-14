@@ -85,4 +85,5 @@ These should still be reported:
 - Issues that require the application to misuse neqo's API.
 - Protocol violations without a security impact.
 
-Issues only reachable in server code are sec-low at most.
+Issues only reachable in server code are sec-low at most, including the memory-safety issues and
+server-enforced properties listed above.
