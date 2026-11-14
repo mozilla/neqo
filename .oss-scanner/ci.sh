@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Linux checks of rustfmt.yml, clippy.yml and check.yml, on the default toolchain and without coverage.
+# The Linux checks of rustfmt.yml, clippy.yml and check.yml, on the default toolchain.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,7 +13,7 @@ RUSTFLAGS="--cfg fuzzing ${RUSTFLAGS:-}" cargo clippy --locked -p fuzz --bins --
 RUSTDOCFLAGS="--deny rustdoc::broken_intra_doc_links --deny warnings" \
     cargo doc --locked --workspace --no-deps --document-private-items
 
-# mtu tests need GitHub Actions.
+# mtu tests fail in the offline scanner sandbox.
 RUST_LOG=debug cargo test --locked --workspace --exclude mtu
 RUST_LOG=debug cargo hack test --locked --workspace --exclude mtu --feature-powerset --tests \
     --exclude-features gecko,ci,build-fuzzing-corpus --mutually-exclusive-features bench,blapi,default,disable-encryption

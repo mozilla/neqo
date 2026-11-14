@@ -51,4 +51,4 @@ ENV CARGO_PROFILE_RELEASE_LTO=false
 RUN cargo +nightly fuzz build --debug-assertions
 
 # Check the image works, but don't fail the build on check failures.
-RUN bash .oss-scanner/ci.sh || echo "WARNING: .oss-scanner/ci.sh reported failures"
+RUN timeout 7200 bash .oss-scanner/ci.sh || echo "WARNING: .oss-scanner/ci.sh reported failures"
