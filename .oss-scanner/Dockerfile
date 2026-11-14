@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN rustup component add clippy \
     && rustup toolchain install nightly --profile minimal --component rustfmt \
-    && cargo install --locked cargo-fuzz
+    && cargo install --locked cargo-fuzz cargo-hack
 
 COPY . /src
 WORKDIR /src
@@ -50,6 +50,5 @@ RUN CARGO_NET_OFFLINE=false cargo fetch --locked \
 ENV CARGO_PROFILE_RELEASE_LTO=false
 RUN cargo +nightly fuzz build --debug-assertions
 
-# Check the image works, but don't fail the build on test failures. mtu tests need GitHub Actions.
-RUN timeout 1200 cargo test --locked --workspace --exclude mtu \
-    || echo "WARNING: cargo test reported failures"
+# Check the image works, but don't fail the build on check failures.
+RUN bash .oss-scanner/ci.sh || echo "WARNING: .oss-scanner/ci.sh reported failures"

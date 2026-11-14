@@ -19,7 +19,8 @@ handshake has authenticated the peer. The main parsers are:
 The application calling neqo's API (Firefox) is trusted; the data the peer sends is not.
 
 The spec for a protocol feature is its RFC or, where no RFC exists yet, the latest version of its
-Internet-Draft.
+Internet-Draft. Differences from a newer draft in wire format or codepoints that the code keeps for
+interoperability are not findings.
 
 ## Components that matter most / least
 

@@ -20,8 +20,7 @@
 - Fix lints by changing code, not with `#[expect]`.
 - Default to no new comment; at most one line where the code cannot speak for itself. Keep existing
   comments.
-- Format with `cargo +nightly fmt --all`; touched crates must pass `cargo test --locked -p <crate>`
-  and `cargo clippy --locked -p <crate> --all-targets -- -D warnings`.
+- Format with `cargo +nightly fmt --all`; `bash .oss-scanner/ci.sh` must pass.
 
 ## Tests
 
