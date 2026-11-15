@@ -9,7 +9,7 @@
   condition that trips them.
 - Work with any RFC-compliant peer, any number of streams and every valid configuration, not only
   neqo and the defaults.
-- No cost on the normal path, no public API changes and no new dependencies unless unavoidable; say
+- No cost on the normal path, and no new dependencies unless unavoidable; say
   so if so.
 - One root cause per patch.
 

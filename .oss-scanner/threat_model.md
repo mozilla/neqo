@@ -80,11 +80,16 @@ sec-high, and sec-critical when exceptionally easy to exploit at scale.
 
 These should still be reported:
 
-- Denial of service: panics, aborts, infinite loops, and peer-driven unbounded memory or CPU use. A
-  panic without memory corruption is a denial of service, not a memory-safety issue.
+- Denial of service: panics, aborts, infinite loops, and peer-driven unbounded memory use. A panic
+  without memory corruption is a denial of service, not a memory-safety issue.
 - Peer-reachable `debug_assert!` failures without the consequences above.
 - Issues that require the application to misuse neqo's API.
 - Protocol violations without a security impact.
 
 Issues only reachable in server code are sec-low at most, including the memory-safety issues and
 server-enforced properties listed above.
+
+## Anything to leave alone
+
+- Peer-driven CPU use that ends on its own, unless the fix is trivial. Firefox can be made to use
+  a lot of CPU through many other components.
