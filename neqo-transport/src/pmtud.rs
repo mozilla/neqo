@@ -106,10 +106,10 @@ impl Pmtud {
         let old_mtu = self.plpmtu();
         self.mtu = self.search_table[idx];
         stats.pmtud_pmtu = self.mtu;
-        self.log_mtu_change(old_mtu, now);
+        self.qlog_mtu_updated(old_mtu, now);
     }
 
-    fn log_mtu_change(&mut self, old_mtu: usize, now: Instant) {
+    fn qlog_mtu_updated(&mut self, old_mtu: usize, now: Instant) {
         let new_mtu = self.plpmtu();
         if old_mtu != new_mtu {
             let done = !self.needs_probe();
@@ -127,7 +127,7 @@ impl Pmtud {
     pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
         let old_mtu = self.plpmtu();
         self.peer_max_udp_payload = Some(peer_max_udp_payload);
-        self.log_mtu_change(old_mtu, now);
+        self.qlog_mtu_updated(old_mtu, now);
     }
 
     /// Returns the peer's `max_udp_payload_size`, if known.
@@ -349,7 +349,7 @@ mod tests {
 
     use super::MAX_PROBES;
     use crate::{
-        Pmtud, Stats,
+        MIN_INITIAL_PACKET_SIZE, Pmtud, Stats,
         crypto::CryptoDxState,
         packet,
         pmtud::{PMTU_RAISE_TIMER, Probe, SEARCH_TABLE_LEN},
@@ -667,8 +667,8 @@ mod tests {
     #[test]
     fn pmtud_peer_max_below_default() {
         for addr in [V4, V6] {
-            let pmtud = find_pmtu_with_peer_max(addr, 9000, None, 1200);
-            assert_eq!(pmtud.plpmtu(), 1200);
+            let pmtud = find_pmtu_with_peer_max(addr, 9000, None, MIN_INITIAL_PACKET_SIZE);
+            assert_eq!(pmtud.plpmtu(), MIN_INITIAL_PACKET_SIZE);
         }
     }
 
@@ -681,14 +681,16 @@ mod tests {
         assert_eq!(pmtud.peer_max_udp_payload(), None);
         let old_mtu = pmtud.plpmtu();
 
-        pmtud.set_peer_max_udp_payload(1200, now());
-        pmtud.set_peer_max_udp_payload(1200, now());
-        assert_eq!(pmtud.peer_max_udp_payload(), Some(1200));
-        assert_eq!(pmtud.plpmtu(), 1200);
+        pmtud.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
+        pmtud.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
+        assert_eq!(pmtud.peer_max_udp_payload(), Some(MIN_INITIAL_PACKET_SIZE));
+        assert_eq!(pmtud.plpmtu(), MIN_INITIAL_PACKET_SIZE);
         drop(pmtud);
         let contents = contents.to_string();
         assert_eq!(contents.matches("mtu_updated").count(), 1);
-        assert!(contents.contains(&format!(r#""old":{old_mtu},"new":1200"#)));
+        assert!(contents.contains(&format!(
+            r#""old":{old_mtu},"new":{MIN_INITIAL_PACKET_SIZE}"#
+        )));
     }
 
     /// `probe_count` is 0 before sending and 1 after the first probe.

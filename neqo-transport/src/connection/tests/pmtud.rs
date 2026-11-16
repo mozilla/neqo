@@ -15,18 +15,17 @@ use test_fixture::{DEFAULT_ADDR, DEFAULT_ADDR_V4, fixture_init, now};
 
 use super::Connection;
 use crate::{
-    ConnectionParameters, Output, Pmtud, Stats, StreamType,
+    ConnectionParameters, MIN_INITIAL_PACKET_SIZE, Output, Pmtud, Stats, StreamType,
     cc::CWND_INITIAL_PKTS,
     connection::tests::{
         DEFAULT_RTT, connect, connect_force_idle, cwnd, default_client, default_server,
-        exchange_ticket, fill_stream, new_client, new_client_with_addr, new_server,
-        send_something,
+        exchange_ticket, fill_stream, new_client, new_client_with_addr, new_server, send_something,
     },
     tparams::{TransportParameter, TransportParameterId::MaxUdpPayloadSize},
 };
 
 /// The minimum `max_udp_payload_size`, which is below the default PLPMTU.
-const PEER_MAX_UDP_PAYLOAD: usize = 1200;
+const PEER_MAX_UDP_PAYLOAD: usize = MIN_INITIAL_PACKET_SIZE;
 
 /// Advertises [`PEER_MAX_UDP_PAYLOAD`] to the peer.
 fn limit_udp_payload(c: &Connection) {

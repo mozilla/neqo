@@ -262,7 +262,7 @@ mod tests {
 
     use super::PacketSender;
     use crate::{
-        ConnectionParameters, SlowStart,
+        ConnectionParameters, MIN_INITIAL_PACKET_SIZE, SlowStart,
         cc::{CWND_INITIAL_PKTS, CongestionControl, tests::pmtud},
         recovery::sent,
         rtt::RttEstimate,
@@ -368,9 +368,9 @@ mod tests {
         let mut sender = make_sender(true);
         assert_eq!(sender.pacer.mtu(), sender.pmtud().plpmtu());
 
-        sender.set_peer_max_udp_payload(1200, now());
-        assert_eq!(sender.pmtud().plpmtu(), 1200);
-        assert_eq!(sender.pacer.mtu(), 1200);
-        assert_eq!(sender.cwnd(), 1200 * CWND_INITIAL_PKTS);
+        sender.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
+        assert_eq!(sender.pmtud().plpmtu(), MIN_INITIAL_PACKET_SIZE);
+        assert_eq!(sender.pacer.mtu(), MIN_INITIAL_PACKET_SIZE);
+        assert_eq!(sender.cwnd(), MIN_INITIAL_PACKET_SIZE * CWND_INITIAL_PKTS);
     }
 }
