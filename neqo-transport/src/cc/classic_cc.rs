@@ -295,13 +295,7 @@ where
         }
         if self.current.congestion_window > cwnd {
             self.current.congestion_window = cwnd;
-            qlog::metrics_updated(
-                &mut self.qlog,
-                [qlog::Metric::CongestionWindow(
-                    self.current.congestion_window,
-                )],
-                now,
-            );
+            qlog::metrics_updated(&mut self.qlog, [qlog::Metric::CongestionWindow(cwnd)], now);
         }
     }
 
@@ -2262,22 +2256,20 @@ mod tests {
         assert_eq!(cc_stats.slow_start_exit, None);
     }
 
-    /// RFC 9002 Section 7.2: a smaller datagram size due to the peer's `max_udp_payload_size`
-    /// resets the congestion window to the new initial window.
+    /// RFC 9002 Section 7.2: a smaller maximum datagram size due to the peer's
+    /// `max_udp_payload_size` resets the congestion window to the new initial congestion window.
     #[test]
     fn peer_max_udp_payload_resets_cwnd() {
         let mut cc = make_cc_newreno();
-        let old_cwnd = cc.cwnd();
-        assert_eq!(old_cwnd, cc.cwnd_initial());
+        assert_eq!(cc.cwnd(), cc.cwnd_initial());
 
         cc.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
         assert_eq!(cc.max_datagram_size(), MIN_INITIAL_PACKET_SIZE);
-        assert_eq!(cc.cwnd(), cc.cwnd_initial());
-        assert!(cc.cwnd() < old_cwnd);
+        assert_eq!(cc.cwnd(), cwnd_initial(MIN_INITIAL_PACKET_SIZE));
 
         // Applying the same limit again changes nothing.
         cc.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
-        assert_eq!(cc.cwnd(), cc.cwnd_initial());
+        assert_eq!(cc.cwnd(), cwnd_initial(MIN_INITIAL_PACKET_SIZE));
     }
 
     /// A limit that does not lower the datagram size leaves the congestion window alone, and a
@@ -2287,11 +2279,11 @@ mod tests {
         let mut cc = make_cc_newreno();
         let now = now();
         let mut cc_stats = CongestionControlStats::default();
-        let mtu = cc.max_datagram_size();
+        let max_datagram_size = cc.max_datagram_size();
         let initial_cwnd = cc.cwnd();
 
-        cc.set_peer_max_udp_payload(mtu + 100, now);
-        assert_eq!(cc.max_datagram_size(), mtu);
+        cc.set_peer_max_udp_payload(max_datagram_size + 100, now);
+        assert_eq!(cc.max_datagram_size(), max_datagram_size);
         assert_eq!(cc.cwnd(), initial_cwnd);
 
         let pkt = sent::make_packet(1, now, 1000);
@@ -2299,8 +2291,8 @@ mod tests {
         let mut lost_pkt = pkt.clone();
         lost_pkt.declare_lost(now, sent::LossTrigger::TimeThreshold);
         cc.on_packets_lost(Some(now), None, PTO, &[lost_pkt], now, &mut cc_stats);
-        let reduced_cwnd = cc.cwnd();
-        assert!(reduced_cwnd < cwnd_initial(MIN_INITIAL_PACKET_SIZE));
+        let reduced_cwnd = initial_cwnd / 2;
+        assert_eq!(cc.cwnd(), reduced_cwnd);
 
         cc.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now);
         assert_eq!(cc.max_datagram_size(), MIN_INITIAL_PACKET_SIZE);
@@ -2333,11 +2325,13 @@ mod tests {
             &mut cc_stats,
         );
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
-        let old_initial_cwnd = cc.cwnd_initial();
 
         // The window stored for the undo was sized for the old datagram size.
+        assert_eq!(
+            cc.stored.as_ref().unwrap().congestion_window,
+            cc.cwnd_initial()
+        );
         cc.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now);
-        assert!(cc.cwnd_initial() < old_initial_cwnd);
 
         let pkt3 = sent::make_packet(3, now, 1000);
         cc.on_packet_sent(&pkt3, now);
@@ -2347,6 +2341,6 @@ mod tests {
 
         assert_eq!(cc_stats.congestion_events.spurious, 1);
         assert_eq!(cc.current.phase, Phase::SlowStart);
-        assert_eq!(cc.cwnd(), cc.cwnd_initial());
+        assert_eq!(cc.cwnd(), cwnd_initial(MIN_INITIAL_PACKET_SIZE));
     }
 }

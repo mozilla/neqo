@@ -3132,10 +3132,11 @@ impl Connection {
             .set_remote_datagram_size(self.tps.borrow().remote().get_integer(MaxDatagramFrameSize));
 
         // We cap this transport parameter to usize::MAX on decode, so this is safe.
-        let max_udp_payload =
+        let peer_max_udp_payload =
             expect_usize(self.tps.borrow().remote().get_integer(MaxUdpPayloadSize));
-        self.paths.set_peer_max_udp_payload(max_udp_payload, now);
-        self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
+        self.paths
+            .set_peer_max_udp_payload(peer_max_udp_payload, now);
+        self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(peer_max_udp_payload);
     }
 
     #[must_use]

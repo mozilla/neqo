@@ -81,8 +81,7 @@ fn peer_max_udp_payload_limits_data_in_one_direction() {
     let c1 = client.process_output(now()).dgram().unwrap();
     assert_eq!(c1.len(), PEER_MAX_UDP_PAYLOAD);
     let s1 = server.process_output(now()).dgram().unwrap();
-    assert_eq!(s1.len(), server.plpmtu());
-    assert!(s1.len() > PEER_MAX_UDP_PAYLOAD);
+    assert_eq!(s1.len(), Pmtud::default_plpmtu(DEFAULT_ADDR.ip()));
 
     server.process_input(c1, now());
     client.process_input(s1, now());

@@ -130,12 +130,6 @@ impl Pmtud {
         self.qlog_mtu_updated(old_mtu, now);
     }
 
-    /// Returns the peer's `max_udp_payload_size`, if known.
-    #[must_use]
-    pub const fn peer_max_udp_payload(&self) -> Option<usize> {
-        self.peer_max_udp_payload
-    }
-
     /// Checks whether the PMTUD raise timer should be fired, and does so if needed.
     pub fn maybe_fire_raise_timer(&mut self, now: Instant, stats: &mut Stats) {
         if self.probe_state == Probe::NotNeeded && self.raise_timer.is_some_and(|t| now >= t) {
@@ -145,7 +139,8 @@ impl Pmtud {
         }
     }
 
-    /// Returns the largest MTU the peer accepts, based on its `max_udp_payload_size`.
+    /// Returns the MTU implied by the peer's `max_udp_payload_size`, i.e., including IP and UDP
+    /// headers.
     const fn peer_mtu_limit(&self) -> usize {
         match self.peer_max_udp_payload {
             Some(p) => p.saturating_add(self.header_size),
@@ -634,7 +629,6 @@ mod tests {
         let peer_limit = peer_max_udp_payload + Pmtud::header_size(addr);
         let effective = mtu.min(iface_mtu.unwrap_or(usize::MAX)).min(peer_limit);
         assert_mtu(&pmtud, effective);
-        assert!(pmtud.plpmtu() <= peer_max_udp_payload);
 
         pmtud
     }
@@ -678,12 +672,10 @@ mod tests {
         let (log, contents) = new_neqo_qlog();
         let mut pmtud = Pmtud::new(V4);
         pmtud.set_qlog(log);
-        assert_eq!(pmtud.peer_max_udp_payload(), None);
         let old_mtu = pmtud.plpmtu();
 
         pmtud.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
         pmtud.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
-        assert_eq!(pmtud.peer_max_udp_payload(), Some(MIN_INITIAL_PACKET_SIZE));
         assert_eq!(pmtud.plpmtu(), MIN_INITIAL_PACKET_SIZE);
         drop(pmtud);
         let contents = contents.to_string();

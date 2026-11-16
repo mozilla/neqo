@@ -191,8 +191,9 @@ impl Paths {
             }
         }
         // Temporary paths don't send, so they only get the peer's limit here.
-        if let Some(peer_max) = self.peer_max_udp_payload {
-            path.borrow_mut().set_peer_max_udp_payload(peer_max, now);
+        if let Some(peer_max_udp_payload) = self.peer_max_udp_payload {
+            path.borrow_mut()
+                .set_peer_max_udp_payload(peer_max_udp_payload, now);
         }
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
@@ -1265,7 +1266,7 @@ mod tests {
 
     use super::{Path, PathRef, Paths};
     use crate::{
-        ConnectionParameters, MIN_INITIAL_PACKET_SIZE, Stats, cc::CWND_INITIAL_PKTS,
+        ConnectionParameters, MIN_INITIAL_PACKET_SIZE, Pmtud, Stats, cc::tests::INITIAL_CWND,
         cid::RemoteConnectionIdEntry, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
     };
 
@@ -1323,11 +1324,12 @@ mod tests {
     fn make_permanent_applies_peer_max_udp_payload() {
         let mut paths = Paths::new(&ConnectionParameters::default());
         let path = find_path(&paths);
-        assert!(path.borrow().plpmtu() > MIN_INITIAL_PACKET_SIZE);
+        let default_plpmtu = Pmtud::default_plpmtu(DEFAULT_ADDR.ip());
+        assert_eq!(path.borrow().plpmtu(), default_plpmtu);
 
         // `Paths` does not track temporary paths.
         paths.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
-        assert!(path.borrow().plpmtu() > MIN_INITIAL_PACKET_SIZE);
+        assert_eq!(path.borrow().plpmtu(), default_plpmtu);
 
         paths.make_permanent(
             &path,
@@ -1337,9 +1339,6 @@ mod tests {
             &mut Stats::default(),
         );
         assert_eq!(path.borrow().plpmtu(), MIN_INITIAL_PACKET_SIZE);
-        assert_eq!(
-            path.borrow().sender().cwnd(),
-            MIN_INITIAL_PACKET_SIZE * CWND_INITIAL_PKTS
-        );
+        assert_eq!(path.borrow().sender().cwnd(), INITIAL_CWND);
     }
 }
