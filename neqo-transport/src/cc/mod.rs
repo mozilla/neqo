@@ -64,8 +64,7 @@ pub trait CongestionController: Display + Debug {
     #[must_use]
     fn pmtud_mut(&mut self) -> &mut Pmtud;
 
-    /// Limit datagrams to the peer's `max_udp_payload_size` transport parameter, and reset the
-    /// congestion window if that lowers the maximum datagram size (RFC 9002 Section 7.2).
+    /// Limit datagrams to the peer's `max_udp_payload_size`; reset cwnd if that lowers the PLPMTU.
     fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant);
 
     fn on_packets_acked(

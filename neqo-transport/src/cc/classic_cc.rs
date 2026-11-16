@@ -284,12 +284,9 @@ where
         if self.max_datagram_size() >= old_max_datagram_size {
             return;
         }
-        // RFC 9002 Section 7.2: If the maximum datagram size is decreased in order to complete
-        // the handshake, the congestion window SHOULD be set to the new initial congestion
-        // window. Never increase a window that has already been reduced.
+        // RFC 9002 Section 7.2: reset to the new initial window, but never raise a smaller one.
         let cwnd = self.cwnd_initial();
-        // Undoing a spurious congestion event must not restore a window sized for larger
-        // datagrams.
+        // A spurious congestion event undo must not restore a window sized for larger datagrams.
         if let Some(stored) = &mut self.stored {
             stored.congestion_window = stored.congestion_window.min(cwnd);
         }
@@ -2256,8 +2253,7 @@ mod tests {
         assert_eq!(cc_stats.slow_start_exit, None);
     }
 
-    /// RFC 9002 Section 7.2: a smaller maximum datagram size due to the peer's
-    /// `max_udp_payload_size` resets the congestion window to the new initial congestion window.
+    /// RFC 9002 Section 7.2: a smaller maximum datagram size resets cwnd to the initial window.
     #[test]
     fn peer_max_udp_payload_resets_cwnd() {
         let mut cc = make_cc_newreno();
@@ -2267,13 +2263,11 @@ mod tests {
         assert_eq!(cc.max_datagram_size(), MIN_INITIAL_PACKET_SIZE);
         assert_eq!(cc.cwnd(), cwnd_initial(MIN_INITIAL_PACKET_SIZE));
 
-        // Applying the same limit again changes nothing.
         cc.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
         assert_eq!(cc.cwnd(), cwnd_initial(MIN_INITIAL_PACKET_SIZE));
     }
 
-    /// A limit that does not lower the datagram size leaves the congestion window alone, and a
-    /// window that is already below the new initial window is never increased.
+    /// A higher limit leaves cwnd alone; a lower one never raises an already reduced cwnd.
     #[test]
     fn peer_max_udp_payload_keeps_smaller_cwnd() {
         let mut cc = make_cc_newreno();
@@ -2299,8 +2293,7 @@ mod tests {
         assert_eq!(cc.cwnd(), reduced_cwnd);
     }
 
-    /// Undoing a spurious congestion event after the peer's `max_udp_payload_size` lowered the
-    /// datagram size must not restore a window sized for the old datagram size.
+    /// A spurious congestion event undo must not restore a window sized for larger datagrams.
     #[test]
     fn peer_max_udp_payload_caps_spurious_undo() {
         let mut cc = make_cc_cubic();
@@ -2326,7 +2319,6 @@ mod tests {
         );
         assert_eq!(cc.current.phase, Phase::RecoveryStart);
 
-        // The window stored for the undo was sized for the old datagram size.
         assert_eq!(
             cc.stored.as_ref().unwrap().congestion_window,
             cc.cwnd_initial()

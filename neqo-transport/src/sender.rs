@@ -131,7 +131,6 @@ impl PacketSender {
         self.cc.pmtud_mut()
     }
 
-    /// Limit datagrams to the peer's `max_udp_payload_size` transport parameter.
     pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
         self.cc.set_peer_max_udp_payload(peer_max_udp_payload, now);
         self.maybe_update_pacer_mtu();
@@ -364,8 +363,7 @@ mod tests {
         assert_eq!(after, before, "cwnd should not grow when app limited");
     }
 
-    /// The pacer must follow the peer's `max_udp_payload_size` right away, not only after the
-    /// next ACK or loss.
+    /// The pacer follows the peer's `max_udp_payload_size` at once, not on the next ACK or loss.
     #[test]
     fn peer_max_udp_payload_updates_pacer() {
         let mut sender = make_sender(true);

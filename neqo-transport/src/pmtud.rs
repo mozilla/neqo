@@ -122,8 +122,7 @@ impl Pmtud {
         self.iface_mtu = iface_mtu;
     }
 
-    /// Set the peer's `max_udp_payload_size` transport parameter as an upper bound for the PLPMTU
-    /// and for probing.
+    /// Set the peer's `max_udp_payload_size` as an upper bound for the PLPMTU and probing.
     pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
         let old_mtu = self.plpmtu();
         self.peer_max_udp_payload = Some(peer_max_udp_payload);
@@ -139,8 +138,7 @@ impl Pmtud {
         }
     }
 
-    /// Returns the MTU implied by the peer's `max_udp_payload_size`, i.e., including IP and UDP
-    /// headers.
+    /// The peer's `max_udp_payload_size` plus IP and UDP headers.
     const fn peer_mtu_limit(&self) -> usize {
         match self.peer_max_udp_payload {
             Some(p) => p.saturating_add(self.header_size),
@@ -149,8 +147,8 @@ impl Pmtud {
     }
 
     /// Returns the current Packetization Layer Path MTU, i.e., the maximum UDP payload that can be
-    /// sent. During probing, this may be larger than the actual path MTU. It never exceeds the
-    /// peer's `max_udp_payload_size`.
+    /// sent. During probing, this may be larger than the actual path MTU. Capped by the peer's
+    /// `max_udp_payload_size`.
     #[must_use]
     pub const fn plpmtu(&self) -> usize {
         const_min(self.mtu, self.peer_mtu_limit()) - self.header_size
@@ -666,7 +664,7 @@ mod tests {
         }
     }
 
-    /// Capping the PLPMTU logs a single `mtu_updated` event, even if the limit is set again.
+    /// Capping the PLPMTU logs one `mtu_updated` event, even if repeated.
     #[test]
     fn peer_max_udp_payload_logs_mtu_update() {
         let (log, contents) = new_neqo_qlog();

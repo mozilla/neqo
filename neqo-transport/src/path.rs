@@ -111,8 +111,7 @@ impl Paths {
             })
     }
 
-    /// Applies the peer's `max_udp_payload_size` to all permanent paths and remembers it for
-    /// paths that are made permanent later.
+    /// Applies the peer's `max_udp_payload_size` to current and future permanent paths.
     pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
         self.peer_max_udp_payload = Some(peer_max_udp_payload);
         for p in &self.paths {
@@ -1051,7 +1050,6 @@ impl Path {
         self.sender.pmtud_mut()
     }
 
-    /// Limit datagrams on this path to the peer's `max_udp_payload_size` transport parameter.
     pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
         self.sender
             .set_peer_max_udp_payload(peer_max_udp_payload, now);

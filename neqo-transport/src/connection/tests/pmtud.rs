@@ -27,7 +27,6 @@ use crate::{
 /// The minimum `max_udp_payload_size`, which is below the default PLPMTU.
 const PEER_MAX_UDP_PAYLOAD: usize = MIN_INITIAL_PACKET_SIZE;
 
-/// Advertises [`PEER_MAX_UDP_PAYLOAD`] to the peer.
 fn limit_udp_payload(c: &Connection) {
     c.set_local_tparam(
         MaxUdpPayloadSize,
@@ -36,8 +35,6 @@ fn limit_udp_payload(c: &Connection) {
     .unwrap();
 }
 
-/// Checks that `d` is limited by the peer and that `c` uses the matching initial window
-/// (RFC 9002 Section 7.2).
 fn assert_peer_limited(c: &Connection, d: &Datagram) {
     assert_eq!(d.len(), PEER_MAX_UDP_PAYLOAD);
     assert_eq!(cwnd(c), PEER_MAX_UDP_PAYLOAD * CWND_INITIAL_PKTS);
@@ -46,10 +43,8 @@ fn assert_peer_limited(c: &Connection, d: &Datagram) {
 /// The server applies the client's limit as soon as it has its transport parameters.
 #[test]
 fn peer_max_udp_payload_limits_first_flight() {
-    // An unfragmented ClientHello is processed while the server's path is still temporary,
-    // so the limit is applied in `Paths::make_permanent`. A fragmented one completes after
-    // the first datagram made the path permanent, so `Paths::set_peer_max_udp_payload`
-    // applies it.
+    // Unfragmented, the path is still temporary and `Paths::make_permanent` applies the limit;
+    // fragmented, the path is already permanent and `Paths::set_peer_max_udp_payload` does.
     for fragmented in [false, true] {
         let mut client = default_client();
         let mut server = default_server();
@@ -89,7 +84,7 @@ fn peer_max_udp_payload_limits_data_in_one_direction() {
     assert_eq!(client.stats().frame_rx.stream, 1);
 }
 
-/// A resuming client applies the limit it remembers from the previous connection.
+/// A resuming client applies the remembered limit.
 #[test]
 fn peer_max_udp_payload_limits_resumption() {
     let mut client = default_client();
