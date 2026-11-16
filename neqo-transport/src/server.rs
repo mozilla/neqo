@@ -11,6 +11,7 @@ use std::{
     cmp::min,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
+    mem,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -18,7 +19,9 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, Role, Tos, event::Provider as _, hex::Hex, qlog::Qlog};
+use neqo_common::{
+    Datagram, Role, Tos, datagram::Batch, event::Provider as _, hex::Hex, qlog::Qlog,
+};
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
     encode_ech_config,
@@ -127,6 +130,9 @@ pub struct Server {
     /// datagrams. To be processed on consecutive calls to
     /// [`Server::process_multiple`].
     saved_datagrams: VecDeque<SavedDatagram>,
+    /// An empty buffer for the next batch, shared by all connections, see
+    /// [`Server::recycle`].
+    send_buffer: Vec<u8>,
 }
 
 impl Server {
@@ -165,6 +171,7 @@ impl Server {
             qlog_dir: None,
             ech_config: None,
             saved_datagrams: VecDeque::new(),
+            send_buffer: Vec::new(),
         })
     }
 
@@ -556,11 +563,12 @@ impl Server {
         );
         let mut callback = None;
 
+        // Lend the buffer to each connection in turn, until one uses it for a batch.
+        let mut buffer = mem::take(&mut self.send_buffer);
         for connection in &mut self.connections {
-            match connection
-                .borrow_mut()
-                .process_multiple_output(now, max_datagrams)
-            {
+            let mut connection = connection.borrow_mut();
+            connection.set_send_buffer(buffer);
+            match connection.process_multiple_output(now, max_datagrams) {
                 OutputBatch::None => {}
                 d @ OutputBatch::DatagramBatch(_) => return d,
                 OutputBatch::Callback(next) => match callback {
@@ -568,9 +576,17 @@ impl Server {
                     None => callback = Some(next),
                 },
             }
+            buffer = connection.take_send_buffer();
         }
+        self.send_buffer = buffer;
 
         callback.map_or(OutputBatch::None, OutputBatch::Callback)
+    }
+
+    /// Reuse the buffer of a batch that has been sent for the next batch of any
+    /// connection, instead of allocating one.
+    pub fn recycle(&mut self, batch: Batch) {
+        self.send_buffer = batch.into_buffer();
     }
 
     /// Short-hand for [`Server::process`] without an input datagram.

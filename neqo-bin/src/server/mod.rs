@@ -33,7 +33,7 @@ use futures::{
     FutureExt as _,
     future::{Either, select, select_all},
 };
-use neqo_common::{Datagram, hex::Hex};
+use neqo_common::{Datagram, datagram::Batch, hex::Hex};
 use neqo_http3::Http3Server;
 use neqo_transport::{
     Connection, OutputBatch, RandomConnectionIdGenerator, Version, server::ValidateAddress,
@@ -330,6 +330,7 @@ pub trait HttpServer: Display {
         now: Instant,
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch;
+    fn recycle(&mut self, batch: Batch);
     fn process_events(&mut self, now: Instant);
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
@@ -424,7 +425,10 @@ impl<S: HttpServer + Unpin> Runner<S> {
                         // OS buffer is full, wait till socket is writable then
                         // try again.
                         match socket.send(&dgram) {
-                            Ok(()) => break,
+                            Ok(()) => {
+                                server.recycle(dgram);
+                                break;
+                            }
                             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
                                 socket.writable().await?;
                                 // Now try again.
@@ -684,7 +688,7 @@ pub(super) mod test_support {
 mod tests {
     use std::fmt;
 
-    use neqo_common::{Tos, datagram};
+    use neqo_common::Tos;
     use test_fixture::{default_client, fixture_init};
     use tokio::time::timeout;
 
@@ -692,7 +696,7 @@ mod tests {
 
     #[derive(Default)]
     struct MockServer {
-        batches: Vec<datagram::Batch>,
+        batches: Vec<Batch>,
         destinations: Vec<SocketAddr>,
     }
 
@@ -716,6 +720,8 @@ mod tests {
                 .pop()
                 .map_or(OutputBatch::None, OutputBatch::DatagramBatch)
         }
+
+        fn recycle(&mut self, _batch: Batch) {}
 
         fn process_events(&mut self, _now: Instant) {}
 
