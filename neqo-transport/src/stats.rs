@@ -376,6 +376,16 @@ pub struct Stats {
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.
     pub pto_counts: [usize; Self::MAX_PTO_COUNTS],
+    /// PTO timers stopped by acknowledgments.
+    pub pto_stop_reason_ack: usize,
+    /// PTO timers stopped when loss state was discarded.
+    pub pto_stop_reason_discarded: usize,
+    /// PTO timers stopped by connection closing due to too many PTOs.
+    pub pto_stop_reason_too_many_ptos: usize,
+    /// PTO timers stopped by connection closing with idle timeout.
+    pub pto_stop_reason_idle_timeout: usize,
+    /// PTO timers stopped by other connection closures.
+    pub pto_stop_reason_close_other: usize,
 
     /// Count frames received.
     pub frame_rx: FrameStats,
