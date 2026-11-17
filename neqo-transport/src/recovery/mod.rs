@@ -1011,10 +1011,11 @@ impl Loss {
     fn reset_pto(&mut self, now: Instant, ack_received: bool) {
         if self.pto_state.take().is_some() {
             qlog::loss_timer_cancelled(&mut self.qlog, now);
+            let mut stats = self.stats.borrow_mut();
             if ack_received {
-                self.stats.borrow_mut().pto_stop_reason_ack += 1;
+                stats.pto_stop_reason_ack += 1;
             } else {
-                self.stats.borrow_mut().pto_stop_reason_discarded += 1;
+                stats.pto_stop_reason_discarded += 1;
             }
         }
     }
