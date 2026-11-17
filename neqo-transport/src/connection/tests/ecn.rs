@@ -390,7 +390,9 @@ pub fn migration_with_modifiers(
 
     if migrated {
         // The server then sends data on the new path.
-        let migrate_server = new_path_modifier(server.process_output(now).dgram().unwrap());
+        let migrate_server = server.process_output(now).dgram().unwrap();
+        assert_ecn_enabled(migrate_server.tos());
+        let migrate_server = new_path_modifier(migrate_server);
         assert_v4_path(&migrate_server, false);
         assert_eq!(server.stats().frame_tx.path_challenge, 2);
         assert_eq!(server.stats().frame_tx.stream, stream_before + 1);

@@ -333,10 +333,13 @@ impl Paths {
         }
 
         if let Some(old_path) = self.select_primary(path, now) {
+            path.borrow_mut()
+                .set_ecn_baseline(old_path.borrow().ecn_info.baseline());
             // Need to probe the old path if the peer migrates.
             old_path.borrow_mut().probe(stats);
             // TODO(mt) - suppress probing if the path was valid within 3PTO.
         }
+        path.borrow_mut().start_ecn(stats);
 
         if self.pmtud {
             path.borrow_mut().pmtud_mut().start(now, stats);
