@@ -972,7 +972,7 @@ fn datagram_over_the_peers_limit_including_context_id_is_rejected() {
 }
 
 /// Far past the default max age, which on a loopback path is the 20ms floor.
-const PAST_DEFAULT_MAX_AGE: Duration = Duration::from_secs(3600);
+const PAST_DEFAULT_MAX_AGE: Duration = Duration::from_hours(1);
 
 /// Queued datagrams are kept as long as necessary.
 #[test]
