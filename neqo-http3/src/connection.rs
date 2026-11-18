@@ -588,7 +588,7 @@ impl Http3Connection {
     /// This function handles reading from all streams, i.e. control, qpack, request/response
     /// stream and unidi stream that still do not have a type.
     /// The function cannot handle:
-    /// 1) a `Http` or `WebTransportStream(_)` stream
+    /// 1) a `Http` or `WebTransportStream { .. }` stream
     /// 2) frames `PriorityUpdateRequest` or `Goaway` must be handled by `Http3Client`/`Server`.
     ///
     /// The function returns `ReceiveOutput`.
@@ -619,7 +619,7 @@ impl Http3Connection {
                 Ok(ReceiveOutput::ControlFrames(rest))
             }
             ReceiveOutput::NewStream(
-                NewStreamType::Http(_) | NewStreamType::WebTransportStream(_),
+                NewStreamType::Http(_) | NewStreamType::WebTransportStream { .. },
             )
             | ReceiveOutput::NoOutput => Ok(output),
             ReceiveOutput::NewStream(_) => {
@@ -771,7 +771,7 @@ impl Http3Connection {
 
     /// If the new stream is a control or QPACK stream, this function creates a proper handler
     /// and perform a read.
-    /// if the new stream is a `Http` or `WebTransportStream(_)` stream, the function
+    /// if the new stream is a `Http` or `WebTransportStream { .. }` stream, the function
     /// returns `ReceiveOutput::NewStream(_)` and the caller will handle it.
     /// If the stream is of a unknown type the stream will be closed.
     fn handle_new_stream(
@@ -813,7 +813,7 @@ impl Http3Connection {
             NewStreamType::Http(_) => {
                 info!("[{self}] A new http stream {stream_id}");
             }
-            NewStreamType::WebTransportStream(session_id) => {
+            NewStreamType::WebTransportStream { session_id, .. } => {
                 let session_exists = self
                     .send_streams
                     .get(&StreamId::from(session_id))
@@ -839,7 +839,7 @@ impl Http3Connection {
             NewStreamType::Control | NewStreamType::Decoder | NewStreamType::Encoder => {
                 self.stream_receive(conn, stream_id, now)
             }
-            NewStreamType::Http(_) | NewStreamType::WebTransportStream(_) => {
+            NewStreamType::Http(_) | NewStreamType::WebTransportStream { .. } => {
                 Ok(ReceiveOutput::NewStream(stream_type))
             }
             NewStreamType::Unknown => Ok(ReceiveOutput::NoOutput),
@@ -1592,6 +1592,7 @@ impl Http3Connection {
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
+            false,
             (send_events, recv_events),
             true,
             send_group,
@@ -1603,16 +1604,21 @@ impl Http3Connection {
         &mut self,
         session_id: StreamId,
         stream_id: StreamId,
+        fin: bool,
         send_events: Box<dyn SendStreamEvents>,
         recv_events: Box<dyn RecvStreamEvents>,
     ) -> Res<()> {
         trace!("Create new WebTransport stream session={session_id} stream_id={stream_id}");
 
         let wt = self.get_extended_connect_session(session_id)?;
+        if fin && wt.borrow().is_closing() {
+            return Ok(()); // Nothing tracks it and no transport stream is left to read.
+        }
 
         self.webtransport_create_stream_internal(
             wt,
             stream_id,
+            fin,
             (send_events, recv_events),
             false,
             None,
@@ -1624,6 +1630,7 @@ impl Http3Connection {
         &mut self,
         webtransport_session: Rc<RefCell<extended_connect::session::Session>>,
         stream_id: StreamId,
+        fin: bool,
         events: (Box<dyn SendStreamEvents>, Box<dyn RecvStreamEvents>),
         local: bool,
         send_group: Option<SendGroupId>,
@@ -1650,6 +1657,7 @@ impl Http3Connection {
                     stream_id,
                     Box::new(WebTransportRecvStream::new(
                         stream_id,
+                        fin,
                         recv_events,
                         webtransport_session,
                     )),
@@ -1667,6 +1675,7 @@ impl Http3Connection {
                 )),
                 Box::new(WebTransportRecvStream::new(
                     stream_id,
+                    fin,
                     recv_events,
                     webtransport_session,
                 )),
