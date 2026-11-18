@@ -2388,7 +2388,7 @@ impl Connection {
             "pn_len can't be zero as unacked_range should be > 0, pn {pn}, largest_acknowledged {largest_acknowledged:?}, tx {tx}"
         );
         // TODO(mt) also use `4*path CWND/path MTU` to set a minimum length.
-        builder.pn(pn, pn_len);
+        builder.set_pn(pn, pn_len);
 
         (pt, builder, pn)
     }
@@ -3733,7 +3733,7 @@ impl Connection {
             for token in acked.tokens() {
                 match token {
                     recovery::Token::Stream(stream_token) => self.streams.acked(stream_token),
-                    recovery::Token::Ack(at) => self.acks.acked(space, at),
+                    recovery::Token::Ack(at) => self.acks.acked(space, acked.pn(), at),
                     recovery::Token::Crypto(ct) => self.crypto.acked(space, ct),
                     recovery::Token::NewToken(seqno) => self.new_token.acked(*seqno),
                     recovery::Token::NewConnectionId(entry) => self.cid_manager.acked(entry),
