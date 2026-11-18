@@ -49,9 +49,15 @@ impl WindowAdjustment for NewReno {
         (curr_cwnd / 2, acked_bytes / 2)
     }
 
-    fn on_app_limited(&mut self) {}
+    fn on_app_limited(&mut self, _now: Instant) {}
 
-    fn save_undo_state(&mut self) {}
+    fn on_persistent_congestion(&mut self, _cc_stats: &mut CongestionControlStats) {}
+
+    fn persistent_congestion_ssthresh(&self, _flight_size: usize) -> Option<usize> {
+        None
+    }
+
+    fn save_undo_state(&mut self, _now: Instant) {}
 
     fn restore_undo_state(&mut self, _cc_stats: &mut CongestionControlStats) {}
 }
