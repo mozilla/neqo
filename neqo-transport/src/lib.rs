@@ -177,6 +177,11 @@ pub enum Error {
     KeyUpdateBlocked,
     #[error("no available path")]
     NoAvailablePath,
+    /// The server did not respond to the client's first handshake flight before
+    /// the first PTO, and [`ConnectionParameters::single_handshake_flight`] is
+    /// enabled. The client closes the connection without sending anything.
+    #[error("no response to the first handshake flight")]
+    NoHandshakeResponse,
     #[error("no more data")]
     NoMoreData,
     #[error("not available")]
@@ -229,7 +234,7 @@ impl Error {
             Self::InvalidToken => 11,
             Self::KeysExhausted => ERROR_AEAD_LIMIT_REACHED,
             Self::Application => ERROR_APPLICATION_CLOSE,
-            Self::NoAvailablePath | Self::TooManyPtos => 16,
+            Self::NoAvailablePath | Self::TooManyPtos | Self::NoHandshakeResponse => 16,
             Self::CryptoBufferExceeded => ERROR_CRYPTO_BUFFER_EXCEEDED,
             Self::CryptoAlert(a) => 0x100 + u64::from(*a),
             // As we have a special error code for ECH fallbacks, we lose the alert.
@@ -311,6 +316,7 @@ mod tests {
             (Error::VersionNegotiation, 17),
             (Error::Internal, 1),
             (Error::TooManyPtos, 16),
+            (Error::NoHandshakeResponse, 16),
         ] {
             assert_eq!(err.code(), code);
         }

@@ -309,6 +309,10 @@ pub struct Connection {
     /// when they are either just reordered or we haven't been able to install keys yet.
     /// In particular, this occurs when asynchronous certificate validation happens.
     saved_datagrams: SavedDatagrams,
+    /// Whether a client received a Handshake or 1-RTT packet for one of its
+    /// connection IDs before the server's Initial, e.g. because that Initial
+    /// was lost. See [`ConnectionParameters::single_handshake_flight`].
+    server_packet_before_initial: bool,
     /// Some packets were received, but not tracked.
     received_untracked: bool,
 
@@ -458,6 +462,7 @@ impl Connection {
             remote_initial_source_cid: None,
             original_destination_cid: None,
             saved_datagrams: SavedDatagrams::default(),
+            server_packet_before_initial: false,
             received_untracked: false,
             crypto,
             acks: AckTracker::default(),
@@ -1091,12 +1096,30 @@ impl Connection {
         let res = self.crypto.states_mut().check_key_update(now);
         self.absorb_error(now, res);
 
-        if let Some(path) = self.paths.primary() {
-            let lost = self
-                .loss_recovery
-                .timeout(&path, now, self.crypto.has_handshake_keys());
+        let pto_fired = self.paths.primary().is_some_and(|path| {
+            let (lost, pto_fired) =
+                self.loss_recovery
+                    .timeout(&path, now, self.crypto.has_handshake_keys());
             self.handle_lost_packets(&lost);
             qlog::packets_lost(&mut self.qlog, &lost, now);
+            pto_fired
+        });
+
+        // With a single handshake flight, give up when the first PTO fires
+        // without any response from the server, before any probe is sent.
+        if pto_fired
+            && self.conn_params.single_handshake_flight_enabled()
+            && self.role == Role::Client
+            && self.state == State::WaitInitial
+            && !matches!(self.address_validation, AddressValidationInfo::Retry { .. })
+            && !self.server_packet_before_initial
+        {
+            debug!("[{self}] no response to the first handshake flight, closing");
+            self.set_state(
+                State::Closed(CloseReason::Transport(Error::NoHandshakeResponse)),
+                now,
+            );
+            return;
         }
 
         // Declare the connection broken if too many consecutive PTOs have gone
@@ -1516,7 +1539,9 @@ impl Connection {
             let conn_params = self
                 .conn_params
                 .clone()
-                .versions(version, self.conn_params.get_versions().all().to_vec());
+                .versions(version, self.conn_params.get_versions().all().to_vec())
+                // The server responded, so it speaks QUIC: no reason to give up early.
+                .single_handshake_flight(false);
             let mut c = Self::new_client(
                 self.crypto.server_name().ok_or(Error::VersionNegotiation)?,
                 self.crypto.protocols(),
@@ -1643,6 +1668,7 @@ impl Connection {
                     && self.cid_manager.is_valid(packet.dcid())
                     && !self.saved_datagrams.is_either_full()
                 => {
+                    self.server_packet_before_initial = true;
                     self.crypto.resend_unacked_early();
                     self.resend_0rtt(now);
                 }
