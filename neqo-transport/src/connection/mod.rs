@@ -1566,6 +1566,15 @@ impl Connection {
             return Ok(PreprocessResult::Next);
         }
 
+        // RFC 9000, Section 9: a client MUST discard packets from an unknown server address.
+        if self.role == Role::Client && !self.paths.is_known_remote(path.borrow().remote_address())
+        {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Packet from unknown server address");
+            return Ok(PreprocessResult::Next);
+        }
+
         match (packet.packet_type(), &self.state, &self.role) {
             // RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an
             // Initial to 0, and a client that receives an Initial with a non-zero Token

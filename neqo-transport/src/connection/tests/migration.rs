@@ -49,7 +49,7 @@ use crate::{
     },
     frame::FrameType,
     packet,
-    path::{Path, PathRef},
+    path::{MAX_PATHS, Path, PathRef},
     pmtud::Pmtud,
     recovery::MAX_PTO_PACKET_COUNT,
     stats::FrameStats,
@@ -454,8 +454,9 @@ fn rebind_address_and_port_zero_len_cid() {
 }
 
 /// This simulates an attack where a valid packet is forwarded on
-/// a different path.  This shows how both paths are probed and the
-/// server eventually returns to the original path.
+/// a different path.  This shows how the server probes both paths, the client
+/// discards the probe from an unknown server address, and the server eventually
+/// returns to the original path.
 #[test]
 fn path_forwarding_attack() {
     let mut client = default_client();
@@ -485,18 +486,27 @@ fn path_forwarding_attack() {
     server.stream_close_send(stream_id).unwrap();
     assert!(server.process_output(now).dgram().is_none());
 
-    // The client should respond to the challenge on the new path.
-    // The server couldn't pad, so the client is also amplification limited.
-    let new_resp = client.process(Some(new_probe), now).dgram().unwrap();
+    // The client discards the challenge on the new path, from an unknown server address.
+    let before = client.stats();
+    client.process_input(new_probe.clone(), now);
+    assert_eq!(client.stats().dropped_rx, before.dropped_rx + 1);
+
+    // The attacker forwards the challenge to the client on the old path,
+    // and forwards the response to the server on the new path.
+    let new_resp = client
+        .process(Some(change_path(&new_probe, DEFAULT_ADDR)), now)
+        .dgram()
+        .unwrap();
     assert_eq!(client.stats().frame_rx.path_challenge, 1);
-    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
     assert_eq!(client.stats().frame_tx.path_response, 1);
-    assert_v4_path(&new_resp, false);
+    assert_v6_path(&new_resp, true);
+    let new_resp = change_path(&new_resp, DEFAULT_ADDR_V4);
 
     // The client also responds to probes on the old path.
     let old_resp = client.process(Some(old_probe), now).dgram().unwrap();
     assert_eq!(client.stats().frame_rx.path_challenge, 2);
-    assert_eq!(client.stats().frame_tx.path_challenge, 1);
+    assert_eq!(client.stats().frame_tx.path_challenge, 0);
     assert_eq!(client.stats().frame_tx.path_response, 2);
     assert_v6_path(&old_resp, true);
 
@@ -512,15 +522,14 @@ fn path_forwarding_attack() {
     assert_eq!(server.stats().frame_tx.path_challenge, 3);
     assert_path_challenge_min_len(&server, &server_data1, now);
 
-    // The client responds to this probe on the new path.
-    client.process_input(server_data1, now);
-    let stream_before = client.stats().frame_tx.stream;
-    let padded_resp = send_something(&mut client, now);
-    assert_eq!(stream_before, client.stats().frame_tx.stream);
-    assert_v4_path(&padded_resp, true); // This is padded!
+    // The client responds to this probe, forwarded on the old path.
+    client.process_input(change_path(&server_data1, DEFAULT_ADDR), now);
+    let padded_resp = client.process_output(now).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.path_response, 3);
+    assert_v6_path(&padded_resp, true); // This is padded!
 
-    // But new data from the client stays on the old path.
-    let client_data2 = client.process_output(now).dgram().unwrap();
+    // New data from the client is on the old path.
+    let client_data2 = send_something(&mut client, now);
     assert_v6_path(&client_data2, false);
 
     // The server keeps sending on the new path.
@@ -613,11 +622,11 @@ fn unfit_path_response_is_dropped() {
     connect_force_idle(&mut client, &mut server);
     let now = now();
 
-    // Two small datagrams with only a PATH_CHALLENGE, from a new server address.
+    // Two small datagrams with only a PATH_CHALLENGE, from a new client address.
     let mut challenge = || {
         let mut frame = vec![FrameType::PathChallenge.into()];
         frame.resize(9, 0);
-        let d = server
+        let d = client
             .test_write_frames(Writer(frame), now)
             .dgram()
             .unwrap();
@@ -626,16 +635,16 @@ fn unfit_path_response_is_dropped() {
     let (first, second) = (challenge(), challenge());
 
     // The first challenge arrives when the new path has no budget left.
-    client.process_input(first, now);
-    let path = client.paths.select_path().unwrap();
+    server.process_input(first, now);
+    let path = server.paths.select_path().unwrap();
     let limit = path.borrow().amplification_limit();
     path.borrow_mut().add_sent(limit);
-    drain(&mut client, now);
+    drain(&mut server, now);
 
     // The second brings budget, but only it gets a response.
-    client.process_input(second, now);
-    drain(&mut client, now);
-    assert_eq!(client.stats().frame_tx.path_response, 1);
+    server.process_input(second, now);
+    drain(&mut server, now);
+    assert_eq!(server.stats().frame_tx.path_response, 1);
 }
 
 /// A delayed ACK that the anti-amplification limit holds back on an unvalidated primary path
@@ -1519,6 +1528,52 @@ fn preferred_address_client() {
     );
 }
 
+/// Writes a `NEW_CONNECTION_ID` and a `PATH_CHALLENGE`, which would make the path permanent.
+struct NewCidPathChallengeWriter(u64);
+
+impl test_internal::FrameWriter for NewCidPathChallengeWriter {
+    fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
+        let mut cid = AddConnectionIds {
+            first: self.0,
+            count: 1,
+        };
+        test_internal::FrameWriter::write_frames(&mut cid, builder);
+        test_internal::FrameWriter::write_frames(&mut PathChallengeWriter {}, builder);
+    }
+}
+
+/// A client discards packets from unknown server addresses, so a server cannot fill `Paths`
+/// and evict the preferred address path that the client is probing.
+#[test]
+fn client_drops_packets_from_unknown_server_address() {
+    const EXTRA_PATHS: usize = MAX_PATHS - 1; // Overflows `Paths` with primary and preferred paths.
+
+    let mut client = default_client();
+    let preferred = new_port(DEFAULT_ADDR);
+    let spa = PreferredAddress::new_any(None, Some(preferred));
+    let mut server = new_server(ConnectionParameters::default().preferred_address(spa));
+    let dgram = fast_handshake(&mut client, &mut server);
+    let probe = client.process(dgram, now()).dgram().unwrap();
+    assert_eq!(*client.state(), State::Confirmed);
+    let before = client.stats();
+
+    for i in 0..EXTRA_PATHS {
+        let seqno = NewConnectionIds::SEQNO + to_u64(i);
+        let challenge = send_with_extra(&mut server, NewCidPathChallengeWriter(seqno), now());
+        client.process_input(change_source_port(&challenge, i + 1), now());
+        drain(&mut client, now());
+    }
+    let stats = client.stats();
+    assert_eq!(stats.frame_tx.path_response, before.frame_tx.path_response);
+    assert_eq!(stats.dropped_rx, before.dropped_rx + EXTRA_PATHS);
+
+    let resp = server.process(Some(probe), now()).dgram().unwrap();
+    client.process_input(resp, now());
+    drain(&mut client, now());
+    let primary = client.paths.primary().unwrap();
+    assert_eq!(primary.borrow().remote_address(), preferred);
+}
+
 /// Test that migration isn't permitted if the connection isn't in the right state.
 #[test]
 fn migration_invalid_state() {
@@ -1994,17 +2049,13 @@ fn retire_prior_to_migration_failure() {
 
     // Have the client receive the NEW_CONNECTION_ID with Retire Prior To.
     client.process_input(retire_all, now());
-    // This packet contains the probe response, which should be fine, but it
-    // also includes PATH_CHALLENGE for the new path, and the client can't
-    // respond without a connection ID.  We treat this as a connection error.
+    // That removed the new path, so the client discards the probe response
+    // and stays on the old path.
+    let before = client.stats();
     client.process_input(resp, now());
-    assert!(matches!(
-        client.state(),
-        State::Closing {
-            error: CloseReason::Transport(Error::InvalidMigration),
-            ..
-        }
-    ));
+    assert_eq!(client.stats().dropped_rx, before.dropped_rx + 1);
+    assert_eq!(*client.state(), State::Confirmed);
+    assert_v6_path(&send_something(&mut client, now()), false);
 }
 
 /// The timing of when frames arrive can mean that the migration path can
@@ -2078,21 +2129,21 @@ fn error_on_new_path_with_no_connection_id() {
 
     let cid_gen: Rc<RefCell<dyn ConnectionIdGenerator>> =
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default()));
-    let retire_all = send_with_extra(&mut server, NewConnectionIds::retire_all(cid_gen), now());
+    let retire_all = send_with_extra(&mut client, NewConnectionIds::retire_all(cid_gen), now());
 
-    client.process_input(retire_all, now());
+    server.process_input(retire_all, now());
 
-    let garbage = send_with_extra(&mut server, GarbageWriter {}, now());
+    let garbage = send_with_extra(&mut client, GarbageWriter {}, now());
 
     let dgram = change_path(&garbage, DEFAULT_ADDR_V4);
-    client.process_input(dgram, now());
+    server.process_input(dgram, now());
 
-    // See issue #1697. We had a crash when the client had a temporary path and
+    // See issue #1697. We had a crash when the endpoint had a temporary path and
     // process_output is called.
-    let closing_frames = client.stats().frame_tx.connection_close;
-    drop(client.process_output(now()));
+    let closing_frames = server.stats().frame_tx.connection_close;
+    drop(server.process_output(now()));
     assert!(matches!(
-        client.state(),
+        server.state(),
         State::Closing {
             error: CloseReason::Transport(Error::UnknownFrameType),
             ..
@@ -2100,12 +2151,12 @@ fn error_on_new_path_with_no_connection_id() {
     ));
     // Wait until the connection is closed.
     let mut now = now();
-    now += client.process_output(now).callback();
-    _ = client.process_output(now);
+    now += server.process_output(now).callback();
+    _ = server.process_output(now);
     // No closing frames should be sent, and the connection should be closed.
-    assert_eq!(client.stats().frame_tx.connection_close, closing_frames);
+    assert_eq!(server.stats().frame_tx.connection_close, closing_frames);
     assert!(matches!(
-        client.state(),
+        server.state(),
         State::Closed(CloseReason::Transport(Error::UnknownFrameType))
     ));
 }
@@ -2287,13 +2338,13 @@ fn close_on_new_path() {
     assert_eq!(client.stats().frame_tx.connection_close, 1);
 }
 
-/// Make `client` close on an invalid frame from a new path; return the size of that datagram.
+/// Make `server` close on an invalid frame from a new path; return the size of that datagram.
 fn error_on_new_path(client: &mut Connection, server: &mut Connection) -> usize {
     connect_force_idle(client, server);
-    let garbage = send_with_extra(server, GarbageWriter {}, now());
+    let garbage = send_with_extra(client, GarbageWriter {}, now());
     let dgram = change_path(&garbage, DEFAULT_ADDR_V4);
     let len = dgram.len();
-    client.process_input(dgram, now());
+    server.process_input(dgram, now());
     len
 }
 
@@ -2314,17 +2365,17 @@ fn error_on_new_path_amplification_limit() {
     let mut server = default_server();
     let budget = 3 * error_on_new_path(&mut client, &mut server);
 
-    let close = client.process_output(now()).dgram().unwrap();
+    let close = server.process_output(now()).dgram().unwrap();
     assert_eq!(close.destination(), DEFAULT_ADDR_V4);
     let mut sent = close.len();
-    // Every datagram from the server draws another CONNECTION_CLOSE, until the budget is spent.
-    let trigger = send_something(&mut server, now());
+    // Every datagram from the client draws another CONNECTION_CLOSE, until the budget is spent.
+    let trigger = send_something(&mut client, now());
     for _ in 0..10 {
-        client.process_input(trigger.clone(), now());
-        sent += client.process_output(now()).dgram().map_or(0, |d| d.len());
+        server.process_input(trigger.clone(), now());
+        sent += server.process_output(now()).dgram().map_or(0, |d| d.len());
     }
 
-    let path = closing_path(&client);
+    let path = closing_path(&server);
     assert!(!path.borrow().is_valid());
     assert!(sent <= budget);
 }
@@ -2336,16 +2387,16 @@ fn error_on_new_path_tiny_amplification_limit() {
     let mut server = default_server();
     error_on_new_path(&mut client, &mut server);
 
-    let path = closing_path(&client);
-    let (_, tx) = client
+    let path = closing_path(&server);
+    let (_, tx) = server
         .crypto
         .states()
-        .select_tx(client.version, ApplicationData)
+        .select_tx(server.version, ApplicationData)
         .unwrap();
     let left = tx.expansion() - 1;
     let limit = path.borrow().amplification_limit();
     path.borrow_mut().add_sent(limit - left);
-    assert!(client.process_output(now()).dgram().is_none());
+    assert!(server.process_output(now()).dgram().is_none());
     assert_eq!(path.borrow().amplification_limit(), left);
 }
 
