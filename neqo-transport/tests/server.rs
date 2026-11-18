@@ -9,7 +9,7 @@ mod common;
 use std::{cell::RefCell, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use neqo_common::{Datagram, Decoder, Encoder, Role};
+use neqo_common::{Datagram, Decoder, Encoder, Role, event::Provider as _};
 use neqo_transport::{
     CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output, State,
     StreamType, Version,
@@ -988,4 +988,39 @@ fn server_ciphers_unknown() {
     let initial = client.process_output(now()).dgram();
     assert!(server.process(initial, now()).dgram().is_none());
     assert!(!server.has_active_connections());
+}
+
+#[test]
+fn recycle_reuses_send_buffer_across_connections() {
+    let mut server = default_server();
+    let conns: Vec<_> = std::iter::repeat_with(|| {
+        let conn = connect(&mut default_client(), &mut server);
+        // Only one connection may have events when connecting the next.
+        conn.borrow_mut().events().for_each(drop);
+        conn
+    })
+    .take(2)
+    .collect();
+    while let Some(batch) = server
+        .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+        .dgram()
+    {
+        server.recycle(batch);
+    }
+
+    // The second batch is smaller than the first, so it fits the recycled buffer.
+    let mut ptr = None;
+    for (conn, len) in conns.iter().zip([1000, 100]) {
+        let stream_id = conn.borrow_mut().stream_create(StreamType::UniDi).unwrap();
+        conn.borrow_mut()
+            .stream_send(stream_id, &vec![0; len])
+            .unwrap();
+        let batch = server
+            .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+            .dgram()
+            .unwrap();
+        let first = *ptr.get_or_insert_with(|| batch.data().as_ptr());
+        assert_eq!(batch.data().as_ptr(), first);
+        server.recycle(batch);
+    }
 }

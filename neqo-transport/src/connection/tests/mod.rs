@@ -10,6 +10,7 @@ use std::{
     convert::identity,
     mem,
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -903,4 +904,33 @@ fn server_receives_new_token() {
             ..
         }
     ));
+}
+
+#[test]
+fn recycle_reuses_send_buffer() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    while let Some(batch) = client
+        .process_multiple_output(now(), NonZeroUsize::MIN)
+        .dgram()
+    {
+        client.recycle(batch);
+    }
+
+    // The second batch is smaller than the first, so it fits the recycled buffer.
+    client.stream_send(stream_id, &[0; 1000]).unwrap();
+    let batch = client
+        .process_multiple_output(now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    let ptr = batch.data().as_ptr();
+    client.recycle(batch);
+    client.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    let batch = client
+        .process_multiple_output(now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    assert_eq!(batch.data().as_ptr(), ptr);
 }

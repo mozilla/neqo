@@ -33,7 +33,7 @@ use futures::{
     future::{Either, select},
 };
 use http::Uri as Url;
-use neqo_common::{Datagram, Role, qlog::Qlog};
+use neqo_common::{Datagram, Role, datagram::Batch, qlog::Qlog};
 use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
@@ -388,6 +388,7 @@ trait Client {
 
     fn process_multiple_output(&mut self, now: Instant, max_datagrams: NonZeroUsize)
     -> OutputBatch;
+    fn recycle(&mut self, batch: Batch);
     fn process_multiple_input<'a>(
         &mut self,
         dgrams: impl IntoIterator<Item = Datagram<&'a mut [u8]>>,
@@ -484,7 +485,10 @@ impl<'a, H: Handler> Runner<'a, H> {
                     // buffer is full, wait till socket is writable then try
                     // again.
                     match self.socket.send(&dgram) {
-                        Ok(()) => break,
+                        Ok(()) => {
+                            self.client.recycle(dgram);
+                            break;
+                        }
                         Err(e) if e.kind() == ErrorKind::WouldBlock => {
                             self.socket.writable().await?;
                             // Now try again.

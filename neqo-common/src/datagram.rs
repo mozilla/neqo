@@ -238,6 +238,13 @@ impl Batch {
         &self.d
     }
 
+    /// Take the buffer the batch is stored in, emptied, so it can be reused.
+    #[must_use]
+    pub fn into_buffer(mut self) -> Vec<u8> {
+        self.d.clear();
+        self.d
+    }
+
     #[must_use]
     pub const fn num_datagrams(&self) -> usize {
         self.d.len().div_ceil(self.datagram_size.get())

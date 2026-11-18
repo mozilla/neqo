@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, event::Provider as _};
+use neqo_common::{Datagram, datagram::Batch, event::Provider as _};
 use neqo_http3::Error;
 use neqo_transport::{
     ConnectionEvent, ConnectionIdGenerator, OutputBatch, State, StreamId,
@@ -207,6 +207,10 @@ impl super::HttpServer for HttpServer {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         self.server.process_multiple(dgrams, now, max_datagrams)
+    }
+
+    fn recycle(&mut self, batch: Batch) {
+        self.server.recycle(batch);
     }
 
     fn process_events(&mut self, now: Instant) {
