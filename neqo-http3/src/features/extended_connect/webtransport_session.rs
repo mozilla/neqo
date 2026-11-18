@@ -35,7 +35,7 @@ pub struct Session {
     role: Role,
     /// Remote initiated streams received before session confirmation.
     ///
-    /// [`HashSet`] size limited by QUIC connection stream limit.
+    /// [`HashSet`] size limited by [`MAX_PENDING_STREAMS`].
     pending_streams: HashSet<StreamId>,
     /// The negotiated protocol from server response headers.
     negotiated_protocol: Option<String>,
@@ -43,6 +43,9 @@ pub struct Session {
     send_groups: HashSet<SendGroupId>,
     stats: SessionStats,
 }
+
+/// See draft-ietf-webtrans-http3-16 Section 4.6.
+const MAX_PENDING_STREAMS: usize = 16;
 
 impl Display for Session {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
@@ -184,7 +187,7 @@ impl Protocol for Session {
                 unreachable!("see match above");
             }
             State::Negotiating => {
-                // > a client may receive a server-initiated stream or a datagram
+                // > a client can receive a server-initiated stream or a datagram
                 // > before receiving the CONNECT response headers from the
                 // > server.
                 // >
@@ -192,7 +195,7 @@ impl Protocol for Session {
                 // > streams and datagrams until they can be associated with an
                 // > established session.
                 //
-                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-13.html#section-4.5>
+                // <https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-16.html#section-4.6>
                 self.pending_streams.insert(stream_id);
             }
             State::Active => {
@@ -242,6 +245,10 @@ impl Protocol for Session {
 
     fn protocol(&self) -> Option<&str> {
         self.negotiated_protocol.as_deref()
+    }
+
+    fn pending_streams_full(&self) -> bool {
+        self.pending_streams.len() >= MAX_PENDING_STREAMS
     }
 
     fn stats(&self) -> Option<&SessionStats> {
