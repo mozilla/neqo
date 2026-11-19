@@ -19,7 +19,7 @@ use nss::random;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ConnectionParameters, Stats,
+    ConnectionParameters, MIN_INITIAL_PACKET_SIZE, Stats,
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
@@ -903,11 +903,13 @@ impl Path {
         self.probe_blocked_since.map(|since| since + pto * count)
     }
 
+    /// Writes path validation frames into a datagram of at most `limit` bytes. Returns whether the
+    /// datagram needs to be expanded to 1200 bytes (RFC 9000, Section 8.2).
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
         stats: &mut FrameStats,
-        mtu: bool, // Whether the packet we're writing into will be a full MTU.
+        limit: usize,
         now: Instant,
     ) -> bool {
         if builder.remaining() < Self::PATH_FRAME_LEN {
@@ -931,12 +933,14 @@ impl Path {
             stats.path_response += 1;
             resp_sent = true;
         }
-        if builder.remaining() < Self::PATH_FRAME_LEN {
-            return resp_sent;
-        }
 
-        // Send PATH_CHALLENGE.
-        if let ProbeState::ProbeNeeded { probe_count } = self.state {
+        // Send PATH_CHALLENGE only in a datagram that can be expanded to 1200 bytes, unless the
+        // anti-amplification limit prevents that (RFC 9000, Section 8.2.1).
+        let challenge_sent = if builder.remaining() >= Self::PATH_FRAME_LEN
+            && let ProbeState::ProbeNeeded { probe_count } = self.state
+            && (limit >= MIN_INITIAL_PACKET_SIZE
+                || self.amplification_limit() < MIN_INITIAL_PACKET_SIZE)
+        {
             trace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<PATH_CHALLENGE_LEN>();
             builder.encode_frame(FrameType::PathChallenge, |b| {
@@ -949,13 +953,14 @@ impl Path {
             self.state = ProbeState::Probing {
                 probe_count,
                 data,
-                mtu,
+                mtu: limit >= self.plpmtu(),
                 sent: now,
             };
             true
         } else {
-            resp_sent
-        }
+            false
+        };
+        (resp_sent || challenge_sent) && limit >= MIN_INITIAL_PACKET_SIZE
     }
 
     /// Write `ACK_FREQUENCY` frames.
@@ -1311,7 +1316,7 @@ mod tests {
         builder.set_limit(builder.len() + 2 * Path::PATH_FRAME_LEN);
 
         let mut stats = FrameStats::default();
-        assert!(path.write_frames(&mut builder, &mut stats, false, now()));
+        assert!(path.write_frames(&mut builder, &mut stats, packet::LIMIT, now()));
         assert_eq!(stats.path_response, 2);
         assert_eq!(stats.path_challenge, 0);
         assert_eq!(path.challenges, [[2; PATH_CHALLENGE_LEN]]);

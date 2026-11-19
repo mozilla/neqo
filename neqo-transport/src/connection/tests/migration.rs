@@ -31,7 +31,7 @@ use super::{
     AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, assert_error, connect_fail,
     connect_force_idle, connect_rtt_idle, cwnd_avail, default_client, default_server,
     exchange_ticket, fill_cwnd, fill_stream, handshake, maybe_authenticate, new_client, new_server,
-    resumed_server, send_something, zero_len_cid_client, zero_len_cid_server,
+    next_dgram, resumed_server, send_something, zero_len_cid_client, zero_len_cid_server,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -2390,4 +2390,49 @@ fn server_error_on_new_path_not_validated() {
     let path = closing_path(&server);
     assert_eq!(path.borrow().remote_address(), remote);
     assert!(!path.borrow().is_valid());
+}
+
+/// A datagram carrying a `PATH_CHALLENGE` is expanded to at least 1200 bytes unless the
+/// anti-amplification limit prevents it (RFC 9000, Section 8.2.1), also when pacing limits it.
+#[test]
+fn paced_path_challenge_is_expanded() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+    let stream = server.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut server, stream);
+    let rebound = |server: &mut Connection, d: Datagram, now| {
+        server.process_input(change_source_port(&d, 1), now);
+    };
+
+    // After NAT rebinding, the anti-amplification limit keeps the first challenge small.
+    let c1 = change_source_port(&send_something(&mut client, now), 1);
+    let new_addr = c1.source();
+    server.process_input(c1, now);
+    let (out, _) = drain(&mut server, now);
+    let challenge = out
+        .into_iter()
+        .find(|d| d.destination() == new_addr)
+        .unwrap();
+    assert!(challenge.len() < MIN_INITIAL_PACKET_SIZE);
+
+    // More bytes from the client let the server spend its pacing credit on the new path.
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(id, &[0; 2000]).unwrap();
+    super::drain(&mut client, &mut now, |d, now| rebound(&mut server, d, now));
+    _ = drain(&mut server, now);
+
+    // The response validates the path, which the server then challenges again at full size.
+    client.process_input(change_destination(&challenge, DEFAULT_ADDR), now);
+    super::drain(&mut client, &mut now, |d, now| rebound(&mut server, d, now));
+    let challenge = loop {
+        let before = server.stats().frame_tx.path_challenge;
+        let d = next_dgram(&mut now, |t| server.process_output(t)).unwrap();
+        if server.stats().frame_tx.path_challenge > before {
+            break d;
+        }
+    };
+    assert_eq!(challenge.destination(), new_addr);
+    assert_path_challenge_min_len(&server, &challenge, now);
 }
