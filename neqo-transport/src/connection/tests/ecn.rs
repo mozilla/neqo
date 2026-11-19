@@ -199,6 +199,38 @@ fn migration_delay_to_ecn_blackhole() {
     }
 }
 
+/// ECN validation of a path does not count ECT(0) packets acknowledged from another path (RFC 9000,
+/// Section 13.4.2), so after a forced migration to a path that drops ECN-marked datagrams, the path
+/// is not ECN-capable.
+#[test]
+fn ecn_validation_is_per_path() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now)
+        .unwrap();
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(stream, &[0; 12_000]).unwrap();
+    let mut marked = 0;
+    for _ in 0..200 {
+        match client.process_output(now) {
+            Output::Datagram(d) if d.source().is_ipv4() && d.tos().is_ecn_marked() => marked += 1,
+            Output::Datagram(d) => {
+                server.process_input(d, now);
+                while let Some(d) = server.process_output(now).dgram() {
+                    client.process_input(d, now);
+                }
+            }
+            Output::Callback(t) => now += t,
+            Output::None => break,
+        }
+    }
+    assert_eq!(marked, ecn::TEST_COUNT);
+}
+
 #[test]
 fn stats() {
     let now = now();
