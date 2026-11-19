@@ -466,10 +466,11 @@ impl RecvdPackets {
     /// We don't send ranges that have been acknowledged, but they still need
     /// to be tracked so that duplicates can be detected. Ranges that do not fit
     /// are left for a later ACK.
-    fn write_frame<B: Buffer>(
+    pub(crate) fn write_frame<B: Buffer>(
         &mut self,
         now: Instant,
         rtt: Duration,
+        ack_delay_exponent: u64,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
@@ -487,8 +488,8 @@ impl RecvdPackets {
             return;
         };
         let elapsed = now.duration_since(largest_pn_time);
-        // We use the default exponent, so delay is in multiples of 8 microseconds.
-        let ack_delay = u64::try_from(elapsed.as_micros() / 8).unwrap_or(u64::MAX);
+        let ack_delay =
+            u64::try_from(elapsed.as_micros() >> ack_delay_exponent).unwrap_or(u64::MAX);
         let ack_delay = min(MAX_VARINT, ack_delay);
 
         let ecn = self.ecn_count.is_some().then_some((
@@ -618,20 +619,6 @@ impl AckTracker {
             space.acknowledged(acked);
         }
     }
-
-    pub(crate) fn write_frame<B: Buffer>(
-        &mut self,
-        pn_space: PacketNumberSpace,
-        now: Instant,
-        rtt: Duration,
-        builder: &mut packet::Builder<B>,
-        tokens: &mut recovery::Tokens,
-        stats: &mut FrameStats,
-    ) {
-        if let Some(space) = self.get_mut(pn_space) {
-            space.write_frame(now, rtt, builder, tokens, stats);
-        }
-    }
 }
 
 impl Default for AckTracker {
@@ -666,6 +653,8 @@ mod tests {
     };
 
     const RTT: Duration = Duration::from_millis(100);
+    /// The default `ack_delay_exponent`.
+    const ACK_DELAY_EXPONENT: u64 = 3;
 
     fn test_ack_range(pns: &[packet::Number], nranges: usize) {
         let mut rp = RecvdPackets::new(PacketNumberSpace::Initial); // Any space will do.
@@ -802,7 +791,14 @@ mod tests {
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
-        rp.write_frame(now, RTT, &mut builder, &mut tokens, &mut stats);
+        rp.write_frame(
+            now,
+            RTT,
+            ACK_DELAY_EXPONENT,
+            &mut builder,
+            &mut tokens,
+            &mut stats,
+        );
         assert!(!tokens.is_empty());
         assert_eq!(stats.ack, 1);
     }
@@ -974,14 +970,17 @@ mod tests {
 
         let mut tokens = recovery::Tokens::new();
         let mut frame_stats = FrameStats::default();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut frame_stats,
-        );
+        tracker
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .write_frame(
+                now(),
+                RTT,
+                ACK_DELAY_EXPONENT,
+                &mut builder,
+                &mut tokens,
+                &mut frame_stats,
+            );
         assert_eq!(frame_stats.ack, 1);
 
         // Mark another packet as received so we have cause to send another ACK in that space.
@@ -1005,15 +1004,6 @@ mod tests {
                 .ack_time(now().checked_sub(Duration::from_millis(1)).unwrap())
                 .is_none()
         );
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut frame_stats,
-        );
-        assert_eq!(frame_stats.ack, 1);
         if let recovery::Token::Ack(tok) = &tokens[0] {
             tracker.acked(PacketNumberSpace::Initial, tok); // Should be a noop.
         } else {
@@ -1038,14 +1028,17 @@ mod tests {
         let mut builder =
             packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
         let mut stats = FrameStats::default();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            t + elapsed,
-            RTT,
-            &mut builder,
-            &mut recovery::Tokens::new(),
-            &mut stats,
-        );
+        tracker
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .write_frame(
+                t + elapsed,
+                RTT,
+                ACK_DELAY_EXPONENT,
+                &mut builder,
+                &mut recovery::Tokens::new(),
+                &mut stats,
+            );
         assert_eq!(stats.ack, 1, "ACK frame should have been written");
 
         // Decode the ACK frame from the builder output and check ack_delay.
@@ -1086,14 +1079,17 @@ mod tests {
 
         let mut stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut stats,
-        );
+        tracker
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .write_frame(
+                now(),
+                RTT,
+                ACK_DELAY_EXPONENT,
+                &mut builder,
+                &mut tokens,
+                &mut stats,
+            );
         assert_eq!(stats.ack, 0);
         assert!(tokens.is_empty());
         assert_eq!(builder.len(), 0);
@@ -1156,14 +1152,17 @@ mod tests {
     ) -> (packet::Builder<Vec<u8>>, recovery::Tokens) {
         let mut frame_stats = FrameStats::default();
         let mut tokens = recovery::Tokens::new();
-        tracker.write_frame(
-            PacketNumberSpace::Initial,
-            now(),
-            RTT,
-            &mut builder,
-            &mut tokens,
-            &mut frame_stats,
-        );
+        tracker
+            .get_mut(PacketNumberSpace::Initial)
+            .unwrap()
+            .write_frame(
+                now(),
+                RTT,
+                ACK_DELAY_EXPONENT,
+                &mut builder,
+                &mut tokens,
+                &mut frame_stats,
+            );
         assert_eq!(frame_stats.ack, 1);
         (builder, tokens)
     }
