@@ -912,7 +912,11 @@ impl Path {
         limit: usize,
         now: Instant,
     ) -> bool {
-        if builder.remaining() < Self::PATH_FRAME_LEN {
+        // Send path validation frames only in a datagram that can be expanded to 1200 bytes, unless
+        // the anti-amplification limit prevents that (RFC 9000, Section 8.2).
+        let expand = limit >= MIN_INITIAL_PACKET_SIZE;
+        let amplification_limited = self.amplification_limit() < MIN_INITIAL_PACKET_SIZE;
+        if builder.remaining() < Self::PATH_FRAME_LEN || !(expand || amplification_limited) {
             return false;
         }
         // Send a PATH_RESPONSE for each pending challenge that fits.
@@ -934,12 +938,9 @@ impl Path {
             resp_sent = true;
         }
 
-        // Send PATH_CHALLENGE only in a datagram that can be expanded to 1200 bytes, unless the
-        // anti-amplification limit prevents that (RFC 9000, Section 8.2.1).
+        // Send PATH_CHALLENGE.
         let challenge_sent = if builder.remaining() >= Self::PATH_FRAME_LEN
             && let ProbeState::ProbeNeeded { probe_count } = self.state
-            && (limit >= MIN_INITIAL_PACKET_SIZE
-                || self.amplification_limit() < MIN_INITIAL_PACKET_SIZE)
         {
             trace!("[{self}] Initiating path challenge {probe_count}");
             let data = random::<PATH_CHALLENGE_LEN>();
@@ -960,7 +961,7 @@ impl Path {
         } else {
             false
         };
-        (resp_sent || challenge_sent) && limit >= MIN_INITIAL_PACKET_SIZE
+        (resp_sent || challenge_sent) && expand
     }
 
     /// Write `ACK_FREQUENCY` frames.
