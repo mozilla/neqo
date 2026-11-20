@@ -3861,6 +3861,7 @@ impl Connection {
             self.events.connection_state_change(state);
             qlog::connection_state_updated(&mut self.qlog, &old_state, &self.state, now);
             if let State::Closed(reason) = &self.state {
+                self.loss_recovery.on_connection_close(reason);
                 qlog::connection_closed(&mut self.qlog, reason, now);
             }
         } else if mem::discriminant(&state) != mem::discriminant(&self.state) {

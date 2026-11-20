@@ -73,6 +73,28 @@ fn pto_works_basic() {
 }
 
 #[test]
+fn pto_stop_reason_ack() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // Drop the original packet so that the PTO probe is sent.
+    drop(send_something(&mut client, now));
+
+    now += client.process_output(now).callback();
+    let pto = client.process_output(now).dgram().expect("PTO probe");
+    assert_eq!(client.stats().pto_stop_reason_ack, 0);
+
+    let ack = server
+        .process(Some(pto), now)
+        .dgram()
+        .expect("server should acknowledge the PTO probe");
+    client.process_input(ack, now);
+
+    assert_eq!(client.stats().pto_stop_reason_ack, 1);
+}
+
+#[test]
 fn pto_works_full_cwnd() {
     let mut client = default_client();
     let mut server = default_server();

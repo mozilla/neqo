@@ -349,3 +349,32 @@ fn stateless_reset_client() {
     client.process_input(datagram(vec![77; 21]), now());
     assert_draining(&client, &Error::StatelessReset);
 }
+
+#[test]
+fn pto_stop_reason_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let mut now = now();
+    // Drop the original packet so that the PTO probe is sent.
+    drop(send_something(&mut client, now));
+    assert_eq!(client.stats().pto_counts, [0; 16]);
+
+    now += client.process_output(now).callback();
+    client.process_output(now).dgram().expect("PTO probe");
+    assert_eq!(client.stats().pto_stop_reason_close_other, 0);
+    assert_eq!(client.stats().pto_counts[0], 1);
+
+    client.close(now, 42, "");
+    drop(client.process_output(now));
+
+    let State::Closing { timeout, .. } = *client.state() else {
+        panic!("not closing: {:?}", client.state());
+    };
+
+    drop(client.process_output(timeout));
+    assert_eq!(*client.state(), State::Closed(CloseReason::Application(42)));
+
+    assert_eq!(client.stats().pto_stop_reason_close_other, 1);
+}

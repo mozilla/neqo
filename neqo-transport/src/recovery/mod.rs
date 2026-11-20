@@ -24,7 +24,7 @@ pub use token::{StreamRecoveryToken, Token, Tokens};
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ecn, packet,
+    CloseReason, ecn, packet,
     path::{Path, PathRef},
     qlog,
     rtt::{RttEstimate, RttSource},
@@ -731,10 +731,7 @@ impl Loss {
             &mut self.stats.borrow_mut(),
         );
 
-        if self.pto_state.is_some() {
-            qlog::loss_timer_cancelled(&mut self.qlog, now);
-        }
-        self.pto_state = None;
+        self.reset_pto(now, true);
 
         (acked_packets, lost)
     }
@@ -742,10 +739,7 @@ impl Loss {
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
-        if self.pto_state.is_some() {
-            qlog::loss_timer_cancelled(&mut self.qlog, now);
-        }
-        self.pto_state = None;
+        self.reset_pto(now, false);
         let mut dropped = self
             .spaces
             .iter_mut()
@@ -792,13 +786,28 @@ impl Loss {
         // We just made progress, so discard PTO count.
         // The spec says that clients should not do this until confirming that
         // the server has completed address validation, but ignore that.
-        if self.pto_state.is_some() {
-            qlog::loss_timer_cancelled(&mut self.qlog, now);
-        }
-        self.pto_state = None;
+        self.reset_pto(now, false);
 
         if space == PacketNumberSpace::Handshake {
             self.confirm(path.rtt(), now);
+        }
+    }
+
+    /// Updates the PTO stats after a connection close event.
+    pub(crate) fn on_connection_close(&self, reason: &CloseReason) {
+        if self.pto_state.is_some() {
+            let mut stats = self.stats.borrow_mut();
+            match reason {
+                CloseReason::Transport(crate::Error::IdleTimeout) => {
+                    stats.pto_stop_reason_idle_timeout += 1;
+                }
+                CloseReason::Transport(crate::Error::TooManyPtos) => {
+                    stats.pto_stop_reason_too_many_ptos += 1;
+                }
+                CloseReason::Application(_) | CloseReason::Transport(_) => {
+                    stats.pto_stop_reason_close_other += 1;
+                }
+            }
         }
     }
 
@@ -995,6 +1004,19 @@ impl Loss {
         // Maybe prime the Handshake PTO when PTO fires in Initial space.
         if pn_space == PacketNumberSpace::Initial {
             self.maybe_prime_handshake_pto(now, has_handshake_keys);
+        }
+    }
+
+    /// Resets the pto state and updates the pto stats.
+    fn reset_pto(&mut self, now: Instant, ack_received: bool) {
+        if self.pto_state.take().is_some() {
+            qlog::loss_timer_cancelled(&mut self.qlog, now);
+            let mut stats = self.stats.borrow_mut();
+            if ack_received {
+                stats.pto_stop_reason_ack += 1;
+            } else {
+                stats.pto_stop_reason_discarded += 1;
+            }
         }
     }
 

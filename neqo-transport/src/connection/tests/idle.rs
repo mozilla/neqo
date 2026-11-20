@@ -87,6 +87,29 @@ fn idle_timeout_custom_both() {
 }
 
 #[test]
+fn pto_stop_reason_idle_timeout() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // Drop the original packet, then send and drop the PTO probe.
+    drop(send_something(&mut client, now));
+    assert_eq!(client.stats().pto_stop_reason_idle_timeout, 0);
+
+    now += client.process_output(now).callback();
+
+    drop(client.process_output(now).dgram().expect("PTO probe"));
+
+    drop(client.process_output(now + default_timeout()));
+
+    assert_eq!(
+        *client.state(),
+        State::Closed(CloseReason::Transport(Error::IdleTimeout))
+    );
+    assert_eq!(client.stats().pto_stop_reason_idle_timeout, 1);
+}
+
+#[test]
 fn asymmetric_idle_timeout() {
     const LOWER_TIMEOUT_MS: u64 = 1000;
     const LOWER_TIMEOUT: Duration = Duration::from_millis(LOWER_TIMEOUT_MS);
@@ -847,6 +870,7 @@ fn declare_broken_after_max_pto() {
     // The client sends data that never reaches the server: a black hole.
     let mut now = start;
     drop(send_something(&mut client, now));
+    assert_eq!(client.stats().pto_stop_reason_too_many_ptos, 0);
 
     // Advance through PTOs, dropping every probe the client emits.
     for _ in 0..=MAX_PTO {
@@ -870,6 +894,9 @@ fn declare_broken_after_max_pto() {
         client.state()
     );
     assert_eq!(client.loss_recovery.pto_count(), MAX_PTO);
+    assert_eq!(client.stats().pto_stop_reason_too_many_ptos, 1);
+    assert_eq!(client.stats().pto_stop_reason_idle_timeout, 0);
+    assert_eq!(client.stats().pto_stop_reason_close_other, 0);
     // The whole point: we gave up well before the idle timeout would have fired.
     assert!(
         now - start < default_timeout(),
