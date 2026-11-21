@@ -28,7 +28,7 @@ use crate::{
     path::{Path, PathRef},
     qlog,
     rtt::{RttEstimate, RttSource},
-    stats::{Stats, StatsCell},
+    stats::{PtoStopReason, Stats, StatsCell},
     tracking::{PacketNumberSpace, PacketNumberSpaceSet},
 };
 
@@ -731,7 +731,7 @@ impl Loss {
             &mut self.stats.borrow_mut(),
         );
 
-        self.reset_pto(now, true);
+        self.reset_pto(now, PtoStopReason::Ack);
 
         (acked_packets, lost)
     }
@@ -739,7 +739,7 @@ impl Loss {
     /// When receiving a retry, get all the sent packets so that they can be flushed.
     /// We also need to pretend that they never happened for the purposes of congestion control.
     pub fn retry(&mut self, primary_path: &PathRef, now: Instant) -> Vec<sent::Packet> {
-        self.reset_pto(now, false);
+        self.reset_pto(now, PtoStopReason::Discarded);
         let mut dropped = self
             .spaces
             .iter_mut()
@@ -786,7 +786,7 @@ impl Loss {
         // We just made progress, so discard PTO count.
         // The spec says that clients should not do this until confirming that
         // the server has completed address validation, but ignore that.
-        self.reset_pto(now, false);
+        self.reset_pto(now, PtoStopReason::Discarded);
 
         if space == PacketNumberSpace::Handshake {
             self.confirm(path.rtt(), now);
@@ -795,19 +795,15 @@ impl Loss {
 
     /// Updates the PTO stats after a connection close event.
     pub(crate) fn on_connection_close(&self, reason: &CloseReason) {
-        if self.pto_state.is_some() {
-            let mut stats = self.stats.borrow_mut();
-            match reason {
-                CloseReason::Transport(crate::Error::IdleTimeout) => {
-                    stats.pto_stop_reason_idle_timeout += 1;
-                }
-                CloseReason::Transport(crate::Error::TooManyPtos) => {
-                    stats.pto_stop_reason_too_many_ptos += 1;
-                }
+        if let Some(pto) = &self.pto_state {
+            let stop = match reason {
+                CloseReason::Transport(crate::Error::IdleTimeout) => PtoStopReason::IdleTimeout,
+                CloseReason::Transport(crate::Error::TooManyPtos) => PtoStopReason::TooManyPtos,
                 CloseReason::Application(_) | CloseReason::Transport(_) => {
-                    stats.pto_stop_reason_close_other += 1;
+                    PtoStopReason::CloseOther
                 }
-            }
+            };
+            self.stats.borrow_mut().add_pto_stop(stop, pto.count());
         }
     }
 
@@ -1008,15 +1004,10 @@ impl Loss {
     }
 
     /// Resets the pto state and updates the pto stats.
-    fn reset_pto(&mut self, now: Instant, ack_received: bool) {
-        if self.pto_state.take().is_some() {
+    fn reset_pto(&mut self, now: Instant, reason: PtoStopReason) {
+        if let Some(pto) = self.pto_state.take() {
             qlog::loss_timer_cancelled(&mut self.qlog, now);
-            let mut stats = self.stats.borrow_mut();
-            if ack_received {
-                stats.pto_stop_reason_ack += 1;
-            } else {
-                stats.pto_stop_reason_discarded += 1;
-            }
+            self.stats.borrow_mut().add_pto_stop(reason, pto.count());
         }
     }
 

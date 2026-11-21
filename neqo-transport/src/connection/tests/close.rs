@@ -16,7 +16,8 @@ use super::{
     send_something, ticket_with_new_token,
 };
 use crate::{
-    AppError, CloseReason, ConnectionEvent, ERROR_APPLICATION_CLOSE, Error, StreamType,
+    AppError, CloseReason, ConnectionEvent, ERROR_APPLICATION_CLOSE, Error, PtoStopReason,
+    StreamType,
     stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
 };
@@ -363,7 +364,7 @@ fn pto_stop_reason_close() {
 
     now += client.process_output(now).callback();
     client.process_output(now).dgram().expect("PTO probe");
-    assert_eq!(client.stats().pto_stop_reason_close_other, 0);
+    assert_eq!(client.stats().pto_stops[PtoStopReason::CloseOther], [0; 16]);
     assert_eq!(client.stats().pto_counts[0], 1);
 
     client.close(now, 42, "");
@@ -376,5 +377,5 @@ fn pto_stop_reason_close() {
     drop(client.process_output(timeout));
     assert_eq!(*client.state(), State::Closed(CloseReason::Application(42)));
 
-    assert_eq!(client.stats().pto_stop_reason_close_other, 1);
+    assert_eq!(client.stats().pto_stops[PtoStopReason::CloseOther][0], 1);
 }

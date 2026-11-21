@@ -23,7 +23,7 @@ use super::{
     new_client, new_client_with_qlog, new_server, send_and_receive, send_something,
 };
 use crate::{
-    CloseReason, Error, Pmtud, Stats, StreamType,
+    CloseReason, Error, Pmtud, PtoStopReason, Stats, StreamType,
     connection::{test_internal::FrameWriter, tests::cwnd_min},
     frame::FrameType,
     packet,
@@ -83,7 +83,7 @@ fn pto_stop_reason_ack() {
 
     now += client.process_output(now).callback();
     let pto = client.process_output(now).dgram().expect("PTO probe");
-    assert_eq!(client.stats().pto_stop_reason_ack, 0);
+    assert_eq!(client.stats().pto_stops[PtoStopReason::Ack], [0; 16]);
 
     let ack = server
         .process(Some(pto), now)
@@ -91,7 +91,7 @@ fn pto_stop_reason_ack() {
         .expect("server should acknowledge the PTO probe");
     client.process_input(ack, now);
 
-    assert_eq!(client.stats().pto_stop_reason_ack, 1);
+    assert_eq!(client.stats().pto_stops[PtoStopReason::Ack][0], 1);
 }
 
 #[test]

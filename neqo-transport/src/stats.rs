@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-use enum_map::EnumMap;
+use enum_map::{Enum, EnumMap};
 use neqo_common::{Dscp, Ecn};
 use serde::{Serialize, Serializer, ser::SerializeMap as _};
 use serde_with::skip_serializing_none;
@@ -215,6 +215,14 @@ fn opt_ms<S: Serializer>(d: &Option<Duration>, serializer: S) -> Result<S::Ok, S
     }
 }
 
+/// [`serialize_counts`] for [`Stats::pto_stops`].
+fn pto_stops<S: Serializer>(
+    stops: &EnumMap<PtoStopReason, [usize; Stats::MAX_PTO_COUNTS]>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serialize_counts(*stops, serializer)
+}
+
 /// A map key rendered with [`Debug`]: JSON keys have to be strings.
 struct Key<K>(K);
 
@@ -312,6 +320,21 @@ impl DerefMut for DscpCount {
     }
 }
 
+/// Why a PTO streak ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum PtoStopReason {
+    /// An ACK acknowledged a new packet.
+    Ack,
+    /// Sent packets were discarded, on Retry or when dropping keys.
+    Discarded,
+    /// The connection closed after too many PTOs.
+    TooManyPtos,
+    /// The connection closed on idle timeout.
+    IdleTimeout,
+    /// The connection closed for any other reason.
+    CloseOther,
+}
+
 /// Connection statistics
 #[skip_serializing_none]
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
@@ -376,16 +399,9 @@ pub struct Stats {
     /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
     /// separately.
     pub pto_counts: [usize; Self::MAX_PTO_COUNTS],
-    /// PTO timers stopped by acknowledgments.
-    pub pto_stop_reason_ack: usize,
-    /// PTO timers stopped when loss state was discarded.
-    pub pto_stop_reason_discarded: usize,
-    /// PTO timers stopped by connection closing due to too many PTOs.
-    pub pto_stop_reason_too_many_ptos: usize,
-    /// PTO timers stopped by connection closing with idle timeout.
-    pub pto_stop_reason_idle_timeout: usize,
-    /// PTO timers stopped by other connection closures.
-    pub pto_stop_reason_close_other: usize,
+    /// PTO streaks by why they ended, in the same buckets as `pto_counts`.
+    #[serde(serialize_with = "pto_stops")]
+    pub pto_stops: EnumMap<PtoStopReason, [usize; Self::MAX_PTO_COUNTS]>,
 
     /// Count frames received.
     pub frame_rx: FrameStats,
@@ -466,6 +482,12 @@ impl Stats {
             self.pto_counts[count - 2] -= 1;
         }
     }
+
+    /// Records a streak of `count` PTOs that ended for `reason`, in the bucket
+    /// `add_pto_count` left it in.
+    pub fn add_pto_stop(&mut self, reason: PtoStopReason, count: usize) {
+        self.pto_stops[reason][count.clamp(1, Self::MAX_PTO_COUNTS - 1) - 1] += 1;
+    }
 }
 
 #[derive(Debug, Default, Clone)]
@@ -489,7 +511,7 @@ mod tests {
     use serde::Serialize;
     use serde_json::{Value, json};
 
-    use super::{EcnCount, EcnTransitions, Stats, StatsCell, opt_ms};
+    use super::{EcnCount, EcnTransitions, PtoStopReason, Stats, StatsCell, opt_ms};
     use crate::{
         ecn::{ValidationCount, ValidationError, ValidationOutcome},
         packet,
@@ -539,6 +561,20 @@ mod tests {
         let json = to_json(&counts);
         assert!(json.contains("Short"));
         assert!(!json.contains("Initial") && !json.contains("Handshake"));
+    }
+
+    #[test]
+    fn pto_stops_use_pto_counts_buckets() {
+        let mut stats = Stats::default();
+        let depth = Stats::MAX_PTO_COUNTS + 1;
+        for count in 1..=depth {
+            stats.add_pto_count(count);
+        }
+        stats.add_pto_stop(PtoStopReason::IdleTimeout, depth);
+        assert_eq!(
+            stats.pto_stops[PtoStopReason::IdleTimeout],
+            stats.pto_counts
+        );
     }
 
     #[test]

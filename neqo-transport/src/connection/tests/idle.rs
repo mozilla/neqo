@@ -20,7 +20,7 @@ use super::{
     send_and_receive, send_something,
 };
 use crate::{
-    CloseReason, Error, packet, recovery,
+    CloseReason, Error, PtoStopReason, packet, recovery,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -94,7 +94,10 @@ fn pto_stop_reason_idle_timeout() {
 
     // Drop the original packet, then send and drop the PTO probe.
     drop(send_something(&mut client, now));
-    assert_eq!(client.stats().pto_stop_reason_idle_timeout, 0);
+    assert_eq!(
+        client.stats().pto_stops[PtoStopReason::IdleTimeout],
+        [0; 16]
+    );
 
     now += client.process_output(now).callback();
 
@@ -106,7 +109,7 @@ fn pto_stop_reason_idle_timeout() {
         *client.state(),
         State::Closed(CloseReason::Transport(Error::IdleTimeout))
     );
-    assert_eq!(client.stats().pto_stop_reason_idle_timeout, 1);
+    assert_eq!(client.stats().pto_stops[PtoStopReason::IdleTimeout][0], 1);
 }
 
 #[test]
@@ -870,7 +873,10 @@ fn declare_broken_after_max_pto() {
     // The client sends data that never reaches the server: a black hole.
     let mut now = start;
     drop(send_something(&mut client, now));
-    assert_eq!(client.stats().pto_stop_reason_too_many_ptos, 0);
+    assert_eq!(
+        client.stats().pto_stops[PtoStopReason::TooManyPtos],
+        [0; 16]
+    );
 
     // Advance through PTOs, dropping every probe the client emits.
     for _ in 0..=MAX_PTO {
@@ -894,9 +900,10 @@ fn declare_broken_after_max_pto() {
         client.state()
     );
     assert_eq!(client.loss_recovery.pto_count(), MAX_PTO);
-    assert_eq!(client.stats().pto_stop_reason_too_many_ptos, 1);
-    assert_eq!(client.stats().pto_stop_reason_idle_timeout, 0);
-    assert_eq!(client.stats().pto_stop_reason_close_other, 0);
+    let stops = client.stats().pto_stops;
+    assert_eq!(stops[PtoStopReason::TooManyPtos][MAX_PTO - 1], 1);
+    assert_eq!(stops[PtoStopReason::IdleTimeout], [0; 16]);
+    assert_eq!(stops[PtoStopReason::CloseOther], [0; 16]);
     // The whole point: we gave up well before the idle timeout would have fired.
     assert!(
         now - start < default_timeout(),
