@@ -13,6 +13,7 @@
 use std::{
     cell::RefCell,
     cmp::min,
+    iter,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     rc::Rc,
     time::{Duration, Instant},
@@ -31,7 +32,7 @@ use super::{
     AT_LEAST_PTO, CountingConnectionIdGenerator, DEFAULT_RTT, assert_error, connect_fail,
     connect_force_idle, connect_rtt_idle, cwnd_avail, default_client, default_server,
     exchange_ticket, fill_cwnd, fill_stream, handshake, maybe_authenticate, new_client, new_server,
-    resumed_server, send_something, zero_len_cid_client, zero_len_cid_server,
+    next_dgram, resumed_server, send_something, zero_len_cid_client, zero_len_cid_server,
 };
 use crate::{
     CloseReason, ConnectionEvent, ConnectionId, ConnectionIdDecoder, ConnectionIdGenerator,
@@ -2119,28 +2120,39 @@ impl test_internal::FrameWriter for PathChallengeWriter {
     }
 }
 
-/// A `PATH_RESPONSE` does not cause padding in a packet limited by the congestion window.
+/// A `PATH_RESPONSE` waits for a datagram that the congestion window allows to be expanded to 1200
+/// bytes (RFC 9000, Section 8.2.2).
 #[test]
-fn path_response_not_padded_when_cwnd_limited() {
+fn path_response_waits_for_cwnd() {
     let mut client = new_client(ConnectionParameters::default().pacing(false));
     let mut server = default_server();
     connect(&mut client, &mut server);
 
     // Leave less than a full MTU of congestion window, with nothing left to send.
     let id = client.stream_create(StreamType::UniDi).unwrap();
+    let mut sent = Vec::new();
     while cwnd_avail(&client) >= client.plpmtu() {
         client.stream_send(id, &[0; 500]).unwrap();
-        while client.process_output(now()).dgram().is_some() {}
+        sent.extend(iter::from_fn(|| client.process_output(now()).dgram()));
     }
 
     let challenge = send_with_extra(&mut server, PathChallengeWriter {}, now());
     client.process_input(challenge, now());
-    let before = client.stats().frame_tx;
+    let responses = client.stats().frame_tx.path_response;
     client.stream_send(id, &[0; 10]).unwrap();
     assert!(client.process_output(now()).dgram().is_some());
-    let after = client.stats().frame_tx;
-    assert_eq!(after.path_response, before.path_response + 1);
-    assert_eq!(after.padding, before.padding);
+    assert_eq!(client.stats().frame_tx.path_response, responses);
+
+    // The acknowledgments open the congestion window for an expanded `PATH_RESPONSE`.
+    for d in sent {
+        server.process_input(d, now());
+    }
+    while let Some(d) = server.process_output(now()).dgram() {
+        client.process_input(d, now());
+    }
+    let response = client.process_output(now()).dgram().unwrap();
+    assert_eq!(client.stats().frame_tx.path_response, responses + 1);
+    assert!(response.len() >= MIN_INITIAL_PACKET_SIZE);
 }
 
 /// Writes a padded `PATH_CHALLENGE` into every packet but the first, a long header packet.
@@ -2390,4 +2402,51 @@ fn server_error_on_new_path_not_validated() {
     let path = closing_path(&server);
     assert_eq!(path.borrow().remote_address(), remote);
     assert!(!path.borrow().is_valid());
+}
+
+/// A datagram carrying a `PATH_CHALLENGE` is expanded to at least 1200 bytes unless the
+/// anti-amplification limit prevents it (RFC 9000, Section 8.2.1), also when pacing limits it.
+#[test]
+fn paced_path_challenge_is_expanded() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let mut now = now();
+    let stream = server.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut server, stream);
+    let rebound = |client: &mut Connection, server: &mut Connection, now| {
+        while let Some(d) = client.process_output(now).dgram() {
+            server.process_input(change_source_port(&d, 1), now);
+        }
+    };
+
+    // After NAT rebinding, the anti-amplification limit keeps the first challenge small.
+    let c1 = change_source_port(&send_something(&mut client, now), 1);
+    let new_addr = c1.source();
+    server.process_input(c1, now);
+    let (out, _) = drain(&mut server, now);
+    let challenge = out
+        .into_iter()
+        .find(|d| d.destination() == new_addr)
+        .unwrap();
+    assert!(challenge.len() < MIN_INITIAL_PACKET_SIZE);
+
+    // More bytes from the client let the server spend its pacing credit on the new path.
+    let id = client.stream_create(StreamType::UniDi).unwrap();
+    client.stream_send(id, &[0; 2000]).unwrap();
+    rebound(&mut client, &mut server, now);
+    _ = drain(&mut server, now);
+
+    // The response validates the path, which the server then challenges again at full size.
+    client.process_input(change_destination(&challenge, DEFAULT_ADDR), now);
+    rebound(&mut client, &mut server, now);
+    let challenge = loop {
+        let before = server.stats().frame_tx.path_challenge;
+        let d = next_dgram(&mut now, |t| server.process_output(t)).unwrap();
+        if server.stats().frame_tx.path_challenge > before {
+            break d;
+        }
+    };
+    assert_eq!(challenge.destination(), new_addr);
+    assert_path_challenge_min_len(&server, &challenge, now);
 }

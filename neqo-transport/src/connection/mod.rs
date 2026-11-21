@@ -2601,18 +2601,16 @@ impl Connection {
         debug_assert!(
             !pmtud_probe || (primary && full_mtu && space == PacketNumberSpace::ApplicationData)
         );
-        if space == PacketNumberSpace::ApplicationData && self.state.connected() {
-            // Path validation probes should only be padded if the full MTU is available.
-            // The probing code needs to know so it can track that.
-            if path.borrow_mut().write_frames(
+        if space == PacketNumberSpace::ApplicationData
+            && self.state.connected()
+            && path.borrow_mut().write_frames(
                 builder,
                 &mut self.stats.borrow_mut().frame_tx,
-                full_mtu,
+                profile.limit(),
                 now,
-            ) && full_mtu
-            {
-                builder.enable_padding(true);
-            }
+            )
+        {
+            builder.enable_padding(true);
         }
 
         // ACKs only if CC limited or a server Initial is too small (RFC 9000, Section 14.1).
