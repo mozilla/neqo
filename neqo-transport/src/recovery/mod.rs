@@ -930,16 +930,18 @@ impl Loss {
     /// When it has, mark packets as "lost" for the purposes of having frames
     /// regenerated in subsequent packets.  The packets aren't truly lost, so
     /// we have to clone the `sent::Packet` instance.
+    ///
+    /// Returns whether the PTO fired.
     fn maybe_fire_pto(
         &mut self,
         primary_path: &PathRef,
         now: Instant,
         lost: &mut Vec<sent::Packet>,
         has_handshake_keys: bool,
-    ) {
+    ) -> bool {
         // As in `next_timeout`, which does not arm the timer then (RFC 9002, Section 6.2.2.1).
         if !primary_path.borrow().pto_possible() {
-            return;
+            return false;
         }
         let mut pto_space = None;
         // The spaces in which we will allow probing.
@@ -969,7 +971,7 @@ impl Loss {
         // This has to happen outside the loop. Increasing the PTO count here causes the
         // pto_time to increase which might cause PTO for later packet number spaces to not fire.
         let Some(pn_space) = pto_space else {
-            return;
+            return false;
         };
 
         // Collect packets for retransmission.
@@ -996,14 +998,17 @@ impl Loss {
         if pn_space == PacketNumberSpace::Initial {
             self.maybe_prime_handshake_pto(now, has_handshake_keys);
         }
+        true
     }
 
+    /// Process the loss detection and PTO timers. Returns the packets to treat
+    /// as lost, and whether the PTO fired.
     pub fn timeout(
         &mut self,
         primary_path: &PathRef,
         now: Instant,
         has_handshake_keys: bool,
-    ) -> Vec<sent::Packet> {
+    ) -> (Vec<sent::Packet>, bool) {
         trace!("[{self}] timeout {now:?}");
         if let Some(timer_type) = self
             .pending_timer_type
@@ -1037,8 +1042,9 @@ impl Loss {
         }
         self.count_lost(&lost_packets);
 
-        self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
-        lost_packets
+        let pto_fired =
+            self.maybe_fire_pto(primary_path, now, &mut lost_packets, has_handshake_keys);
+        (lost_packets, pto_fired)
     }
 
     /// Check how packets should be sent, based on whether there is a PTO,
@@ -1153,7 +1159,7 @@ mod tests {
         }
 
         pub fn timeout(&mut self, now: Instant) -> Vec<sent::Packet> {
-            self.lr.timeout(&self.path, now, true)
+            self.lr.timeout(&self.path, now, true).0
         }
 
         pub fn note_timeout_type(&mut self, now: Instant) {

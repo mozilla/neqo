@@ -153,6 +153,9 @@ pub struct ConnectionParameters {
     /// locally. `None` (the default) disables the check, leaving the idle timeout
     /// as the only backstop.
     max_pto: Option<NonZeroUsize>,
+    /// Whether a client sends its first handshake flight only once. See
+    /// [`ConnectionParameters::single_handshake_flight`].
+    single_handshake_flight: bool,
     preferred_address: PreferredAddressConfig,
     datagram_size: u64,
     initial_rtt: Duration,
@@ -197,6 +200,7 @@ impl Default for ConnectionParameters {
             ack_ratio: Self::DEFAULT_ACK_RATIO,
             idle_timeout: Self::DEFAULT_IDLE_TIMEOUT,
             max_pto: None,
+            single_handshake_flight: false,
             preferred_address: PreferredAddressConfig::Default,
             datagram_size: MAX_DATAGRAM_FRAME_SIZE,
             initial_rtt: DEFAULT_INITIAL_RTT,
@@ -378,6 +382,28 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn get_max_pto(&self) -> Option<NonZeroUsize> {
         self.max_pto
+    }
+
+    /// Send the client's first handshake flight only once. If the first PTO fires
+    /// before the server has responded in any way (Initial, Handshake, 1-RTT,
+    /// Retry or Version Negotiation packet), close the connection with
+    /// [`Error::NoHandshakeResponse`] instead of retransmitting.
+    ///
+    /// Use this when the client does not know whether the server supports QUIC,
+    /// e.g. when there is no Alt-Svc and no HTTPS DNS record. If the server does
+    /// not respond, it most likely does not support QUIC, and retransmitting
+    /// would only waste resources.
+    ///
+    /// [`Error::NoHandshakeResponse`]: crate::Error::NoHandshakeResponse
+    #[must_use]
+    pub const fn single_handshake_flight(mut self, single_handshake_flight: bool) -> Self {
+        self.single_handshake_flight = single_handshake_flight;
+        self
+    }
+
+    #[must_use]
+    pub const fn single_handshake_flight_enabled(&self) -> bool {
+        self.single_handshake_flight
     }
 
     #[must_use]
