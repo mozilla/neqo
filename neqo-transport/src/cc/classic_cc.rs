@@ -514,13 +514,12 @@ where
             now,
         );
 
-        // Lost PMTUD probes do not elicit congestion control reactions, so this closure filters
-        // them out.
-        let lost_packets_no_pmtud = || lost_packets.iter().filter(|pkt| !pkt.is_pmtud_probe());
-
-        // Packets not in flight don't elicit congestion control reactions either, so we early
-        // return if there is no lost in-flight packet left.
-        let Some(last_lost_packet) = lost_packets_no_pmtud().rfind(|pkt| pkt.cc_in_flight()) else {
+        // Lost PMTUD probes and packets not in flight do not elicit congestion control reactions,
+        // so return early if no other packet was lost.
+        let Some(last_lost_packet) = lost_packets
+            .iter()
+            .rfind(|pkt| pkt.cc_in_flight() && !pkt.is_pmtud_probe())
+        else {
             return false;
         };
 
@@ -531,13 +530,13 @@ where
             now,
             cc_stats,
         );
-        // Persistent congestion checks still need to see lost packets that are not in-flight for
-        // continuity checks. That is why only the closure to filter out lost PMTUD probes is used.
+        // Persistent congestion checks still need every lost packet, including PMTUD probes and
+        // packets not in flight, for continuity.
         let persistent_congestion = self.detect_persistent_congestion(
             first_rtt_sample_time,
             prev_largest_acked_sent,
             pto,
-            lost_packets_no_pmtud(),
+            lost_packets,
             now,
         );
         debug!(
@@ -818,7 +817,7 @@ where
         let mut start = None;
 
         // Look for the first lost packet after the previous largest acknowledged.
-        // Ignore packets that weren't ack-eliciting for the start of this range.
+        // Ignore non-ack-eliciting packets and PMTUD probes for the ends of this range.
         // Also, make sure to ignore any packets sent before we got an RTT estimate
         // as we might not have sent PTO packets soon enough after those.
         let cutoff = max(first_rtt_sample_time, prev_largest_acked_sent);
@@ -831,7 +830,7 @@ where
                 start = None;
             }
             last_pn = Some(p.pn());
-            if !p.ack_eliciting() || !p.on_primary_path() {
+            if !p.ack_eliciting() || !p.on_primary_path() || p.is_pmtud_probe() {
                 // Not interesting, keep looking.
                 continue;
             }
@@ -1031,15 +1030,28 @@ mod tests {
         assert_eq!(cc.ssthresh(), Some(cc.cwnd_initial() / 2));
     }
 
-    fn lost(pn: packet::Number, ack_eliciting: bool, t: Duration) -> sent::Packet {
+    fn lost_with_tokens(
+        pn: packet::Number,
+        ack_eliciting: bool,
+        t: Duration,
+        tokens: recovery::Tokens,
+    ) -> sent::Packet {
         sent::Packet::new(
             packet::Type::Short,
             pn,
             now() + t,
             ack_eliciting,
-            recovery::Tokens::new(),
+            tokens,
             100,
         )
+    }
+
+    fn lost(pn: packet::Number, ack_eliciting: bool, t: Duration) -> sent::Packet {
+        lost_with_tokens(pn, ack_eliciting, t, recovery::Tokens::new())
+    }
+
+    fn lost_probe(pn: packet::Number, t: Duration) -> sent::Packet {
+        lost_with_tokens(pn, true, t, vec![recovery::Token::PmtudProbe(100)])
     }
 
     fn persistent_congestion_by_algorithm(
@@ -1119,6 +1131,17 @@ mod tests {
             &[lost(1, true, ZERO), lost(2, true, RTT), lost(3, true, PC)],
             true,
         );
+        persistent_congestion(
+            &[lost(1, true, ZERO), lost_probe(2, RTT), lost(3, true, PC)],
+            true,
+        );
+    }
+
+    /// A lost PMTUD probe neither starts nor ends a span (RFC 9000, Section 14.4).
+    #[test]
+    fn persistent_congestion_pmtud_probe() {
+        persistent_congestion(&[lost_probe(1, ZERO), lost(2, true, PC)], false);
+        persistent_congestion(&[lost(1, true, ZERO), lost_probe(2, PC)], false);
     }
 
     /// Leading non-ack-eliciting packets are skipped.
