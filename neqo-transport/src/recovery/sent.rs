@@ -157,10 +157,12 @@ impl Packet {
         &self.tokens
     }
 
-    /// Clears the flag that had this packet on the primary path.
-    /// Used when migrating to clear out state.
-    pub const fn clear_primary_path(&mut self) {
+    /// Stops counting this packet for the primary path, including its ECT(0) mark, as ECN is
+    /// validated per path (RFC 9000, Section 13.4.2).
+    pub fn detach_from_primary_path(&mut self) {
         self.primary_path = false;
+        self.tokens
+            .retain(|t| !matches!(t, recovery::Token::EcnEct0));
     }
 
     /// For Initial packets, it is possible that the packet builder needs to amend the length.

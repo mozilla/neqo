@@ -65,7 +65,7 @@ pub enum Token {
     RetireConnectionId(u64),
     AckFrequency(AckRate),
     Datagram(DatagramTracking),
-    /// A packet marked with [`neqo_common::Ecn::Ect0`].
+    /// A packet marked with [`neqo_common::Ecn::Ect0`] on the primary path.
     EcnEct0,
     /// A PMTUD probe packet, carrying the IP MTU it probes for.
     PmtudProbe(usize),
