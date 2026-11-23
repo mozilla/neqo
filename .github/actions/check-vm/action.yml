@@ -172,7 +172,7 @@ runs:
     - if: ${{ inputs.platform == 'netbsd' }}
       uses: vmactions/netbsd-vm@5957cf330aef2e6ddc63c604364c99ce2e02b91d # v1.5.3
       with:
-        release: "11.0"
+        release: "11.1"
         usesh: true
         disable-cache: true
         copyback: true
