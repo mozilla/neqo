@@ -13,8 +13,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, qinfo, qtrace};
+use neqo_common::Datagram;
 use neqo_transport::Output;
+use tracing::{info, trace};
 
 use super::{
     Node, Rng,
@@ -189,8 +190,7 @@ impl TailDrop {
         // Duration consists of a u64 and a u32, so we have 32 high bits to spare.
         let t =
             sz * (ONE_SECOND_NS << 32) / u128::try_from(self.rate).unwrap() + u128::from(sub_ns);
-        let send_ns = u64::try_from(t >> 32).unwrap();
-        let deque_time = now + Duration::from_nanos(send_ns);
+        let deque_time = now + Duration::from_nanos_u128(t >> 32);
         let sub_ns = u32::try_from(t & u128::from(u32::MAX)).unwrap();
         self.next_deque = Some((deque_time, sub_ns));
 
@@ -213,7 +213,7 @@ impl TailDrop {
             self.stats.update_maxq(self.used);
             self.queue.push_back((now, d));
         } else {
-            qtrace!("taildrop dropping {} bytes", d.len());
+            trace!("taildrop dropping {} bytes", d.len());
             self.stats.dropped += 1;
         }
     }
@@ -277,25 +277,22 @@ impl Node for TailDrop {
 
         self.maybe_send(now);
 
-        if let Some((t, _)) = self.on_link.front() {
-            if *t <= now {
-                let (_, d) = self.on_link.pop_front().unwrap();
-                self.stats.delivered += 1;
-                Output::Datagram(d)
-            } else {
-                let next = self
-                    .next_deque
-                    .as_ref()
-                    .map_or(*t, |(next, _)| min(*next, *t));
-                Output::Callback(next - now)
-            }
+        if let Some((_, d)) = self.on_link.pop_front_if(|(t, _)| *t <= now) {
+            self.stats.delivered += 1;
+            Output::Datagram(d)
+        } else if let Some((t, _)) = self.on_link.front() {
+            let next = self
+                .next_deque
+                .as_ref()
+                .map_or(*t, |(next, _)| min(*next, *t));
+            Output::Callback(next - now)
         } else {
             Output::None
         }
     }
 
     fn print_summary(&self, test_name: &str) {
-        qinfo!("{test_name}: taildrop: {stats}", stats = self.stats);
+        info!("{test_name}: taildrop: {stats}", stats = self.stats);
     }
 }
 
@@ -315,8 +312,9 @@ mod test {
         time::{Duration, Instant},
     };
 
-    use neqo_common::{Datagram, Dscp, Ecn, Encoder, Tos, qinfo};
+    use neqo_common::{Datagram, Dscp, Ecn, Encoder, Tos};
     use neqo_transport::Output;
+    use tracing::info;
 
     use crate::{
         now,
@@ -429,10 +427,10 @@ mod test {
 
         // Each successive gap should be smaller than the previous (control law: INTERVAL/sqrt(n)).
         let gaps: Vec<_> = mark_times
-            .windows(2)
-            .map(|w| w[1].duration_since(w[0]))
+            .array_windows()
+            .map(|[a, b]| b.duration_since(*a))
             .collect();
-        assert!(gaps.windows(2).all(|w| w[1] < w[0]));
+        assert!(gaps.is_sorted_by(|a, b| b < a));
     }
 
     fn mark_rate(used: usize, capacity: usize, trials: usize, salt: u64) -> usize {
@@ -441,9 +439,7 @@ mod test {
         enc.encode_uint(8, u64::try_from(capacity).unwrap());
         enc.encode_uint(8, u64::try_from(trials).unwrap());
         enc.encode_uint(8, salt);
-        let rng = Rc::new(RefCell::new(Random::new(
-            <&[u8; 32]>::try_from(enc.as_ref()).unwrap(),
-        )));
+        let rng = Rc::new(RefCell::new(Random::new(enc.as_ref().as_array().unwrap())));
         let mut td = TailDrop::new(1, capacity, Aqm::red(), Duration::from_secs(2));
         td.init(rng, now());
         let Aqm::Red(state) = &td.aqm else {
@@ -452,7 +448,7 @@ mod test {
         let successes = (0..trials)
             .filter(|_| state.should_mark(used, capacity))
             .count();
-        qinfo!("{successes} out of {trials} trials at {used}/{capacity}");
+        info!("{successes} out of {trials} trials at {used}/{capacity}");
         successes
     }
 
@@ -577,10 +573,10 @@ mod test {
         let mut state = CodelState::default();
         let mark_times = codel_marks(&mut state, 4, now());
         let gaps: Vec<_> = mark_times
-            .windows(2)
-            .map(|w| w[1].duration_since(w[0]))
+            .array_windows()
+            .map(|[a, b]| b.duration_since(*a))
             .collect();
-        assert!(gaps.windows(2).all(|w| w[1] < w[0]));
+        assert!(gaps.is_sorted_by(|a, b| b < a));
     }
 
     /// Re-entering the dropping state shortly after leaving gives a shorter second-mark

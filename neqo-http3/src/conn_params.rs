@@ -4,16 +4,18 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use neqo_common::qdebug;
 use neqo_qpack as qpack;
 use neqo_transport::ConnectionParameters;
+use tracing::debug;
 
 const WEBTRANSPORT_DEFAULT: bool = false;
 /// Do not support HTTP Extended CONNECT by default.
 const CONNECT_DEFAULT: bool = false;
 const HTTP3_DATAGRAM_DEFAULT: bool = true;
+const SEND_INITIAL_PRIORITY_UPDATE_DEFAULT: bool = true;
 
 #[derive(Debug, Clone)]
+#[expect(clippy::struct_excessive_bools, reason = "Independent feature flags.")]
 pub struct Http3Parameters {
     conn_params: ConnectionParameters,
     qpack_settings: qpack::Settings,
@@ -21,6 +23,7 @@ pub struct Http3Parameters {
     /// HTTP Extended CONNECT
     connect: bool,
     http3_datagram: bool,
+    send_initial_priority_update: bool,
 }
 
 impl Default for Http3Parameters {
@@ -31,6 +34,7 @@ impl Default for Http3Parameters {
             webtransport: WEBTRANSPORT_DEFAULT,
             connect: CONNECT_DEFAULT,
             http3_datagram: HTTP3_DATAGRAM_DEFAULT,
+            send_initial_priority_update: SEND_INITIAL_PRIORITY_UPDATE_DEFAULT,
         }
     }
 }
@@ -125,15 +129,15 @@ impl Http3Parameters {
         // and reliable stream reset (to deliver each stream's header even if the stream is
         // reset). Only enable it when all of those are configured locally.
         if !self.http3_datagram {
-            qdebug!("WebTransport disabled: SETTINGS_H3_DATAGRAM is not enabled");
+            debug!("WebTransport disabled: SETTINGS_H3_DATAGRAM is not enabled");
             return false;
         }
         if self.conn_params.get_datagram_size() == 0 {
-            qdebug!("WebTransport disabled: max_datagram_frame_size transport parameter is 0");
+            debug!("WebTransport disabled: max_datagram_frame_size transport parameter is 0");
             return false;
         }
         if !self.conn_params.reliable_stream_reset_enabled() {
-            qdebug!("WebTransport disabled: reset_stream_at transport parameter is disabled");
+            debug!("WebTransport disabled: reset_stream_at transport parameter is disabled");
             return false;
         }
         true
@@ -165,11 +169,29 @@ impl Http3Parameters {
     #[must_use]
     pub fn get_http3_datagram(&self) -> bool {
         if self.http3_datagram && self.conn_params.get_datagram_size() == 0 {
-            qdebug!(
+            debug!(
                 "HTTP/3 setting SETTINGS_H3_DATAGRAM is enabled but QUIC transport parameter max_datagram_frame_size is 0. Datagrams will be sent via HTTP DATAGRAM Capsules."
             );
         }
         self.http3_datagram
+    }
+
+    /// Whether a `PRIORITY_UPDATE` frame should be sent on the HTTP/3 control stream at the
+    /// beginning of each request.
+    ///
+    /// This only affects clients.
+    #[must_use]
+    pub const fn send_initial_priority_update(
+        mut self,
+        send_initial_priority_update: bool,
+    ) -> Self {
+        self.send_initial_priority_update = send_initial_priority_update;
+        self
+    }
+
+    #[must_use]
+    pub const fn send_initial_priority_update_enabled(&self) -> bool {
+        self.send_initial_priority_update
     }
 }
 

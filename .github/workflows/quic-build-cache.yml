@@ -25,7 +25,7 @@ permissions:
 jobs:
   build-others:
     name: Build ${{ matrix.impl }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04 # The cache key omits the OS version; binaries run on the 24.04 CodSpeed runner.
     strategy:
       matrix:
         # perfcompare.yml builds these, but only runs on pull requests.

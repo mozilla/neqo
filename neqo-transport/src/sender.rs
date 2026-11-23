@@ -8,7 +8,8 @@
 
 use std::time::{Duration, Instant};
 
-use neqo_common::{qdebug, qlog::Qlog};
+use neqo_common::qlog::Qlog;
+use tracing::debug;
 
 use crate::{
     ConnectionParameters, SlowStart, Stats,
@@ -130,6 +131,11 @@ impl PacketSender {
         self.cc.pmtud_mut()
     }
 
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        self.cc.set_peer_max_udp_payload(peer_max_udp_payload, now);
+        self.maybe_update_pacer_mtu();
+    }
+
     #[must_use]
     pub fn cwnd(&self) -> usize {
         self.cc.cwnd()
@@ -161,7 +167,7 @@ impl PacketSender {
     fn maybe_update_pacer_mtu(&mut self) {
         let current_mtu = self.pmtud().plpmtu();
         if current_mtu != self.pacer.mtu() {
-            qdebug!(
+            debug!(
                 "PLPMTU changed from {} to {current_mtu}, updating pacer",
                 self.pacer.mtu()
             );
@@ -248,18 +254,21 @@ impl PacketSender {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{IpAddr, Ipv4Addr},
-        time::Duration,
-    };
+    use std::time::Duration;
 
     use neqo_common::to_u64;
     use test_fixture::now;
 
     use super::PacketSender;
     use crate::{
-        ConnectionParameters, SlowStart, cc::CongestionControl, pmtud::Pmtud, recovery::sent,
-        rtt::RttEstimate, stats::Stats,
+        ConnectionParameters, MIN_INITIAL_PACKET_SIZE, SlowStart,
+        cc::{
+            CongestionControl,
+            tests::{INITIAL_CWND, pmtud},
+        },
+        recovery::sent,
+        rtt::RttEstimate,
+        stats::Stats,
     };
 
     #[test]
@@ -297,11 +306,7 @@ mod tests {
             let params = ConnectionParameters::default()
                 .congestion_control(cc)
                 .slow_start(ss);
-            let sender = PacketSender::new(
-                &params,
-                Pmtud::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(1500)),
-                now,
-            );
+            let sender = PacketSender::new(&params, pmtud(), now);
             let description = sender.cc.to_string();
             assert!(
                 description.starts_with(expected_prefix),
@@ -314,11 +319,7 @@ mod tests {
 
     fn make_sender(pacing: bool) -> PacketSender {
         let params = ConnectionParameters::default().pacing(pacing);
-        PacketSender::new(
-            &params,
-            Pmtud::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(1500)),
-            now(),
-        )
+        PacketSender::new(&params, pmtud(), now())
     }
 
     /// Send `n` packets at once, ACK them one RTT later, return (`cwnd_before`, `cwnd_after`).
@@ -360,5 +361,17 @@ mod tests {
         // though we are pacing delayed.
         let (before, after) = send_and_ack(true, super::PACING_BURST_SIZE + 1);
         assert_eq!(after, before, "cwnd should not grow when app limited");
+    }
+
+    /// The pacer follows the peer's `max_udp_payload_size` at once, not on the next ACK or loss.
+    #[test]
+    fn peer_max_udp_payload_updates_pacer() {
+        let mut sender = make_sender(true);
+        assert_eq!(sender.pacer.mtu(), sender.pmtud().plpmtu());
+
+        sender.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
+        assert_eq!(sender.pmtud().plpmtu(), MIN_INITIAL_PACKET_SIZE);
+        assert_eq!(sender.pacer.mtu(), MIN_INITIAL_PACKET_SIZE);
+        assert_eq!(sender.cwnd(), INITIAL_CWND);
     }
 }

@@ -7,7 +7,7 @@ permissions:
 
 env:
   # renovate: depName=https://github.com/mstange/samply datasource=git-refs branch=main
-  SAMPLY_REV: a2252a6ef2ec2c9c77337b71644be58c93c7c6a8
+  SAMPLY_REV: 99fe90353baeca4b50e71ea6ec83a03643f888ff
 
 jobs:
   build-samply:

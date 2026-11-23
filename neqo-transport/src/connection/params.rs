@@ -14,7 +14,7 @@ use crate::{
     CongestionControl, DEFAULT_INITIAL_RTT, HyStartCssBaseline, Res, SlowStart,
     connection::{ConnectionIdManager, Role},
     rtt::GRANULARITY,
-    stream_id::StreamType,
+    stream_id::{MAX_STREAMS_LIMIT, StreamType},
     tparams::{
         PreferredAddress, TransportParameter, TransportParameterId,
         TransportParameterId::{
@@ -299,7 +299,7 @@ impl ConnectionParameters {
     /// If v > 2^60 (the maximum allowed by the protocol).
     #[must_use]
     pub fn max_streams(mut self, stream_type: StreamType, v: u64) -> Self {
-        assert!(v <= (1 << 60), "max_streams is too large");
+        assert!(v <= MAX_STREAMS_LIMIT, "max_streams is too large");
         self.max_streams[stream_type] = v;
         self
     }

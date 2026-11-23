@@ -27,7 +27,7 @@ permissions:
 jobs:
   fuzz-corpus:
     name: Check for new fuzzing samples
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       pull-requests: write # Needed to create PRs.
       contents: write # Needed to push branches.

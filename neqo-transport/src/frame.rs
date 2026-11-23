@@ -16,14 +16,19 @@
 
 use std::{num::NonZeroUsize, ops::RangeInclusive};
 
-use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT, qtrace};
+use neqo_common::{Buffer, Decoder, Encoder, MAX_VARINT};
 use strum::FromRepr;
+use tracing::trace;
 
 use crate::{
     AppError, ConnectionId, Error, Res, TransportError, ecn, packet,
     stateless_reset::Token as Srt,
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
 };
+
+/// The length of the data carried by `PATH_CHALLENGE` and `PATH_RESPONSE` frames, see
+/// [RFC 9000, Section 19.17](https://www.rfc-editor.org/rfc/rfc9000.html#section-19.17).
+pub const PATH_CHALLENGE_LEN: usize = 8;
 
 #[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromRepr)]
@@ -230,10 +235,10 @@ pub enum Frame<'a> {
         sequence_number: u64,
     },
     PathChallenge {
-        data: [u8; 8],
+        data: [u8; PATH_CHALLENGE_LEN],
     },
     PathResponse {
-        data: [u8; 8],
+        data: [u8; PATH_CHALLENGE_LEN],
     },
     ConnectionClose {
         error_code: CloseError,
@@ -472,7 +477,7 @@ impl<'a> Frame<'a> {
         const MAX_ACK_RANGE_COUNT: u64 = 32 * 1024;
 
         fn d<T>(v: Option<T>) -> Res<T> {
-            v.ok_or(Error::NoMoreData)
+            v.ok_or(Error::FrameEncoding)
         }
         fn dv(dec: &mut Decoder) -> Res<u64> {
             d(dec.decode_varint())
@@ -485,7 +490,7 @@ impl<'a> Frame<'a> {
                 if nr < MAX_ACK_RANGE_COUNT {
                     Ok(nr)
                 } else {
-                    Err(Error::TooMuchData)
+                    Err(Error::FrameEncoding)
                 }
             })?;
             let fa = dv(dec)?;
@@ -594,10 +599,10 @@ impl<'a> Frame<'a> {
                 };
                 let fill = !t.is_stream_with_length();
                 let data = if fill {
-                    qtrace!("STREAM frame, extends to the end of the packet");
+                    trace!("STREAM frame, extends to the end of the packet");
                     dec.decode_remainder()
                 } else {
-                    qtrace!("STREAM frame, with length");
+                    trace!("STREAM frame, with length");
                     d(dec.decode_vvec())?
                 };
                 if o + u64::try_from(data.len())? > MAX_VARINT {
@@ -620,8 +625,8 @@ impl<'a> Frame<'a> {
             }),
             FrameType::MaxStreamsBiDi | FrameType::MaxStreamsUniDi => {
                 let m = dv(dec)?;
-                if m > (1 << 60) {
-                    return Err(Error::StreamLimit);
+                if m > MAX_STREAMS_LIMIT {
+                    return Err(Error::FrameEncoding);
                 }
                 Ok(Self::MaxStreams {
                     stream_type: t.try_into()?,
@@ -637,8 +642,8 @@ impl<'a> Frame<'a> {
             }),
             FrameType::StreamsBlockedBiDi | FrameType::StreamsBlockedUniDi => {
                 let m = dv(dec)?;
-                if m > (1 << 60) {
-                    return Err(Error::StreamLimit);
+                if m > MAX_STREAMS_LIMIT {
+                    return Err(Error::FrameEncoding);
                 }
                 Ok(Self::StreamsBlocked {
                     stream_type: t.try_into()?,
@@ -655,7 +660,7 @@ impl<'a> Frame<'a> {
                 if connection_id.is_empty() || connection_id.len() > ConnectionId::MAX_LEN {
                     return Err(Error::FrameEncoding);
                 }
-                let stateless_reset_token = Srt::try_from(dec)?;
+                let stateless_reset_token = Srt::try_from(dec).map_err(|_| Error::FrameEncoding)?;
 
                 Ok(Self::NewConnectionId {
                     sequence_number,
@@ -668,14 +673,14 @@ impl<'a> Frame<'a> {
                 sequence_number: dv(dec)?,
             }),
             FrameType::PathChallenge => {
-                let data = d(dec.decode(8))?;
-                let mut datav: [u8; 8] = [0; 8];
+                let data = d(dec.decode(PATH_CHALLENGE_LEN))?;
+                let mut datav = [0; PATH_CHALLENGE_LEN];
                 datav.copy_from_slice(data);
                 Ok(Self::PathChallenge { data: datav })
             }
             FrameType::PathResponse => {
-                let data = d(dec.decode(8))?;
-                let mut datav: [u8; 8] = [0; 8];
+                let data = d(dec.decode(PATH_CHALLENGE_LEN))?;
+                let mut datav = [0; PATH_CHALLENGE_LEN];
                 datav.copy_from_slice(data);
                 Ok(Self::PathResponse { data: datav })
             }
@@ -701,11 +706,8 @@ impl<'a> Frame<'a> {
                     return Err(Error::FrameEncoding);
                 }
                 let delay = dv(dec)?;
-                let ignore_order = match d(dec.decode_uint::<u8>())? {
-                    0 => false,
-                    1 => true,
-                    _ => return Err(Error::FrameEncoding),
-                };
+                let ignore_order = bool::try_from(d(dec.decode_uint::<u8>())?)
+                    .map_err(|_| Error::FrameEncoding)?;
                 Ok(Self::AckFrequency {
                     seqno,
                     tolerance,
@@ -714,14 +716,14 @@ impl<'a> Frame<'a> {
                 })
             }
             FrameType::Datagram => {
-                qtrace!("DATAGRAM frame, extends to the end of the packet");
+                trace!("DATAGRAM frame, extends to the end of the packet");
                 Ok(Self::Datagram {
                     data: dec.decode_remainder(),
                     len_field_len: None,
                 })
             }
             FrameType::DatagramWithLen => {
-                qtrace!("DATAGRAM frame, with length");
+                trace!("DATAGRAM frame, with length");
                 let len_start = dec.offset();
                 let data = d(dec.decode_vvec())?;
                 let len_field_len = dec.offset() - len_start - data.len();
@@ -779,9 +781,9 @@ mod tests {
     use neqo_common::{Decoder, Encoder, MAX_VARINT};
 
     use crate::{
-        CloseError, ConnectionId, Error, StreamId, StreamType, Token as Srt,
+        CloseError, ConnectionId, Error, MAX_STREAMS_LIMIT, StreamId, StreamType, Token as Srt,
         ecn::Count,
-        frame::{AckRange, Frame, FrameType},
+        frame::{AckRange, Frame, FrameType, PATH_CHALLENGE_LEN},
         packet,
     };
 
@@ -822,7 +824,7 @@ mod tests {
         // Try to parse ACK_ECN without ECN values
         let enc = Encoder::from_hex("035234523502523601020304");
         let mut dec = enc.as_decoder();
-        assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::NoMoreData);
+        assert_eq!(Frame::decode(&mut dec).unwrap_err(), Error::FrameEncoding);
 
         // Try to parse ACK_ECN with ECN values
         let ecn_count = Some(Count::new(0, 1, 2, 3));
@@ -1089,6 +1091,17 @@ mod tests {
     }
 
     #[test]
+    fn truncated_new_connection_id() {
+        let mut enc = Encoder::from_hex("18523400"); // type, sequence_number, retire_prior
+        enc.encode_vvec(&[0x01, 0x02]);
+        enc.encode(&[0x11; 15][..]); // One byte short of a stateless reset token.
+        assert_eq!(
+            Frame::decode(&mut enc.as_decoder()).unwrap_err(),
+            Error::FrameEncoding
+        );
+    }
+
+    #[test]
     fn new_connection_id_retire_prior_after_sequence_number() {
         // retire_prior (5) greater than sequence_number (2).
         let mut enc = Encoder::from_hex("180205"); // type, sequence_number, retire_prior
@@ -1111,14 +1124,18 @@ mod tests {
 
     #[test]
     fn path_challenge() {
-        let f = Frame::PathChallenge { data: [9; 8] };
+        let f = Frame::PathChallenge {
+            data: [9; PATH_CHALLENGE_LEN],
+        };
 
         just_dec(&f, "1a0909090909090909");
     }
 
     #[test]
     fn path_response() {
-        let f = Frame::PathResponse { data: [9; 8] };
+        let f = Frame::PathResponse {
+            data: [9; PATH_CHALLENGE_LEN],
+        };
 
         just_dec(&f, "1b0909090909090909");
     }
@@ -1237,7 +1254,8 @@ mod tests {
         e.encode_varint(0u64); // ACK delay
         e.encode_varint(u32::MAX); // ACK range count = huge, but maybe available for allocation
 
-        assert_eq!(Err(Error::TooMuchData), Frame::decode(&mut e.as_decoder()));
+        let res = Frame::decode(&mut e.as_decoder());
+        assert_eq!(res, Err(Error::FrameEncoding));
     }
 
     #[test]
@@ -1399,11 +1417,17 @@ mod tests {
             "RetireConnectionId { sequence_number: 1 }"
         );
         assert_eq!(
-            Frame::PathChallenge { data: [1; 8] }.dump(),
+            Frame::PathChallenge {
+                data: [1; PATH_CHALLENGE_LEN]
+            }
+            .dump(),
             "PathChallenge { data: [1, 1, 1, 1, 1, 1, 1, 1] }"
         );
         assert_eq!(
-            Frame::PathResponse { data: [2; 8] }.dump(),
+            Frame::PathResponse {
+                data: [2; PATH_CHALLENGE_LEN]
+            }
+            .dump(),
             "PathResponse { data: [2, 2, 2, 2, 2, 2, 2, 2] }"
         );
         assert_eq!(
@@ -1475,7 +1499,9 @@ mod tests {
     /// 1-RTT packets (RFC 9000, Table 3).
     #[test]
     fn is_allowed_path_response_and_handshake_done() {
-        let path_response = Frame::PathResponse { data: [0; 8] };
+        let path_response = Frame::PathResponse {
+            data: [0; PATH_CHALLENGE_LEN],
+        };
         assert!(path_response.is_allowed(packet::Type::Short));
         assert!(!path_response.is_allowed(packet::Type::ZeroRtt));
 
@@ -1483,7 +1509,9 @@ mod tests {
         assert!(!Frame::HandshakeDone.is_allowed(packet::Type::ZeroRtt));
 
         // PATH_CHALLENGE, by contrast, is permitted in 0-RTT packets.
-        let path_challenge = Frame::PathChallenge { data: [0; 8] };
+        let path_challenge = Frame::PathChallenge {
+            data: [0; PATH_CHALLENGE_LEN],
+        };
         assert!(path_challenge.is_allowed(packet::Type::ZeroRtt));
     }
 
@@ -1534,13 +1562,15 @@ mod tests {
     /// ACK with too many ranges is rejected; just below the limit passes the range count check.
     #[test]
     fn decode_ack_too_many_ranges() {
-        let enc = encode_ack_header(32768);
+        let mut enc = encode_ack_header(32768);
+        enc.pad_to(enc.len() + 1 + 2 * 32768, 0); // Only the range-count limit can fail.
         let result = Frame::decode(&mut enc.as_decoder());
-        assert_eq!(result.unwrap_err(), Error::TooMuchData);
+        assert_eq!(result.unwrap_err(), Error::FrameEncoding);
 
-        let enc = encode_ack_header(32767);
+        let mut enc = encode_ack_header(32767);
+        enc.pad_to(enc.len() + 1 + 2 * 32767, 0); // First ACK Range and 32767 ACK Ranges.
         let result = Frame::decode(&mut enc.as_decoder());
-        assert_ne!(result.unwrap_err(), Error::TooMuchData);
+        assert!(result.is_ok());
     }
 
     /// Both Stream and Crypto frames reject `offset + data.len() > MAX_VARINT`.
@@ -1573,10 +1603,10 @@ mod tests {
     fn decode_max_streams_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x12); // MaxStreamsBiDi
-        enc.encode_varint((1u64 << 60) + 1);
+        enc.encode_varint(MAX_STREAMS_LIMIT + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::StreamLimit
+            Error::FrameEncoding
         );
     }
 
@@ -1585,10 +1615,10 @@ mod tests {
     fn decode_streams_blocked_exceeds_limit() {
         let mut enc = Encoder::default();
         enc.encode_byte(0x16); // StreamsBlockedBiDi
-        enc.encode_varint((1u64 << 60) + 1);
+        enc.encode_varint(MAX_STREAMS_LIMIT + 1);
         assert_eq!(
             Frame::decode(&mut enc.as_decoder()).unwrap_err(),
-            Error::StreamLimit
+            Error::FrameEncoding
         );
     }
 

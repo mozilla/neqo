@@ -119,6 +119,11 @@ impl<'a> Decoder<'a> {
         Some(res)
     }
 
+    /// Decodes `N` bytes of arbitrary data as an array.
+    pub fn decode_array<const N: usize>(&mut self) -> Option<&'a [u8; N]> {
+        self.decode(N)?.as_array()
+    }
+
     pub(crate) fn decode_n(&mut self, n: usize) -> Option<u64> {
         debug_assert!(n > 0 && n <= 8);
         if self.remaining() < n {
@@ -242,6 +247,11 @@ impl<'b> PartialEq<Decoder<'b>> for Decoder<'_> {
     }
 }
 
+/// Bytes reserved in an [`Encoder`] and later filled by [`Encoder::overwrite`].
+#[must_use = "call Encoder::overwrite to fill the reserved bytes"]
+#[derive(Copy, Clone)]
+pub struct Reservation<const N: usize>(usize);
+
 /// Encoder is good for building data structures.
 pub struct Encoder<B = Vec<u8>> {
     buf: B,
@@ -345,6 +355,32 @@ impl<B: Buffer> Encoder<B> {
             () if v < (1 << 62) => self.encode((v | (3 << 62)).to_be_bytes()),
             () => panic!("Varint value too large"),
         }
+    }
+
+    /// Reserve `N` bytes, filled with zero, for a later [`Self::overwrite`].
+    ///
+    /// # Panics
+    ///
+    /// When the underlying buffer cannot hold `N` more bytes.
+    pub fn reserve<const N: usize>(&mut self) -> Reservation<N> {
+        let pos = self.buf.position();
+        self.pad_to(self.len() + N, 0);
+        Reservation(pos)
+    }
+
+    /// Overwrite bytes previously returned by [`Self::reserve`].
+    ///
+    /// # Panics
+    ///
+    /// When `rsv` is not contained in the bytes written to this encoder.
+    pub fn overwrite<const N: usize>(&mut self, rsv: Reservation<N>, data: [u8; N]) -> &mut Self {
+        assert!(rsv.0 >= self.start, "reservation is outside the encoder");
+        let offset = rsv.0 - self.start;
+        let end = offset + N;
+        let len = self.len();
+        assert!(end <= len, "reservation extends past encoder");
+        self.as_mut()[offset..end].copy_from_slice(&data);
+        self
     }
 
     /// Encode a length or byte count as a QUIC varint, accepting either `usize` or `u64`.
@@ -453,6 +489,7 @@ impl<B: Buffer> Encoder<B> {
 impl Encoder<Vec<u8>> {
     /// Skip the first `n` bytes from the encoder buffer without copying.
     /// This advances the internal offset, making those bytes inaccessible.
+    /// Skipped bytes stay allocated until [`Self::compact`].
     ///
     /// # Panics
     ///
@@ -460,6 +497,21 @@ impl Encoder<Vec<u8>> {
     pub fn skip(&mut self, n: usize) {
         assert!(n <= self.len(), "Cannot skip beyond buffer length");
         self.start += n;
+    }
+
+    /// Get the allocated capacity of the underlying buffer.
+    #[must_use]
+    pub const fn capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+
+    /// Release skipped bytes once they are at least as many as the remaining ones,
+    /// keeping the allocated capacity. This invalidates any outstanding [`Reservation`].
+    pub fn compact(&mut self) {
+        if self.start >= self.len() {
+            self.buf.drain(..self.start);
+            self.start = 0;
+        }
     }
 
     /// Static helper function for previewing the results of encoding without doing it.
@@ -739,7 +791,30 @@ mod tests {
         io::{Cursor, Write as _},
     };
 
-    use super::{Buffer, Decoder, Encoder, MAX_VARINT};
+    use super::{Buffer, Decoder, Encoder, MAX_VARINT, Reservation};
+
+    #[test]
+    fn reserve_then_overwrite() {
+        let mut enc = Encoder::default();
+        enc.encode_byte(0xaa);
+        let one: Reservation<1> = enc.reserve();
+        let two: Reservation<2> = enc.reserve();
+        enc.encode_byte(0xbb);
+        assert_eq!(enc, Encoder::from_hex("aa000000bb"));
+        enc.overwrite(two, [0x22, 0x33]);
+        enc.overwrite(one, [0x11]);
+        assert_eq!(enc, Encoder::from_hex("aa112233bb"));
+
+        // `start` is not zero: the reserved offset is absolute in the buffer.
+        let mut buf = vec![0xff];
+        {
+            let mut enc = Encoder::new_borrowed_vec(&mut buf);
+            let reserved = enc.reserve::<1>();
+            enc.encode_byte(0x22);
+            enc.overwrite(reserved, [0x11]);
+        }
+        assert_eq!(buf, [0xff, 0x11, 0x22]);
+    }
 
     #[test]
     fn decode() {
@@ -747,6 +822,15 @@ mod tests {
         let mut dec = enc.as_decoder();
         assert_eq!(dec.decode(2).unwrap(), &[0x01, 0x23]);
         assert!(dec.decode(2).is_none());
+    }
+
+    #[test]
+    fn decode_array() {
+        let enc = Encoder::from_hex("012345");
+        let mut dec = enc.as_decoder();
+        assert_eq!(dec.decode_array(), Some(&[0x01, 0x23]));
+        assert!(dec.decode_array::<2>().is_none());
+        assert_eq!(dec.decode_array(), Some(&[0x45]));
     }
 
     #[test]
@@ -1320,6 +1404,22 @@ mod tests {
     fn encoder_skip_too_much() {
         let mut enc = Encoder::from_hex("0102");
         enc.skip(3);
+    }
+
+    #[test]
+    fn encoder_compact() {
+        let mut enc = Encoder::from_hex("010203040506");
+        let capacity = enc.buf.capacity();
+        enc.skip(2);
+        enc.compact();
+        assert_eq!((enc.start, enc.buf.len()), (2, 6));
+        enc.skip(1);
+        enc.compact();
+        assert_eq!((enc.start, enc.buf.as_slice()), (0, [4, 5, 6].as_slice()));
+        enc.skip(3);
+        enc.compact();
+        assert_eq!((enc.start, enc.buf.len()), (0, 0));
+        assert_eq!(enc.buf.capacity(), capacity);
     }
 
     /// [`Encoder::as_decoder`] should only expose the bytes actively encoded through this

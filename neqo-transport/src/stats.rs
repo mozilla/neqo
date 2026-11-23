@@ -15,9 +15,10 @@ use std::{
 };
 
 use enum_map::EnumMap;
-use neqo_common::{Dscp, Ecn, qdebug};
+use neqo_common::{Dscp, Ecn};
 use serde::{Serialize, Serializer, ser::SerializeMap as _};
 use serde_with::skip_serializing_none;
+use tracing::debug;
 
 use crate::{cc::CongestionTrigger, ecn, packet, version::Version};
 
@@ -344,7 +345,7 @@ pub struct Stats {
     pub unacked_range_dropped: usize,
     /// Number of PMTUD probes sent.
     pub pmtud_tx: usize,
-    /// Number of PMTUD probes ACK'ed.
+    /// Number of PMTUD probes ACK'ed for the size under test during an active search.
     pub pmtud_ack: usize,
     /// Number of PMTUD probes lost.
     pub pmtud_lost: usize,
@@ -352,7 +353,7 @@ pub struct Stats {
     pub pmtud_iface_mtu: usize,
     /// The peer's `max_udp_payload_size` transport parameter.
     pub pmtud_peer_max_udp_payload: Option<usize>,
-    /// Probed PMTU of the current path.
+    /// Probed PMTU of the current path, before the [`Stats::pmtud_peer_max_udp_payload`] cap.
     pub pmtud_pmtu: usize,
     /// The connection-level receive window, as auto-tuned.
     pub fc_max_active: u64,
@@ -432,7 +433,7 @@ impl Stats {
 
     pub fn pkt_dropped<A: AsRef<str>>(&mut self, reason: A) {
         self.dropped_rx += 1;
-        qdebug!(
+        debug!(
             "[{}] Dropped received packet: {}; Total: {}",
             self.info,
             reason.as_ref(),

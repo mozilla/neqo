@@ -13,13 +13,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Bytes, Encoder, Header, qdebug, qinfo, qtrace, to_u64};
-#[cfg(test)]
-use neqo_transport::DatagramQueueCapacity;
+use neqo_common::{Bytes, Encoder, Header, to_u64};
 use neqo_transport::{
-    Connection, DatagramQueueOutcome, DatagramTracking, StreamId, StreamType, recv_stream,
-    send_stream, server::ConnectionRef, streams::SendOrder,
+    Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
+    StreamType, recv_stream, send_stream, server::ConnectionRef, streams::SendOrder,
 };
+use tracing::{debug, info, trace};
 
 use crate::{
     Error, Http3Client, Http3OrWebTransportStream, Http3ServerEvent, Http3State, Http3StreamInfo,
@@ -77,6 +76,52 @@ pub trait ClientSession {
         &mut self,
         session_id: StreamId,
         max_buffered_datagrams: Option<NonZeroUsize>,
+    ) -> Res<()>;
+
+    /// A snapshot of this session's outgoing-datagram queue; see
+    /// [`DatagramQueueCapacity`].  The `outgoingMaxBufferedDatagrams` limit is not included.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid or is not a WebTransport session.
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity>;
+
+    /// Set the number of concurrent incoming unidirectional streams a WebTransport session
+    /// anticipates (`anticipatedConcurrentIncomingUnidirectionalStreams`).
+    ///
+    /// This raises a connection-wide stream limit computed as the sum of the anticipated values
+    /// set for all not-yet-closed WebTransport sessions on this connection, capped at
+    /// [`crate::MAX_ANTICIPATED_INCOMING_STREAMS`] streams per direction; it does not create a
+    /// per-session limit.  Closed sessions are excluded so a stale one cannot keep inflating the
+    /// total; sessions still negotiating are included, since the W3C API supplies this value at
+    /// construction.  A `value` that would push the sum past the cap is accepted but only takes
+    /// effect up to it. The transport limit only ever rises, so lowering `value` does not reduce
+    /// it. The limit is a concurrency window, not a cumulative budget: as the peer closes streams
+    /// it opened, it may open further streams without another call here.
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, is not a WebTransport session, or is closing.
+    fn webtransport_set_anticipated_incoming_uni_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()>;
+
+    /// Bidirectional counterpart to
+    /// [`Self::webtransport_set_anticipated_incoming_uni_streams`]
+    /// (`anticipatedConcurrentIncomingBidirectionalStreams`).
+    ///
+    /// # Errors
+    ///
+    /// Returns error if the session ID is invalid, is not a WebTransport session, or is closing.
+    fn webtransport_set_anticipated_incoming_bidi_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
     ) -> Res<()>;
 
     /// Set the outgoing-datagram queue's `outgoingMaxAge`, or clear it back
@@ -177,7 +222,7 @@ pub trait ClientSession {
     fn webtransport_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId>;
 
@@ -269,6 +314,42 @@ impl ClientSession for Http3Client {
         )
     }
 
+    fn webtransport_datagram_queue_capacity(
+        &self,
+        session_id: StreamId,
+    ) -> Res<DatagramQueueCapacity> {
+        self.handler()
+            .webtransport_datagram_queue_capacity(self.connection(), session_id)
+    }
+
+    fn webtransport_set_anticipated_incoming_uni_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_set_anticipated_incoming_streams(
+            conn,
+            session_id,
+            StreamType::UniDi,
+            value,
+        )
+    }
+
+    fn webtransport_set_anticipated_incoming_bidi_streams(
+        &mut self,
+        session_id: StreamId,
+        value: u16,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_set_anticipated_incoming_streams(
+            conn,
+            session_id,
+            StreamType::BiDi,
+            value,
+        )
+    }
+
     fn webtransport_set_datagram_max_age(
         &mut self,
         session_id: StreamId,
@@ -350,7 +431,7 @@ impl ClientSession for Http3Client {
     fn webtransport_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId> {
         let events = Box::new(self.client_events().clone());
@@ -404,7 +485,7 @@ impl ClientSession for Http3Client {
         send_group_id: SendGroupId,
         send_order: SendOrder,
     ) -> Res<DatagramQueueOutcome> {
-        qtrace!("webtransport_send_datagram session:{session_id:?}");
+        trace!("webtransport_send_datagram session:{session_id:?}");
         let (conn, handler) = self.connection_and_handler();
         handler.webtransport_send_datagram(
             session_id,
@@ -445,10 +526,8 @@ impl ExportKeyingMaterial for Connection {
             return Err(Error::InvalidInput);
         }
 
-        let mut wt_context = Encoder::with_capacity(
-            Encoder::varint_len(session_id.as_u64()) + 1 + label.len() + 1 + context.len(),
-        );
-        wt_context.encode_varint(session_id.as_u64());
+        let mut wt_context = Encoder::with_capacity(8 + 1 + label.len() + 1 + context.len());
+        wt_context.encode_uint(8, session_id.as_u64());
         wt_context.encode_vec(1, label);
         wt_context.encode_vec(1, context);
 
@@ -462,7 +541,7 @@ trait Handler {
         &mut self,
         conn: &mut Connection,
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId>;
 
@@ -505,10 +584,10 @@ impl Handler for Http3Connection {
         &mut self,
         conn: &mut Connection,
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId> {
-        qinfo!("[{self}] Create WebTransport");
+        info!("[{self}] Create WebTransport");
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -529,7 +608,7 @@ impl Handler for Http3Connection {
         accept_res: &SessionAcceptAction,
         now: Instant,
     ) -> Res<()> {
-        qtrace!("Respond to WebTransport session with accept={accept_res}");
+        trace!("Respond to WebTransport session with accept={accept_res}");
         if !self.webtransport_enabled() {
             return Err(Error::Unavailable);
         }
@@ -551,19 +630,9 @@ impl Handler for Http3Connection {
         message: &str,
         now: Instant,
     ) -> Res<extended_connect::stats::SessionStats> {
-        qtrace!("Close WebTransport session {session_id:?}");
-        // Collect expiries and snapshot the stats before tearing the session down,
-        // so the caller sees the final values.  This also rejects non-WebTransport
-        // sessions.
-        //
-        // `extended_connect_close_session` then checks the type again. That is
-        // deliberate: it is shared with connect-udp, which needs the check for its own
-        // close path, so it cannot rely on this one having happened.
-        self.webtransport_session(session_id)?
-            .borrow_mut()
-            .expire_datagrams(conn, now);
-        let stats = self.webtransport_session_stats(session_id)?;
-        self.extended_connect_close_session(
+        trace!("Close WebTransport session {session_id:?}");
+        // Read the stats after closing, which counts the queue's expired and dropped datagrams.
+        let session = self.extended_connect_close_session(
             conn,
             session_id,
             extended_connect::ExtendedConnectType::WebTransport,
@@ -571,7 +640,8 @@ impl Handler for Http3Connection {
             message,
             now,
         )?;
-        Ok(stats)
+        let stats = session.borrow().stats();
+        stats.ok_or(Error::InvalidStreamId)
     }
 
     fn webtransport_send_datagram<I: Into<DatagramTracking>>(
@@ -793,7 +863,7 @@ impl ServerSession {
     ///
     /// It may return `InvalidStreamId` if a stream does not exist anymore.
     pub fn response(&self, accept: &SessionAcceptAction, now: Instant) -> Res<()> {
-        qdebug!("[{self}] Set a response for a WebTransport session");
+        debug!("[{self}] Set a response for a WebTransport session");
         self.stream_handler
             .handler
             .borrow_mut()
@@ -904,7 +974,8 @@ impl ServerSession {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidStreamId` if the session no longer exists.
+    /// Returns `InvalidStreamId` if the session is not yet accepted or no
+    /// longer exists.
     pub fn set_max_buffered_datagrams(
         &self,
         max_buffered_datagrams: Option<NonZeroUsize>,
@@ -924,7 +995,8 @@ impl ServerSession {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidStreamId` if the session no longer exists.
+    /// Returns `InvalidStreamId` if the session is not yet accepted or no
+    /// longer exists.
     pub fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
@@ -938,7 +1010,7 @@ impl ServerSession {
             )
     }
 
-    /// This session's statistics, e.g. `datagrams_expired_outgoing`.
+    /// This session's statistics, e.g. `outgoing_datagrams.expired`.
     #[cfg(test)]
     pub(crate) fn stats(&self) -> extended_connect::stats::SessionStats {
         let session_id = self.stream_handler.stream_id();
@@ -951,6 +1023,9 @@ impl ServerSession {
     }
 
     /// Snapshot of the outgoing-datagram queue's current byte/count state.
+    ///
+    /// Production callers use
+    /// [`ClientSession::webtransport_datagram_queue_capacity`].
     #[cfg(test)]
     pub(crate) fn datagram_queue_capacity(&self) -> DatagramQueueCapacity {
         let session_id = self.stream_handler.stream_id();
@@ -958,15 +1033,12 @@ impl ServerSession {
             .handler
             .borrow_mut()
             .base_handler_mut()
-            .extended_connect_datagram_queue_capacity(
-                session_id,
-                &self.stream_handler.conn.borrow(),
-            )
+            .webtransport_datagram_queue_capacity(&self.stream_handler.conn.borrow(), session_id)
             .expect("test session must exist")
     }
 
-    /// Test-only: what the transport still queues for this session, which
-    /// can outlive the session itself.
+    /// What the transport still queues for this session, which can outlive
+    /// the session itself.
     #[cfg(test)]
     pub(crate) fn transport_queued_datagrams(&self) -> usize {
         self.stream_handler
@@ -1094,5 +1166,38 @@ impl ServerEvents for Http3ServerEvents {
             session,
             datagram,
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::StreamId;
+    use test_fixture::connect;
+
+    use super::ExportKeyingMaterial as _;
+
+    /// The exporter context must encode the session ID as a fixed 64-bit
+    /// field, per draft-ietf-webtrans-http3 §4.8, Figure 6.
+    #[test]
+    fn exporter_context_session_id_is_64_bits() {
+        let (client, _server) = connect();
+        let session_id = StreamId::new(4);
+
+        let mut wt = [0u8; 32];
+        client
+            .webtransport_export_keying_material(session_id, b"label", b"ctx", &mut wt)
+            .unwrap();
+
+        let mut expected_context = vec![0, 0, 0, 0, 0, 0, 0, 4];
+        expected_context.push(5);
+        expected_context.extend_from_slice(b"label");
+        expected_context.push(3);
+        expected_context.extend_from_slice(b"ctx");
+        let mut raw = [0u8; 32];
+        client
+            .export_keying_material("EXPORTER-WebTransport", &expected_context, &mut raw)
+            .unwrap();
+
+        assert_eq!(wt, raw);
     }
 }

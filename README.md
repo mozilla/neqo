@@ -93,7 +93,7 @@ to enable decryption by [Wireshark](https://wiki.wireshark.org/TLS) and other to
 
 ### Using RUST_LOG effectively
 
-As documented in the [env_logger documentation](https://docs.rs/env_logger/),
+As documented for [`tracing-subscriber`'s `Targets` filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/targets/struct.Targets.html),
 the `RUST_LOG` environment variable can be used to selectively enable log messages
 from Rust code. This works for Neqo's command line tools, as well as for when Neqo is
 incorporated into Gecko, although [Gecko needs to be built in debug mode](https://developer.mozilla.org/en-US/docs/Mozilla/Developer_guide/Build_Instructions/Configuring_Build_Options).

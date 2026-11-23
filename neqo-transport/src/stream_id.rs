@@ -11,6 +11,10 @@ use std::fmt::{self, Display, Formatter};
 use enum_map::Enum;
 use neqo_common::Role;
 
+/// The most streams of one type a peer can be permitted to open, and so the
+/// largest value `MAX_STREAMS` can carry (RFC 9000, Section 4.6).
+pub const MAX_STREAMS_LIMIT: u64 = 1 << 60;
+
 /// The type of stream, either Bi-Directional or Uni-Directional.
 /// The discriminant values match the QUIC stream type bits.
 #[derive(PartialEq, Debug, Copy, Clone, PartialOrd, Eq, Ord, Hash, Enum)]

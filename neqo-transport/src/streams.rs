@@ -8,11 +8,13 @@
 use std::{
     cell::RefCell,
     cmp::Ordering,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, qdebug, qtrace};
+use neqo_common::{Buffer, Role};
+use tracing::{debug, trace};
 
 use crate::{
     AppError, ConnectionEvents, Error, Res,
@@ -23,7 +25,7 @@ use crate::{
     recv_stream::{RecvStream, RecvStreams},
     send_stream::{SendStream, SendStreams, TransmissionPriority},
     stats::{FrameStats, Stats},
-    stream_id::{StreamId, StreamType},
+    stream_id::{MAX_STREAMS_LIMIT, StreamId, StreamType},
     tparams::{
         TransportParameterId::{
             InitialMaxData, InitialMaxStreamDataBidiLocal, InitialMaxStreamDataBidiRemote,
@@ -131,13 +133,15 @@ impl Streams {
         self.clear_streams();
         // Rejected data does not count against the new 1-RTT flow-control limit.
         *self.sender_fc.borrow_mut() = SenderFlowControl::new((), 0);
-        debug_assert_eq!(
-            self.remote_stream_limits[StreamType::BiDi].max_active(),
-            self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
+        // `set_remote_max_streams` may have raised these above the configured transport
+        // parameter; they are never reduced.
+        debug_assert!(
+            self.remote_stream_limits[StreamType::BiDi].max_active()
+                >= self.tps.borrow().local().get_integer(InitialMaxStreamsBidi)
         );
-        debug_assert_eq!(
-            self.remote_stream_limits[StreamType::UniDi].max_active(),
-            self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
+        debug_assert!(
+            self.remote_stream_limits[StreamType::UniDi].max_active()
+                >= self.tps.borrow().local().get_integer(InitialMaxStreamsUni)
         );
         self.local_stream_limits = LocalStreamLimits::new(self.role);
     }
@@ -231,10 +235,9 @@ impl Streams {
                 stream_id,
                 maximum_stream_data,
             } => {
-                qtrace!(
+                trace!(
                     "Stream {} Received MaxStreamData {}",
-                    *stream_id,
-                    *maximum_stream_data
+                    *stream_id, *maximum_stream_data
                 );
                 stats.max_stream_data += 1;
                 // Terminate connection with STREAM_STATE_ERROR if receive-only
@@ -254,12 +257,12 @@ impl Streams {
                 self.handle_max_streams(*stream_type, *maximum_streams);
             }
             Frame::DataBlocked { data_limit } => {
-                qdebug!("Received DataBlocked with data limit {data_limit}");
+                debug!("Received DataBlocked with data limit {data_limit}");
                 stats.data_blocked += 1;
                 self.handle_data_blocked();
             }
             Frame::StreamDataBlocked { stream_id, .. } => {
-                qtrace!("Received StreamDataBlocked");
+                trace!("Received StreamDataBlocked");
                 stats.stream_data_blocked += 1;
                 // Terminate connection with STREAM_STATE_ERROR if send-only
                 // stream (-transport 19.13)
@@ -576,15 +579,22 @@ impl Streams {
         }
     }
 
+    /// See `Connection::set_remote_max_streams`.
+    pub fn set_remote_max_streams(&mut self, stream_type: StreamType, max: u64) {
+        let max = max.min(MAX_STREAMS_LIMIT);
+        if max > self.remote_stream_limits[stream_type].max_active() {
+            self.remote_stream_limits[stream_type].set_max_active(max);
+        }
+    }
+
     pub fn handle_max_data(&mut self, maximum_data: u64) {
         let previous_limit = self.sender_fc.borrow().available();
         let Some(current_limit) = self.sender_fc.borrow_mut().update(maximum_data) else {
             return;
         };
 
-        for (_id, ss) in &mut self.send {
-            ss.maybe_emit_writable_event(previous_limit, current_limit);
-        }
+        self.send
+            .maybe_emit_writable_events(previous_limit, current_limit);
     }
 
     pub fn handle_data_blocked(&self) {
@@ -633,6 +643,15 @@ impl Streams {
     /// When the stream does not exist.
     pub fn get_send_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut SendStream> {
         self.send.get_mut(stream_id)
+    }
+
+    pub(crate) fn set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        self.send
+            .set_writable_event_low_watermark(stream_id, watermark)
     }
 
     /// # Errors

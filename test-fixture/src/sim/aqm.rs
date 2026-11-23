@@ -11,7 +11,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Dscp, Ecn, Tos, qtrace};
+use neqo_common::{Datagram, Dscp, Ecn, Tos};
+use tracing::trace;
 
 use super::Rng;
 
@@ -141,11 +142,11 @@ fn mark_ce(mut dgram: Datagram) -> Option<Datagram> {
         Some(dgram)
     } else if ecn.is_ect() {
         assert_ne!(ecn, Ecn::Ect1, "ECT(1)/L4S is not implemented");
-        qtrace!("taildrop marking {} bytes CE", dgram.len());
+        trace!("taildrop marking {} bytes CE", dgram.len());
         dgram.set_tos(Tos::from((Dscp::from(tos), Ecn::Ce)));
         Some(dgram)
     } else {
-        qtrace!("taildrop dropping {} bytes (not ECT-capable)", dgram.len());
+        trace!("taildrop dropping {} bytes (not ECT-capable)", dgram.len());
         None
     }
 }

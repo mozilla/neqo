@@ -13,12 +13,13 @@
 
 use std::ops::Range;
 
-use neqo_common::{Datagram, Decoder, Role, hex::HexWithLen, qtrace};
+use neqo_common::{Datagram, Decoder, Role, hex::HexWithLen};
 use nss::{
-    Mode, RecordProtection as Aead,
+    Mode, RecordProtection as Aead, RecordProtectionOps as _,
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     hkdf, hp,
 };
+use tracing::trace;
 
 pub use crate::{CountingConnectionIdGenerator, default_client, now};
 
@@ -120,7 +121,7 @@ pub fn remove(hp: &hp::Key, header: &[u8], payload: &[u8]) -> (Vec<u8>, u64) {
     fixed_header.extend_from_slice(&payload[..4]);
 
     // Sample for masking and apply the mask.
-    let mask = hp.mask(payload[4..20].try_into().unwrap()).unwrap();
+    let mask = hp.mask(payload[4..20].as_array().unwrap()).unwrap();
     fixed_header[0] ^= mask[0] & 0xf;
     let pn_len = 1 + usize::from(fixed_header[0] & 0x3);
     for i in 0..pn_len {
@@ -145,7 +146,7 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
                 .expect("Failed to convert sample slice to array for header protection mask"),
         )
         .expect("Failed to generate header protection mask");
-    qtrace!(
+    trace!(
         "sample={} mask={}",
         HexWithLen::new(&packet[sample_start..sample_end]),
         HexWithLen::new(mask)
@@ -154,4 +155,33 @@ pub fn apply(hp: &hp::Key, packet: &mut [u8], pn_bytes: Range<usize>) {
     for i in 0..(pn_bytes.end - pn_bytes.start) {
         packet[pn_bytes.start + i] ^= mask[1 + i];
     }
+}
+
+/// Decrypt the Initial packet at the start of `dgram`, let `f` modify its plaintext, and return a
+/// datagram with just the re-encrypted packet. `dcid` is the DCID of the client's first Initial.
+#[must_use]
+pub fn rewrite_initial<F: FnOnce(&mut [u8])>(
+    dgram: &Datagram,
+    dcid: &[u8],
+    role: Role,
+    f: F,
+) -> Datagram {
+    let (protected_header, _, _, payload) = decode_initial_header(dgram, role).unwrap();
+    let (aead_enc, aead_dec, hp) = initial_aead_and_hp(dcid, role);
+    let (header, pn) = remove(&hp, protected_header, payload);
+    let pn_len = header.len() - protected_header.len();
+    let mut buf = vec![0; payload.len()];
+    let mut plaintext = aead_dec
+        .decrypt(pn, &header, &payload[pn_len..], &mut buf)
+        .unwrap()
+        .to_owned();
+    f(&mut plaintext);
+
+    let mut packet = header.clone();
+    packet.resize(header.len() + payload.len() - pn_len, 0);
+    aead_enc
+        .encrypt(pn, &header, &plaintext, &mut packet[header.len()..])
+        .unwrap();
+    apply(&hp, &mut packet, protected_header.len()..header.len());
+    Datagram::new(dgram.source(), dgram.destination(), dgram.tos(), packet)
 }

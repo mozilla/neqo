@@ -4,10 +4,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::{cmp::max, collections::HashMap, fmt::Debug};
+use std::{cmp::max, collections::HashMap, fmt::Debug, num::NonZeroUsize};
 
-use neqo_common::{Role, event::Provider as _, qdebug, to_u64};
+use neqo_common::{Role, event::Provider as _, to_u64};
 use test_fixture::now;
+use tracing::debug;
 
 use super::{
     super::State, DEFAULT_STREAM_DATA, assert_error, connect, connect_force_idle, default_client,
@@ -62,7 +63,7 @@ fn transfer() {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    qdebug!("---- client sends");
+    debug!("---- client sends");
     // Send
     let client_stream_id = client.stream_create(StreamType::UniDi).unwrap();
     client.stream_send(client_stream_id, &[6; 100]).unwrap();
@@ -84,12 +85,12 @@ fn transfer() {
     assert_eq!(datagrams.len(), 4);
     assert_eq!(*client.state(), State::Confirmed);
 
-    qdebug!("---- server receives");
+    debug!("---- server receives");
     for d in datagrams {
         let out = server.process(Some(d), now());
         // With an RTT of zero, the server will acknowledge every packet immediately.
         assert!(out.as_dgram_ref().is_some());
-        qdebug!("Output={:0x?}", out.as_dgram_ref());
+        debug!("Output={:0x?}", out.as_dgram_ref());
     }
     assert_eq!(*server.state(), State::Confirmed);
 
@@ -122,7 +123,7 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
 
-    qdebug!("---- client sends");
+    debug!("---- client sends");
     // open all streams and set the sendorders
     let mut ordered = Vec::new();
     let mut streams = Vec::<StreamId>::new();
@@ -149,10 +150,10 @@ fn sendorder_test(order_of_sendorder: &[Option<SendOrder>]) {
     }
     assert_eq!(*client.state(), State::Confirmed);
 
-    qdebug!("---- server receives");
+    debug!("---- server receives");
     for d in datagrams {
         let out = server.process(Some(d), now());
-        qdebug!("Output={:0x?}", out.as_dgram_ref());
+        debug!("Output={:0x?}", out.as_dgram_ref());
     }
     assert_eq!(*server.state(), State::Confirmed);
 
@@ -449,6 +450,49 @@ fn max_data() {
     ));
 }
 
+/// `MAX_DATA` wakes exactly the streams whose low watermark the previous limit did not exceed.
+#[test]
+fn max_data_low_watermark() {
+    const SMALL_MAX_DATA: usize = 1024;
+    const WATERMARK: usize = 100;
+
+    fn writable_after_max_data(client: &mut Connection, max_data: usize) -> Vec<StreamId> {
+        client.streams.handle_max_data(to_u64(max_data));
+        client
+            .events()
+            .filter_map(|e| match e {
+                ConnectionEvent::SendStreamWritable { stream_id } => Some(stream_id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().max_data(to_u64(SMALL_MAX_DATA)));
+    connect(&mut client, &mut server);
+
+    let low = client.stream_create(StreamType::UniDi).unwrap();
+    let high = client.stream_create(StreamType::UniDi).unwrap();
+    assert_eq!(
+        client.stream_send(low, &[b'a'; SMALL_MAX_DATA]).unwrap(),
+        SMALL_MAX_DATA
+    );
+    _ = client.events().count();
+
+    let limit = SMALL_MAX_DATA + WATERMARK / 2;
+    assert_eq!(writable_after_max_data(&mut client, limit), [low, high]);
+
+    client
+        .stream_set_writable_event_low_watermark(high, NonZeroUsize::new(WATERMARK).unwrap())
+        .unwrap();
+    let limit = SMALL_MAX_DATA + WATERMARK;
+    assert_eq!(writable_after_max_data(&mut client, limit), [high]);
+    let limit = SMALL_MAX_DATA + WATERMARK * 3 / 2;
+    assert_eq!(writable_after_max_data(&mut client, limit), [high]);
+    let limit = SMALL_MAX_DATA + WATERMARK * 3;
+    assert!(writable_after_max_data(&mut client, limit).is_empty());
+}
+
 #[test]
 fn exceed_max_data() {
     const SMALL_MAX_DATA: usize = 1024;
@@ -527,7 +571,7 @@ fn do_not_accept_data_after_stop_sending() {
     );
 }
 
-struct Writer(Vec<u64>);
+pub(super) struct Writer(pub Vec<u64>);
 
 impl crate::connection::test_internal::FrameWriter for Writer {
     fn write_frames(&mut self, builder: &mut packet::Builder<&mut Vec<u8>>) {
@@ -981,6 +1025,85 @@ fn max_streams_after_bidi_closed() {
     client.process_input(dgram.unwrap(), now());
     assert!(client.stream_create(StreamType::BiDi).is_ok());
     assert!(client.stream_create(StreamType::BiDi).is_err());
+}
+
+/// Raising the incoming stream limit at runtime is advertised to the peer via
+/// `MAX_STREAMS`, so it can open streams beyond the limit the handshake set.
+#[test]
+fn set_remote_max_streams_lets_peer_open_more_streams() {
+    for st in [StreamType::BiDi, StreamType::UniDi] {
+        let mut client = default_client();
+        let mut server = new_server(ConnectionParameters::default().max_streams(st, 1));
+        connect(&mut client, &mut server);
+
+        let first = client.stream_create(st).unwrap();
+        assert_eq!(client.stream_create(st).unwrap_err(), Error::StreamLimit);
+
+        server.set_remote_max_streams(st, 3);
+        let dgram = server.process_output(now()).dgram();
+        client.process_input(dgram.expect("MAX_STREAMS is sent right away"), now());
+
+        assert!(client.stream_create(st).is_ok());
+        assert!(client.stream_create(st).is_ok());
+        assert_eq!(client.stream_create(st).unwrap_err(), Error::StreamLimit);
+
+        // Monotonic: a lower value changes nothing and sends nothing, so
+        // retiring a stream still frees exactly one more.
+        server.set_remote_max_streams(st, 2);
+        assert!(server.process_output(now()).dgram().is_none());
+
+        client.stream_close_send(first).unwrap();
+        let dgram = client.process_output(now()).dgram();
+        server.process_input(dgram.unwrap(), now());
+        let mut buf = [0; 16];
+        assert_eq!(server.stream_recv(first, &mut buf).unwrap(), (0, true));
+        if st == StreamType::BiDi {
+            server.stream_close_send(first).unwrap();
+            let dgram = server.process_output(now()).dgram();
+            client.process_input(dgram.unwrap(), now());
+            let dgram = send_something(&mut client, now());
+            server.process_input(dgram, now());
+        }
+        let dgram = server.process_output(now()).dgram();
+        client.process_input(dgram.expect("retiring a stream sends MAX_STREAMS"), now());
+
+        assert!(client.stream_create(st).is_ok());
+        assert_eq!(client.stream_create(st).unwrap_err(), Error::StreamLimit);
+    }
+}
+
+/// A closed stream still frees a slot after a raise: the next `MAX_STREAMS`
+/// is the streams retired so far plus the raised limit.
+#[test]
+fn set_remote_max_streams_then_retire_frees_another_stream() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().max_streams(StreamType::UniDi, 1));
+    connect(&mut client, &mut server);
+
+    server.set_remote_max_streams(StreamType::UniDi, 2);
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.unwrap(), now());
+
+    let first = client.stream_create(StreamType::UniDi).unwrap();
+    assert!(client.stream_create(StreamType::UniDi).is_ok());
+    assert_eq!(
+        client.stream_create(StreamType::UniDi).unwrap_err(),
+        Error::StreamLimit
+    );
+
+    client.stream_close_send(first).unwrap();
+    let dgram = client.process_output(now()).dgram();
+    server.process_input(dgram.unwrap(), now());
+    let mut buf = [0; 16];
+    assert_eq!(server.stream_recv(first, &mut buf).unwrap(), (0, true));
+    let dgram = server.process_output(now()).dgram();
+    client.process_input(dgram.expect("retiring a stream sends MAX_STREAMS"), now());
+
+    assert!(client.stream_create(StreamType::UniDi).is_ok());
+    assert_eq!(
+        client.stream_create(StreamType::UniDi).unwrap_err(),
+        Error::StreamLimit
+    );
 }
 
 #[test]

@@ -4,6 +4,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+mod anticipated_streams;
 mod datagrams;
 mod negotiation;
 mod sessions;
@@ -152,7 +153,7 @@ impl WtTest {
     ) -> (StreamId, Option<ServerSession>) {
         let wt_session_id = self
             .client
-            .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+            .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
             .unwrap();
         self.exchange_packets();
 
@@ -202,7 +203,7 @@ impl WtTest {
     fn create_second_wt_session(&mut self) -> StreamId {
         let id = self
             .client
-            .webtransport_create_session(now(), ("https", "something.com", "/"), &[])
+            .webtransport_create_session(now(), &("https", "something.com", "/"), &[])
             .unwrap();
         self.exchange_packets();
         while let Some(event) = self.server.next_event() {

@@ -1,8 +1,7 @@
 name: Vendor
 on:
   pull_request:
-    # `edited` so a retargeted PR gets a run, see codspeed.yml. Only base changes run jobs.
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   merge_group:
   workflow_dispatch:
     inputs:
@@ -24,8 +23,7 @@ on:
         default: true
 
 concurrency:
-  # Non-base edits skip all jobs, so they must not cancel the run in progress.
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'edited' && !github.event.changes.base && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -43,11 +41,10 @@ env:
 jobs:
   vendor:
     name: Vendor into Gecko
-    if: ${{ github.event.action != 'edited' || github.event.changes.base }}
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        os: [ubuntu-26.04, macos-26, windows-2025]
     runs-on: ${{ matrix.os }}
     env:
       MOZBUILD_STATE_PATH: ${{ github.workspace }}/mozbuild
@@ -78,7 +75,7 @@ jobs:
       # FIXME: macos-15 runners have a Python version that is too new for mach
       - name: Set up Python (macOS)
         if: runner.os == 'macOS'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
 
@@ -116,10 +113,6 @@ jobs:
             echo ""
           done >> supply-chain/audits.toml
 
-          # Hide .git to prevent mach from running git operations
-          mv .git .git.bak
-          trap 'mv .git.bak .git' EXIT
-
           if ./mach vendor rust --ignore-modified 2>&1 | tee vendor.log; then
             echo "Vendoring succeeded"
             exit 0
@@ -129,6 +122,8 @@ jobs:
             echo "::error::Vendoring failed with no output"
             exit 1
           fi
+
+          UNUSED_PATCH='Unused patch in top-level Cargo.toml|has an override in .* that is not used'
 
           # Check if this is a vet-related failure
           if grep -qE "Vet error|Missing audit for" vendor.log; then
@@ -145,6 +140,20 @@ jobs:
             done
             echo "::warning::Vet failures are unrelated to neqo, forcing"
             ./mach vendor rust --ignore-modified --force
+          elif grep -qE "$UNUSED_PATCH" vendor.log &&
+               ! grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor.log | grep -vE "$UNUSED_PATCH" > /dev/null; then
+            for crate in $NEQO_CRATES; do
+              if grep -qF "Unused patch in top-level Cargo.toml for $crate." vendor.log; then
+                echo "::error::Patch for neqo crate $crate was not used"
+                exit 1
+              fi
+            done
+            grep -E "$UNUSED_PATCH" vendor.log | sed 's/^.* E /::warning::/'
+            ./mach vendor rust --ignore-modified --force 2>&1 | tee vendor-force.log
+            if grep -E '[0-9]+:[0-9]+\.[0-9]+ E ' vendor-force.log | grep -vE "$UNUSED_PATCH" > /dev/null; then
+              echo "::error::Forced vendoring reported errors besides unused patches"
+              exit 1
+            fi
           else
             echo "::error::Vendoring failed for non-vet reasons:"
             cat vendor.log
