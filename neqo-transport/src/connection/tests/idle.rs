@@ -94,9 +94,12 @@ fn pto_stop_reason_idle_timeout() {
 
     // Drop the original packet, then send and drop the PTO probe.
     drop(send_something(&mut client, now));
-    assert_eq!(
-        client.stats().pto_stops[PtoStopReason::IdleTimeout],
-        [0; 16]
+    assert!(
+        client
+            .stats()
+            .pto_stops
+            .iter()
+            .all(|s| s[PtoStopReason::IdleTimeout] == 0)
     );
 
     now += client.process_output(now).callback();
@@ -109,7 +112,7 @@ fn pto_stop_reason_idle_timeout() {
         *client.state(),
         State::Closed(CloseReason::Transport(Error::IdleTimeout))
     );
-    assert_eq!(client.stats().pto_stops[PtoStopReason::IdleTimeout][0], 1);
+    assert_eq!(client.stats().pto_stops[0][PtoStopReason::IdleTimeout], 1);
 }
 
 #[test]
@@ -873,10 +876,8 @@ fn declare_broken_after_max_pto() {
     // The client sends data that never reaches the server: a black hole.
     let mut now = start;
     drop(send_something(&mut client, now));
-    assert_eq!(
-        client.stats().pto_stops[PtoStopReason::TooManyPtos],
-        [0; 16]
-    );
+    let stops = client.stats().pto_stops;
+    assert!(stops.iter().all(|s| s[PtoStopReason::TooManyPtos] == 0));
 
     // Advance through PTOs, dropping every probe the client emits.
     for _ in 0..=MAX_PTO {
@@ -901,9 +902,9 @@ fn declare_broken_after_max_pto() {
     );
     assert_eq!(client.loss_recovery.pto_count(), MAX_PTO);
     let stops = client.stats().pto_stops;
-    assert_eq!(stops[PtoStopReason::TooManyPtos][MAX_PTO - 1], 1);
-    assert_eq!(stops[PtoStopReason::IdleTimeout], [0; 16]);
-    assert_eq!(stops[PtoStopReason::CloseOther], [0; 16]);
+    assert_eq!(stops[MAX_PTO - 1][PtoStopReason::TooManyPtos], 1);
+    assert!(stops.iter().all(|s| s[PtoStopReason::IdleTimeout] == 0));
+    assert!(stops.iter().all(|s| s[PtoStopReason::CloseOther] == 0));
     // The whole point: we gave up well before the idle timeout would have fired.
     assert!(
         now - start < default_timeout(),

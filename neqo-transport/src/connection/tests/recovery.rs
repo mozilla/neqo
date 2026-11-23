@@ -23,7 +23,7 @@ use super::{
     new_client, new_client_with_qlog, new_server, send_and_receive, send_something,
 };
 use crate::{
-    CloseReason, Error, Pmtud, PtoStopReason, Stats, StreamType,
+    CloseReason, Error, Pmtud, PtoStopReason, StreamType,
     connection::{test_internal::FrameWriter, tests::cwnd_min},
     frame::FrameType,
     packet,
@@ -83,7 +83,13 @@ fn pto_stop_reason_ack() {
 
     now += client.process_output(now).callback();
     let pto = client.process_output(now).dgram().expect("PTO probe");
-    assert_eq!(client.stats().pto_stops[PtoStopReason::Ack], [0; 16]);
+    assert!(
+        client
+            .stats()
+            .pto_stops
+            .iter()
+            .all(|s| s[PtoStopReason::Ack] == 0)
+    );
 
     let ack = server
         .process(Some(pto), now)
@@ -91,7 +97,7 @@ fn pto_stop_reason_ack() {
         .expect("server should acknowledge the PTO probe");
     client.process_input(ack, now);
 
-    assert_eq!(client.stats().pto_stops[PtoStopReason::Ack][0], 1);
+    assert_eq!(client.stats().pto_stops[0][PtoStopReason::Ack], 1);
 }
 
 #[test]
@@ -364,8 +370,7 @@ fn pto_handshake_complete() {
     let cb = client.process_output(now).callback();
     assert_eq!(cb, pto);
 
-    let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 0);
 
     // Wait for PTO to expire and resend a handshake packet.
     // Wait long enough that the 1-RTT PTO also fires.
@@ -377,8 +382,7 @@ fn pto_handshake_complete() {
     let ping = client.process_output(now).dgram();
     assert_eq!(ping.as_ref().unwrap()[0] & 0x80, 0);
 
-    pto_counts[0] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 1);
 
     // PTO has been doubled.
     let pto = 2 * pto;
@@ -408,9 +412,7 @@ fn pto_handshake_complete() {
 
     // Not one but two PTOs in a row, thus resetting first bit and increasing
     // second bit.
-    pto_counts[0] = 0;
-    pto_counts[1] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 2);
 
     now += HALF_RTT;
     // Now let the server have pkt1 and expect an immediate Handshake ACK.
@@ -449,6 +451,10 @@ fn pto_handshake_complete() {
     // Let the client receive the ACK.
     // The client now waits in order to delay its ACK of the HANDSHAKE_DONE.
     let _retransmissions = client.process(ack, now);
+    assert_eq!(client.loss_recovery.pto_count(), 0);
+    let stops = client.stats().pto_stops;
+    assert_eq!(stops[1][PtoStopReason::Ack], 1);
+    assert_eq!(stops[0][PtoStopReason::Ack], 0);
     let cb = client.process_output(now).callback();
     // The default ack delay is the RTT divided by the default ACK ratio of 4.
     let expected_ack_delay = HALF_RTT * 2 / 4;
@@ -589,8 +595,7 @@ fn handshake_ack_pto() {
     let delay = client.process_output(now).callback();
     assert_eq!(delay, RTT * 3);
 
-    let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 0);
 
     // Wait for the PTO and ensure that the client generates a packet.
     now += delay;
@@ -602,8 +607,7 @@ fn handshake_ack_pto() {
     server.process_input(c3.unwrap(), now);
     assert_eq!(server.stats().frame_rx.ping, ping_before + 1);
 
-    pto_counts[0] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 1);
 
     // Now complete the handshake as cheaply as possible.
     let dgram = server.process_output(now).dgram();
@@ -616,7 +620,7 @@ fn handshake_ack_pto() {
     client.process_input(dgram.unwrap(), now);
     assert_eq!(*client.state(), State::Confirmed);
 
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 0);
 }
 
 #[test]

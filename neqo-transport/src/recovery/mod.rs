@@ -477,10 +477,6 @@ impl PtoState {
         self.count
     }
 
-    pub fn count_pto(&self, stats: &mut Stats) {
-        stats.add_pto_count(self.count);
-    }
-
     /// Generate a sending profile, indicating what space it should be from.
     /// This takes a packet from the supply if one remains, or returns `None`.
     pub fn send_profile(&mut self, mtu: usize) -> Option<SendProfile> {
@@ -924,7 +920,6 @@ impl Loss {
         }
 
         if let Some(st) = &mut self.pto_state {
-            st.count_pto(&mut self.stats.borrow_mut());
             qlog::metrics_updated(&mut self.qlog, [qlog::Metric::PtoCount(st.count())], now);
         }
         let pto = self.pto_period(rtt);
