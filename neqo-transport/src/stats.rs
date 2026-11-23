@@ -472,7 +472,7 @@ impl Stats {
     /// When preconditions are violated.
     pub fn add_pto_count(&mut self, count: usize) {
         debug_assert!(count > 0);
-        if count >= Self::MAX_PTO_COUNTS {
+        if count > Self::MAX_PTO_COUNTS {
             // We can't move this count any further, so stop.
             return;
         }
@@ -486,7 +486,7 @@ impl Stats {
     /// Records a streak of `count` PTOs that ended for `reason`, in the bucket
     /// `add_pto_count` left it in.
     pub fn add_pto_stop(&mut self, reason: PtoStopReason, count: usize) {
-        self.pto_stops[reason][count.clamp(1, Self::MAX_PTO_COUNTS - 1) - 1] += 1;
+        self.pto_stops[reason][count.clamp(1, Self::MAX_PTO_COUNTS) - 1] += 1;
     }
 }
 
