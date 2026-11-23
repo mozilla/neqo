@@ -771,6 +771,39 @@ fn server_session_has_the_built_in_max_buffered_datagrams() {
     );
 }
 
+#[test]
+fn equal_priority_quic_datagrams_rejected() {
+    // The combination of datagram length and number of sends yields about 1 MiB of data, which is
+    // more than the buffer can hold.
+    const DATAGRAM_LEN: usize = 1000;
+    const TOTAL_SENDS: usize = 1000;
+
+    fixture_init();
+    let (mut client, proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
+    while client.next_event().is_some() {}
+    while proxy.next_event().is_some() {}
+
+    // Queue datagrams without calling `process_output`, so the buffer fills up.
+    let mut rejected = false;
+    for i in 0..TOTAL_SENDS {
+        let outcome = client
+            .connect_udp_send_datagram(session_id, &[0; DATAGRAM_LEN], None, now())
+            .unwrap();
+        match outcome {
+            DatagramQueueOutcome::Ok => assert!(i < 9, "send {i} reported Ok"),
+            DatagramQueueOutcome::MaxBufferedReached => assert!(i >= 9),
+            DatagramQueueOutcome::Overflowed { .. } => panic!("send {i} overflowed"),
+            DatagramQueueOutcome::Rejected => rejected = true,
+        }
+    }
+
+    assert!(
+        rejected,
+        "no datagrams were rejected, even though we exceeded the buffer limit"
+    );
+}
+
 /// Establish a connect-udp session over the HTTP DATAGRAM Capsule path, granting
 /// the client only `proxy_max_stream_data` bytes of control-stream flow control.
 fn establish_capsule_session(
