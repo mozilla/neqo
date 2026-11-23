@@ -12,18 +12,52 @@
 //! is a Rust benchmark instead of a unit test due to its runtime (> 10s) even
 //! in Rust release mode.
 
-use std::{env, time::Duration};
+use std::{
+    env,
+    time::{Duration, Instant},
+};
 
 use neqo_common::log::init as init_log;
-use neqo_transport::{ConnectionParameters, State};
+use neqo_transport::{Connection, ConnectionEvent, ConnectionParameters, State};
 use test_fixture::{
     boxed,
     sim::{
-        Simulator,
-        connection::{Node, ReachState, ReceiveData, SendData},
+        GoalStatus, Simulator,
+        connection::{Goal, Node, ReachState, ReceiveData, SendData},
         network::{Aqm, Mtu, TailDrop},
     },
 };
+
+/// `SendData` that, once all data is sent, asserts that ECN signalled congestion.
+#[derive(Debug)]
+struct SendDataWithEcn(SendData);
+
+impl SendDataWithEcn {
+    fn check(c: &Connection, status: GoalStatus) -> GoalStatus {
+        if status == GoalStatus::Done {
+            let events = c.stats().cc.congestion_events;
+            assert!(events.ecn > 0, "no ECN congestion events: {events:?}");
+        }
+        status
+    }
+}
+
+impl Goal for SendDataWithEcn {
+    fn process(&mut self, c: &mut Connection, now: Instant) -> GoalStatus {
+        let status = self.0.process(c, now);
+        Self::check(c, status)
+    }
+
+    fn handle_event(
+        &mut self,
+        c: &mut Connection,
+        e: &ConnectionEvent,
+        now: Instant,
+    ) -> GoalStatus {
+        let status = self.0.handle_event(c, e, now);
+        Self::check(c, status)
+    }
+}
 
 /// Run a transfer of a gigabyte over a gigabit link.
 /// Check to see that the achieved transfer rate matches expectations.
@@ -40,6 +74,9 @@ fn gbit_bandwidth(ecn: bool) {
     const LINK_RTT_MS: u64 = 40;
     /// The amount of delay that the link buffer will add when full.
     const BUFFER_LATENCY_MS: usize = 4;
+    /// The same with ECN: `CoDel` marks only once queueing delay has stayed above its 5 ms target
+    /// for 100 ms, so a shallower buffer overflows first and the transfer sees losses, not marks.
+    const ECN_BUFFER_LATENCY_MS: usize = 64;
     /// How much of the theoretical bandwidth we will expect to deliver.
     /// Because we're not transferring a whole lot relative to the bandwidth,
     /// this ratio is relatively low.
@@ -47,9 +84,12 @@ fn gbit_bandwidth(ecn: bool) {
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        // Set capacity to double when ECN is enabled
-        // so that the overall throughput remains roughly consistent.
-        let capacity_byte = (1 + usize::from(ecn)) * rate_byte * BUFFER_LATENCY_MS / 1000;
+        let buffer_ms = if ecn {
+            ECN_BUFFER_LATENCY_MS
+        } else {
+            BUFFER_LATENCY_MS
+        };
+        let capacity_byte = rate_byte * buffer_ms / 1000;
         let delay = Duration::from_millis(LINK_RTT_MS) / 2;
         TailDrop::new(
             rate_byte,
@@ -60,6 +100,13 @@ fn gbit_bandwidth(ecn: bool) {
     };
 
     init_log(None);
+
+    let send = SendData::new(TRANSFER_AMOUNT);
+    let send_goal: Box<dyn Goal> = if ecn {
+        Box::new(SendDataWithEcn(send))
+    } else {
+        Box::new(send)
+    };
 
     let name = format!("gbit-bandwidth{}", if ecn { "-ecn" } else { "-noecn" });
     let simulated_time = Simulator::new(
@@ -75,7 +122,7 @@ fn gbit_bandwidth(ecn: bool) {
             Node::new_server(
                 ConnectionParameters::default().ack_ratio(200),
                 boxed![ReachState::new(State::Confirmed)],
-                boxed![SendData::new(TRANSFER_AMOUNT)]
+                [send_goal]
             ),
             Mtu::new(1500),
             gbit_link(),
