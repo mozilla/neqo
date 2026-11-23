@@ -77,38 +77,41 @@ fn gbit_bandwidth(ecn: bool) {
     /// The same with ECN: `CoDel` marks only once queueing delay has stayed above its 5 ms target
     /// for 100 ms, so a shallower buffer overflows first and the transfer sees losses, not marks.
     const ECN_BUFFER_LATENCY_MS: usize = 64;
-    /// How much of the theoretical bandwidth we will expect to deliver.
-    /// Because we're not transferring a whole lot relative to the bandwidth,
-    /// this ratio is relatively low.
-    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.4;
+    /// How much of the theoretical bandwidth we will expect to deliver, without and with ECN.
+    /// The simulation is deterministic, so these sit just below what it achieves and a
+    /// throughput regression fails.
+    const MINIMUM_EXPECTED_UTILIZATION: f64 = 0.6;
+    const MINIMUM_EXPECTED_UTILIZATION_ECN: f64 = 0.7;
+
+    let send = SendData::new(TRANSFER_AMOUNT);
+    let (suffix, aqm, buffer_ms, minimum, send_goal): (_, _, _, _, Box<dyn Goal>) = if ecn {
+        (
+            "ecn",
+            Aqm::codel(),
+            ECN_BUFFER_LATENCY_MS,
+            MINIMUM_EXPECTED_UTILIZATION_ECN,
+            Box::new(SendDataWithEcn(send)),
+        )
+    } else {
+        (
+            "noecn",
+            Aqm::None,
+            BUFFER_LATENCY_MS,
+            MINIMUM_EXPECTED_UTILIZATION,
+            Box::new(send),
+        )
+    };
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        let buffer_ms = if ecn {
-            ECN_BUFFER_LATENCY_MS
-        } else {
-            BUFFER_LATENCY_MS
-        };
         let capacity_byte = rate_byte * buffer_ms / 1000;
         let delay = Duration::from_millis(LINK_RTT_MS) / 2;
-        TailDrop::new(
-            rate_byte,
-            capacity_byte,
-            if ecn { Aqm::codel() } else { Aqm::None },
-            delay,
-        )
+        TailDrop::new(rate_byte, capacity_byte, aqm.clone(), delay)
     };
 
     init_log(None);
 
-    let send = SendData::new(TRANSFER_AMOUNT);
-    let send_goal: Box<dyn Goal> = if ecn {
-        Box::new(SendDataWithEcn(send))
-    } else {
-        Box::new(send)
-    };
-
-    let name = format!("gbit-bandwidth{}", if ecn { "-ecn" } else { "-noecn" });
+    let name = format!("gbit-bandwidth-{suffix}");
     let simulated_time = Simulator::new(
         &name,
         boxed![
@@ -140,8 +143,8 @@ fn gbit_bandwidth(ecn: bool) {
     );
 
     assert!(
-        LINK_BANDWIDTH as f64 * MINIMUM_EXPECTED_UTILIZATION < achieved_bandwidth,
-        "{name} expected to reach {MINIMUM_EXPECTED_UTILIZATION} of maximum bandwidth ({t} Mbit/s) but got {a} Mbit/s",
+        LINK_BANDWIDTH as f64 * minimum < achieved_bandwidth,
+        "{name} expected to reach {minimum} of maximum bandwidth ({t} Mbit/s) but got {a} Mbit/s",
         t = LINK_BANDWIDTH / MBIT,
         a = achieved_bandwidth / MBIT as f64,
     );
