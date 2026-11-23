@@ -25,17 +25,15 @@ fn fill_buffer(n: usize, mask: u8) -> Vec<u8> {
 }
 
 fn decoder(c: &mut Criterion, count: usize, mask: u8) {
+    // Built once: decoding only reads it.
+    let buf = fill_buffer(count, mask);
     c.bench_function(&format!("decode {count} bytes, mask {mask:x}"), |b| {
-        b.iter_batched_ref(
-            || fill_buffer(count, mask),
-            |buf| {
-                let mut dec = Decoder::new(&buf[..]);
-                while black_box(dec.decode_varint()).is_some() {
-                    // Do nothing;
-                }
-            },
-            criterion::BatchSize::SmallInput,
-        );
+        b.iter(|| {
+            let mut dec = Decoder::new(black_box(&buf[..]));
+            while black_box(dec.decode_varint()).is_some() {
+                // Do nothing;
+            }
+        });
     });
 }
 
