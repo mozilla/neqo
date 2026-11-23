@@ -317,7 +317,7 @@ pub struct ReadySimulator {
 }
 
 impl ReadySimulator {
-    pub fn run(mut self) -> Duration {
+    pub fn run(&mut self) -> Duration {
         #[expect(clippy::disallowed_methods, reason = "Simulations run in real time")]
         let real_start = Instant::now();
         let end = self.sim.process_loop(self.start, self.now);

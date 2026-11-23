@@ -99,7 +99,8 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
             group.bench_function(
                 format!("{name_prefix}/{streams}-streams/each-{data_size}-bytes"),
                 |b| {
-                    b.iter_batched(
+                    // `_ref`, so dropping the simulator is not timed.
+                    b.iter_batched_ref(
                         || setup_fn(streams, data_size),
                         |sim| black_box(sim.run()),
                         SmallInput,
