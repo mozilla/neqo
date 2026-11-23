@@ -25,7 +25,7 @@ const FIXED_SEED: &str = "62df6933ba1f543cece01db8f27fb2025529b27f93df39e19f006e
 
 /// Creates a ready simulator for benchmarking transfer.
 #[must_use]
-fn setup(label: &str, seed: Option<&str>, pacing: bool) -> ReadySimulator {
+fn setup(pacing: bool) -> ReadySimulator {
     let nodes = boxed![
         Node::new_client(
             ConnectionParameters::default()
@@ -48,35 +48,23 @@ fn setup(label: &str, seed: Option<&str>, pacing: bool) -> ReadySimulator {
         TailDrop::dsl_downlink(),
         Delay::new(DELAY),
     ];
-    let mut sim = Simulator::new(label, nodes);
-    if let Some(seed) = seed {
-        sim.seed_str(seed);
-    }
+    let mut sim = Simulator::new("transfer", nodes);
+    sim.seed_str(FIXED_SEED);
     sim.setup()
 }
 
 /// Runs transfer benchmarks using `iter_batched`, grouping results under
 /// `name_prefix` (e.g. `"walltime"` or `"simulated"`).
 pub fn bench(c: &mut Criterion, name_prefix: &str) {
-    let env_seed = std::env::var("SIMULATION_SEED").ok();
-    let configs: [(&str, Option<&str>); 2] = [
-        ("varying-seeds", env_seed.as_deref()),
-        ("same-seed", Some(FIXED_SEED)),
-    ];
-
     let mut group = c.benchmark_group("transfer");
     group.noise_threshold(0.03);
     group.throughput(Throughput::Bytes(to_u64(TRANSFER_AMOUNT)));
-    for (label, seed) in configs {
-        for pacing in [false, true] {
-            group.bench_function(format!("{name_prefix}/pacing-{pacing}/{label}"), |b| {
-                b.iter_batched(
-                    || setup(label, seed, pacing),
-                    |sim| black_box(sim.run()),
-                    SmallInput,
-                );
-            });
-        }
+    // One seed only: no node here draws from the simulator's RNG, so other seeds would measure
+    // the same transfer.
+    for pacing in [false, true] {
+        group.bench_function(format!("{name_prefix}/pacing-{pacing}/same-seed"), |b| {
+            b.iter_batched(|| setup(pacing), |sim| black_box(sim.run()), SmallInput);
+        });
     }
     group.finish();
 }
