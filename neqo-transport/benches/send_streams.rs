@@ -55,6 +55,27 @@ fn make_streams_inner(n_streams: usize, all_have_data: bool, fair: bool) -> Send
             ss.set_fairness(id, true).expect("set_fairness failed");
         }
     }
+    steady_state(ss, stream_ids(if all_have_data { n_streams } else { 1 }))
+}
+
+/// The IDs of the first `n_streams` streams the `make_*` functions create.
+fn stream_ids(n_streams: usize) -> impl Iterator<Item = StreamId> {
+    (0..to_u64(n_streams)).map(|i| StreamId::from(i * 4))
+}
+
+/// Sends the queued data once, untimed, and queues `DATA` again on the `active` streams. The timed
+/// call then extends each stream's sent range, as on a long-lived stream, rather than allocating
+/// the first one.
+fn steady_state<I: IntoIterator<Item = StreamId>>(ss: SendStreams, active: I) -> SendStreams {
+    let mut input = with_builder(ss);
+    do_write_frames(&mut input);
+    let mut ss = input.0;
+    for id in active {
+        ss.get_mut(id)
+            .expect("stream exists")
+            .send(DATA)
+            .expect("send failed");
+    }
     ss
 }
 
@@ -150,7 +171,7 @@ fn make_grouped_streams(n_streams: usize, n_groups: usize) -> SendStreams {
         ss.set_sendgroup(id, Some(group_id))
             .expect("set_sendgroup failed");
     }
-    ss
+    steady_state(ss, stream_ids(n_streams))
 }
 
 /// Create `n_streams` fair streams with data and sendOrder, in a single group.
@@ -171,7 +192,7 @@ fn make_sendordered_streams(n_streams: usize) -> SendStreams {
         ss.set_sendorder(id, Some(i.cast_signed()))
             .expect("set_sendorder failed");
     }
-    ss
+    steady_state(ss, stream_ids(n_streams))
 }
 
 /// 3 sendGroups, 9 streams (3 per group), all active — exercises round-robin.
