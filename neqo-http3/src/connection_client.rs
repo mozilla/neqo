@@ -16,9 +16,7 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Decoder, Encoder, Header, Role,
-    event::Provider as EventProvider,
-    hex::{Hex, HexWithLen},
+    Datagram, Decoder, Encoder, Header, Role, event::Provider as EventProvider, hex::HexWithLen,
     qlog::Qlog,
 };
 use neqo_qpack::Stats as QpackStats;
@@ -422,7 +420,7 @@ impl Http3Client {
             let mut enc = Encoder::default();
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            ResumptionToken::new(enc.into(), token.expiration_time())
+            token.clone_with_bytes(enc.into())
         })
     }
 
@@ -455,7 +453,7 @@ impl Http3Client {
             Error::InvalidResumptionToken,
         )?;
         let tok = dec.decode_remainder();
-        trace!("[{self}]   Transport token {}", Hex::new(tok));
+        trace!("[{self}]   Transport token [{}]", tok.len());
         self.conn.enable_resumption(now, tok)?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();

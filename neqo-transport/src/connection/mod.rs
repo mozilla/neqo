@@ -810,7 +810,7 @@ impl Connection {
         trace!("[{self}]   Initial token {}", Hex::new(init_token));
 
         let tok = dec.decode_remainder();
-        trace!("[{self}]   TLS token {}", Hex::new(tok));
+        trace!("[{self}]   TLS token [{}]", tok.len());
 
         match self.crypto.tls_mut() {
             Agent::Client(c) => {

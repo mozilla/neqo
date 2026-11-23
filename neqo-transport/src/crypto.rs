@@ -25,11 +25,7 @@ use std::{
 };
 
 use enum_map::{Enum as _, EnumMap};
-use neqo_common::{
-    Buffer, Encoder, Role,
-    hex::{Hex, HexSnipMiddle},
-    to_u64,
-};
+use neqo_common::{Buffer, Encoder, Role, hex::Hex, to_u64};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
@@ -428,7 +424,7 @@ impl Crypto {
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
-                trace!("TLS token {}", Hex::new(t.as_ref()));
+                trace!("TLS token {t:?}");
                 let mut enc = Encoder::default();
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
@@ -437,13 +433,9 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                debug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
-                ResumptionToken::new_with_early_data(
-                    enc.into(),
-                    t.expiration_time(),
-                    0,
-                    t.is_plaintext(),
-                )
+                let token = t.clone_with_bytes(enc.into());
+                debug!("resumption token {token:?}");
+                token
             })
         } else {
             unreachable!("It is a server");
