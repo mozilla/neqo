@@ -132,7 +132,9 @@ fn mark_acked_gap_empty_covered(c: &mut Criterion) {
                 }
                 black_box(rt)
             },
-            BatchSize::SmallInput,
+            // Freeing a whole batch of grown trackers lets glibc trim the heap, so the next
+            // batch would fault its allocations back in while timed.
+            BatchSize::PerIteration,
         );
     });
 }
