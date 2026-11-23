@@ -181,6 +181,8 @@ pub struct ConnectionParameters {
     /// Whether to use Alternative Backoff with ECN (RFC 8511), i.e. a smaller multiplicative
     /// decrease on ECN-CE congestion events than on loss. Only affects CUBIC.
     abe: bool,
+    /// Whether to ask NSS for resumption tokens that carry the secret in cleartext.
+    plaintext_resumption_export: bool,
 }
 
 impl Default for ConnectionParameters {
@@ -213,6 +215,7 @@ impl Default for ConnectionParameters {
             reliable_stream_reset: true,
             spurious_recovery: true,
             abe: true,
+            plaintext_resumption_export: false,
         }
     }
 }
@@ -553,6 +556,17 @@ impl ConnectionParameters {
     #[must_use]
     pub const fn abe(mut self, abe: bool) -> Self {
         self.abe = abe;
+        self
+    }
+
+    #[must_use]
+    pub const fn plaintext_resumption_export_enabled(&self) -> bool {
+        self.plaintext_resumption_export
+    }
+
+    #[must_use]
+    pub const fn plaintext_resumption_export(mut self, plaintext_resumption_export: bool) -> Self {
+        self.plaintext_resumption_export = plaintext_resumption_export;
         self
     }
 

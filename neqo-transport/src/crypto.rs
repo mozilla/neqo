@@ -120,6 +120,10 @@ impl Crypto {
             // Always enable 0-RTT on the client, but the server needs
             // more configuration passed to server_enable_0rtt.
             c.enable_0rtt()?;
+
+            if conn_params.plaintext_resumption_export_enabled() {
+                c.enable_plaintext_resumption_export(true)?;
+            }
         }
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
@@ -434,7 +438,12 @@ impl Crypto {
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
                 debug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
-                ResumptionToken::new(enc.into(), t.expiration_time())
+                ResumptionToken::new_with_early_data(
+                    enc.into(),
+                    t.expiration_time(),
+                    0,
+                    t.is_plaintext(),
+                )
             })
         } else {
             unreachable!("It is a server");

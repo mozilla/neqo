@@ -33,6 +33,25 @@ fn resume() {
     connect(&mut client, &mut server);
 
     let token = exchange_ticket(&mut client, &mut server, now());
+    assert!(!token.is_plaintext());
+    let mut client = default_client();
+    client
+        .enable_resumption(now(), token)
+        .expect("should set token");
+    let mut server = resumed_server(&client);
+    connect(&mut client, &mut server);
+    assert!(client.tls_info().unwrap().resumed());
+    assert!(server.tls_info().unwrap().resumed());
+}
+
+#[test]
+fn resume_plaintext() {
+    let mut client = new_client(ConnectionParameters::default().plaintext_resumption_export(true));
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let token = exchange_ticket(&mut client, &mut server, now());
+    assert!(token.is_plaintext());
     let mut client = default_client();
     client
         .enable_resumption(now(), token)
