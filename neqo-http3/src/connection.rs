@@ -20,6 +20,7 @@ use neqo_transport::{
     DatagramTracking, State, StreamId, StreamType, ZeroRttState,
     streams::{SendGroupId, SendOrder},
 };
+use qlog::events::http3::Initiator;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use strum::Display;
 use tracing::{debug, error, info, trace, warn};
@@ -42,6 +43,7 @@ use crate::{
     },
     frames::HFrame,
     headers_checks::headers_valid,
+    qlog as h3_qlog,
     qpack_decoder_receiver::DecoderRecvStream,
     qpack_encoder_receiver::EncoderRecvStream,
     recv_message::{RecvMessage, RecvMessageInfo},
@@ -422,17 +424,24 @@ impl Http3Connection {
 
     /// This function creates and initializes, i.e. send stream type, the control and qpack
     /// streams.
-    fn initialize_http3_connection(&mut self, conn: &mut Connection) -> Res<()> {
+    fn initialize_http3_connection(&mut self, conn: &mut Connection, now: Instant) -> Res<()> {
         debug!("[{self}] Initialize the http3 connection");
         self.control_stream_local.create(conn)?;
 
-        self.send_settings();
+        self.send_settings(conn, now);
         self.create_qpack_streams(conn)?;
         Ok(())
     }
 
-    fn send_settings(&mut self) {
+    fn send_settings(&mut self, conn: &mut Connection, now: Instant) {
         debug!("[{self}] Send settings");
+        h3_qlog::parameters_set(
+            conn.qlog_mut(),
+            Initiator::Local,
+            &HSettings::from(&self.local_params),
+            None,
+            now,
+        );
         self.control_stream_local.queue_frame(&HFrame::Settings {
             settings: HSettings::from(&self.local_params),
         });
@@ -517,8 +526,16 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         settings: HSettings,
+        now: Instant,
     ) -> Res<()> {
-        self.initialize_http3_connection(conn)?;
+        h3_qlog::parameters_set(
+            conn.qlog_mut(),
+            Initiator::Remote,
+            &settings,
+            Some(true),
+            now,
+        );
+        self.initialize_http3_connection(conn, now)?;
         self.set_qpack_settings(&settings)?;
         self.settings_state = Http3RemoteSettingsState::ZeroRtt(settings);
         self.state = Http3State::ZeroRtt;
@@ -612,7 +629,7 @@ impl Http3Connection {
             ReceiveOutput::ControlFrames(control_frames) => {
                 let mut rest = Vec::new();
                 for cf in control_frames {
-                    if let Some(not_handled) = self.handle_control_frame(conn, cf)? {
+                    if let Some(not_handled) = self.handle_control_frame(conn, cf, now)? {
                         rest.push(not_handled);
                     }
                 }
@@ -663,6 +680,7 @@ impl Http3Connection {
         &mut self,
         conn: &mut Connection,
         state: &State,
+        now: Instant,
     ) -> Res<bool> {
         debug!("[{self}] Handle state change {state:?}");
         match state {
@@ -671,7 +689,7 @@ impl Http3Connection {
                     && conn.zero_rtt_state() == ZeroRttState::AcceptedServer
                 {
                     self.state = Http3State::ZeroRtt;
-                    self.initialize_http3_connection(conn)?;
+                    self.initialize_http3_connection(conn, now)?;
                     Ok(true)
                 } else {
                     Ok(false)
@@ -683,7 +701,7 @@ impl Http3Connection {
                     Http3State::Initializing | Http3State::ZeroRtt
                 ));
                 if self.state == Http3State::Initializing {
-                    self.initialize_http3_connection(conn)?;
+                    self.initialize_http3_connection(conn, now)?;
                 }
                 self.state = Http3State::Connected;
                 Ok(true)
@@ -1753,7 +1771,12 @@ impl Http3Connection {
     /// Frames whose handling is specific to the client and server (`Goaway`,
     /// `PriorityUpdateRequest`, and the unsupported server-push control frames) are given to the
     /// specific client/server handler.
-    fn handle_control_frame(&mut self, conn: &Connection, f: HFrame) -> Res<Option<HFrame>> {
+    fn handle_control_frame(
+        &mut self,
+        conn: &mut Connection,
+        f: HFrame,
+        now: Instant,
+    ) -> Res<Option<HFrame>> {
         debug!("[{self}] Handle a control frame {f:?}");
         if !matches!(f, HFrame::Settings { .. })
             && !matches!(
@@ -1765,7 +1788,7 @@ impl Http3Connection {
         }
         match f {
             HFrame::Settings { settings } => {
-                self.handle_settings(conn, settings)?;
+                self.handle_settings(conn, settings, now)?;
                 Ok(None)
             }
             HFrame::Goaway { .. }
@@ -1784,8 +1807,14 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_settings(&mut self, conn: &Connection, new_settings: HSettings) -> Res<()> {
+    fn handle_settings(
+        &mut self,
+        conn: &mut Connection,
+        new_settings: HSettings,
+        now: Instant,
+    ) -> Res<()> {
         debug!("[{self}] Handle SETTINGS frame");
+        h3_qlog::parameters_set(conn.qlog_mut(), Initiator::Remote, &new_settings, None, now);
         let prereqs = TransportPrerequisites::new(
             conn.remote_datagram_size() > 0,
             conn.peer_supports_reliable_stream_reset(),

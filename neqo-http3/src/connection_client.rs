@@ -461,13 +461,13 @@ impl Http3Client {
             let state = self.conn.state().clone();
             let res = self
                 .base_handler
-                .handle_state_change(&mut self.conn, &state);
+                .handle_state_change(&mut self.conn, &state, now);
             debug_assert_eq!(Ok(true), res);
             return Err(Error::Fatal);
         }
         if self.conn.zero_rtt_state() == ZeroRttState::Sending {
             self.base_handler
-                .set_0rtt_settings(&mut self.conn, settings)?;
+                .set_0rtt_settings(&mut self.conn, settings, now)?;
             self.events
                 .connection_state_change(self.base_handler.state().clone());
         }
@@ -889,7 +889,7 @@ impl Http3Client {
                 ConnectionEvent::StateChange(state) => {
                     if self
                         .base_handler
-                        .handle_state_change(&mut self.conn, &state)?
+                        .handle_state_change(&mut self.conn, &state, now)?
                     {
                         self.events
                             .connection_state_change(self.base_handler.state().clone());
@@ -3999,6 +3999,96 @@ mod tests {
 
         assert!(client.tls_info().unwrap().resumed());
         assert!(server.conn.tls_info().unwrap().resumed());
+    }
+
+    #[test]
+    fn zero_rtt_logs_parameters_set() {
+        // First connection: just to get a resumption token.
+        let (mut client, mut server) = connect();
+        let token = exchange_token(&mut client, &mut server.conn);
+
+        // Second connection: attach the qlog BEFORE enabling resumption.
+        let (log, contents) = test_fixture::new_neqo_qlog();
+        let mut client = default_http3_client();
+        client.set_qlog(log);
+        let mut server = TestServer::new();
+        client
+            .enable_resumption(now(), &token)
+            .expect("Set resumption token");
+
+        // Drive the handshake to completion
+        let out = client.process_output(now());
+        let out2 = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+        drop(server.conn.process(out.dgram(), now()));
+
+        // The server now sends its real SETTINGS frame.
+        let control_stream = server.conn.stream_create(StreamType::UniDi).unwrap();
+        let mut enc = Encoder::default();
+        server.settings.encode(&mut enc);
+        server
+            .conn
+            .stream_send(control_stream, CONTROL_STREAM_TYPE)
+            .unwrap();
+        server
+            .conn
+            .stream_send(control_stream, enc.as_ref())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+
+        drop(client);
+        let output = contents.to_string();
+        let events: Vec<&str> = output
+            .lines()
+            .filter(|l| l.contains("http3:parameters_set"))
+            .collect();
+
+        // 1. Restored (remembered) server settings, logged while still waiting.
+        // 2. Our own settings, sent on the control stream.
+        // 3. The server's real settings, once they arrive.
+        assert_eq!(events.len(), 3, "unexpected events: {events:?}");
+
+        assert!(events[0].contains(r#""initiator":"remote""#));
+        assert!(events[0].contains(r#""waits_for_settings":true"#));
+        assert!(events[0].contains(r#""max_table_capacity":100"#));
+
+        assert!(events[1].contains(r#""initiator":"local""#));
+        assert!(!events[1].contains("waits_for_settings"));
+
+        assert!(events[2].contains(r#""initiator":"remote""#));
+        assert!(!events[2].contains("waits_for_settings"));
+        assert!(events[2].contains(r#""max_field_section_size":10000"#));
+        assert!(events[2].contains(r#""max_table_capacity":100"#));
+        assert!(events[2].contains(r#""blocked_streams_count":100"#));
+    }
+
+    #[test]
+    fn handshake_logs_parameters_set() {
+        let (log, contents) = test_fixture::new_neqo_qlog();
+        let mut client = default_http3_client();
+        client.set_qlog(log);
+        let mut server = TestServer::new();
+        connect_with(&mut client, &mut server);
+
+        drop(client);
+        let output = contents.to_string();
+        let events: Vec<&str> = output
+            .lines()
+            .filter(|l| l.contains("http3:parameters_set"))
+            .collect();
+
+        // Our own settings, then the server's.
+        assert_eq!(events.len(), 2, "unexpected events: {events:?}");
+        assert!(events[0].contains(r#""initiator":"local""#));
+        assert!(events[1].contains(r#""initiator":"remote""#));
+        assert!(events[1].contains(r#""max_table_capacity":100"#));
+        assert!(!output.contains("waits_for_settings"));
     }
 
     #[test]

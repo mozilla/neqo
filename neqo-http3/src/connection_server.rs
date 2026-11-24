@@ -273,7 +273,7 @@ impl Http3ServerHandler {
                     .base_handler
                     .handle_stream_stop_sending(stream_id, app_error, conn)?,
                 ConnectionEvent::StateChange(state) => {
-                    if self.base_handler.handle_state_change(conn, &state)? {
+                    if self.base_handler.handle_state_change(conn, &state, now)? {
                         if self.base_handler.state() == &Http3State::Connected {
                             let settings = self.base_handler.save_settings();
                             conn.send_ticket(now, &settings)?;
