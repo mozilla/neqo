@@ -104,7 +104,7 @@ fn gbit_bandwidth(ecn: bool) {
 
     let gbit_link = || {
         let rate_byte = LINK_BANDWIDTH / 8;
-        let capacity_byte = rate_byte * buffer_ms / 1000;
+        let capacity_byte = (rate_byte / 1000) * buffer_ms;
         let delay = Duration::from_millis(LINK_RTT_MS) / 2;
         TailDrop::new(rate_byte, capacity_byte, aqm.clone(), delay)
     };
