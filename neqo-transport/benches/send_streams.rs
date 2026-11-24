@@ -63,13 +63,18 @@ fn stream_ids(n_streams: usize) -> impl Iterator<Item = StreamId> {
     (0..to_u64(n_streams)).map(|i| StreamId::from(i * 4))
 }
 
-/// Sends the queued data once, untimed, and queues `DATA` again on the `active` streams. The timed
-/// call then extends each stream's sent range, as on a long-lived stream, rather than allocating
-/// the first one.
-fn steady_state<I: IntoIterator<Item = StreamId>>(ss: SendStreams, active: I) -> SendStreams {
-    let mut input = with_builder(ss);
-    do_write_frames(&mut input);
-    let mut ss = input.0;
+/// Sends all queued data, untimed and a packet at a time, and queues `DATA` again on the `active`
+/// streams. The timed call then extends each stream's sent range, as on a long-lived stream,
+/// rather than allocating the first one.
+fn steady_state<I: IntoIterator<Item = StreamId>>(mut ss: SendStreams, active: I) -> SendStreams {
+    loop {
+        let mut input = with_builder(ss);
+        do_write_frames(&mut input);
+        ss = input.0;
+        if input.2.is_empty() {
+            break;
+        }
+    }
     for id in active {
         ss.get_mut(id)
             .expect("stream exists")
