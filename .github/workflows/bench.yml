@@ -243,6 +243,7 @@ jobs:
           if [ "$MODE" = walltime ]; then
             # Run the baseline and PR builds interleaved for this benchmark.
             if [ -n "$BENCHMARK_VARIANT" ]; then
+              rm -rf estimates # The runner keeps its workspace.
               SIDES=(neqo) # A new benchmark has no baseline.
               if [ -n "$BASELINE_BENCH" ] && grep -qxF "$BENCHMARK_VARIANT" <<<"$(variants "$BASELINE_BENCH")"; then
                 SIDES=(neqo-baseline neqo)
