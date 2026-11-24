@@ -188,6 +188,11 @@ jobs:
         with:
           mtu: ${{ env.MTU }}
 
+      - name: Prepare huge-page text
+        id: huge-page-text
+        if: ${{ matrix.benchmark.mode == 'walltime' }}
+        uses: $/.github/actions/huge-page-text
+
       - name: Enable perf
         if: ${{ matrix.benchmark.mode != 'walltime' }}
         uses: $/.github/actions/enable-perf
@@ -195,13 +200,15 @@ jobs:
       - name: Run cargo bench
         env:
           BENCH_CPUS: ${{ steps.machine.outputs.bench-cpus }} # Two: the benches serve from a thread.
+          PRELOAD: ${{ steps.huge-page-text.outputs.preload }}
           RECORD_OPT: ${{ matrix.benchmark.mode == 'walltime' && env.PERF_OPT || env.PERF_OPT_GITHUB }}
         run: |
           # Only the pinned runner has CPUs to pin to.
           PIN=()
           [ -z "$BENCH_CPUS" ] || PIN=(setarch --addr-no-randomize taskset -c "$BENCH_CPUS")
           # `MTU` is part of the benchmark names `--exact` matches; `LC_ALL=C` keeps perf parseable.
-          bench_exec() { env "MTU=$MTU" "LC_ALL=C" "${PIN[@]}" "$@"; }
+          # Only the benchmark preloads `PRELOAD`: perf can't symbolize remapped code, so not `perf_exec`.
+          bench_exec() { env "MTU=$MTU" "LC_ALL=C" "${PIN[@]}" env "LD_PRELOAD=$PRELOAD" "$@"; }
           # Only `perf` needs root, for the tracepoints; `sudo` resets NSS's paths.
           perf_exec() { sudo env "MTU=$MTU" "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" "${PIN[@]}" perf "$@"; }
           shopt -s extglob globstar nullglob
