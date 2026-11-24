@@ -253,7 +253,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
         "--output",
         "null",
         "--warmup",
-        "5",
+        str(5 if part == 0 else 0),
         "--runs",
         str(runs),
         "--prepare",
@@ -319,7 +319,7 @@ def _load_result(out_dir, name):
     return {
         "times": times,
         "mean": fmean(times),
-        "stddev": stdev(times),
+        "stddev": stdev(times) if len(times) > 1 else 0.0,
         "median": median(times),
         "min": min(times),
         "max": max(times),
