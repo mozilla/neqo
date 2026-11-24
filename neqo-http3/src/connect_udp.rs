@@ -9,7 +9,7 @@ use std::{
     fmt::{self, Display, Formatter},
     num::NonZeroUsize,
     rc::Rc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use neqo_common::{Bytes, Header};
@@ -36,6 +36,18 @@ use crate::{
 /// before per-session queues replaced it, so connect-udp keeps the
 /// backpressure signal PR #3859 added.
 const MAX_BUFFERED_DATAGRAMS: NonZeroUsize = NonZeroUsize::new(10).expect("nonzero");
+
+/// Transport settings for every connect-udp session.
+fn configure_transport(conn: &mut Connection, session_id: StreamId, now: Instant) -> Res<()> {
+    conn.set_max_buffered_datagrams(session_id, Some(MAX_BUFFERED_DATAGRAMS));
+
+    // This is equivalent to disabling datagram expiration, which is a
+    // WebTransport concept that doesn't apply to connect-udp.
+    conn.set_datagram_max_age(session_id, Some(Duration::MAX), now);
+
+    conn.stream_fairness(session_id, true)?;
+    Ok(())
+}
 
 pub trait ClientSession {
     /// Whether `CONNECT_UDP` is enabled on the connection.
@@ -113,7 +125,7 @@ impl ClientSession for Http3Client {
         let events = Box::new(self.client_events().clone());
         let output = {
             let (conn, handler) = self.connection_and_handler();
-            handler.connect_udp_create_session(conn, events, target, headers)
+            handler.connect_udp_create_session(conn, events, target, headers, now)
         };
 
         if let Err(e) = &output
@@ -156,6 +168,7 @@ trait Handler {
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
         target: &T,
         headers: &[Header],
+        now: Instant,
     ) -> Res<StreamId>;
 
     fn connect_udp_session_accept(
@@ -193,6 +206,7 @@ impl Handler for Http3Connection {
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
         target: &T,
         headers: &[Header],
+        now: Instant,
     ) -> Res<StreamId> {
         info!("[{self}] Create ConnectUdp");
         if !self.connect_udp_enabled() {
@@ -205,7 +219,7 @@ impl Handler for Http3Connection {
             headers,
             extended_connect::ExtendedConnectType::ConnectUdp,
         )?;
-        conn.set_max_buffered_datagrams(id, Some(MAX_BUFFERED_DATAGRAMS));
+        configure_transport(conn, id, now)?;
         Ok(id)
     }
 
@@ -230,7 +244,7 @@ impl Handler for Http3Connection {
             now,
         )?;
         if !matches!(accept_res, SessionAcceptAction::Reject(_)) {
-            conn.set_max_buffered_datagrams(stream_id, Some(MAX_BUFFERED_DATAGRAMS));
+            configure_transport(conn, stream_id, now)?;
         }
         Ok(())
     }
