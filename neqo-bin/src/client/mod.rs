@@ -38,7 +38,7 @@ use neqo_http3::Header;
 use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
 use neqo_udp::RecvBuf;
 use nss::{
-    Cipher, ResumptionToken, TokenKind,
+    Cipher, ResumptionToken,
     constants::{TLS_AES_128_GCM_SHA256, TLS_AES_256_GCM_SHA384, TLS_CHACHA20_POLY1305_SHA256},
     init,
 };
@@ -623,7 +623,7 @@ pub async fn client(mut args: Args) -> Res<()> {
             .as_ref()
             .map(|path| -> Res<_> {
                 Ok(ResumptionToken::new(
-                    TokenKind::Encrypted(std::fs::read(path)?),
+                    std::fs::read(path)?,
                     // Expiry is a client-side hint only; the TLS ticket itself
                     // carries its own lifetime enforced by the server.
                     now() + std::time::Duration::from_hours(24),
