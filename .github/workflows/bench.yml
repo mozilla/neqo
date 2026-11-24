@@ -239,7 +239,7 @@ jobs:
           if [ "$MODE" = walltime ]; then
             # Run the baseline and PR builds interleaved for this benchmark.
             if [ -n "$BENCHMARK_VARIANT" ]; then
-              if [ -n "$BASELINE_BENCH" ] && grep -qxF "$BENCHMARK_VARIANT" < <(variants "$BASELINE_BENCH"); then
+              if [ -n "$BASELINE_BENCH" ] && grep -qxF "$BENCHMARK_VARIANT" <<<"$(variants "$BASELINE_BENCH")"; then
                 bench_exec "$BASELINE_BENCH" --bench --save-baseline baseline --noplot --exact "$BENCHMARK_VARIANT" | tee -a results-baseline.txt
               fi
               # --baseline-lenient allows us to add new benchmarks in pull requests.
