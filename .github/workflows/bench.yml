@@ -146,6 +146,10 @@ jobs:
       BENCHMARK_VARIANT: ${{ matrix.benchmark.variant }}
       BENCHMARK_SLUG: ${{ matrix.benchmark.slug }}
       MODE: ${{ matrix.benchmark.mode }}
+      # Walltime variants: baseline and PR process pairs, and each process's seconds.
+      BENCH_PAIRS: 5
+      BENCH_WARM_UP_TIME: 1
+      BENCH_MEASUREMENT_TIME: 3
     defaults:
       run:
         shell: bash
@@ -200,7 +204,7 @@ jobs:
           bench_exec() { env "MTU=$MTU" "LC_ALL=C" "${PIN[@]}" "$@"; }
           # Only `perf` needs root, for the tracepoints; `sudo` resets NSS's paths.
           perf_exec() { sudo env "MTU=$MTU" "LC_ALL=C" "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" "TEST_FIXTURE_DB=$TEST_FIXTURE_DB" "${PIN[@]}" perf "$@"; }
-          shopt -s extglob nullglob
+          shopt -s extglob globstar nullglob
 
           variants() { "$1" --bench --list 2>/dev/null | sed -n 's/: benchmark$//p' || true; }
           PR_BENCH="dist/neqo/$BENCHMARK_NAME"
@@ -239,13 +243,27 @@ jobs:
           if [ "$MODE" = walltime ]; then
             # Run the baseline and PR builds interleaved for this benchmark.
             if [ -n "$BENCHMARK_VARIANT" ]; then
+              SIDES=(neqo) # A new benchmark has no baseline.
               if [ -n "$BASELINE_BENCH" ] && grep -qxF "$BENCHMARK_VARIANT" <<<"$(variants "$BASELINE_BENCH")"; then
-                bench_exec "$BASELINE_BENCH" --bench --save-baseline baseline --noplot --exact "$BENCHMARK_VARIANT" | tee -a results-baseline.txt
+                SIDES=(neqo-baseline neqo)
               fi
-              # --baseline-lenient allows us to add new benchmarks in pull requests.
-              bench_exec "$PR_BENCH" --bench --baseline-lenient baseline --noplot --exact "$BENCHMARK_VARIANT" | tee -a results.txt
+              # Each process has its own timing offset, so compare several, in BP PB PB BP order against drift.
+              for ((i = 0; i < BENCH_PAIRS; i++)); do
+                ORDER=("${SIDES[@]}")
+                if (( (i + 1) / 2 % 2 )); then
+                  ORDER=("${SIDES[@]:1}" "${SIDES[0]}")
+                fi
+                for SIDE in "${ORDER[@]}"; do
+                  CRITERION_DIR=$(mktemp -d)
+                  CRITERION_HOME="$CRITERION_DIR" bench_exec "dist/$SIDE/$BENCHMARK_NAME" --bench --noplot --exact "$BENCHMARK_VARIANT" \
+                    --warm-up-time "$BENCH_WARM_UP_TIME" --measurement-time "$BENCH_MEASUREMENT_TIME" --sample-size 10
+                  mkdir -p "estimates/$SIDE/$i"
+                  cp "$CRITERION_DIR"/**/new/*.json "estimates/$SIDE/$i/"
+                done
+              done
             else
               [ -n "$BASELINE_BENCH" ] && bench_exec "$BASELINE_BENCH" --bench --save-baseline baseline --noplot | tee -a results-baseline.txt
+              # --baseline-lenient allows us to add new benchmarks in pull requests.
               bench_exec "$PR_BENCH" --bench --baseline-lenient baseline --noplot | tee -a results.txt
             fi
             # `perf stat` fails outright on an event it cannot open, so add the tracepoints
@@ -291,6 +309,7 @@ jobs:
             profiles/*/*.report.txt
             profiles/*/*.lo
             stats/*/*.txt
+            estimates
             results.txt
             results-baseline.txt
             benchmark-status
@@ -322,13 +341,18 @@ jobs:
           pattern: benchmark-*
           path: benchmarks
 
+      - name: Install SciPy # bench-compare.py's Mann-Whitney test needs it.
+        run: |
+          [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends python3-scipy
+
       - name: Merge benchmark results
         run: |
           set -euo pipefail
           shopt -s nullglob
           : > results.txt
           : > results-baseline.txt
-          mkdir -p profiles/neqo profiles/neqo-baseline stats/neqo stats/neqo-baseline
+          mkdir -p profiles/neqo profiles/neqo-baseline stats/neqo stats/neqo-baseline estimates
           : > failed-benchmarks.txt
 
           for benchmark in benchmarks/benchmark-*; do
@@ -344,7 +368,11 @@ jobs:
                 cp -a "$benchmark/stats/$side/." "stats/$side/"
               fi
             done
+            if [ -d "$benchmark/estimates" ]; then
+              cp -a "$benchmark/estimates" "estimates/${benchmark#benchmarks/benchmark-}"
+            fi
           done
+          python3 neqo/.github/scripts/bench-compare.py estimates/* >> results.txt
 
       - name: List per-benchmark profiles
         env:
@@ -422,6 +450,7 @@ jobs:
             profiles/*/*.report.txt
             profiles/*/*.lo
             stats/*/*.txt
+            estimates
             *.txt
             *.md
             event.json
