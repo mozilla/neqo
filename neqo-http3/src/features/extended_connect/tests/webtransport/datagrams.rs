@@ -544,8 +544,7 @@ fn datagram_burst_exceeding_byte_budget_preserves_priority_through_a_live_connec
         .unwrap();
         low_priority_ids.push(next_id);
         next_id += 1;
-        if let DatagramQueueOutcome::Overflowed { dropped } = outcome {
-            total_evicted += dropped;
+        if outcome == DatagramQueueOutcome::Rejected {
             break;
         }
         assert_eq!(
@@ -740,7 +739,7 @@ fn fill_to_the_byte_budget(wt: &mut WtTest, session_id: StreamId) -> u64 {
             .client
             .webtransport_send_datagram(session_id, DGRAM, None, now(), SendGroupId::new(0), 10)
             .unwrap();
-        if matches!(outcome, DatagramQueueOutcome::Overflowed { .. }) {
+        if outcome == DatagramQueueOutcome::Rejected {
             return n;
         }
         assert!(n < 1_000_000, "byte budget should have been hit by now");

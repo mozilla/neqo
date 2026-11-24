@@ -604,13 +604,19 @@ impl DatagramQueue {
             let Some((victim_order, victim_group)) = self.lowest_priority_key() else {
                 break;
             };
-            // Compares `send_order` alone, not the full `(send_order,
-            // send_group_id)` tuple `lowest_priority_key` returns: that tuple
-            // breaks *victim-selection* ties by group ID for determinism, but
-            // reusing it here would make group ID decide *admission* too -
-            // under sustained equal-order pressure the lowest-numbered group
-            // would always lose and never get to evict anyone.
-            if send_order < victim_order {
+            // A newcomer is refused if it has lower priority than the victim, or
+            // if it has the *same* priority within the *same* group.
+            //
+            // Across groups, we compare `send_order` alone, not the full
+            // `(send_order, send_group_id)` tuple `lowest_priority_key`
+            // returns: that tuple breaks *victim-selection* ties by group ID
+            // for determinism, but reusing it here would make group ID decide
+            // *admission* too - under sustained equal-order pressure the
+            // lowest-numbered group would always lose and never get to evict
+            // anyone.
+            if send_order < victim_order
+                || (send_order == victim_order && send_group_id == victim_group)
+            {
                 outranked = true;
                 break;
             }
@@ -1106,7 +1112,7 @@ mod tests {
         _ = queue.enqueue(vec![1], None, t, g(0), 0);
 
         assert_eq!(
-            queue.enqueue(vec![2], Some(2), t, g(0), 0),
+            queue.enqueue(vec![2], Some(2), t, g(0), 1),
             DatagramQueueOutcome::Overflowed { dropped: 1 },
             "an untracked datagram is as evictable as a tracked one"
         );
@@ -1128,7 +1134,7 @@ mod tests {
             DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(
-            queue.enqueue(vec![2], Some(2), t, g(0), 0),
+            queue.enqueue(vec![2], Some(2), t, g(0), 1),
             DatagramQueueOutcome::Overflowed { dropped: 1 }
         );
     }
@@ -1148,7 +1154,7 @@ mod tests {
             DatagramQueueOutcome::MaxBufferedReached
         );
         assert_eq!(
-            queue.enqueue(vec![2], Some(2), t, g(0), 0),
+            queue.enqueue(vec![2], Some(2), t, g(0), 1),
             DatagramQueueOutcome::Overflowed { dropped: 1 }
         );
 
@@ -1876,13 +1882,13 @@ mod tests {
         // `O + 1`, and the budget is `4*O + 4`, so two evictions leave it
         // one byte short.
         assert_eq!(
-            q.enqueue(vec![9; PER_DATAGRAM_OVERHEAD + 3], Some(5), t, g(0), 0),
+            q.enqueue(vec![9; PER_DATAGRAM_OVERHEAD + 3], Some(5), t, g(0), 1),
             DatagramQueueOutcome::Overflowed { dropped: 3 }
         );
         assert_eq!(q.len(), 2);
         assert_eq!(
             drain_ids(&mut q),
-            vec![4, 5],
+            vec![5, 4],
             "only the three oldest 1-byte datagrams (1, 2, 3) are evicted"
         );
     }
@@ -1971,7 +1977,7 @@ mod tests {
             DatagramQueueOutcome::Ok
         );
         assert_eq!(
-            q.enqueue(vec![2], Some(2), t, g(0), 0),
+            q.enqueue(vec![2], Some(2), t, g(0), 1),
             DatagramQueueOutcome::Overflowed { dropped: 1 }
         );
 
@@ -2074,8 +2080,8 @@ mod tests {
     }
 
     #[test]
-    fn byte_budget_evicts_fifo_within_one_order_bucket() {
-        // Equal group and equal order: the oldest is the eviction victim.
+    fn byte_budget_rejects_equal_priority_newcomer_within_one_group() {
+        // Equal group and equal order: the newcomer is rejected.
         let mut q = DatagramQueue::default();
         let t = now();
         q.set_max_queued_bytes(3 * charge(1)); // room for exactly three 1-byte datagrams
@@ -2084,9 +2090,9 @@ mod tests {
         enq(&mut q, vec![3], 3, t, 0, 0);
         assert_eq!(
             q.enqueue(vec![4], Some(4), t, g(0), 0),
-            DatagramQueueOutcome::Overflowed { dropped: 1 }
+            DatagramQueueOutcome::Rejected
         );
-        assert_eq!(drain_ids(&mut q), vec![2, 3, 4]);
+        assert_eq!(drain_ids(&mut q), vec![1, 2, 3]);
     }
 
     #[test]
