@@ -1,0 +1,26 @@
+name: Prepare huge-page text
+description: >
+  Build elfremapper and reserve the huge pages it needs. Preloaded into a benchmark, it moves the
+  executable's code and data onto 2 MiB pages, so their physical placement, which otherwise
+  differs between copies of the same binary, stops affecting the timings.
+outputs:
+  preload:
+    description: Library to preload into a benchmark
+    value: ${{ steps.build.outputs.preload }}
+runs:
+  using: composite
+  steps:
+    - id: build
+      shell: bash
+      env:
+        REV: 8e19b343deabe6c9e05d5882e173afa846d3832a # dmitriy-philimonov/elfremapper
+      run: |
+        echo 64 | sudo tee /proc/sys/vm/nr_hugepages > /dev/null # A benchmark process takes three.
+        [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
+        sudo apt-get install -y --no-install-recommends cmake g++
+        src="$RUNNER_TEMP/elfremapper"
+        mkdir -p "$src"
+        curl -fsSL "https://github.com/dmitriy-philimonov/elfremapper/archive/$REV.tar.gz" | tar -xz -C "$src" --strip-components=1
+        cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DMAKE_LD_PRELOAD_LIBRARY=1
+        cmake --build "$src/build"
+        echo "preload=$(find "$src/build" -name 'libelfremapper.so.*' -type f)" >> "$GITHUB_OUTPUT"
