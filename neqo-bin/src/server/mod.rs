@@ -331,6 +331,8 @@ pub trait HttpServer: Display {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch;
     fn process_events(&mut self, now: Instant);
+    /// Send data on streams that became writable.
+    fn process_writable(&mut self, _now: Instant) {}
     fn has_events(&self) -> bool;
     /// Enables an [`HttpServer`] to drive asynchronous operations.
     ///
@@ -538,6 +540,7 @@ impl<S: HttpServer + Unpin> Runner<S> {
     pub async fn run(mut self) -> Res<()> {
         loop {
             self.server.process_events((self.now)());
+            self.server.process_writable((self.now)());
             self.process().await?;
 
             if self.server.has_events() {
