@@ -13,7 +13,7 @@ use std::{
     time::Instant,
 };
 
-use neqo_common::{Datagram, datagram::Batch};
+use neqo_common::Datagram;
 use neqo_transport::{
     ConnectionIdGenerator, Output, OutputBatch, State,
     server::{ConnectionRef, Server, ValidateAddress},
@@ -118,11 +118,6 @@ impl Http3Server {
     #[must_use]
     pub fn ech_config(&self) -> &[u8] {
         self.server.ech_config()
-    }
-
-    /// See [`Server::recycle`].
-    pub fn recycle(&mut self, batch: Batch) {
-        self.server.recycle(batch);
     }
 
     /// Short-hand for [`Http3Server::process`] with no input datagram.

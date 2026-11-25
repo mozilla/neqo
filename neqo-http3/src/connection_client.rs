@@ -17,7 +17,6 @@ use std::{
 
 use neqo_common::{
     Datagram, Decoder, Encoder, Header, Role,
-    datagram::Batch,
     event::Provider as EventProvider,
     hex::{Hex, HexWithLen},
     qlog::Qlog,
@@ -761,11 +760,6 @@ impl Http3Client {
                 _ = self.check_result(now, &res);
             }
         }
-    }
-
-    /// See [`Connection::recycle`].
-    pub fn recycle(&mut self, batch: Batch) {
-        self.conn.recycle(batch);
     }
 
     /// Wrapper around [`Http3Client::process_multiple_output`] that processes a single

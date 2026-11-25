@@ -5,10 +5,13 @@
 // except according to those terms.
 
 use std::{
+    cell::Cell,
     fmt::{self, Debug, Formatter},
+    mem,
     net::SocketAddr,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
+    rc::Rc,
 };
 
 use crate::{Bytes, Tos, hex::HexWithLen};
@@ -27,7 +30,7 @@ pub struct Datagram<D = Vec<u8>> {
 impl TryFrom<Batch> for Datagram {
     type Error = ();
 
-    fn try_from(d: Batch) -> Result<Self, Self::Error> {
+    fn try_from(mut d: Batch) -> Result<Self, Self::Error> {
         if d.num_datagrams() != 1 {
             return Err(());
         }
@@ -35,7 +38,7 @@ impl TryFrom<Batch> for Datagram {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            d: d.d,
+            d: mem::take(&mut d.d),
         })
     }
 }
@@ -155,13 +158,39 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-#[derive(Clone, PartialEq, Eq)]
 pub struct Batch {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
     datagram_size: NonZeroUsize,
     d: Vec<u8>,
+    spare: Option<SpareBuffer>,
+}
+
+impl Drop for Batch {
+    fn drop(&mut self) {
+        if let Some(spare) = &self.spare {
+            spare.put(mem::take(&mut self.d));
+        }
+    }
+}
+
+/// A spare buffer, which a dropped [`Batch`] leaves its buffer in for reuse.
+#[derive(Clone, Default)]
+pub struct SpareBuffer(Rc<Cell<Vec<u8>>>);
+
+impl SpareBuffer {
+    /// Take the spare buffer, or a new one if there is none.
+    #[must_use]
+    pub fn take(&self) -> Vec<u8> {
+        self.0.take()
+    }
+
+    /// Clear `buffer` and keep it as the spare buffer.
+    pub fn put(&self, mut buffer: Vec<u8>) {
+        buffer.clear();
+        self.0.set(buffer);
+    }
 }
 
 impl Debug for Batch {
@@ -180,14 +209,9 @@ impl Debug for Batch {
 
 impl From<Datagram<Vec<u8>>> for Batch {
     fn from(d: Datagram<Vec<u8>>) -> Self {
-        Self {
-            src: d.src,
-            dst: d.dst,
-            tos: d.tos,
-            datagram_size: NonZeroUsize::new(d.d.len())
-                .expect("Datagram is guaranteed to be non-empty"),
-            d: d.d,
-        }
+        let datagram_size =
+            NonZeroUsize::new(d.d.len()).expect("Datagram is guaranteed to be non-empty");
+        Self::new(d.src, d.dst, d.tos, datagram_size, d.d)
     }
 }
 
@@ -206,7 +230,15 @@ impl Batch {
             tos,
             datagram_size,
             d,
+            spare: None,
         }
+    }
+
+    /// Leave the buffer of the batch in `spare` when the batch is dropped.
+    #[must_use]
+    pub fn with_spare_buffer(mut self, spare: SpareBuffer) -> Self {
+        self.spare = Some(spare);
+        self
     }
 
     #[must_use]
@@ -236,13 +268,6 @@ impl Batch {
     #[must_use]
     pub fn data(&self) -> &[u8] {
         &self.d
-    }
-
-    /// Take the buffer the batch is stored in, emptied, so it can be reused.
-    #[must_use]
-    pub fn into_buffer(mut self) -> Vec<u8> {
-        self.d.clear();
-        self.d
     }
 
     #[must_use]

@@ -124,7 +124,7 @@ impl TryFrom<OutputBatch> for Output {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum OutputBatch {
     /// Connection requires no action.
     None,
@@ -325,8 +325,7 @@ pub struct Connection {
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: StatsCell,
-    /// An empty buffer for the next batch, see [`Connection::recycle`].
-    send_buffer: Vec<u8>,
+    spare_buffer: datagram::SpareBuffer,
     qlog: Qlog,
     /// A session ticket was received without `NEW_TOKEN`,
     /// this is when that turns into an event without `NEW_TOKEN`.
@@ -471,7 +470,7 @@ impl Connection {
             events,
             new_token: NewTokenState::new(role),
             stats,
-            send_buffer: Vec::new(),
+            spare_buffer: datagram::SpareBuffer::default(),
             qlog: Qlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
@@ -1258,20 +1257,8 @@ impl Connection {
             .expect("max_datagrams is 1")
     }
 
-    /// Reuse the buffer of a batch that has been sent for the next batch,
-    /// instead of allocating one.
-    pub fn recycle(&mut self, batch: datagram::Batch) {
-        self.send_buffer = batch.into_buffer();
-    }
-
-    /// Use `buffer`, which has to be empty, for the next batch.
-    pub(crate) fn set_send_buffer(&mut self, buffer: Vec<u8>) {
-        self.send_buffer = buffer;
-    }
-
-    /// Take the buffer for the next batch, if no batch has used it.
-    pub(crate) fn take_send_buffer(&mut self) -> Vec<u8> {
-        mem::take(&mut self.send_buffer)
+    pub(crate) fn set_spare_buffer(&mut self, spare: datagram::SpareBuffer) {
+        self.spare_buffer = spare;
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -2720,7 +2707,7 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = mem::take(&mut self.send_buffer);
+        let mut send_buffer = self.spare_buffer.take();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
@@ -2791,7 +2778,7 @@ impl Connection {
                 SendOption::No(paced) => {
                     if num_datagrams == 0 {
                         debug_assert!(send_buffer.is_empty());
-                        self.send_buffer = send_buffer;
+                        self.spare_buffer.put(send_buffer);
                         return Ok(SendOptionBatch::No(paced));
                     }
                     break;
@@ -2800,13 +2787,16 @@ impl Connection {
         }
 
         debug_assert!(!send_buffer.is_empty());
-        let batch = path.borrow_mut().datagram_batch(
-            send_buffer,
-            packet_tos,
-            num_datagrams,
-            max_datagram_size.ok_or(Error::Internal)?,
-            &mut self.stats.borrow_mut(),
-        );
+        let batch = path
+            .borrow_mut()
+            .datagram_batch(
+                send_buffer,
+                packet_tos,
+                num_datagrams,
+                max_datagram_size.ok_or(Error::Internal)?,
+                &mut self.stats.borrow_mut(),
+            )
+            .with_spare_buffer(self.spare_buffer.clone());
 
         Ok(SendOptionBatch::Yes(batch))
     }

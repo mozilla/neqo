@@ -20,7 +20,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{Datagram, datagram::Batch, event::Provider, hex::Hex};
+use neqo_common::{Datagram, event::Provider, hex::Hex};
 use neqo_http3::{Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3State, Priority};
 use neqo_transport::{
     AppError, CloseReason, Connection, EmptyConnectionIdGenerator, OutputBatch,
@@ -140,10 +140,6 @@ impl super::Client for Http3Client {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         self.process_multiple_output(now, max_datagrams)
-    }
-
-    fn recycle(&mut self, batch: Batch) {
-        self.recycle(batch);
     }
 
     fn process_multiple_input<'a>(

@@ -20,7 +20,7 @@ use std::{
 };
 
 use http::Uri as Url;
-use neqo_common::{Datagram, datagram::Batch, event::Provider};
+use neqo_common::{Datagram, event::Provider};
 use neqo_transport::{
     AppError, CloseReason, Connection, ConnectionEvent, ConnectionIdGenerator,
     EmptyConnectionIdGenerator, Error, OutputBatch, RandomConnectionIdGenerator, State, StreamId,
@@ -200,10 +200,6 @@ impl super::Client for Connection {
         max_datagrams: NonZeroUsize,
     ) -> OutputBatch {
         self.process_multiple_output(now, max_datagrams)
-    }
-
-    fn recycle(&mut self, batch: Batch) {
-        self.recycle(batch);
     }
 
     fn process_multiple_input<'a>(

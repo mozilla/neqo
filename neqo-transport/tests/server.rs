@@ -991,7 +991,7 @@ fn server_ciphers_unknown() {
 }
 
 #[test]
-fn recycle_reuses_send_buffer_across_connections() {
+fn spare_buffer_shared_across_connections() {
     let mut server = default_server();
     let conns: Vec<_> = std::iter::repeat_with(|| {
         let conn = connect(&mut default_client(), &mut server);
@@ -1001,14 +1001,13 @@ fn recycle_reuses_send_buffer_across_connections() {
     })
     .take(2)
     .collect();
-    while let Some(batch) = server
+    while server
         .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
         .dgram()
-    {
-        server.recycle(batch);
-    }
+        .is_some()
+    {}
 
-    // The second batch is smaller than the first, so it fits the recycled buffer.
+    // The second batch is smaller than the first, so it fits the spare buffer.
     let mut ptr = None;
     for (conn, len) in conns.iter().zip([1000, 100]) {
         let stream_id = conn.borrow_mut().stream_create(StreamType::UniDi).unwrap();
@@ -1021,6 +1020,5 @@ fn recycle_reuses_send_buffer_across_connections() {
             .unwrap();
         let first = *ptr.get_or_insert_with(|| batch.data().as_ptr());
         assert_eq!(batch.data().as_ptr(), first);
-        server.recycle(batch);
     }
 }
