@@ -1,0 +1,22 @@
+--- a/src/elfremapper.cc
++++ b/src/elfremapper.cc
+@@ -467,9 +467,7 @@
+     size_t hugeSize = addrEnd - addrBeg;
+     size_t hugePerm = perm | PROT_WRITE;
+     void *huge = mmap((void *)addrBeg, hugeSize, hugePerm,
+-                      MAP_HUGETLB | MAP_HUGE_2MB | MAP_PRIVATE | MAP_ANONYMOUS |
+-                          MAP_FIXED,
+-                      -1, 0);
++                      MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+     if (huge == MAP_FAILED) {
+       /* can't print error */
+       err = errno;
+@@ -496,6 +494,8 @@
+       memcpy(ri.RealAddr, ri.RemapAddr, ri.RemapSize);
+       munmap(ri.RemapAddr, ri.RemapSize);
+     }
++    /* THPs regardless of the THP sysfs settings (Linux 6.1+) */
++    madvise(huge, hugeSize, 25 /* MADV_COLLAPSE */);
+ 
+     /* remove PROT_WRITE from the mapping */
+     if (perm != hugePerm) {
