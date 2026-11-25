@@ -11,12 +11,27 @@
      if (huge == MAP_FAILED) {
        /* can't print error */
        err = errno;
-@@ -496,6 +494,8 @@
+@@ -495,6 +493,11 @@
+       const TRegionInfo &ri = info[i];
        memcpy(ri.RealAddr, ri.RemapAddr, ri.RemapSize);
        munmap(ri.RemapAddr, ri.RemapSize);
-     }
++    }
 +    /* THPs regardless of the THP sysfs settings (Linux 6.1+) */
-+    madvise(huge, hugeSize, 25 /* MADV_COLLAPSE */);
++    int collapseErr = 0;
++    if (madvise(huge, hugeSize, 25 /* MADV_COLLAPSE */) == -1) {
++      collapseErr = errno;
+     }
  
      /* remove PROT_WRITE from the mapping */
-     if (perm != hugePerm) {
+@@ -518,6 +521,11 @@
+       PRINT_ERROR_ERRNO_IMPL(err, "Drop write access (mprotect(%p, %#lx, %d))",
+                              huge, hugeSize, static_cast<int>(perm));
+     }
++    if (collapseErr) {
++      PRINT_ERROR_ERRNO_IMPL(collapseErr, "MADV_COLLAPSE(%p, %#lx)", huge,
++                             hugeSize);
++      return 0;
++    }
+ 
+     hugeSize /= HUGE_PAGE_SIZE;
+     DEBUG("Remapped [%#lx, %#lx) to %lu pages (2M)", addrBeg, addrEnd,
