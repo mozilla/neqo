@@ -413,7 +413,7 @@ pub struct Stats {
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
 
-    /// PTO stream stop reasons, grouped by streak length.
+    /// PTO streak stop reasons, grouped by streak length.
     #[serde(serialize_with = "pto_stops")]
     pub pto_stops: [EnumMap<PtoStopReason, usize>; Self::MAX_PTO_COUNTS],
 
