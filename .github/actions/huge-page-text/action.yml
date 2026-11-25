@@ -1,8 +1,8 @@
 name: Prepare huge-page text
 description: >
-  Build elfremapper and reserve the huge pages it needs. Preloaded into a benchmark, it moves the
-  executable's code and data onto 2 MiB pages, so their physical placement, which otherwise
-  differs between copies of the same binary, stops affecting the timings.
+  Build elfremapper. Preloaded into a benchmark, it moves the executable's code and data onto
+  2 MiB pages, so their physical placement, which otherwise differs between copies of the same
+  binary, stops affecting the timings.
 outputs:
   preload:
     description: Library to preload into a benchmark
@@ -15,12 +15,15 @@ runs:
       env:
         REV: 8e19b343deabe6c9e05d5882e173afa846d3832a # dmitriy-philimonov/elfremapper
       run: |
-        echo 64 | sudo tee /proc/sys/vm/nr_hugepages > /dev/null # A benchmark process takes three.
         [ "$APT_UPDATED" ] || sudo apt-get update && echo "APT_UPDATED=1" >> "$GITHUB_ENV"
         sudo apt-get install -y --no-install-recommends cmake g++
         src="$RUNNER_TEMP/elfremapper"
         mkdir -p "$src"
         curl -fsSL "https://github.com/dmitriy-philimonov/elfremapper/archive/$REV.tar.gz" | tar -xz -C "$src" --strip-components=1
+        # THPs via `MADV_COLLAPSE`: CodSpeed can't symbolize hugetlb pages, and enabling THP slows
+        # the kernel's send path.
+        # TODO: Drop the patch once a release has https://github.com/dmitriy-philimonov/elfremapper/issues/5.
+        patch -d "$src" -p1 < "$GITHUB_ACTION_PATH/collapse.patch"
         cmake -S "$src" -B "$src/build" -DCMAKE_BUILD_TYPE=Release -DMAKE_LD_PRELOAD_LIBRARY=1
         cmake --build "$src/build"
         echo "preload=$(find "$src/build" -name 'libelfremapper.so.*' -type f)" >> "$GITHUB_OUTPUT"
