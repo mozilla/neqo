@@ -51,7 +51,7 @@ runs:
   using: composite
   steps:
     - id: rust
-      uses: mozilla/actions/rust@21f6d303fcbd4e418481d01cf738591b847037b7 # v3.2.0
+      uses: mozilla/actions/rust@80429d96b44ae13c8cfe2a2dbec978ffc31c3720 # v3.3.0
       with:
         version: ${{ inputs.version }}
         components: ${{ inputs.components }}

@@ -151,11 +151,18 @@ jobs:
           MTU: 1500 # Step-scoped: `neqo-bin` benches append `/mtu-$MTU` to their names.
         run: sudo ip link set dev lo mtu "$MTU"
 
+      - name: Prepare huge-page text
+        id: huge-page-text
+        if: ${{ matrix.batch.mode == 'walltime' }}
+        uses: $/.github/actions/huge-page-text
+
       - name: Run bench & upload results
-        uses: CodSpeedHQ/action@61efe07e57e55bedeab750c434504de272a56e8c # v5.6.1
+        uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
+        env:
+          PRELOAD: ${{ steps.huge-page-text.outputs.preload }}
         with:
           mode: ${{ matrix.batch.mode }}
-          run: cargo codspeed run
+          run: env "LD_PRELOAD=$PRELOAD" cargo codspeed run
           token: ${{ secrets.CODSPEED_TOKEN }} # zizmor: ignore[secrets-outside-env]
 
   # The client/server jobs live here, rather than in a workflow of their own, so that all of a
@@ -312,7 +319,7 @@ jobs:
           } > "$GITHUB_WORKSPACE/codspeed.yml"
 
       - name: Run benchmark
-        uses: CodSpeedHQ/action@61efe07e57e55bedeab750c434504de272a56e8c # v5.6.1
+        uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
         with:
           mode: walltime
           working-directory: ${{ github.workspace }}
