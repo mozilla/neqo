@@ -20,5 +20,9 @@ fn benchmark(c: &mut Criterion) {
     common::bench(c, "simulated");
 }
 
-criterion_group!(benches, benchmark);
+criterion_group! {
+    name = benches;
+    config = common::criterion_config();
+    targets = benchmark
+}
 criterion_main!(benches);
