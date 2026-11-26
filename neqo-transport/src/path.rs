@@ -101,7 +101,11 @@ impl Paths {
     ) -> PathRef {
         self.paths
             .iter()
-            .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
+            .find_map(|p| {
+                p.borrow()
+                    .received_on(&local, &remote)
+                    .then(|| Rc::clone(p))
+            })
             .unwrap_or_else(|| {
                 let mut p = Path::temporary(local, remote, conn_params, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
@@ -686,8 +690,8 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    pub fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
-        self.local == local && self.remote == remote
+    pub fn received_on(&self, local: &SocketAddr, remote: &SocketAddr) -> bool {
+        self.local == *local && self.remote == *remote
     }
 
     /// Update the remote port number.  Any flexibility we allow in `received_on`

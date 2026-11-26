@@ -1790,7 +1790,7 @@ impl Connection {
             && self
                 .paths
                 .primary()
-                .is_some_and(|p| !p.borrow().received_on(d.destination(), d.source()))
+                .is_some_and(|p| !p.borrow().received_on(&d.destination(), &d.source()))
         {
             self.stats
                 .borrow_mut()

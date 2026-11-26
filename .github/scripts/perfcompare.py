@@ -285,6 +285,59 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
         print(result.stderr, end="")
 
 
+# Zen 5 `ls_bad_status2.stli_other`, loads blocked by an older store they cannot forward from,
+# per the kernel's tools/perf/pmu-events/arch/x86/amdzen5/load-store.json.
+STLI_EVENT = "cpu/event=0x24,umask=0x02/u"
+
+
+def _probe(log: Path, cmd: list[str], stdout=subprocess.PIPE) -> str:
+    """Run `cmd`, appending it, its stderr and exit status to `log`, and return its stdout.
+    A failure only gets logged."""
+    with log.open("a", encoding="utf-8") as f:
+        f.write(f"$ {shlex.join(cmd)}\n")
+        try:
+            r = sh(cmd, stdout=stdout, stderr=subprocess.PIPE, text=True)
+        except OSError as e:
+            f.write(f"{e}\n\n")
+            return ""
+        f.write(f"{r.stderr}exit status {r.returncode}\n\n")
+        return r.stdout or ""
+
+
+def _stlf_probe(ws: Path, name: str, client) -> None:
+    """Count the neqo client's store-to-load forwarding failures and IBS-sample `find_path`.
+    `client(out, opt)` is the pinned `perf <opt> -o <out>` command of the profiled transfer."""
+    log = ws / "hyperfine" / f"{name}.client.stlf.txt"
+    listed = _probe(log, ["perf", "list"])
+    try:
+        devices = sorted(os.listdir("/sys/bus/event_source/devices"))
+    except OSError as e:
+        devices = [str(e)]
+    wanted = re.compile(r"stlf|stli|forward|bad_status|ls_", re.IGNORECASE)
+    with log.open("a", encoding="utf-8") as f:
+        f.writelines(line for line in listed.splitlines(keepends=True) if wanted.search(line))
+        f.write(f"\n/sys/bus/event_source/devices: {' '.join(devices)}\n\n")
+    stat = f"stat -x, -e cycles:u,instructions:u,{STLI_EVENT}"
+    _probe(log, client(f"hyperfine/{name}.client.stlf.csv", stat), subprocess.DEVNULL)
+    if "ibs_op" not in devices:
+        with log.open("a", encoding="utf-8") as f:
+            f.write("No ibs_op PMU, skipping the IBS recording.\n")
+        return
+    data = f"{name}.client.ibs"  # Not `*.perf`, which process-perf would convert.
+    _probe(log, client(data, "record -e ibs_op//"), subprocess.DEVNULL)
+    report = [*_sudo_env(), "perf", "report", "-i", str(ws / data), "--stdio"]
+    stats = _probe(log, [*report, "--stats"])
+    syms = _probe(log, [*report, "-q", "--sort", "sym"])
+    hits = [line for line in syms.splitlines() if "find_path" in line]
+    with (ws / "hyperfine" / f"{name}.client.ibs.annotate.txt").open("w", encoding="utf-8") as f:
+        f.writelines(f"{line}\n" for line in stats.splitlines() if "THROTTLE" in line)
+        f.writelines(f"{line}\n" for line in hits)
+        for line in hits:
+            sym = line.split("] ", 1)[-1].strip()
+            annotate = [*_sudo_env(), "perf", "annotate", "-i", str(ws / data), "--stdio", sym]
+            f.write(f"\n{_probe(log, annotate)}")
+
+
 def perf(cfg, scmd, ccmd, name):
     """Run perf profiling with 20x larger file, also capturing per-connection stats."""
     tag, ws = _tag(scmd), cfg.workspace
@@ -299,12 +352,14 @@ def perf(cfg, scmd, ccmd, name):
 
     scmd, ccmd = with_stats(scmd, "server"), with_stats(ccmd, "client")
 
-    def perf_cmd(cpu, out, exe):
-        perf_opt, exe = shlex.split(cfg.perf_opt), shlex.split(f"{ws}/{exe}")
+    def perf_cmd(cpu, out, exe, opt=cfg.perf_opt):
+        perf_opt, exe = shlex.split(opt), shlex.split(f"{ws}/{exe}")
         return [*_sudo_env(), *_pin(cpu), "perf", *perf_opt, "-o", f"{ws}/{out}", *exe]
 
     with _server(perf_cmd(cfg.server_cpu, f"{name}.server.perf", scmd), tag):
         sh(perf_cmd(cfg.client_cpu, f"{name}.client.perf", ccmd), **QUIET)
+        if "neqo-client" in ccmd:
+            _stlf_probe(ws, name, lambda out, opt: perf_cmd(cfg.client_cpu, out, ccmd, opt))
 
 
 def _load_result(out_dir, name):
