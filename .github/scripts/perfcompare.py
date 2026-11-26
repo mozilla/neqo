@@ -158,7 +158,7 @@ def setup(cfg):
         stderr=subprocess.DEVNULL,
     )
     # The warm-up size, which the file-serving implementations need to exist.
-    for s in (cfg.size, cfg.size * 20, cfg.size // 32):
+    for s in (cfg.size, cfg.size * 100, cfg.size // 32):
         sh(["truncate", "-s", str(s), str(tmp / str(s))], check=True)
     return tmp
 
@@ -286,9 +286,9 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
 
 
 def perf(cfg, scmd, ccmd, name):
-    """Run perf profiling with 20x larger file, also capturing per-connection stats."""
+    """Run perf profiling with 100x larger file, also capturing per-connection stats."""
     tag, ws = _tag(scmd), cfg.workspace
-    ccmd = ccmd.replace(str(cfg.size), str(cfg.size * 20))
+    ccmd = ccmd.replace(str(cfg.size), str(cfg.size * 100))
 
     def with_stats(cmd: str, role: str) -> str:
         """Have neqo report PTOs and loss for this profiled transfer, not the timed hyperfine
