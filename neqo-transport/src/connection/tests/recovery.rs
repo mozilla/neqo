@@ -96,7 +96,6 @@ fn pto_stop_reason_ack() {
         .dgram()
         .expect("server should acknowledge the PTO probe");
     client.process_input(ack, now);
-
     assert_eq!(client.stats().pto_stops[0][PtoStopReason::Ack], 1);
 }
 
