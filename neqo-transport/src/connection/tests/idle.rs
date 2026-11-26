@@ -103,11 +103,10 @@ fn pto_stop_reason_idle_timeout() {
     );
 
     now += client.process_output(now).callback();
-
     drop(client.process_output(now).dgram().expect("PTO probe"));
 
-    drop(client.process_output(now + default_timeout()));
-
+    now += default_timeout();
+    drop(client.process_output(now));
     assert_eq!(
         *client.state(),
         State::Closed(CloseReason::Transport(Error::IdleTimeout))
