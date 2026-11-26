@@ -917,19 +917,19 @@ impl<'a> Public<'a> {
         self.data[0] = first_byte;
 
         // Unmask the PN.
-        let mut pn_encoded: u64 = 0;
-        let mut pn_bytes =
-            self.data[self.header_len..self.header_len + MAX_PACKET_NUMBER_LEN].to_vec();
-        for i in 0..MAX_PACKET_NUMBER_LEN {
-            pn_bytes[i] ^= mask[1 + i];
-            pn_encoded <<= 8;
-            pn_encoded += u64::from(pn_bytes[i]);
-        }
+        let pn_bytes = self
+            .data
+            .get_mut(self.header_len..self.header_len + MAX_PACKET_NUMBER_LEN)
+            .and_then(<[u8]>::as_mut_array)
+            .ok_or(Error::NoMoreData)?;
         // Now decode the packet number length and apply it, hopefully in constant time.
         let pn_len = usize::from((first_byte & 0x3) + 1);
-        self.data[self.header_len..self.header_len + pn_len].copy_from_slice(&pn_bytes[..pn_len]);
+        let pn_shift = 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
+        let pn_mask =
+            u32::from_be_bytes([mask[1], mask[2], mask[3], mask[4]]) & (u32::MAX << pn_shift);
+        *pn_bytes = (u32::from_be_bytes(*pn_bytes) ^ pn_mask).to_be_bytes();
         hdrbytes.end = self.header_len + pn_len;
-        pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
+        let pn_encoded = u64::from(u32::from_be_bytes(*pn_bytes) >> pn_shift);
 
         trace!("unmasked hdr={}", Hex::new(&self.data[hdrbytes.clone()]));
 
