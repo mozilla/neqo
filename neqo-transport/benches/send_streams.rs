@@ -47,13 +47,37 @@ fn make_streams_inner(n_streams: usize, all_have_data: bool, fair: bool) -> Send
             Rc::clone(&conn_fc),
             conn_events.clone(),
         );
-        if i == 0 || all_have_data {
-            s.send(DATA).expect("send failed");
-        }
+        s.send(DATA).expect("send failed");
         ss.insert(id, s);
         if fair {
             ss.set_fairness(id, true).expect("set_fairness failed");
         }
+    }
+    steady_state(ss, stream_ids(if all_have_data { n_streams } else { 1 }))
+}
+
+/// The IDs of the first `n_streams` streams the `make_*` functions create.
+fn stream_ids(n_streams: usize) -> impl Iterator<Item = StreamId> {
+    (0..to_u64(n_streams)).map(|i| StreamId::from(i * 4))
+}
+
+/// Sends all queued data, untimed and a packet at a time, and queues `DATA` again on the `active`
+/// streams. The timed call then extends each stream's sent range, as on a long-lived stream,
+/// rather than allocating the first one.
+fn steady_state<I: IntoIterator<Item = StreamId>>(mut ss: SendStreams, active: I) -> SendStreams {
+    loop {
+        let mut input = with_builder(ss);
+        do_write_frames(&mut input);
+        ss = input.0;
+        if input.2.is_empty() {
+            break;
+        }
+    }
+    for id in active {
+        ss.get_mut(id)
+            .expect("stream exists")
+            .send(DATA)
+            .expect("send failed");
     }
     ss
 }
@@ -88,7 +112,7 @@ fn write_frames_1_stream(c: &mut Criterion) {
 }
 
 /// `SendStreams::write_frames` with 5 streams, only 1 has data.
-/// Typical HTTP/3 connection: data stream + control + 2 QPACK + settings.
+/// HTTP/3-like: 2 request streams + control + QPACK encoder + QPACK decoder.
 fn write_frames_5_streams(c: &mut Criterion) {
     c.bench_function("SendStreams::write_frames 5-streams 1-active", |b| {
         b.iter_batched_ref(|| with_builder(make_streams(5)), do_write_frames, BATCH);
@@ -150,7 +174,7 @@ fn make_grouped_streams(n_streams: usize, n_groups: usize) -> SendStreams {
         ss.set_sendgroup(id, Some(group_id))
             .expect("set_sendgroup failed");
     }
-    ss
+    steady_state(ss, stream_ids(n_streams))
 }
 
 /// Create `n_streams` fair streams with data and sendOrder, in a single group.
@@ -171,7 +195,7 @@ fn make_sendordered_streams(n_streams: usize) -> SendStreams {
         ss.set_sendorder(id, Some(i.cast_signed()))
             .expect("set_sendorder failed");
     }
-    ss
+    steady_state(ss, stream_ids(n_streams))
 }
 
 /// 3 sendGroups, 9 streams (3 per group), all active — exercises round-robin.
