@@ -47,9 +47,7 @@ fn make_streams_inner(n_streams: usize, all_have_data: bool, fair: bool) -> Send
             Rc::clone(&conn_fc),
             conn_events.clone(),
         );
-        if i == 0 || all_have_data {
-            s.send(DATA).expect("send failed");
-        }
+        s.send(DATA).expect("send failed");
         ss.insert(id, s);
         if fair {
             ss.set_fairness(id, true).expect("set_fairness failed");
@@ -114,7 +112,7 @@ fn write_frames_1_stream(c: &mut Criterion) {
 }
 
 /// `SendStreams::write_frames` with 5 streams, only 1 has data.
-/// Typical HTTP/3 connection: data stream + control + 2 QPACK + settings.
+/// HTTP/3-like: 2 request streams + control + QPACK encoder + QPACK decoder.
 fn write_frames_5_streams(c: &mut Criterion) {
     c.bench_function("SendStreams::write_frames 5-streams 1-active", |b| {
         b.iter_batched_ref(|| with_builder(make_streams(5)), do_write_frames, BATCH);
