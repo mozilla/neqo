@@ -491,7 +491,6 @@ impl<S: HttpServer + Unpin> Runner<S> {
                 Some(input_dgrams),
             )
             .await?;
-            self.server.process_events((self.now)());
         }
 
         Ok(())
