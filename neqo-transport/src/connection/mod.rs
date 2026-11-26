@@ -1847,12 +1847,13 @@ impl Connection {
             trace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
-            match packet.decrypt(self.crypto.states_mut(), now + pto) {
+            let decrypted = packet.decrypt(self.crypto.states_mut(), now + pto);
+            match &decrypted {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     let pn = payload.pn();
                     self.log_packet(
-                        packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
+                        packet::MetaData::new_in(path, tos, packet_len, payload, self.version),
                         now,
                     );
 
@@ -1872,15 +1873,15 @@ impl Connection {
                             debug!("Duplicate packet {space}-{pn}");
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
-                            match self.process_packet(path, tos, &payload, now) {
+                            match self.process_packet(path, tos, payload, now) {
                                 Ok(migrate) => {
                                     self.idle_timeout.on_packet_received(now);
                                     self.postprocess_packet(
-                                        path, tos, remote, &payload, migrate, now,
+                                        path, tos, remote, payload, migrate, now,
                                     );
                                 }
                                 Err(e) => {
-                                    self.ensure_error_path(path, &payload, now);
+                                    self.ensure_error_path(path, payload, now);
                                     return Err(e);
                                 }
                             }
@@ -1907,7 +1908,7 @@ impl Connection {
                         // authenticated but broke the protocol (e.g. reserved
                         // bits set), which closes the connection.
                         Error::KeysExhausted | Error::ProtocolViolation => {
-                            return Err(e.error);
+                            return Err(e.error.clone());
                         }
                         Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
                         _ => (),
@@ -1917,8 +1918,8 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&mut self.qlog, &e, now);
-                    dcid = Some(e.dcid);
+                    qlog::packet_dropped(&mut self.qlog, e, now);
+                    dcid = Some(e.dcid.clone());
                 }
             }
             slc = remainder;
