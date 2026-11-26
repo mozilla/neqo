@@ -85,6 +85,7 @@ pub fn bench(c: &mut Criterion, name_prefix: &str) {
 #[must_use]
 pub fn criterion_config() -> Criterion {
     Criterion::default()
-        .warm_up_time(Duration::from_secs(5))
+        // A longer warm-up builds large `SmallInput` batches, which slow and destabilize the run.
+        .warm_up_time(Duration::from_secs(1))
         .measurement_time(Duration::from_secs(15))
 }

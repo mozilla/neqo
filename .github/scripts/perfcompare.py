@@ -421,6 +421,19 @@ def units() -> list[Unit]:
     return out
 
 
+def recopy(cfg, cmds):
+    """Replace each command's executable with a fresh copy of itself.
+
+    Where the page cache happens to hold a binary's code shifts its speed by up to ~1.5%, and that
+    placement holds for the file's lifetime, so give each part a placement of its own.
+    """
+    for cmd in cmds:
+        exe = cfg.workspace / cmd.split()[0]
+        copy = exe.with_name(f"{exe.name}.copy")
+        shutil.copy2(exe, copy)
+        copy.replace(exe)
+
+
 def run_unit(cfg, tmp, unit):
     """Run one unit's comparison; `merge` turns its results into a table row."""
 
@@ -458,6 +471,7 @@ def run_unit(cfg, tmp, unit):
     for part, order in enumerate(schedule):
         for side in order:
             cmds, out_dir = sides[side]
+            recopy(cfg, cmds)
             hyperfine(cfg, *cmds, unit.name, out_dir, runs, part)
     # After the timed runs, so recording cannot drift them apart.
     perf(cfg, scmd, ccmd, unit.name)
