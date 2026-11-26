@@ -629,7 +629,16 @@ impl Http3Connection {
             ReceiveOutput::ControlFrames(control_frames) => {
                 let mut rest = Vec::new();
                 for cf in control_frames {
-                    if let Some(not_handled) = self.handle_control_frame(conn, cf, now)? {
+                    if let HFrame::Settings { settings } = &cf {
+                        h3_qlog::parameters_set(
+                            conn.qlog_mut(),
+                            Initiator::Remote,
+                            settings,
+                            None,
+                            now,
+                        );
+                    }
+                    if let Some(not_handled) = self.handle_control_frame(conn, cf)? {
                         rest.push(not_handled);
                     }
                 }
@@ -1771,12 +1780,7 @@ impl Http3Connection {
     /// Frames whose handling is specific to the client and server (`Goaway`,
     /// `PriorityUpdateRequest`, and the unsupported server-push control frames) are given to the
     /// specific client/server handler.
-    fn handle_control_frame(
-        &mut self,
-        conn: &mut Connection,
-        f: HFrame,
-        now: Instant,
-    ) -> Res<Option<HFrame>> {
+    fn handle_control_frame(&mut self, conn: &Connection, f: HFrame) -> Res<Option<HFrame>> {
         debug!("[{self}] Handle a control frame {f:?}");
         if !matches!(f, HFrame::Settings { .. })
             && !matches!(
@@ -1788,7 +1792,7 @@ impl Http3Connection {
         }
         match f {
             HFrame::Settings { settings } => {
-                self.handle_settings(conn, settings, now)?;
+                self.handle_settings(conn, settings)?;
                 Ok(None)
             }
             HFrame::Goaway { .. }
@@ -1807,14 +1811,8 @@ impl Http3Connection {
         Ok(())
     }
 
-    fn handle_settings(
-        &mut self,
-        conn: &mut Connection,
-        new_settings: HSettings,
-        now: Instant,
-    ) -> Res<()> {
+    fn handle_settings(&mut self, conn: &Connection, new_settings: HSettings) -> Res<()> {
         debug!("[{self}] Handle SETTINGS frame");
-        h3_qlog::parameters_set(conn.qlog_mut(), Initiator::Remote, &new_settings, None, now);
         let prereqs = TransportPrerequisites::new(
             conn.remote_datagram_size() > 0,
             conn.peer_supports_reliable_stream_reset(),
