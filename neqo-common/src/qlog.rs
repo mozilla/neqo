@@ -108,6 +108,10 @@ impl Qlog {
     where
         F: FnOnce() -> Option<EventData>,
     {
+        // Check before the closure below captures `f`, so disabled qlog doesn't copy it.
+        if self.inner.is_none() {
+            return;
+        }
         self.add_event_with_stream(|s| {
             if let Some(ev_data) = f() {
                 s.add_event_data_with_instant(ev_data, now)?;
