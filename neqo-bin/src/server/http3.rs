@@ -19,7 +19,7 @@ use neqo_http3::{
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use tracing::{debug, error};
 
 use super::Args;
@@ -37,6 +37,8 @@ pub struct HttpServer {
     posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
     stats: StatsReporter,
+    /// Streams that became writable since the last [`super::HttpServer::process_writable`].
+    writable: HashSet<Http3OrWebTransportStream>,
 }
 
 impl HttpServer {
@@ -119,6 +121,7 @@ impl HttpServer {
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
             stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
+            writable: HashSet::default(),
         }
     }
 }
@@ -203,12 +206,7 @@ impl super::HttpServer for HttpServer {
                     self.send_response(&stream, response, now);
                 }
                 Http3ServerEvent::DataWritable { stream } => {
-                    if self.posts.get_mut(&stream).is_none()
-                        && let Some(mut remaining) = self.remaining_data.remove(&stream)
-                        && let Some(data) = Self::send_response_body(&stream, &mut remaining, now)
-                    {
-                        self.remaining_data.insert(stream, data);
-                    }
+                    self.writable.insert(stream);
                 }
 
                 Http3ServerEvent::Data { stream, data, fin } => {
@@ -243,6 +241,18 @@ impl super::HttpServer for HttpServer {
             .retain(|stream, _| !stream.conn.borrow().state().closed());
     }
 
+    fn process_writable(&mut self, now: Instant) {
+        #[expect(clippy::iter_over_hash_type, reason = "Write order does not matter.")]
+        for stream in self.writable.drain() {
+            if !self.posts.contains_key(&stream)
+                && let Some(mut remaining) = self.remaining_data.remove(&stream)
+                && let Some(data) = Self::send_response_body(&stream, &mut remaining, now)
+            {
+                self.remaining_data.insert(stream, data);
+            }
+        }
+    }
+
     fn has_events(&self) -> bool {
         self.server.has_events()
     }
@@ -254,7 +264,7 @@ mod tests {
 
     use neqo_common::event::Provider as _;
     use neqo_http3::{Error, Http3Client, Http3ClientEvent, Priority, StreamId};
-    use neqo_transport::RandomConnectionIdGenerator;
+    use neqo_transport::{INITIAL_LOCAL_MAX_STREAM_DATA, RandomConnectionIdGenerator};
     use test_fixture::{
         ProcessServer, anti_replay, connect_peers, default_http3_client, exchange_packets,
         fixture_init, now,
@@ -363,6 +373,22 @@ mod tests {
             .unwrap();
         deliver(&mut server, &mut client);
         assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn process_writable_sends_on_writable_streams() {
+        let (mut server, mut client) = setup();
+        let stream_id = fetch(&mut client, "GET", &blocked_path());
+        deliver(&mut server, &mut client);
+        exchange_packets(&mut client, &mut server.server, false, None);
+        let mut buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
+        while client.read_data(now(), stream_id, &mut buf).unwrap().0 > 0 {}
+        exchange_packets(&mut client, &mut server.server, false, None);
+
+        server.process_events(now());
+        assert_eq!((server.writable.len(), entries(&server)), (1, (0, 1)));
+        server.process_writable(now());
+        assert_eq!((server.writable.len(), entries(&server)), (0, (0, 0)));
     }
 
     #[test]
