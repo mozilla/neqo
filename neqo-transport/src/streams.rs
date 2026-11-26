@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use enumset::EnumSet;
 use neqo_common::{Buffer, Role};
 use tracing::{debug, trace};
 
@@ -327,14 +328,23 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
+    /// Write send stream frames at `priority`, if it is in `active`.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
+        active: EnumSet<TransmissionPriority>,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        self.send.write_frames(priority, builder, tokens, stats);
+        if active.contains(priority) {
+            self.send.write_frames(priority, builder, tokens, stats);
+        }
+    }
+
+    /// See [`SendStreams::priorities`].
+    pub(crate) fn send_priorities(&self) -> EnumSet<TransmissionPriority> {
+        self.send.priorities()
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
