@@ -80,7 +80,7 @@ jobs:
           persist-credentials: false
       - id: units
         shell: bash
-        run: echo "units=$(python3 .github/scripts/perfcompare.py --list-units)" >> "$GITHUB_OUTPUT"
+        run: echo 'units=["neqo-neqo-cubic-nopacing","neqo-neqo-newreno-nopacing"]' >> "$GITHUB_OUTPUT"
 
   perfcompare:
     name: ${{ matrix.unit }}
@@ -157,6 +157,58 @@ jobs:
           # Take back what root `perf` wrote.
           sudo chown -R "$(id -u)" ./*.perf hyperfine hyperfine-baseline 2>/dev/null || true
 
+      - name: Count server PMU events
+        env:
+          SERVER_CPU: ${{ steps.machine.outputs.server-cpu }}
+          CLIENT_CPU: ${{ steps.machine.outputs.client-cpu }}
+          UNIT: ${{ matrix.unit }}
+        run: |
+          set -u
+          case "$UNIT" in *newreno*) CC=newreno ;; *) CC=cubic ;; esac
+          # Zen 5 raw encodings, tools/perf/pmu-events/arch/x86/amdzen5/*.json.
+          EVA='cycles:u,instructions:u,cpu/event=0x18e,umask=0x18,name=ic_miss/u,cpu/event=0x28f,umask=0x04,name=oc_miss/u,cpu/event=0x1a0,umask=0x01,name=fe_empty_slots/u'
+          EVB='cycles:u,instructions:u,cpu/event=0xc3,name=brn_misp/u,cpu/event=0x82,name=ic_fill_l2/u,cpu/event=0xaa,umask=0x01,name=ops_from_decoder/u'
+          lscpu | grep -E 'Model name|L1i|L2'; uname -r; perf --version; cat /proc/sys/kernel/nmi_watchdog
+          mkdir -p counters
+          sudo perf stat -x, -e "$EVA" true; sudo perf stat -x, -e "$EVB" true
+          for i in $(seq 0 39); do
+            if [ $((i % 2)) = 0 ]; then EV=$EVA; S=a; else EV=$EVB; S=b; fi
+            if [ $((i / 2 % 2)) = 0 ]; then ORDER="neqo-baseline neqo"; else ORDER="neqo neqo-baseline"; fi
+            for B in $ORDER; do
+              D=build-neqo/$B
+              setarch --addr-no-randomize taskset -c "$SERVER_CPU" "$D/neqo-server" --cc "$CC" --no-pacing -Q 1 127.0.0.1:4433 > /dev/null 2>> counters/server.err &
+              SP=$!
+              sleep 0.2
+              setarch --addr-no-randomize taskset -c "$CLIENT_CPU" "$D/neqo-client" --cc "$CC" --no-pacing -Q 1 "https://127.0.0.1:4433/$((SIZE / 32))" > /dev/null
+              sudo perf stat -x, -e "$EV" -p "$SP" -o "counters/$B-$S-$i.txt" &
+              PP=$!
+              sleep 0.3
+              setarch --addr-no-randomize taskset -c "$CLIENT_CPU" "$D/neqo-client" --cc "$CC" --no-pacing -Q 1 "https://127.0.0.1:4433/$SIZE" > /dev/null
+              echo "$B $S $i $?" >> counters/rc.txt
+              kill -9 "$SP"
+              wait "$PP"
+              wait "$SP" 2> /dev/null || true
+            done
+          done
+          sudo chown -R "$(id -u)" counters
+          python3 - <<'EOF'
+          import glob, statistics
+          for s in "ab":
+              for b in ("neqo-baseline", "neqo"):
+                  rs = []
+                  for p in sorted(glob.glob(f"counters/{b}-{s}-*.txt")):
+                      c = {}
+                      for x in open(p):
+                          f = x.strip().split(",")
+                          if len(f) > 4 and f[0].replace(".", "").isdigit():
+                              c[f[2].removesuffix(":u").removesuffix("/u")] = (float(f[0]) / 1e6, f[4])
+                      rs.append(c)
+                  out = [f"{k}={statistics.mean(r[k][0] for r in rs):.3f}M(sd{statistics.stdev(r[k][0] for r in rs):.3f})" for k in rs[0]]
+                  mux = sorted({k for r in rs for k, v in r.items() if v[1] != "100.00"})
+                  print(f"set {s} {b:<13} n={len(rs)} " + " ".join(out) + (f" MULTIPLEXED={mux}" if mux else ""))
+          EOF
+          awk '$4 != 0' counters/rc.txt
+
       - name: Post-process perf data
         timeout-minutes: 30
         uses: $/.github/actions/process-perf
@@ -173,6 +225,7 @@ jobs:
             *.report.txt
             hyperfine
             hyperfine-baseline
+            counters
           retention-days: 1
           compression-level: 9
 
