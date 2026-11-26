@@ -329,7 +329,15 @@ impl RxStreamOrderer {
                 e.get_mut().extend_from_slice(new_data);
                 Ok(())
             } else {
-                self.insert_range(new_start, new_data.to_vec())
+                // Reserve room for the adjacent frames that will extend this range.
+                let capacity = if adjacent && new_data.len() < Self::RANGE_TARGET {
+                    Self::RANGE_TARGET + new_data.len()
+                } else {
+                    new_data.len()
+                };
+                let mut data = Vec::with_capacity(capacity);
+                data.extend_from_slice(new_data);
+                self.insert_range(new_start, data)
             };
         }
 
