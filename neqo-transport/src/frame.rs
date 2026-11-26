@@ -477,7 +477,11 @@ impl<'a> Frame<'a> {
         const MAX_ACK_RANGE_COUNT: u64 = 32 * 1024;
 
         fn d<T>(v: Option<T>) -> Res<T> {
-            v.ok_or(Error::FrameEncoding)
+            // Not `ok_or`, which builds the `Error` even for `Some` and then has to drop it.
+            let Some(v) = v else {
+                return Err(Error::FrameEncoding);
+            };
+            Ok(v)
         }
         fn dv(dec: &mut Decoder) -> Res<u64> {
             d(dec.decode_varint())
