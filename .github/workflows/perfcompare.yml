@@ -48,6 +48,35 @@ jobs:
           artifact-name: build-neqo
           baseline-ref: origin/${{ env.BASE_REF }}
 
+  build-pads:
+    name: Build neqo, ${{ matrix.pad }} B pad
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        pad: [16, 304, 480, 1024, 2048, 3456, 3520, 4096]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout mozilla/neqo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mozilla/neqo
+          path: neqo
+          persist-credentials: false
+
+      - name: Pad .rodata
+        env:
+          PAD: ${{ matrix.pad }}
+        run: |
+          printf '\n#[used]\nstatic NEQO_PAD: [u8; %d] = [0xa5; %d];\n' "$PAD" "$PAD" >> neqo/neqo-bin/src/bin/server.rs
+          tail -3 neqo/neqo-bin/src/bin/server.rs
+
+      - uses: $/.github/actions/build-neqo
+        with:
+          artifact-name: build-pad-${{ matrix.pad }}
+          ref: pr
+
   build-others:
     name: Build ${{ matrix.impl }}
     runs-on: ubuntu-24.04
@@ -80,12 +109,12 @@ jobs:
           persist-credentials: false
       - id: units
         shell: bash
-        run: echo "units=$(python3 .github/scripts/perfcompare.py --list-units)" >> "$GITHUB_OUTPUT"
+        run: echo 'units=["neqo-neqo-cubic-nopacing","neqo-neqo-newreno-nopacing"]' >> "$GITHUB_OUTPUT"
 
   perfcompare:
     name: ${{ matrix.unit }}
     runs-on: codspeed-macro-x86-ryzen-9950x-ubuntu-24-04 # zizmor: ignore[self-hosted-runner]
-    needs: [units, build-neqo, build-others, build-samply]
+    needs: [units, build-neqo, build-pads, build-others, build-samply]
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +186,69 @@ jobs:
           # Take back what root `perf` wrote.
           sudo chown -R "$(id -u)" ./*.perf hyperfine hyperfine-baseline 2>/dev/null || true
 
+      - name: Count server PMU events
+        env:
+          SERVER_CPU: ${{ steps.machine.outputs.server-cpu }}
+          CLIENT_CPU: ${{ steps.machine.outputs.client-cpu }}
+          UNIT: ${{ matrix.unit }}
+        run: |
+          set -u
+          case "$UNIT" in *newreno*) CC=newreno ;; *) CC=cubic ;; esac
+          # Zen 5 raw encodings, tools/perf/pmu-events/arch/x86/amdzen5/*.json.
+          EV='cycles:u,instructions:u,cpu/event=0x18e,umask=0x18,name=ic_miss/u,cpu/event=0x28f,umask=0x04,name=oc_miss/u,cpu/event=0x1a0,umask=0x01,name=fe_empty_slots/u,cpu/event=0xaa,umask=0x01,name=ops_from_decoder/u'
+          chmod +x build-pad-*/neqo/*
+          VARIANTS=(build-neqo/neqo-baseline build-neqo/neqo build-pad-{16,304,480,1024,2048,3456,3520,4096}/neqo)
+          for V in "${VARIANTS[@]}"; do
+            echo "$V $(readelf -SW "$V/neqo-server" | awk '$2 == ".text" {print $4}') $(sha256sum "$V/neqo-server" | cut -c1-12)"
+          done
+          sudo perf stat -x, -e "$EV" true
+          mkdir -p counters
+          N=${#VARIANTS[@]}
+          for i in $(seq 0 15); do
+            for j in $(seq 0 $((N - 1))); do
+              V=${VARIANTS[$(( (i + j) % N ))]}
+              T=$(echo "$V" | tr / _)
+              setarch --addr-no-randomize taskset -c "$SERVER_CPU" "$V/neqo-server" --cc "$CC" --no-pacing -Q 1 127.0.0.1:4433 > /dev/null 2>> counters/server.err &
+              SP=$!
+              sleep 0.2
+              setarch --addr-no-randomize taskset -c "$CLIENT_CPU" build-neqo/neqo-baseline/neqo-client --cc "$CC" --no-pacing -Q 1 "https://127.0.0.1:4433/$((SIZE / 32))" > /dev/null
+              sudo perf stat -x, -e "$EV" -p "$SP" -o "counters/$T-$i.txt" &
+              PP=$!
+              sleep 0.3
+              setarch --addr-no-randomize taskset -c "$CLIENT_CPU" build-neqo/neqo-baseline/neqo-client --cc "$CC" --no-pacing -Q 1 "https://127.0.0.1:4433/$SIZE" > /dev/null
+              echo "$T $i $?" >> counters/rc.txt
+              kill -9 "$SP"
+              wait "$PP"
+              wait "$SP" 2> /dev/null || true
+            done
+          done
+          sudo chown -R "$(id -u)" counters
+          python3 - "${VARIANTS[@]}" <<'EOF'
+          import glob, math, statistics, sys
+          res = {}
+          for v in sys.argv[1:]:
+              t = v.replace("/", "_")
+              rs = []
+              for p in sorted(glob.glob(f"counters/{t}-*.txt")):
+                  c = {}
+                  for x in open(p):
+                      f = x.strip().split(",")
+                      if len(f) > 4 and f[0].replace(".", "").isdigit():
+                          c[f[2].removesuffix(":u").removesuffix("/u")] = (float(f[0]) / 1e6, f[4])
+                  rs.append(c)
+              res[t] = rs
+          base = res["build-neqo_neqo-baseline"]
+          for t, rs in res.items():
+              out = []
+              for k in rs[0]:
+                  v, b = [r[k][0] for r in rs], [r[k][0] for r in base]
+                  se = math.sqrt(statistics.variance(v) / len(v) + statistics.variance(b) / len(b)) or 1
+                  out.append(f"{k}={statistics.mean(v):.3f}M({100 * (statistics.mean(v) / statistics.mean(b) - 1):+.2f}%,z{(statistics.mean(v) - statistics.mean(b)) / se:+.1f})")
+              mux = sorted({k for r in rs for k, x in r.items() if x[1] != "100.00"})
+              print(f"{t:<26} n={len(rs)} " + " ".join(out) + (f" MULTIPLEXED={mux}" if mux else ""))
+          EOF
+          awk '$3 != 0' counters/rc.txt
+
       - name: Post-process perf data
         timeout-minutes: 30
         uses: $/.github/actions/process-perf
@@ -173,6 +265,7 @@ jobs:
             *.report.txt
             hyperfine
             hyperfine-baseline
+            counters
           retention-days: 1
           compression-level: 9
 
