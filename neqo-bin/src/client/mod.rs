@@ -410,6 +410,11 @@ struct Runner<'a, H: Handler> {
     recv_buf: RecvBuf,
 }
 
+#[allow(
+    clippy::allow_attributes,
+    clippy::future_not_send,
+    reason = "This is example code; not all clippy versions flag it."
+)]
 impl<'a, H: Handler> Runner<'a, H> {
     fn new(
         socket: &'a mut crate::udp::Socket,
