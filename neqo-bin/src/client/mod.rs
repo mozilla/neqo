@@ -35,7 +35,9 @@ use futures::{
 use http::Uri as Url;
 use neqo_common::{Datagram, Role, qlog::Qlog};
 use neqo_http3::Header;
-use neqo_transport::{AppError, CloseReason, ConnectionId, OutputBatch, Version};
+use neqo_transport::{
+    AppError, CloseReason, ConnectionId, ConnectionParameters, OutputBatch, Version,
+};
 use neqo_udp::RecvBuf;
 use nss::{
     Cipher, ResumptionToken,
@@ -52,6 +54,8 @@ use crate::{SharedArgs, contained_path, now, report_stats};
 mod http09;
 mod http3;
 mod token_store;
+
+pub(crate) use token_store::TokenStore;
 
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -127,12 +131,9 @@ pub struct Args {
     resume: bool,
 
     #[arg(long)]
-    /// Save the resumption token to a file after connecting.
-    save_token: Option<PathBuf>,
-
-    #[arg(long)]
-    /// Load a resumption token from a file and attempt 0-RTT.
-    load_token: Option<PathBuf>,
+    /// Load resumption tokens from this file on start; on exit, save the unused and newly received
+    /// ones. Enables plaintext resumption tokens.
+    token_store: Option<PathBuf>,
 
     #[arg(name = "key-update", long, hide = true)]
     /// Attempt to initiate a key update immediately after confirming the connection.
@@ -201,8 +202,7 @@ impl Args {
             output_read_data: false,
             output_dir: Some("/dev/null".into()),
             resume: false,
-            save_token: None,
-            load_token: None,
+            token_store: None,
             key_update: false,
             ech: None,
             ipv4_only: false,
@@ -224,6 +224,17 @@ impl Args {
                 _ => None,
             })
             .collect::<Vec<_>>()
+    }
+
+    fn connection_parameters(&self, alpn: &str) -> ConnectionParameters {
+        self.shared
+            .quic_parameters
+            .get(alpn)
+            .plaintext_resumption_export(self.token_store.is_some())
+    }
+
+    const fn needs_resumption_tokens(&self) -> bool {
+        self.resume || self.token_store.is_some()
     }
 
     fn update_for_tests(&mut self) {
@@ -376,7 +387,7 @@ trait Handler {
     type Client: Client;
 
     fn handle(&mut self, client: &mut Self::Client) -> Res<bool>;
-    fn take_token(&mut self) -> Option<ResumptionToken>;
+    fn take_tokens(&mut self) -> Vec<ResumptionToken>;
 }
 
 enum CloseState {
@@ -435,13 +446,13 @@ impl<'a, H: Handler> Runner<'a, H> {
         }
     }
 
-    async fn run(mut self) -> Res<Option<ResumptionToken>> {
+    async fn run(mut self) -> Res<Vec<ResumptionToken>> {
         let res = self.transfer().await;
         if self.args.shared.stats_enabled() {
             report_stats(&self.client.stats(), self.args.shared.stats_file.as_deref());
         }
         res?;
-        Ok(self.handler.take_token())
+        Ok(self.handler.take_tokens())
     }
 
     async fn transfer(&mut self) -> Res<()> {
@@ -594,13 +605,21 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     init()?;
 
+    let mut store = args
+        .token_store
+        .as_deref()
+        .map(TokenStore::load)
+        .transpose()?
+        .unwrap_or_default();
+
     for ((host, port), mut urls) in urls_by_origin(&args.urls) {
         if args.resume && urls.len() < 2 {
             error!("Resumption to {host} cannot work without at least 2 URLs");
             exit(127);
         }
 
-        let remote_addr = format!("{host}:{port}").to_socket_addrs()?.find(|addr| {
+        let origin = format!("{host}:{port}");
+        let remote_addr = origin.to_socket_addrs()?.find(|addr| {
             !matches!(
                 (addr, args.ipv4_only, args.ipv6_only),
                 (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
@@ -621,18 +640,6 @@ pub async fn client(mut args: Args) -> Res<()> {
             args.shared.alpn
         );
 
-        let mut token: Option<ResumptionToken> = args
-            .load_token
-            .as_ref()
-            .map(|path| -> Res<_> {
-                Ok(ResumptionToken::new(
-                    std::fs::read(path)?,
-                    // Expiry is a client-side hint only; the TLS ticket itself
-                    // carries its own lifetime enforced by the server.
-                    now() + std::time::Duration::from_hours(24),
-                ))
-            })
-            .transpose()?;
         let mut first = true;
         while !urls.is_empty() {
             let to_request = if (args.resume && first) || args.download_in_series {
@@ -643,7 +650,8 @@ pub async fn client(mut args: Args) -> Res<()> {
 
             first = false;
 
-            token = if args.shared.alpn == "h3" {
+            let token = store.take(&origin);
+            let tokens = if args.shared.alpn == "h3" {
                 let client = http3::create_client(&args, real_local, remote_addr, &host, token)
                     .expect("failed to create client");
 
@@ -658,16 +666,40 @@ pub async fn client(mut args: Args) -> Res<()> {
 
                 Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
             };
+            store.extend(&origin, tokens);
         }
+    }
 
-        if let (Some(path), Some(tok)) = (&args.save_token, &token) {
-            if let Err(e) = std::fs::write(path, tok.as_ref()) {
-                error!("Failed to save token to {}: {e}", path.display());
-            } else {
-                info!("Resumption token saved to {}", path.display());
-            }
+    if let Some(path) = &args.token_store {
+        if let Err(e) = store.save(path) {
+            error!(
+                "Failed to save resumption tokens to {}: {e}",
+                path.display()
+            );
+        } else {
+            info!("Resumption tokens saved to {}", path.display());
         }
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::Args;
+
+    fn export_enabled(token_store: Option<PathBuf>) -> bool {
+        let mut args = Args::new(None, 1, 0, 1);
+        args.token_store = token_store;
+        args.connection_parameters("h3")
+            .plaintext_resumption_export_enabled()
+    }
+
+    #[test]
+    fn connection_parameters_plaintext_export() {
+        assert!(export_enabled(Some(PathBuf::from("tokens.json"))));
+        assert!(!export_enabled(None));
+    }
 }

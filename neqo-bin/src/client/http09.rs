@@ -12,6 +12,7 @@ use std::{
     fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
+    iter, mem,
     net::SocketAddr,
     num::NonZeroUsize,
     path::PathBuf,
@@ -39,7 +40,7 @@ pub struct Handler<'a> {
     handled_urls: Vec<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
-    token: Option<ResumptionToken>,
+    tokens: Vec<ResumptionToken>,
     needs_key_update: bool,
     read_buffer: Vec<u8>,
 }
@@ -103,7 +104,7 @@ impl super::Handler for Handler<'_> {
                     self.download_urls(client);
                 }
                 ConnectionEvent::ResumptionToken(token) => {
-                    self.token = Some(token);
+                    self.tokens.push(token);
                 }
                 _ => {
                     warn!("Unhandled event {event:?}");
@@ -115,15 +116,16 @@ impl super::Handler for Handler<'_> {
             return Ok(false);
         }
 
-        if (self.args.resume || self.args.save_token.is_some()) && self.token.is_none() {
-            self.token = client.take_resumption_token(now());
+        if self.args.needs_resumption_tokens() {
+            self.tokens
+                .extend(iter::from_fn(|| client.take_resumption_token(now())));
         }
 
         Ok(true)
     }
 
-    fn take_token(&mut self) -> Option<ResumptionToken> {
-        self.token.take()
+    fn take_tokens(&mut self) -> Vec<ResumptionToken> {
+        mem::take(&mut self.tokens)
     }
 }
 
@@ -151,7 +153,7 @@ pub fn create_client(
         cid_generator,
         local_addr,
         remote_addr,
-        args.shared.quic_parameters.get(alpn),
+        args.connection_parameters(alpn),
         now(),
     )?;
 
@@ -240,7 +242,7 @@ impl<'b> Handler<'b> {
             handled_urls: Vec::new(),
             all_paths: Vec::new(),
             args,
-            token: None,
+            tokens: Vec::new(),
             needs_key_update: args.key_update,
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
