@@ -17,11 +17,11 @@ use std::{
     rc::Rc,
 };
 
+use enumset::{EnumSet, EnumSetType};
 use indexmap::IndexMap;
 use neqo_common::{Buffer, Encoder, Role, expect_usize, to_u64};
 use rustc_hash::FxBuildHasher;
 use smallvec::SmallVec;
-use static_assertions::const_assert;
 use tracing::{debug, error, trace};
 
 use crate::{
@@ -41,7 +41,7 @@ use crate::{
 };
 
 /// The priority that is assigned to sending data for the stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
+#[derive(Debug, Default, PartialOrd, Ord, EnumSetType)]
 pub enum TransmissionPriority {
     /// This stream is more important than the functioning of the connection.
     /// Don't use this priority unless the stream really is that important.
@@ -467,7 +467,7 @@ pub struct TxBuffer {
     ranges: RangeTracker,   // ranges in buffer that have been sent or acked
 }
 
-const_assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
+const _: () = assert!(MAX_LOCAL_MAX_STREAM_DATA <= to_u64(usize::MAX));
 
 impl TxBuffer {
     /// The maximum stream send buffer size.
@@ -585,7 +585,8 @@ impl TxBuffer {
         Self::MAX_SIZE - self.buffered()
     }
 
-    fn used(&self) -> u64 {
+    #[must_use]
+    pub fn used(&self) -> u64 {
         self.retired() + to_u64(self.buffered())
     }
 }
@@ -805,6 +806,21 @@ impl SendStream {
             return false;
         };
         self.has_next_bytes(retransmission)
+    }
+
+    /// Priorities at which [`Self::write_frames`] can write a frame.
+    fn priorities(&self) -> EnumSet<TransmissionPriority> {
+        let mut priorities = self.priority | self.effective_priority;
+        if let State::ResetSent {
+            priority: Some(p), ..
+        }
+        | State::ResetSentReliable {
+            priority: Some(p), ..
+        } = self.state
+        {
+            priorities |= p;
+        }
+        priorities
     }
 
     /// Return `false` if the builder is full and the caller should stop iterating.
@@ -1421,7 +1437,7 @@ impl SendStream {
     /// event.
     ///
     /// See [`crate::Connection::stream_set_writable_event_low_watermark`].
-    pub fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
+    pub(crate) fn set_writable_event_low_watermark(&mut self, watermark: NonZeroUsize) {
         debug!("[{self}] low watermark {watermark}, avail {}", self.avail());
         self.writable_event_low_watermark = watermark;
     }
@@ -1925,6 +1941,8 @@ pub struct SendStreams {
     // hash lookup) while still resuming after the last-served stream when the packet
     // builder fills mid-pass, preserving fairness.
     fair_rr_next: usize,
+
+    max_low_watermark: Option<NonZeroUsize>, // Upper bound of the streams' low watermarks.
 }
 
 impl SendStreams {
@@ -2098,7 +2116,11 @@ impl SendStreams {
                 // fall back to binary-search insertion.
                 let null_grp = self.per_group.entry(NULL_GROUP_ID).or_default();
                 let grp = null_grp.group_mut(sendorder);
-                if matches!(grp.stream_ids().last(), Some(last) if stream_id > *last) {
+                if grp
+                    .stream_ids()
+                    .last()
+                    .is_some_and(|last| stream_id > *last)
+                {
                     grp.push(stream_id);
                 } else {
                     grp.insert(stream_id);
@@ -2189,6 +2211,15 @@ impl SendStreams {
             self.fair_rr_next = 0;
         }
         removed
+    }
+
+    /// Priorities at which [`Self::write_frames`] can write a frame or change state.
+    pub(crate) fn priorities(&self) -> EnumSet<TransmissionPriority> {
+        if self.per_group.len() > 1 {
+            // Every call advances `per_group_next`.
+            return EnumSet::all();
+        }
+        self.map.values().map(SendStream::priorities).collect()
     }
 
     pub fn write_frames<B: Buffer>(
@@ -2400,6 +2431,33 @@ impl SendStreams {
             ss.set_max_stream_data(limit);
         }
     }
+
+    pub(crate) fn set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        self.get_mut(stream_id)?
+            .set_writable_event_low_watermark(watermark);
+        self.max_low_watermark = max(self.max_low_watermark, Some(watermark));
+        Ok(())
+    }
+
+    pub(crate) fn maybe_emit_writable_events(
+        &mut self,
+        previous_limit: usize,
+        current_limit: usize,
+    ) {
+        if self.max_low_watermark.unwrap_or(NonZeroUsize::MIN).get() < previous_limit {
+            return; // No stream was waiting for connection flow control.
+        }
+        let mut max_low_watermark = NonZeroUsize::MIN;
+        for ss in self.map.values() {
+            ss.maybe_emit_writable_event(previous_limit, current_limit);
+            max_low_watermark = max(max_low_watermark, ss.writable_event_low_watermark);
+        }
+        self.max_low_watermark = Some(max_low_watermark);
+    }
 }
 
 #[allow(
@@ -2571,7 +2629,7 @@ mod tests {
 
         // Higher-priority sendordered stream with only a few bytes: it easily fits
         // alongside the regular stream if the scheduler gives it a turn.
-        let mut s = SendStream::new(sendordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(sendordered, 1 << 20, conn_fc, conn_events);
         s.send(&[0; 8]).unwrap();
         ss.insert(sendordered, s);
         ss.set_fairness(sendordered, true).unwrap();
@@ -2634,7 +2692,7 @@ mod tests {
 
         // Group 2: a separate group so the multi-group scheduler path is taken.
         let other = StreamId::from(8);
-        let mut s = SendStream::new(other, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(other, 1 << 20, conn_fc, conn_events);
         s.send(&[0; 8]).unwrap();
         ss.insert(other, s);
         ss.set_fairness(other, true).unwrap();
@@ -2699,7 +2757,7 @@ mod tests {
         ss.insert(data_high, s);
         ss.set_sendorder(data_high, Some(100)).unwrap();
 
-        let mut s = SendStream::new(low, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let mut s = SendStream::new(low, 1 << 20, conn_fc, conn_events);
         s.send(&[0; 8]).unwrap();
         ss.insert(low, s);
         ss.set_sendorder(low, Some(50)).unwrap();
@@ -2757,7 +2815,7 @@ mod tests {
         // A drained sendordered stream makes `sendordered` non-empty so write_frames takes
         // the general path and reaches the regular bucket after the (empty) ordered pass.
         let ordered = StreamId::from(8);
-        let s = SendStream::new(ordered, 1 << 20, Rc::clone(&conn_fc), conn_events);
+        let s = SendStream::new(ordered, 1 << 20, conn_fc, conn_events);
         ss.insert(ordered, s);
         ss.set_sendorder(ordered, Some(100)).unwrap();
 

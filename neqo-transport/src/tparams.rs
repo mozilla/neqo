@@ -241,7 +241,7 @@ impl TransportParameter {
 
     fn decode_preferred_address(d: &mut Decoder) -> Res<Self> {
         // IPv4 address (maybe)
-        let v4ip = Ipv4Addr::from(<[u8; 4]>::try_from(d.decode(4).ok_or(Error::NoMoreData)?)?);
+        let v4ip = Ipv4Addr::from_octets(*d.decode_array().ok_or(Error::NoMoreData)?);
         let v4port = d.decode_uint::<u16>().ok_or(Error::NoMoreData)?;
         // Can't have non-zero IP and zero port, or vice versa.
         if v4ip.is_unspecified() ^ (v4port == 0) {
@@ -254,11 +254,9 @@ impl TransportParameter {
         };
 
         // IPv6 address (mostly the same as v4)
-        let v6ip = Ipv6Addr::from(<[u8; 16]>::try_from(
-            d.decode(16).ok_or(Error::NoMoreData)?,
-        )?);
+        let v6ip = Ipv6Addr::from_octets(*d.decode_array().ok_or(Error::NoMoreData)?);
         let v6port = d.decode_uint().ok_or(Error::NoMoreData)?;
-        if v6ip.is_unspecified() ^ (v6port == 0) {
+        if v6ip.to_canonical().is_unspecified() ^ (v6port == 0) {
             return Err(Error::TransportParameter);
         }
         let v6 = if v6port == 0 {
@@ -488,11 +486,6 @@ impl TransportParameters {
         }
     }
 
-    #[allow(
-        clippy::allow_attributes,
-        clippy::unwrap_in_result,
-        reason = "False positive in 1.90, check when we bump MSRV"
-    )]
     fn integer_default(tp: TransportParameterId) -> Option<u64> {
         // Note: testing for this can't catch new values; make sure to update the test.
         Some(match tp {
@@ -726,6 +719,7 @@ pub struct TransportParametersHandler {
     local: TransportParameters,
     remote_handshake: Option<TransportParameters>,
     remote_0rtt: Option<TransportParameters>,
+    error: Option<Error>,
 }
 
 impl TransportParametersHandler {
@@ -740,6 +734,7 @@ impl TransportParametersHandler {
             local,
             remote_handshake: None,
             remote_0rtt: None,
+            error: None,
         }
     }
 
@@ -794,7 +789,7 @@ impl TransportParametersHandler {
                     "Chosen version {current:x} is not compatible with initial version {:x}",
                     self.versions.initial().wire_version(),
                 );
-                Err(Error::TransportParameter)
+                Err(Error::VersionNegotiation)
             }
         } else {
             if current != self.versions.initial().wire_version() {
@@ -802,7 +797,7 @@ impl TransportParametersHandler {
                     "Current version {current:x} != own version {:x}",
                     self.versions.initial().wire_version(),
                 );
-                return Err(Error::TransportParameter);
+                return Err(Error::VersionNegotiation);
             }
 
             if let Some(preferred) = self.versions.preferred_compatible(other) {
@@ -845,6 +840,10 @@ impl TransportParametersHandler {
     #[must_use]
     pub const fn remote_handshake(&self) -> Option<&TransportParameters> {
         self.remote_handshake.as_ref()
+    }
+
+    pub(crate) const fn take_error(&mut self) -> Option<Error> {
+        self.error.take()
     }
 
     /// Filter to retain only those transport parameters that are necessary for an outer
@@ -917,16 +916,18 @@ impl ExtensionHandler for TransportParametersHandler {
         }
 
         let mut dec = Decoder::from(d);
-        match TransportParameters::decode(self.role, &mut dec) {
+        match TransportParameters::decode(self.role, &mut dec)
+            .map_err(|_| Error::TransportParameter)
+            .and_then(|tp| self.compatible_upgrade(&tp).map(|()| tp))
+        {
             Ok(tp) => {
-                if self.compatible_upgrade(&tp).is_ok() {
-                    self.remote_handshake = Some(tp);
-                    ExtensionHandlerResult::Ok
-                } else {
-                    ExtensionHandlerResult::Alert(47)
-                }
+                self.remote_handshake = Some(tp);
+                ExtensionHandlerResult::Ok
             }
-            _ => ExtensionHandlerResult::Alert(47), // illegal_parameter
+            Err(e) => {
+                self.error = Some(e);
+                ExtensionHandlerResult::Alert(47) // illegal_parameter
+            }
         }
     }
 }
@@ -1179,6 +1180,11 @@ mod tests {
         }));
         assert_invalid_spa(&mutate_spa(|_, v6, _| {
             v6.as_mut().unwrap().set_ip(Ipv6Addr::from(0));
+        }));
+        assert_invalid_spa(&mutate_spa(|_, v6, _| {
+            v6.as_mut()
+                .unwrap()
+                .set_ip(Ipv4Addr::UNSPECIFIED.to_ipv6_mapped());
         }));
         // Either address being absent is OK.
         assert_valid_spa(&mutate_spa(|v4, _, _| {

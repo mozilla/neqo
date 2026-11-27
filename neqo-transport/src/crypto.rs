@@ -25,11 +25,7 @@ use std::{
 };
 
 use enum_map::{Enum as _, EnumMap};
-use neqo_common::{
-    Buffer, Encoder, Role,
-    hex::{Hex, HexSnipMiddle},
-    to_u64,
-};
+use neqo_common::{Buffer, Encoder, Role, hex::Hex, to_u64};
 pub use nss::Epoch;
 use nss::{
     Agent, AntiReplay, Cipher, Error as CryptoError, HandshakeState, Mode, PrivateKey, PublicKey,
@@ -120,6 +116,9 @@ impl Crypto {
             // Always enable 0-RTT on the client, but the server needs
             // more configuration passed to server_enable_0rtt.
             c.enable_0rtt()?;
+            c.enable_plaintext_resumption_export(
+                conn_params.plaintext_resumption_export_enabled(),
+            )?;
         }
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
@@ -262,6 +261,10 @@ impl Crypto {
         let secret = secret.ok_or(Error::Internal)?;
         self.states.set_0rtt_keys(version, dir, &secret, cipher)?;
         Ok(true)
+    }
+
+    pub const fn set_version(&mut self, version: Version) {
+        self.version = version;
     }
 
     /// Lock in a compatible upgrade.
@@ -420,7 +423,7 @@ impl Crypto {
     ) -> Option<ResumptionToken> {
         if let Agent::Client(ref mut c) = self.tls {
             c.resumption_token().as_ref().map(|t| {
-                trace!("TLS token {}", Hex::new(t.as_ref()));
+                trace!("TLS token {t:?}");
                 let mut enc = Encoder::default();
                 enc.encode_uint(4, version.wire_version());
                 enc.encode_varint(rtt);
@@ -429,8 +432,9 @@ impl Crypto {
                 });
                 enc.encode_vvec(new_token.unwrap_or(&[]));
                 enc.encode(t.as_ref());
-                debug!("resumption token {}", HexSnipMiddle::new(enc.as_ref()));
-                ResumptionToken::new(enc.into(), t.expiration_time())
+                let token = t.clone_with_bytes(enc.into());
+                debug!("resumption token {token:?}");
+                token
             })
         } else {
             unreachable!("It is a server");
@@ -601,12 +605,10 @@ impl CryptoDxState {
 
     fn invoked(&mut self) -> Res<()> {
         #[cfg(test)]
-        OVERWRITE_INVOCATIONS.with(|v| {
-            if let Some(i) = v.borrow_mut().take() {
-                tracing::warn!("Setting {:?} invocations to {i}", self.direction);
-                self.invocations = i;
-            }
-        });
+        if let Some(i) = OVERWRITE_INVOCATIONS.take() {
+            tracing::warn!("Setting {:?} invocations to {i}", self.direction);
+            self.invocations = i;
+        }
         self.invocations = self
             .invocations
             .checked_sub(1)
@@ -1515,6 +1517,8 @@ impl Display for CryptoStates {
 pub struct CryptoStream {
     tx: TxBuffer,
     rx: RxStreamOrderer,
+    /// The end of the highest range ever sent; unlike `tx`, losses don't lower it.
+    sent: u64,
 }
 
 #[derive(Debug)]
@@ -1635,6 +1639,11 @@ impl CryptoStreams {
         self.get_mut(space).is_none_or(|cs| cs.tx.is_empty())
     }
 
+    /// Whether everything written to `space` has been sent at least once.
+    pub fn sent_all(&self, space: PacketNumberSpace) -> bool {
+        self.get(space).is_none_or(|cs| cs.sent >= cs.tx.used())
+    }
+
     const fn get(&self, space: PacketNumberSpace) -> Option<&CryptoStream> {
         let (initial, hs, app) = match self {
             Self::Initial {
@@ -1718,6 +1727,7 @@ impl CryptoStreams {
             stats: &mut FrameStats,
         ) {
             cs.tx.mark_as_sent(offset, len);
+            cs.sent = max(cs.sent, offset + to_u64(len));
             debug!("CRYPTO for {space} offset={offset}, len={len}");
             tokens.push(recovery::Token::Crypto(CryptoRecoveryToken {
                 offset,
@@ -1766,7 +1776,7 @@ impl CryptoStreams {
             let written = if sni_slicing && offset == 0 {
                 if let Some(sni) = find_sni(data) {
                     // Cut the crypto data in two at the midpoint of the SNI and swap the chunks.
-                    let mid = sni.start + (sni.end - sni.start) / 2;
+                    let mid = sni.start.midpoint(sni.end);
                     let (left, right) = data.split_at(mid);
 
                     // Truncate the chunks so we can fit them into roughly evenly-filled packets.
@@ -1888,16 +1898,16 @@ mod tests {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod buffer_limits {
-    use neqo_common::to_u64;
+    use neqo_common::{Encoder, to_u64};
 
     use super::{CryptoStreams, PacketNumberSpace, RxStreamOrderer};
-    use crate::Error;
+    use crate::{Error, packet, recovery, stats::FrameStats};
 
     /// How many one-byte ranges, each separated by a one-byte gap, to offer.
     const RANGES: u64 = to_u64(RxStreamOrderer::MAX_GAPS) * 2;
 
     // Offsets have to stay inside `BUFFER_LIMIT`.
-    static_assertions::const_assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
+    const _: () = assert!(2 * RANGES < CryptoStreams::BUFFER_LIMIT);
 
     #[test]
     fn crypto_offset_beyond_buffer() {
@@ -1930,5 +1940,27 @@ mod buffer_limits {
                 .err()
         });
         assert_eq!(rejected, Some(Error::CryptoBufferExceeded));
+    }
+
+    /// Lost data still counts as sent.
+    #[test]
+    fn crypto_sent_all_after_loss() {
+        let hs = PacketNumberSpace::Handshake;
+        let mut cs = CryptoStreams::default();
+        cs.send(hs, &[0; 4]).unwrap();
+        assert!(!cs.sent_all(hs));
+
+        let mut builder =
+            packet::Builder::short(Encoder::default(), false, None::<&[u8]>, packet::LIMIT);
+        let (mut tokens, mut stats) = (Vec::new(), FrameStats::default());
+        cs.write_frame(hs, false, &mut builder, &mut tokens, &mut stats);
+        assert!(cs.sent_all(hs));
+
+        let Some(recovery::Token::Crypto(token)) = tokens.pop() else {
+            panic!("expected a CRYPTO token");
+        };
+        cs.lost(hs, &token);
+        assert!(!cs.is_empty(hs));
+        assert!(cs.sent_all(hs));
     }
 }

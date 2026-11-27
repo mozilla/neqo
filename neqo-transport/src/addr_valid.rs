@@ -6,6 +6,16 @@
 
 // This file implements functions necessary for address validation.
 
+#![cfg_attr(
+    fuzzing,
+    expect(
+        clippy::missing_errors_doc,
+        clippy::missing_panics_doc,
+        clippy::must_use_candidate,
+        reason = "`addr_valid` is only public API when fuzzing."
+    )
+)]
+
 use std::{
     net::{IpAddr, SocketAddr},
     time::{Duration, Instant},
@@ -16,7 +26,6 @@ use nss::{
     constants::{TLS_AES_128_GCM_SHA256, TLS_VERSION_1_3},
     selfencrypt::SelfEncrypt,
 };
-use static_assertions::const_assert;
 use tracing::{info, trace};
 
 use crate::{
@@ -34,7 +43,7 @@ const TOKEN_IDENTIFIER_RETRY: &[u8] = &[0x52, 0x65, 0x74, 0x72, 0x79];
 /// corruption of individual bits in transit.
 const TOKEN_IDENTIFIER_NEW_TOKEN: &[u8] = &[0xad, 0x9a, 0x8b, 0x8d, 0x86];
 
-const_assert!(TOKEN_IDENTIFIER_RETRY.len() == TOKEN_IDENTIFIER_NEW_TOKEN.len());
+const _: () = assert!(TOKEN_IDENTIFIER_RETRY.len() == TOKEN_IDENTIFIER_NEW_TOKEN.len());
 
 /// The maximum number of tokens we'll save from `NEW_TOKEN` frames.
 /// This should be the same as the value of `MAX_TICKETS` in `nss`.
@@ -114,7 +123,7 @@ impl AddressValidation {
         now: Instant,
     ) -> Res<Vec<u8>> {
         const EXPIRATION_RETRY: Duration = Duration::from_secs(5);
-        const EXPIRATION_NEW_TOKEN: Duration = Duration::from_secs(60 * 60 * 24);
+        const EXPIRATION_NEW_TOKEN: Duration = Duration::from_hours(24);
 
         // TODO(mt) rotate keys on a fixed schedule.
         let retry = dcid.is_some();

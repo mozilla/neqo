@@ -8,10 +8,12 @@
 use std::{
     cell::RefCell,
     cmp::Ordering,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
 
+use enumset::EnumSet;
 use neqo_common::{Buffer, Role};
 use tracing::{debug, trace};
 
@@ -326,14 +328,23 @@ impl Streams {
         self.local_stream_limits[StreamType::UniDi].write_frames(builder, tokens, stats);
     }
 
+    /// Write send stream frames at `priority`, if it is in `active`.
     pub fn write_frames<B: Buffer>(
         &mut self,
         priority: TransmissionPriority,
+        active: EnumSet<TransmissionPriority>,
         builder: &mut packet::Builder<B>,
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        self.send.write_frames(priority, builder, tokens, stats);
+        if active.contains(priority) {
+            self.send.write_frames(priority, builder, tokens, stats);
+        }
+    }
+
+    /// See [`SendStreams::priorities`].
+    pub(crate) fn send_priorities(&self) -> EnumSet<TransmissionPriority> {
+        self.send.priorities()
     }
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
@@ -592,9 +603,8 @@ impl Streams {
             return;
         };
 
-        for (_id, ss) in &mut self.send {
-            ss.maybe_emit_writable_event(previous_limit, current_limit);
-        }
+        self.send
+            .maybe_emit_writable_events(previous_limit, current_limit);
     }
 
     pub fn handle_data_blocked(&self) {
@@ -643,6 +653,15 @@ impl Streams {
     /// When the stream does not exist.
     pub fn get_send_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut SendStream> {
         self.send.get_mut(stream_id)
+    }
+
+    pub(crate) fn set_writable_event_low_watermark(
+        &mut self,
+        stream_id: StreamId,
+        watermark: NonZeroUsize,
+    ) -> Res<()> {
+        self.send
+            .set_writable_event_low_watermark(stream_id, watermark)
     }
 
     /// # Errors

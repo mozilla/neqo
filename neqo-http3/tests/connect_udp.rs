@@ -6,15 +6,20 @@
 
 #![cfg(test)]
 
+use std::time::Duration;
+
 use http::Uri;
 use neqo_common::{Datagram, Tos, event::Provider as _, header::HeadersExt as _};
 use neqo_http3::{
     ConnectUdpEvent, Error, Http3Client, Http3ClientEvent, Http3Parameters, Http3Server,
     Http3ServerEvent, Http3State, Priority, SessionAcceptAction,
     connect_udp::{ClientSession as _, ServerEvent, ServerSession},
+    features::extended_connect::session::CloseReason,
     webtransport::ClientSession as _,
 };
-use neqo_transport::{ConnectionParameters, DatagramQueueOutcome, StreamDataLimit, StreamType};
+use neqo_transport::{
+    ConnectionParameters, DatagramQueueOutcome, Output, StreamDataLimit, StreamType,
+};
 use nss::AuthenticationStatus;
 use test_fixture::{
     DEFAULT_ADDR, default_http3_client, default_http3_server, exchange_packets, fixture_init,
@@ -34,6 +39,13 @@ fn disabled_by_default() {
     // Connect client and proxy.
     let _out = test_fixture::connect_peers(&mut client, &mut server);
     assert!(!client.connect_udp_enabled());
+}
+
+/// The URI every connect-udp session in these tests connects to through the proxy.
+fn target_uri() -> Uri {
+    format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
+        .parse()
+        .unwrap()
 }
 
 fn initiate_new_session() -> (Http3Client, Http3Server, neqo_http3::StreamId) {
@@ -71,13 +83,7 @@ fn initiate_new_session_with_client_params(
 
     // Establish connect-udp session.
     let connect_udp_session_id = client
-        .connect_udp_create_session(
-            now(),
-            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
-                .parse::<Uri>()
-                .unwrap(),
-            &[],
-        )
+        .connect_udp_create_session(now(), &target_uri(), &[])
         .unwrap();
     (client, proxy, connect_udp_session_id)
 }
@@ -483,12 +489,12 @@ fn server_stream_reset_results_in_client_session_close() {
     proxy_session.reset_send().unwrap();
     exchange_packets(&mut client, &mut proxy, false, None);
 
-    assert!(matches!(
-        client.next_event(),
-        Some(Http3ClientEvent::ConnectUdp(
-            ConnectUdpEvent::SessionClosed { .. }
-        ))
-    ));
+    let Some(Http3ClientEvent::ConnectUdp(ConnectUdpEvent::SessionClosed { reason, .. })) =
+        client.next_event()
+    else {
+        panic!("expected SessionClosed");
+    };
+    assert_eq!(reason, CloseReason::Error(Error::HttpNone.code()));
 }
 
 #[test]
@@ -498,7 +504,7 @@ fn connect_udp_operation_on_fetch_stream() {
         .fetch(
             now(),
             "GET",
-            ("https", "something.com", "/"),
+            &("https", "something.com", "/"),
             &[],
             Priority::default(),
         )
@@ -713,7 +719,7 @@ fn outgoing_datagram_space_available_forwarded() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired before the queue drained"
     );
 
@@ -721,7 +727,7 @@ fn outgoing_datagram_space_available_forwarded() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "OutgoingDatagramSpaceAvailable was not forwarded through connect-udp"
     );
 }
@@ -760,7 +766,7 @@ fn server_session_has_the_built_in_max_buffered_datagrams() {
     assert!(
         proxy
             .events()
-            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { .. })),
+            .any(|e| matches!(e, Http3ServerEvent::OutgoingDatagramSpaceAvailable { session_id, .. } if session_id == proxy_session.stream_id())),
         "OutgoingDatagramSpaceAvailable was not forwarded to the connect-udp server"
     );
 }
@@ -802,13 +808,7 @@ fn establish_capsule_session(
     }
 
     let session_id = client
-        .connect_udp_create_session(
-            now(),
-            &format!("https://[{}]:{}/", DEFAULT_ADDR.ip(), DEFAULT_ADDR.port())
-                .parse::<Uri>()
-                .unwrap(),
-            &[],
-        )
+        .connect_udp_create_session(now(), &target_uri(), &[])
         .unwrap();
 
     exchange_packets(&mut client, &mut proxy, false, None);
@@ -878,7 +878,7 @@ fn datagram_capsule_flow_control_error_and_resume() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired before the window reopened"
     );
 
@@ -888,7 +888,7 @@ fn datagram_capsule_flow_control_error_and_resume() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "resume event not emitted after control-stream flow control reopened"
     );
 }
@@ -915,7 +915,7 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
     assert!(
         !client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { .. })),
         "resume event fired while the window was still closed"
     );
 
@@ -939,7 +939,7 @@ fn datagram_capsule_at_flow_control_boundary_is_refused_not_lost() {
     assert!(
         client
             .events()
-            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable)),
+            .any(|e| matches!(e, Http3ClientEvent::OutgoingDatagramSpaceAvailable { session_id: id } if id == session_id)),
         "resume event not emitted after the window reopened"
     );
 }
@@ -968,6 +968,54 @@ fn datagram_over_the_peers_limit_including_context_id_is_rejected() {
     );
 }
 
+/// Far past the default max age, which on a loopback path is the 20ms floor.
+const PAST_DEFAULT_MAX_AGE: Duration = Duration::from_hours(1);
+
+/// Queued datagrams are kept as long as necessary.
+#[test]
+fn client_datagrams_do_not_expire() {
+    fixture_init();
+    let (mut client, _proxy, proxy_session) = establish_new_session();
+    let session_id = proxy_session.stream_id();
+    while client.next_event().is_some() {}
+
+    let t0 = now();
+    for _ in 0..9 {
+        assert_eq!(
+            client.connect_udp_send_datagram(session_id, PING, None, t0),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+    let t1 = t0 + PAST_DEFAULT_MAX_AGE;
+    drop(client.process_output(t1));
+    assert_eq!(
+        client.connect_udp_send_datagram(session_id, PING, None, t1),
+        Ok(DatagramQueueOutcome::MaxBufferedReached),
+        "the queued datagrams must not expire"
+    );
+}
+
+/// Server-side counterpart to [`client_datagrams_do_not_expire`].
+#[test]
+fn server_datagrams_do_not_expire() {
+    fixture_init();
+    let (_client, _proxy, proxy_session) = establish_new_session();
+
+    let t0 = now();
+    for _ in 0..9 {
+        assert_eq!(
+            proxy_session.send_datagram(PONG, None, t0),
+            Ok(DatagramQueueOutcome::Ok)
+        );
+    }
+    let t1 = t0 + PAST_DEFAULT_MAX_AGE;
+    assert_eq!(
+        proxy_session.send_datagram(PONG, None, t1),
+        Ok(DatagramQueueOutcome::MaxBufferedReached),
+        "the queued datagrams must not expire"
+    );
+}
+
 /// The datagram queue setters are `WebTransport` attributes; a connect-udp
 /// session must be rejected rather than silently given a mark.
 #[test]
@@ -980,15 +1028,199 @@ fn connect_udp_session_rejected_by_webtransport_datagram_setters() {
         Err(Error::InvalidStreamId)
     );
     assert_eq!(
-        client.webtransport_set_datagram_max_age(
-            session_id,
-            Some(std::time::Duration::from_millis(1)),
-            now()
-        ),
+        client.webtransport_set_datagram_max_age(session_id, Some(Duration::from_millis(1)), now()),
         Err(Error::InvalidStreamId)
     );
     assert_eq!(
         client.webtransport_datagram_queue_capacity(session_id),
         Err(Error::InvalidStreamId)
+    );
+}
+
+/// Return a client and proxy with two established connect-udp sessions on a single connection.
+///
+/// `datagram_size == None` uses the HTTP DATAGRAM Capsule path.
+fn establish_sessions(
+    datagram_size: Option<u64>,
+) -> (Http3Client, Http3Server, [neqo_http3::StreamId; 2]) {
+    fixture_init();
+    let params = || {
+        Http3Parameters::default()
+            .connect(true)
+            .connection_parameters(
+                ConnectionParameters::default().datagram_size(datagram_size.unwrap_or(0)),
+            )
+    };
+    let mut client = http3_client_with_params(params());
+    let mut proxy = http3_server_with_params(params());
+    let out = test_fixture::connect_peers(&mut client, &mut proxy);
+    exchange_packets(&mut client, &mut proxy, false, out);
+
+    let mut ids = [neqo_http3::StreamId::new(0); 2];
+    for id in &mut ids {
+        *id = client
+            .connect_udp_create_session(now(), &target_uri(), &[])
+            .unwrap();
+    }
+
+    exchange_packets(&mut client, &mut proxy, false, None);
+    let mut accepted = 0;
+    while let Some(e) = proxy.next_event() {
+        if let Http3ServerEvent::ConnectUdp(ServerEvent::NewSession { session, .. }) = e {
+            session
+                .response(&SessionAcceptAction::Accept, now())
+                .unwrap();
+            accepted += 1;
+        }
+    }
+    assert_eq!(accepted, 2);
+    exchange_packets(&mut client, &mut proxy, false, None);
+    let established = client
+        .events()
+        .filter(|e| {
+            matches!(
+                e,
+                Http3ClientEvent::ConnectUdp(ConnectUdpEvent::NewSession { status: 200, .. })
+            )
+        })
+        .count();
+    assert_eq!(established, 2);
+    (client, proxy, ids)
+}
+
+/// Drive client -> proxy one packet at a time until the proxy has surfaced
+/// `expected` UDP datagrams.
+///
+/// Returns the session of each UDP datagram the proxy surfaced, in arrival order.
+fn drain_to_proxy(
+    client: &mut Http3Client,
+    proxy: &mut Http3Server,
+    expected: usize,
+) -> Vec<neqo_http3::StreamId> {
+    assert!(expected < 10_000); // make sure we won't loop forever
+
+    let mut now = now();
+    let mut received = Vec::new();
+    while received.len() < expected {
+        match client.process_output(now) {
+            Output::Datagram(d) => {
+                let reply = proxy.process(Some(d), now).dgram();
+                while let Some(e) = proxy.next_event() {
+                    if let Http3ServerEvent::ConnectUdp(ServerEvent::Datagram { session, .. }) = e {
+                        received.push(session.stream_id());
+                    }
+                }
+                if let Some(r) = reply {
+                    // Send the proxy's ACKs back to the client
+                    client.process_input(r, now);
+                }
+            }
+            Output::Callback(t) => {
+                now += t;
+                if let Some(r) = proxy.process_output(now).dgram() {
+                    client.process_input(r, now);
+                }
+            }
+            Output::None => break,
+        }
+    }
+
+    assert_eq!(
+        received.len(),
+        expected,
+        "proxy received {} of {expected} datagrams",
+        received.len()
+    );
+    received
+}
+
+fn send_ok(client: &mut Http3Client, id: neqo_http3::StreamId, len: usize) {
+    assert_eq!(
+        client.connect_udp_send_datagram(id, &vec![0; len], None, now()),
+        Ok(DatagramQueueOutcome::Ok)
+    );
+}
+
+/// Session A queues its whole backlog before session B queues anything.
+fn queue_bulk(client: &mut Http3Client, ids: &[neqo_http3::StreamId], per_session: usize) {
+    for &id in ids {
+        for _ in 0..per_session {
+            send_ok(client, id, 1000);
+        }
+    }
+}
+
+/// Sessions take turns queuing one datagram each.
+fn queue_interleaved(client: &mut Http3Client, ids: &[neqo_http3::StreamId], per_session: usize) {
+    for _ in 0..per_session {
+        for &id in ids {
+            send_ok(client, id, 1000);
+        }
+    }
+}
+
+/// QUIC DATAGRAMs round-robin between sessions.
+#[test]
+fn fairness_quic_datagram() {
+    // Bulk
+    let (mut client, mut proxy, ids) = establish_sessions(Some(1500));
+    queue_bulk(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    let [a, b] = ids;
+    assert_eq!(&received[..8], vec![a, b, a, b, a, b, a, b]);
+
+    // Interleaved
+    let (mut client, mut proxy, ids) = establish_sessions(Some(1500));
+    queue_interleaved(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    let [a, b] = ids;
+    assert_eq!(&received[..8], vec![a, b, a, b, a, b, a, b]);
+}
+
+/// QUIC DATAGRAMs round-robin based on datagrams, not bytes: a session sending
+/// large datagrams gets a proportionally larger share of the bandwidth.
+#[test]
+fn fairness_quic_datagram_counts_datagrams_not_bytes() {
+    let (mut client, mut proxy, ids) = establish_sessions(Some(1500));
+    for _ in 0..8 {
+        send_ok(&mut client, ids[0], 1100);
+        send_ok(&mut client, ids[1], 100);
+    }
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    let [a, b] = ids;
+    assert_eq!(
+        received,
+        vec![a, b, a, b, a, b, a, b, a, b, a, b, a, b, a, b]
+    );
+}
+
+/// HTTP DATAGRAM Capsules have their sessions take turns filling packets.
+#[test]
+fn fairness_capsule() {
+    // Bulk, all datagrams of equal size
+    let (mut client, mut proxy, ids) = establish_sessions(None);
+    queue_bulk(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    let [a, b] = ids;
+    assert_eq!(&received[..8], vec![a, b, a, b, a, b, a, b]);
+
+    // Interleaved, all datagrams of equal size
+    let (mut client, mut proxy, ids) = establish_sessions(None);
+    queue_interleaved(&mut client, &ids, 8);
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    let [a, b] = ids;
+    assert_eq!(&received[..8], vec![a, b, a, b, a, b, a, b]);
+
+    // Interleaved, different datagram sizes
+    let (mut client, mut proxy, ids) = establish_sessions(None);
+    for _ in 0..8 {
+        send_ok(&mut client, ids[0], 1100);
+        send_ok(&mut client, ids[1], 550);
+    }
+    let received = drain_to_proxy(&mut client, &mut proxy, 16);
+    let [a, b] = ids;
+    assert_eq!(
+        received,
+        vec![a, b, b, a, b, b, a, b, b, a, b, b, a, a, a, a]
     );
 }

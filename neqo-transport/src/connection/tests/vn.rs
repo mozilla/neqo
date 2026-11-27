@@ -22,7 +22,8 @@ use super::{
 #[cfg(not(feature = "disable-encryption"))]
 use crate::frame::FrameType;
 use crate::{
-    ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Stats, Version,
+    ConnectionParameters, ERROR_VERSION_NEGOTIATION, Error, MIN_INITIAL_PACKET_SIZE, Stats,
+    Version,
     connection::tests::{AT_LEAST_PTO, connect_rtt_idle_with_modifier},
     packet,
     tparams::{TransportParameter, TransportParameterId::*},
@@ -332,6 +333,27 @@ fn compatible_downgrade() {
     assert_eq!(server.version(), Version::Version1);
 }
 
+/// A client configured for version 1 but resuming from a version 2 ticket downgrades to version 1.
+#[test]
+fn compatible_downgrade_resumed() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+    let token = exchange_ticket(&mut client, &mut server, now());
+
+    let mut client = default_client();
+    client.enable_resumption(now(), token).unwrap();
+    assert_eq!(client.version(), Version::Version2);
+    let mut server = new_server(ConnectionParameters::default().versions(
+        Version::Version2,
+        vec![Version::Version1, Version::Version2],
+    ));
+
+    connect(&mut client, &mut server);
+    assert_eq!(client.version(), Version::Version1);
+    assert_eq!(server.version(), Version::Version1);
+}
+
 /// Inject a Version Negotiation packet, which the client detects when it validates the
 /// server `version_negotiation` transport parameter.
 #[test]
@@ -356,7 +378,7 @@ fn version_negotiation_downgrade() {
         &mut client,
         &mut server,
         Error::VersionNegotiation,
-        Error::Peer(Error::VersionNegotiation.code()),
+        Error::Peer(ERROR_VERSION_NEGOTIATION),
     );
 }
 
@@ -382,7 +404,7 @@ fn invalid_server_version() {
     // The server effectively hasn't reacted here.
     match server.state() {
         State::Closed(err) => {
-            assert_eq!(*err, CloseReason::Transport(Error::CryptoAlert(47)));
+            assert_eq!(*err, CloseReason::Transport(Error::VersionNegotiation));
         }
         _ => panic!("invalid server state"),
     }
@@ -413,8 +435,8 @@ fn invalid_current_version_client() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::Peer(Error::CryptoAlert(47).code()),
-        Error::CryptoAlert(47),
+        Error::Peer(Error::VersionNegotiation.code()),
+        Error::VersionNegotiation,
     );
 }
 
@@ -445,8 +467,33 @@ fn invalid_current_version_server() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::CryptoAlert(47),
-        Error::Peer(Error::CryptoAlert(47).code()),
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
+    );
+}
+
+/// The server chooses a version that the client knows but did not offer.
+#[test]
+fn chosen_version_not_offered_by_client() {
+    let just_v1 =
+        ConnectionParameters::default().versions(Version::Version1, vec![Version::Version1]);
+    let mut client = new_client(just_v1.clone());
+    let mut server = new_server(just_v1);
+    server
+        .set_local_tparam(
+            VersionInformation,
+            TransportParameter::Versions {
+                current: Version::Version2.wire_version(),
+                other: vec![Version::Version2.wire_version()],
+            },
+        )
+        .unwrap();
+
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::VersionNegotiation,
+        Error::Peer(Error::VersionNegotiation.code()),
     );
 }
 
@@ -471,8 +518,8 @@ fn no_compatible_version() {
     connect_fail(
         &mut client,
         &mut server,
-        Error::Peer(Error::CryptoAlert(47).code()),
-        Error::CryptoAlert(47),
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
     );
 }
 

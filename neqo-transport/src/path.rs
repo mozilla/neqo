@@ -19,7 +19,7 @@ use nss::random;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    ConnectionParameters, Stats,
+    ConnectionParameters, Error, Res, Stats,
     ackrate::{AckRate, PeerAckDelay},
     cid::{ConnectionId, ConnectionIdRef, ConnectionIdStore, RemoteConnectionIdEntry},
     ecn,
@@ -66,11 +66,18 @@ pub struct Paths {
 
     /// Whether PMTUD is enabled for this connection.
     pmtud: bool,
+
+    /// Whether PMTUD is limited to the local interface MTU.
+    pmtud_iface_mtu: bool,
+
+    /// The peer's `max_udp_payload_size` transport parameter, once known.
+    peer_max_udp_payload: Option<usize>,
 }
 
 impl Paths {
     #[must_use]
-    pub fn new(pmtud: bool) -> Self {
+    pub fn new(conn_params: &ConnectionParameters) -> Self {
+        let pmtud = conn_params.pmtud_enabled();
         Self {
             paths: Vec::new(),
             primary: None,
@@ -78,6 +85,8 @@ impl Paths {
             to_retire: Vec::new(),
             qlog: Qlog::disabled(),
             pmtud,
+            pmtud_iface_mtu: pmtud && conn_params.pmtud_iface_mtu_enabled(),
+            peer_max_udp_payload: None,
         }
     }
 
@@ -89,22 +98,26 @@ impl Paths {
         remote: SocketAddr,
         conn_params: &ConnectionParameters,
         now: Instant,
-        stats: &mut Stats,
     ) -> PathRef {
         self.paths
             .iter()
             .find_map(|p| p.borrow().received_on(local, remote).then(|| Rc::clone(p)))
             .unwrap_or_else(|| {
-                let mut p =
-                    Path::temporary(local, remote, conn_params, self.qlog.clone(), now, stats);
+                let mut p = Path::temporary(local, remote, conn_params, self.qlog.clone(), now);
                 if let Some(primary) = self.primary.as_ref() {
                     p.prime_rtt(primary.borrow().rtt());
-                    if let Some(peer_max) = primary.borrow().pmtud().peer_max_udp_payload() {
-                        p.pmtud_mut().set_peer_max_udp_payload(peer_max);
-                    }
                 }
                 Rc::new(RefCell::new(p))
             })
+    }
+
+    /// Applies the peer's `max_udp_payload_size` to current and future permanent paths.
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        self.peer_max_udp_payload = Some(peer_max_udp_payload);
+        for p in &self.paths {
+            p.borrow_mut()
+                .set_peer_max_udp_payload(peer_max_udp_payload, now);
+        }
     }
 
     /// Get a reference to the primary path, if one exists.
@@ -137,6 +150,7 @@ impl Paths {
         local_cid: Option<ConnectionId>,
         remote_cid: RemoteConnectionIdEntry,
         now: Instant,
+        stats: &mut Stats,
     ) {
         debug_assert!(self.is_temporary(path));
 
@@ -162,6 +176,24 @@ impl Paths {
 
         debug!("[{}] Make permanent", path.borrow());
         path.borrow_mut().make_permanent(local_cid, remote_cid);
+        if self.pmtud_iface_mtu {
+            let ip = path.borrow().remote.ip();
+            match mtu::interface_and_mtu(ip) {
+                Ok((name, mtu)) => {
+                    debug!("Outbound interface {name} for destination {ip} has MTU {mtu}");
+                    stats.pmtud_iface_mtu = mtu;
+                    path.borrow_mut().pmtud_mut().set_iface_mtu(mtu);
+                }
+                Err(e) => {
+                    warn!("Failed to determine outbound interface for destination {ip}: {e}");
+                }
+            }
+        }
+        // Temporary paths don't send, so they only get the peer's limit here.
+        if let Some(peer_max_udp_payload) = self.peer_max_udp_payload {
+            path.borrow_mut()
+                .set_peer_max_udp_payload(peer_max_udp_payload, now);
+        }
         self.paths.push(Rc::clone(path));
         if self.primary.is_none() {
             assert!(self.select_primary(path, now).is_none());
@@ -221,47 +253,43 @@ impl Paths {
     }
 
     /// Process elapsed time for active paths.
-    /// Returns an true if there are viable paths remaining after tidying up.
+    /// Returns whether it failed over to another path.
     ///
     /// TODO(mt) - the paths should own the RTT estimator, so they can find the PTO
     /// for themselves.
-    pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> bool {
-        let to_retire = &mut self.to_retire;
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NoAvailablePath`] if no valid path is left to fail over to.
+    pub fn process_timeout(&mut self, now: Instant, pto: Duration, stats: &mut Stats) -> Res<bool> {
         let mut primary_failed = false;
-        self.paths.retain(|p| {
-            if p.borrow_mut().process_timeout(now, pto, stats) {
-                true
-            } else {
-                debug!("[{}] Retiring path", p.borrow());
-                if p.borrow().is_primary() {
-                    primary_failed = true;
-                }
-                Self::retire(to_retire, p);
-                false
+        for p in self
+            .paths
+            .extract_if(.., |p| !p.borrow_mut().process_timeout(now, pto, stats))
+        {
+            debug!("[{}] Retiring path", p.borrow());
+            if p.borrow().is_primary() {
+                primary_failed = true;
             }
-        });
+            Self::retire(&mut self.to_retire, &p);
+        }
 
         if primary_failed {
             self.primary = None;
             // Find a valid path to fall back to.
-            #[expect(
-                clippy::option_if_let_else,
-                reason = "The alternative is less readable."
-            )]
-            if let Some(fallback) = self
+            let Some(path) = self
                 .paths
                 .iter()
                 .rev() // More recent paths are toward the end.
                 .find(|p| p.borrow().is_valid())
-            {
-                // Need a clone as `fallback` is borrowed from `self`.
-                let path = Rc::clone(fallback);
-                info!("[{}] Failing over after primary path failed", path.borrow());
-                drop(self.select_primary(&path, now));
-                true
-            } else {
-                false
-            }
+                .map(Rc::clone)
+            else {
+                info!("Last available path failed");
+                return Err(Error::NoAvailablePath);
+            };
+            info!("[{}] Failing over after primary path failed", path.borrow());
+            drop(self.select_primary(&path, now));
+            Ok(true)
         } else {
             // See if the PMTUD raise timer wants to fire.
             if let Some(path) = self.primary() {
@@ -269,7 +297,7 @@ impl Paths {
                     .pmtud_mut()
                     .maybe_fire_raise_timer(now, stats);
             }
-            true
+            Ok(false)
         }
     }
 
@@ -315,11 +343,14 @@ impl Paths {
     }
 
     /// Select a path to send on.  This will select the first path that has
-    /// probes to send, then fall back to the primary path.
+    /// probes to send and is not blocked, then fall back to the primary path.
     pub fn select_path(&self) -> Option<PathRef> {
         self.paths
             .iter()
-            .find_map(|p| p.borrow().has_probe().then(|| Rc::clone(p)))
+            .find_map(|p| {
+                let p_ref = p.borrow();
+                (p_ref.has_probe() && p_ref.probe_blocked_since.is_none()).then(|| Rc::clone(p))
+            })
             .or_else(|| self.primary.clone())
     }
 
@@ -559,6 +590,8 @@ pub struct Path {
     received_bytes: usize,
     /// The number of bytes sent on this path.
     sent_bytes: usize,
+    /// When a probe on this path could not be sent, until more bytes arrive.
+    probe_blocked_since: Option<Instant>,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
     /// SCONE info for this path.
@@ -597,30 +630,8 @@ impl Path {
         conn_params: &ConnectionParameters,
         qlog: Qlog,
         now: Instant,
-        stats: &mut Stats,
     ) -> Self {
-        let iface_mtu = if conn_params.pmtud_iface_mtu_enabled() {
-            match mtu::interface_and_mtu(remote.ip()) {
-                Ok((name, mtu)) => {
-                    debug!(
-                        "Outbound interface {name} for destination {ip} has MTU {mtu}",
-                        ip = remote.ip()
-                    );
-                    stats.pmtud_iface_mtu = mtu;
-                    Some(mtu)
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to determine outbound interface for destination {ip}: {e}",
-                        ip = remote.ip()
-                    );
-                    None
-                }
-            }
-        } else {
-            None
-        };
-        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip(), iface_mtu), now);
+        let mut sender = PacketSender::new(conn_params, Pmtud::new(remote.ip()), now);
         sender.set_qlog(qlog.clone());
         Self {
             local,
@@ -635,6 +646,7 @@ impl Path {
             sender,
             received_bytes: 0,
             sent_bytes: 0,
+            probe_blocked_since: None,
             ecn_info: ecn::Info::default(),
             scone: None,
             qlog,
@@ -673,7 +685,7 @@ impl Path {
     }
 
     /// Determine if this path was the one that the provided datagram was received on.
-    fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
+    pub fn received_on(&self, local: SocketAddr, remote: SocketAddr) -> bool {
         self.local == local && self.remote == remote
     }
 
@@ -699,6 +711,7 @@ impl Path {
         debug!("[{self}] Path validated {now:?}");
         self.state = ProbeState::Valid;
         self.validated = Some(now);
+        self.probe_blocked_since = None;
     }
 
     /// Apply updated SCONE information to this path.
@@ -874,6 +887,21 @@ impl Path {
         !self.challenges.is_empty() || self.state.probe_needed()
     }
 
+    /// Handle probing frames that cannot be sent: drop any `PATH_RESPONSE`, and hold back a
+    /// `PATH_CHALLENGE` until more bytes arrive.  Returns true if the path was not blocked before.
+    pub fn block_probe(&mut self, now: Instant) -> bool {
+        self.challenges.clear();
+        let newly_blocked = self.probe_blocked_since.is_none();
+        self.probe_blocked_since.get_or_insert(now);
+        newly_blocked
+    }
+
+    /// When a blocked probe fails the path.
+    fn probe_blocked_deadline(&self, pto: Duration) -> Option<Instant> {
+        let count = u32::try_from(Self::MAX_PROBES).expect("result fits in u32");
+        self.probe_blocked_since.map(|since| since + pto * count)
+    }
+
     pub fn write_frames<B: Buffer>(
         &mut self,
         builder: &mut packet::Builder<B>,
@@ -967,6 +995,10 @@ impl Path {
         {
             self.probe(stats);
         }
+        if self.probe_blocked_deadline(pto).is_some_and(|t| now >= t) {
+            info!("[{self}] Probing blocked for too long");
+            self.state = ProbeState::Failed;
+        }
         if matches!(self.state, ProbeState::Failed) {
             // Retire failed paths immediately.
             false
@@ -987,15 +1019,19 @@ impl Path {
     }
 
     /// Return the next time that this path needs servicing.
-    /// This only considers retransmissions of probes, not cleanup of the path.
+    /// This only considers retransmissions and blocked probes, not cleanup of the path.
     /// If there is no other activity, then there is no real need to schedule a
     /// timer to cleanup old paths.
     pub fn next_timeout(&self, pto: Duration) -> Option<Instant> {
-        if let ProbeState::Probing { sent, .. } = &self.state {
+        let probe = if let ProbeState::Probing { sent, .. } = &self.state {
             Some(*sent + pto)
         } else {
             None
-        }
+        };
+        probe
+            .into_iter()
+            .chain(self.probe_blocked_deadline(pto))
+            .min()
     }
 
     /// Get the RTT estimator for this path.
@@ -1011,6 +1047,11 @@ impl Path {
     /// Mutably borrow the PMTUD discoverer for this path.
     pub fn pmtud_mut(&mut self) -> &mut Pmtud {
         self.sender.pmtud_mut()
+    }
+
+    pub fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        self.sender
+            .set_peer_max_udp_payload(peer_max_udp_payload, now);
     }
 
     /// Read-only access to the owned sender.
@@ -1059,6 +1100,7 @@ impl Path {
     /// Record received bytes for the path.
     pub const fn add_received(&mut self, count: usize) {
         self.received_bytes = self.received_bytes.saturating_add(count);
+        self.probe_blocked_since = None;
     }
 
     /// Record sent bytes for the path.
@@ -1170,7 +1212,7 @@ impl Path {
                         // If we have received absolutely nothing thus far, then this endpoint
                         // is the one initiating communication on this path.  Allow enough space for
                         // probing.
-                        self.plpmtu() * 5
+                        self.plpmtu() * 2 * Self::MAX_PROBES
                     } else {
                         limit
                     };
@@ -1219,10 +1261,20 @@ mod tests {
     use neqo_common::{Encoder, qlog::Qlog};
     use test_fixture::{DEFAULT_ADDR, now};
 
-    use super::Path;
+    use super::{Path, PathRef, Paths};
     use crate::{
-        ConnectionParameters, Stats, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
+        ConnectionParameters, MIN_INITIAL_PACKET_SIZE, Pmtud, Stats, cc::tests::INITIAL_CWND,
+        cid::RemoteConnectionIdEntry, frame::PATH_CHALLENGE_LEN, packet, stats::FrameStats,
     };
+
+    fn find_path(paths: &Paths) -> PathRef {
+        paths.find_path(
+            DEFAULT_ADDR,
+            DEFAULT_ADDR,
+            &ConnectionParameters::default().pmtud_iface_mtu(false),
+            now(),
+        )
+    }
 
     fn path() -> Path {
         Path::temporary(
@@ -1231,7 +1283,6 @@ mod tests {
             &ConnectionParameters::default().pmtud_iface_mtu(false),
             Qlog::disabled(),
             now(),
-            &mut Stats::default(),
         )
     }
 
@@ -1263,5 +1314,28 @@ mod tests {
         assert_eq!(stats.path_response, 2);
         assert_eq!(stats.path_challenge, 0);
         assert_eq!(path.challenges, [[2; PATH_CHALLENGE_LEN]]);
+    }
+
+    /// A temporary path gets the peer's `max_udp_payload_size` once it is made permanent.
+    #[test]
+    fn make_permanent_applies_peer_max_udp_payload() {
+        let mut paths = Paths::new(&ConnectionParameters::default());
+        let path = find_path(&paths);
+        let default_plpmtu = Pmtud::default_plpmtu(DEFAULT_ADDR.ip());
+        assert_eq!(path.borrow().plpmtu(), default_plpmtu);
+
+        // `Paths` does not track temporary paths.
+        paths.set_peer_max_udp_payload(MIN_INITIAL_PACKET_SIZE, now());
+        assert_eq!(path.borrow().plpmtu(), default_plpmtu);
+
+        paths.make_permanent(
+            &path,
+            None,
+            RemoteConnectionIdEntry::empty_remote(),
+            now(),
+            &mut Stats::default(),
+        );
+        assert_eq!(path.borrow().plpmtu(), MIN_INITIAL_PACKET_SIZE);
+        assert_eq!(path.borrow().sender().cwnd(), INITIAL_CWND);
     }
 }

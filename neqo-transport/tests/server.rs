@@ -6,10 +6,10 @@
 
 mod common;
 
-use std::{cell::RefCell, net::SocketAddr, rc::Rc, time::Duration};
+use std::{cell::RefCell, net::SocketAddr, num::NonZeroUsize, rc::Rc, time::Duration};
 
 use common::{connect, connected_server, default_server, find_ticket, generate_ticket, new_server};
-use neqo_common::{Datagram, Decoder, Encoder, Role};
+use neqo_common::{Datagram, Decoder, Encoder, Role, event::Provider as _};
 use neqo_transport::{
     CloseReason, Connection, ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, Output, State,
     StreamType, Version,
@@ -17,8 +17,8 @@ use neqo_transport::{
     version,
 };
 use nss::{
-    AllowZeroRtt, AuthenticationStatus, RecordProtectionOps as _, ZeroRttCheckResult,
-    ZeroRttChecker, generate_ech_keys,
+    AllowZeroRtt, AuthenticationStatus, RecordProtectionOps as _, TLS_AES_256_GCM_SHA384,
+    ZeroRttCheckResult, ZeroRttChecker, generate_ech_keys,
 };
 use test_fixture::{
     CountingConnectionIdGenerator, assertions, datagram, default_client,
@@ -775,7 +775,7 @@ fn closed() {
     assert!(res.callback() > Duration::new(0, 0));
 
     trace!("60s later");
-    let res = server.process_output(now() + Duration::from_secs(60));
+    let res = server.process_output(now() + Duration::from_mins(1));
     assert_eq!(res, Output::None);
 }
 
@@ -945,7 +945,7 @@ fn saved_datagrams() {
         .process_multiple(
             vec![invalid_dgram(), valid_dgram, invalid_dgram()],
             now(),
-            1.try_into().expect("1>0"),
+            NonZeroUsize::MIN,
         )
         .dgram()
         .expect("first packet triggers first vn");
@@ -955,13 +955,78 @@ fn saved_datagrams() {
     // which does require an immediate response. It thereby has to save the
     // fourth (new) datagram for the next call.
     server
-        .process_multiple(Some(invalid_dgram()), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Some(invalid_dgram()), now(), NonZeroUsize::MIN)
         .dgram()
         .expect("third packet triggers second vn");
 
     // Server processes the fourth datagram.
     server
-        .process_multiple(Vec::<Datagram>::new(), now(), 1.try_into().expect("1>0"))
+        .process_multiple(Vec::<Datagram>::new(), now(), NonZeroUsize::MIN)
         .dgram()
         .expect("fourth packet triggers third vn");
+}
+
+#[test]
+fn server_ciphers() {
+    let mut server = default_server();
+    server.set_ciphers([TLS_AES_256_GCM_SHA384]);
+    let mut client = default_client();
+    let server_instance = connect(&mut client, &mut server);
+
+    let client_cipher = client.tls_info().unwrap().cipher_suite();
+    assert_eq!(client_cipher, TLS_AES_256_GCM_SHA384);
+    let server_cipher = server_instance.borrow().tls_info().unwrap().cipher_suite();
+    assert_eq!(server_cipher, TLS_AES_256_GCM_SHA384);
+}
+
+#[test]
+fn server_ciphers_unknown() {
+    let mut server = default_server();
+    server.set_ciphers([0x0a0a]); // RFC 8701 GREASE value, unknown to NSS.
+    let mut client = default_client();
+
+    let initial = client.process_output(now()).dgram();
+    assert!(server.process(initial, now()).dgram().is_none());
+    assert!(!server.has_active_connections());
+}
+
+#[test]
+fn recycled_buffer_shared_across_connections() {
+    let mut server = default_server();
+    let first = connect(&mut default_client(), &mut server);
+    // Only one connection may have events when connecting the next.
+    first.borrow_mut().events().for_each(drop);
+    let second = connect(&mut default_client(), &mut server);
+    second.borrow_mut().events().for_each(drop);
+    while server
+        .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+        .dgram()
+        .is_some()
+    {}
+
+    // The second batch is smaller than the first, so it fits the recycled buffer.
+    let stream_id = first.borrow_mut().stream_create(StreamType::UniDi).unwrap();
+    first
+        .borrow_mut()
+        .stream_send(stream_id, &[0; 1000])
+        .unwrap();
+    let batch = server
+        .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    let ptr = batch.data().as_ptr();
+    drop(batch);
+    let stream_id = second
+        .borrow_mut()
+        .stream_create(StreamType::UniDi)
+        .unwrap();
+    second
+        .borrow_mut()
+        .stream_send(stream_id, &[0; 100])
+        .unwrap();
+    let batch = server
+        .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    assert_eq!(batch.data().as_ptr(), ptr);
 }

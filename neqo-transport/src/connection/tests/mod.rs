@@ -10,6 +10,7 @@ use std::{
     convert::identity,
     mem,
     net::SocketAddr,
+    num::NonZeroUsize,
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -92,10 +93,6 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
         self.counter += 1;
         Some(ConnectionId::from(&r[..8]))
     }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
-    }
 }
 
 // This is fabulous: because test_fixture uses the public API for Connection,
@@ -104,19 +101,23 @@ impl ConnectionIdGenerator for CountingConnectionIdGenerator {
 // test_fixture because they produce different - and incompatible - types.
 //
 // These are a direct copy of those functions.
-fn new_client_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
+fn new_client_with_addr(params: ConnectionParameters, addr: SocketAddr) -> Connection {
     fixture_init();
-    let (log, contents) = new_neqo_qlog();
-    let mut client = Connection::new_client(
+    Connection::new_client(
         test_fixture::DEFAULT_SERVER_NAME,
         test_fixture::DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
-        DEFAULT_ADDR,
-        DEFAULT_ADDR,
+        addr,
+        addr,
         params,
         now(),
     )
-    .expect("create a default client");
+    .expect("create a default client")
+}
+
+fn new_client_with_qlog(params: ConnectionParameters) -> (Connection, test_fixture::SharedVec) {
+    let (log, contents) = new_neqo_qlog();
+    let mut client = new_client_with_addr(params, DEFAULT_ADDR);
     client.set_qlog(log);
     (client, contents)
 }
@@ -138,6 +139,16 @@ fn zero_len_cid_client(local_addr: SocketAddr, remote_addr: SocketAddr) -> Conne
         remote_addr,
         ConnectionParameters::default(),
         now(),
+    )
+    .unwrap()
+}
+
+fn zero_len_cid_server() -> Connection {
+    Connection::new_server(
+        test_fixture::DEFAULT_KEYS,
+        test_fixture::DEFAULT_ALPN,
+        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default())),
+        ConnectionParameters::default(),
     )
     .unwrap()
 }
@@ -211,21 +222,32 @@ impl test_internal::FrameWriter for CryptoWriter {
     }
 }
 
-/// The next datagram from `send`, waiting out pacing delays.
-fn next_dgram(now: &mut Instant, mut send: impl FnMut(Instant) -> Output) -> Option<Datagram> {
+/// The next datagram from `send`, waiting out pacing delays, or the output that ended the wait.
+fn next_dgram(
+    now: &mut Instant,
+    mut send: impl FnMut(Instant) -> Output,
+) -> Result<Datagram, Output> {
     loop {
         match send(*now) {
-            Output::Datagram(d) => return Some(d),
+            Output::Datagram(d) => return Ok(d),
             Output::Callback(t) if t < DEFAULT_RTT => *now += t,
-            _ => return None, // Too long to be pacing.
+            o => return Err(o), // Too long to be pacing.
         }
     }
 }
 
 /// Drain everything `c` will send, following a paced sender by advancing `now` over short delays.
-fn drain(c: &mut Connection, now: &mut Instant, mut deliver: impl FnMut(Datagram, Instant)) {
-    while let Some(d) = next_dgram(now, |t| c.process_output(t)) {
-        deliver(d, *now);
+/// Returns the output that ended the drain.
+fn drain(
+    c: &mut Connection,
+    now: &mut Instant,
+    mut deliver: impl FnMut(Datagram, Instant),
+) -> Output {
+    loop {
+        match next_dgram(now, |t| c.process_output(t)) {
+            Ok(d) => deliver(d, *now),
+            Err(o) => return o,
+        }
     }
 }
 
@@ -411,18 +433,20 @@ fn exchange(a: &mut Connection, b: &mut Connection) {
     }
 }
 
+fn ticket_with_new_token(server: &mut Connection, now: Instant) -> Datagram {
+    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
+    let validation = Rc::new(RefCell::new(validation));
+    server.set_validation(&validation);
+    server.send_ticket(now, &[]).expect("can send ticket");
+    server.process_output(now).dgram().expect("ticket")
+}
+
 fn exchange_ticket(
     client: &mut Connection,
     server: &mut Connection,
     now: Instant,
 ) -> ResumptionToken {
-    let validation = AddressValidation::new(now, ValidateAddress::NoToken).unwrap();
-    let validation = Rc::new(RefCell::new(validation));
-    server.set_validation(&validation);
-    server.send_ticket(now, &[]).expect("can send ticket");
-    let ticket = server.process_output(now).dgram();
-    assert!(ticket.is_some());
-    client.process_input(ticket.unwrap(), now);
+    client.process_input(ticket_with_new_token(server, now), now);
     assert_eq!(*client.state(), State::Confirmed);
     get_tokens(client).pop().expect("should have token")
 }
@@ -570,8 +594,7 @@ fn increase_cwnd(
 /// no ACK frame is generated.
 fn ack_bytes<D>(dest: &mut Connection, stream: StreamId, in_dgrams: D, now: Instant) -> Datagram
 where
-    D: IntoIterator<Item = Datagram>,
-    D::IntoIter: ExactSizeIterator,
+    D: IntoIterator<Item = Datagram, IntoIter: ExactSizeIterator>,
 {
     let mut srv_buf = [0; 4_096];
 
@@ -795,13 +818,9 @@ fn assert_default_stats(stats: &Stats) {
 }
 
 fn assert_path_challenge_min_len(c: &Connection, d: &Datagram, now: Instant) {
-    let path = c.paths.find_path(
-        d.source(),
-        d.destination(),
-        &c.conn_params,
-        now,
-        &mut c.stats.borrow_mut(),
-    );
+    let path = c
+        .paths
+        .find_path(d.source(), d.destination(), &c.conn_params, now);
     if path.borrow().amplification_limit() < path.borrow().plpmtu() {
         // If the amplification limit is less than the PLPMTU, then the path
         // challenge will not have been padded.
@@ -885,4 +904,27 @@ fn server_receives_new_token() {
             ..
         }
     ));
+}
+
+#[test]
+fn dropped_batch_recycles_buffer() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+
+    // The second batch is smaller than the first, so it fits the recycled buffer.
+    client.stream_send(stream_id, &[0; 1000]).unwrap();
+    let batch = client
+        .process_multiple_output(now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    let ptr = batch.data().as_ptr();
+    drop(batch);
+    client.stream_send(stream_id, &[0; 100]).unwrap();
+    let batch = client
+        .process_multiple_output(now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    assert_eq!(batch.data().as_ptr(), ptr);
 }
