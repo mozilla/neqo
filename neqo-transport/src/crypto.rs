@@ -57,6 +57,9 @@ use crate::{
 /// need to ask permission to update, this can be quite small.
 pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 
+/// RFC 9001, Section 4.6.1.
+const MAX_EARLY_DATA_SIZE: u32 = 0xffff_ffff;
+
 // This is a testing kludge that allows for overwriting the number of
 // invocations of the next cipher to operate.  With this, it is possible
 // to test what happens when the number of invocations reaches 0, or
@@ -166,7 +169,7 @@ impl Crypto {
         if let Agent::Server(s) = &mut self.tls {
             Ok(s.enable_0rtt(
                 anti_replay,
-                0xffff_ffff,
+                MAX_EARLY_DATA_SIZE,
                 TpZeroRttChecker::wrap(tphandler, zero_rtt_checker),
             )?)
         } else {
@@ -439,6 +442,19 @@ impl Crypto {
         } else {
             unreachable!("It is a server");
         }
+    }
+
+    /// RFC 9001, Section 4.6.1; NSS reports `max_early_data_size` 0 without `early_data`.
+    pub fn check_resumption_tokens(&mut self) -> Res<()> {
+        if let Agent::Client(c) = &mut self.tls
+            && c.resumption_tokens()
+                .iter()
+                .any(|t| !matches!(t.max_early_data_size(), 0 | MAX_EARLY_DATA_SIZE))
+        {
+            while c.resumption_token().is_some() {}
+            return Err(Error::ProtocolViolation);
+        }
+        Ok(())
     }
 
     pub fn has_resumption_token(&self) -> bool {
