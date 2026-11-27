@@ -2097,6 +2097,32 @@ fn retry_scid_matching_initial_dcid() {
     assert_eq!(client.stats().dropped_rx, 0);
 }
 
+/// A Retry with a token that doesn't fit in an Initial packet is dropped.
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn retry_token_too_long() {
+    for (len, dropped) in [
+        (packet::MAX_INITIAL_TOKEN_LEN, 0),
+        (packet::MAX_INITIAL_TOKEN_LEN + 1, 1),
+    ] {
+        let mut client = default_client();
+        let initial = client_initial(&mut client);
+        let (dcid, scid) = initial_cids(&initial);
+        let mut server_scid = dcid.clone();
+        server_scid[0] ^= 0xff;
+        let retry = packet::Builder::retry(
+            Version::default(),
+            &scid,
+            &server_scid,
+            &vec![1; len],
+            &dcid,
+        )
+        .expect("build retry");
+        drop(client.process(Some(datagram(retry)), now()));
+        assert_eq!(client.stats().dropped_rx, dropped);
+    }
+}
+
 /// RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an Initial
 /// to 0; a client that receives an Initial with a non-zero Token Length MUST discard
 /// it. A token-free server Initial is still processed.

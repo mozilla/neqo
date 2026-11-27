@@ -1353,6 +1353,12 @@ impl Connection {
             self.stats.borrow_mut().pkt_dropped("Retry without a token");
             return Ok(());
         }
+        if packet.token().len() > packet::MAX_INITIAL_TOKEN_LEN {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Retry with a token too long for an Initial");
+            return Ok(());
+        }
         let odcid = self
             .original_destination_cid
             .as_ref()
