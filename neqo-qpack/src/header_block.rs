@@ -24,7 +24,7 @@ use crate::{
     },
     qpack_send_buf::Encoder as _,
     reader::{LiteralReader, ReceiverBufferWrapper, parse_utf8},
-    table::{ADDITIONAL_TABLE_ENTRY_SIZE, DynamicTableEntry, HeaderTable},
+    table::{DynamicTableEntry, HeaderTable},
 };
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -241,9 +241,7 @@ impl<'a> HeaderDecoder<'a> {
                 unreachable!("All prefixes are covered");
             };
             remaining = remaining
-                .checked_sub(
-                    header.name().len() + header.value().len() + ADDITIONAL_TABLE_ENTRY_SIZE,
-                )
+                .checked_sub(header.field_size())
                 .ok_or(Error::Decompression)?;
             h.push(header);
         }
@@ -408,11 +406,8 @@ impl<'a> HeaderDecoder<'a> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
 
-    use super::{
-        ADDITIONAL_TABLE_ENTRY_SIZE, HeaderDecoder, HeaderDecoderResult, HeaderEncoder,
-        HeaderTable, LiteralReader,
-    };
-    use crate::Error;
+    use super::{HeaderDecoder, HeaderDecoderResult, HeaderEncoder, HeaderTable, LiteralReader};
+    use crate::{Error, table::ADDITIONAL_TABLE_ENTRY_SIZE};
 
     const INDEX_STATIC_TEST: &[(u64, &[u8], &str, &str)] = &[
         (0, &[0x0, 0x0, 0xc0], ":authority", ""),

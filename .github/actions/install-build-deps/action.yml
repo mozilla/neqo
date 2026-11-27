@@ -14,6 +14,9 @@ inputs:
   target:
     description: Single target triple; passed to both the Rust toolchain and the NSS build
     default: ""
+  android-api:
+    description: Android API level to build NSS for (Android targets only)
+    default: "21"
   workspaces:
     description: Newline-separated list of workspaces
     default: ""
@@ -51,7 +54,7 @@ runs:
   using: composite
   steps:
     - id: rust
-      uses: mozilla/actions/rust@42622e57e54d96514373f5234c0220b014e64740 # v3.1.1
+      uses: mozilla/actions/rust@80429d96b44ae13c8cfe2a2dbec978ffc31c3720 # v3.3.0
       with:
         version: ${{ inputs.version }}
         components: ${{ inputs.components }}
@@ -65,8 +68,8 @@ runs:
         token: ${{ inputs.token || github.token }}
 
     - if: ${{ inputs.nss == 'true' }}
-      uses: mozilla/nss-rs/install-nss@dae19d45530acd2703fbba5f89a373a63ed7609a # 0.16.2
+      uses: mozilla/nss-rs/install-nss@891693f4eec31c81d3024b73e892ab1c09b3a7b0 # 0.16.4
       with:
         working-directory: ${{ inputs.working-directory }}
         target: ${{ inputs.target }}
-        token: ${{ inputs.token || github.token }}
+        android-api: ${{ inputs.android-api }}

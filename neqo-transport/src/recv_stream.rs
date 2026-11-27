@@ -554,40 +554,23 @@ impl RxStreamOrderer {
         trace!("Reading {} bytes, {} available", buf.len(), self.buffered());
         let mut copied = 0;
 
-        for (&range_start, range_data) in &mut self.data_ranges {
-            let mut keep = false;
-            if self.retired >= range_start {
-                // Frame data has new contiguous bytes.
-                // Conversion OK because this is what is held in this buffer.
-                let copy_offset = expect_usize(self.retired.saturating_sub(range_start));
-                assert!(range_data.len() >= copy_offset);
-                let available = range_data.len() - copy_offset;
-                let space = buf.len() - copied;
-                let copy_bytes = if available > space {
-                    keep = true;
-                    space
-                } else {
-                    available
-                };
-
-                if copy_bytes > 0 {
-                    let copy_slc = &range_data[copy_offset..copy_offset + copy_bytes];
-                    buf[copied..copied + copy_bytes].copy_from_slice(copy_slc);
-                    copied += copy_bytes;
-                    self.retired += to_u64(copy_bytes);
-                }
-            } else {
-                // The data in the buffer isn't contiguous.
-                keep = true;
+        while let Some(range) = self.data_ranges.first_entry() {
+            let start = *range.key();
+            if start > self.retired {
+                return copied; // A gap precedes this range.
             }
-            if keep {
-                let mut keep = self.data_ranges.split_off(&range_start);
-                mem::swap(&mut self.data_ranges, &mut keep);
-                return copied;
+            // Conversion OK because the offset is within this range's data.
+            let data = &range.get()[expect_usize(self.retired - start)..];
+            let len = min(data.len(), buf.len() - copied);
+            buf[copied..copied + len].copy_from_slice(&data[..len]);
+            copied += len;
+            self.retired += to_u64(len);
+            if len < data.len() {
+                return copied; // `buf` is full.
             }
+            range.remove();
         }
 
-        self.data_ranges.clear();
         self.end = self.retired; // All entries were consumed.
         copied
     }
@@ -1188,8 +1171,8 @@ impl RecvStream {
             } => {
                 let bytes_read = recv_buf.read(buf);
                 Self::flow_control_retire_data(u64::try_from(bytes_read)?, fc, session_fc);
-                let fin_read = if data_recvd_state {
-                    if recv_buf.buffered() == 0 {
+                let fin_read = data_recvd_state
+                    && if recv_buf.buffered() == 0 {
                         let received = recv_buf.received();
                         let read = recv_buf.retired();
                         self.set_state(RecvStreamState::DataRead {
@@ -1199,10 +1182,7 @@ impl RecvStream {
                         true
                     } else {
                         false
-                    }
-                } else {
-                    false
-                };
+                    };
                 Ok((bytes_read, fin_read))
             }
             RecvStreamState::SizeKnownAt {
@@ -1407,7 +1387,6 @@ mod tests {
     use std::{cell::RefCell, fmt::Debug, ops::Range, rc::Rc, time::Duration};
 
     use neqo_common::{Encoder, event::Provider as _, expect_usize, to_u64};
-    use static_assertions::const_assert;
     use test_fixture::now;
     use tracing::trace;
 
@@ -2141,7 +2120,7 @@ mod tests {
     }
 
     fn create_stream_session_flow_control() -> (RecvStream, Rc<RefCell<ReceiverFlowControl<()>>>) {
-        static_assertions::const_assert!(INITIAL_LOCAL_MAX_STREAM_DATA > SESSION_WINDOW);
+        const _: () = assert!(INITIAL_LOCAL_MAX_STREAM_DATA > SESSION_WINDOW);
         let session_fc = Rc::new(RefCell::new(ReceiverFlowControl::new(
             (),
             to_u64(SESSION_WINDOW),
@@ -2404,7 +2383,7 @@ mod tests {
         const STREAM_WINDOW_US: usize = CONNECTION_WINDOW_US / 2;
         const STREAM_WINDOW: u64 = to_u64(STREAM_WINDOW_US);
 
-        const_assert!(WINDOW_UPDATE_FRACTION <= to_u64(usize::MAX));
+        const _: () = assert!(WINDOW_UPDATE_FRACTION <= to_u64(usize::MAX));
         #[expect(
             clippy::cast_possible_truncation,
             reason = "value is statically checked"

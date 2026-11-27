@@ -37,14 +37,12 @@ use crate::{
 /// Length of a [`FrameType::Datagram`] or [`FrameType::DatagramWithLen`] in
 /// QUIC varint encoding.
 pub const DATAGRAM_FRAME_TYPE_VARINT_LEN: usize = 1;
-static_assertions::const_assert_eq!(
-    Encoder::varint_len(FrameType::Datagram as u64),
-    DATAGRAM_FRAME_TYPE_VARINT_LEN
-);
-static_assertions::const_assert_eq!(
-    Encoder::varint_len(FrameType::DatagramWithLen as u64),
-    DATAGRAM_FRAME_TYPE_VARINT_LEN
-);
+const _: () = {
+    assert!(Encoder::varint_len(FrameType::Datagram as u64) == DATAGRAM_FRAME_TYPE_VARINT_LEN);
+    assert!(
+        Encoder::varint_len(FrameType::DatagramWithLen as u64) == DATAGRAM_FRAME_TYPE_VARINT_LEN
+    );
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum DatagramTracking {
@@ -271,7 +269,7 @@ impl QuicDatagrams {
             Disposition::DropTooBig => queue.record_too_big(),
         }
         if queue.resume_if_unblocked() {
-            self.conn_events.datagram_space_available();
+            self.conn_events.datagram_space_available(session);
         }
         self.queue_rr_next = StreamId::new(session.as_u64().wrapping_add(1));
         Some(dgram)
@@ -314,7 +312,13 @@ impl QuicDatagrams {
             return Err(Error::TooMuchData);
         }
         let queue = self.queues.entry(session).or_default();
-        Self::expire_queue(queue, &self.conn_events, now, default_max_age(min_rtt));
+        Self::expire_queue(
+            session,
+            queue,
+            &self.conn_events,
+            now,
+            default_max_age(min_rtt),
+        );
         Ok(queue.enqueue(data, id, now, send_group_id, send_order))
     }
 
@@ -323,7 +327,7 @@ impl QuicDatagrams {
         let queue = self.queue_mut(session);
         queue.set_max_buffered_datagrams(mark);
         if queue.resume_if_unblocked() {
-            self.conn_events.datagram_space_available();
+            self.conn_events.datagram_space_available(session);
         }
     }
 
@@ -340,7 +344,7 @@ impl QuicDatagrams {
         let queue = self.queue_mut(session);
         queue.set_max_age(max_age, now, default_max_age(min_rtt));
         if queue.resume_if_unblocked() {
-            self.conn_events.datagram_space_available();
+            self.conn_events.datagram_space_available(session);
         }
     }
 
@@ -399,8 +403,8 @@ impl QuicDatagrams {
     /// schedule.
     pub fn expire_datagrams(&mut self, now: Instant, min_rtt: Duration) {
         let default_max_age = default_max_age(min_rtt);
-        for queue in self.queues.values_mut() {
-            Self::expire_queue(queue, &self.conn_events, now, default_max_age);
+        for (session, queue) in &mut self.queues {
+            Self::expire_queue(*session, queue, &self.conn_events, now, default_max_age);
         }
     }
 
@@ -417,7 +421,13 @@ impl QuicDatagrams {
         min_rtt: Duration,
     ) -> u64 {
         self.queues.get_mut(&session).map_or(0, |queue| {
-            Self::expire_queue(queue, &self.conn_events, now, default_max_age(min_rtt));
+            Self::expire_queue(
+                session,
+                queue,
+                &self.conn_events,
+                now,
+                default_max_age(min_rtt),
+            );
             queue.take_expired_count()
         })
     }
@@ -434,10 +444,9 @@ impl QuicDatagrams {
     /// Expire `queue`'s stale entries and, if that unblocks it, fire the
     /// resume event. Shared by [`Self::expire_datagrams`] (every session),
     /// [`Self::expire_session_datagrams`] (a single one) and
-    /// [`Self::enqueue_datagram`]. Firing per queue rather than once per
-    /// sweep is fine: `datagram_space_available` deduplicates, so a sweep
-    /// that unblocks several queues still yields one event.
+    /// [`Self::enqueue_datagram`].
     fn expire_queue(
+        session: StreamId,
         queue: &mut DatagramQueue,
         conn_events: &ConnectionEvents,
         now: Instant,
@@ -445,7 +454,7 @@ impl QuicDatagrams {
     ) {
         _ = queue.expire(now, default_max_age);
         if queue.resume_if_unblocked() {
-            conn_events.datagram_space_available();
+            conn_events.datagram_space_available(session);
         }
     }
 

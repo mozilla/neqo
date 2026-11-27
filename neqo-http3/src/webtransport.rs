@@ -222,7 +222,7 @@ pub trait ClientSession {
     fn webtransport_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId>;
 
@@ -431,7 +431,7 @@ impl ClientSession for Http3Client {
     fn webtransport_create_session<T: RequestTarget>(
         &mut self,
         now: Instant,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId> {
         let events = Box::new(self.client_events().clone());
@@ -526,10 +526,8 @@ impl ExportKeyingMaterial for Connection {
             return Err(Error::InvalidInput);
         }
 
-        let mut wt_context = Encoder::with_capacity(
-            Encoder::varint_len(session_id.as_u64()) + 1 + label.len() + 1 + context.len(),
-        );
-        wt_context.encode_varint(session_id.as_u64());
+        let mut wt_context = Encoder::with_capacity(8 + 1 + label.len() + 1 + context.len());
+        wt_context.encode_uint(8, session_id.as_u64());
         wt_context.encode_vec(1, label);
         wt_context.encode_vec(1, context);
 
@@ -543,7 +541,7 @@ trait Handler {
         &mut self,
         conn: &mut Connection,
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId>;
 
@@ -586,7 +584,7 @@ impl Handler for Http3Connection {
         &mut self,
         conn: &mut Connection,
         events: Box<dyn extended_connect::ExtendedConnectEvents>,
-        target: T,
+        target: &T,
         headers: &[Header],
     ) -> Res<StreamId> {
         info!("[{self}] Create WebTransport");
@@ -976,7 +974,8 @@ impl ServerSession {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidStreamId` if the session no longer exists.
+    /// Returns `InvalidStreamId` if the session is not yet accepted or no
+    /// longer exists.
     pub fn set_max_buffered_datagrams(
         &self,
         max_buffered_datagrams: Option<NonZeroUsize>,
@@ -996,7 +995,8 @@ impl ServerSession {
     ///
     /// # Errors
     ///
-    /// Returns `InvalidStreamId` if the session no longer exists.
+    /// Returns `InvalidStreamId` if the session is not yet accepted or no
+    /// longer exists.
     pub fn set_datagram_max_age(&self, max_age: Option<Duration>, now: Instant) -> Res<()> {
         let session_id = self.stream_handler.stream_id();
         self.stream_handler
@@ -1166,5 +1166,38 @@ impl ServerEvents for Http3ServerEvents {
             session,
             datagram,
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use neqo_transport::StreamId;
+    use test_fixture::connect;
+
+    use super::ExportKeyingMaterial as _;
+
+    /// The exporter context must encode the session ID as a fixed 64-bit
+    /// field, per draft-ietf-webtrans-http3 §4.8, Figure 6.
+    #[test]
+    fn exporter_context_session_id_is_64_bits() {
+        let (client, _server) = connect();
+        let session_id = StreamId::new(4);
+
+        let mut wt = [0u8; 32];
+        client
+            .webtransport_export_keying_material(session_id, b"label", b"ctx", &mut wt)
+            .unwrap();
+
+        let mut expected_context = vec![0, 0, 0, 0, 0, 0, 0, 4];
+        expected_context.push(5);
+        expected_context.extend_from_slice(b"label");
+        expected_context.push(3);
+        expected_context.extend_from_slice(b"ctx");
+        let mut raw = [0u8; 32];
+        client
+            .export_keying_material("EXPORTER-WebTransport", &expected_context, &mut raw)
+            .unwrap();
+
+        assert_eq!(wt, raw);
     }
 }

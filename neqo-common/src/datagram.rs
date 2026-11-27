@@ -5,10 +5,13 @@
 // except according to those terms.
 
 use std::{
+    cell::Cell,
     fmt::{self, Debug, Formatter},
+    mem,
     net::SocketAddr,
     num::NonZeroUsize,
     ops::{Deref, DerefMut},
+    rc::Rc,
 };
 
 use crate::{Bytes, Tos, hex::HexWithLen};
@@ -35,7 +38,7 @@ impl TryFrom<Batch> for Datagram {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            d: d.d,
+            d: d.d.clone(), // Dropping `d` returns its buffer for recycling.
         })
     }
 }
@@ -155,13 +158,39 @@ impl<D: AsRef<[u8]>> AsRef<[u8]> for Datagram<D> {
 ///
 /// Upholds Linux GSO requirement. That is, all but the last datagram in the
 /// batch have the same size. The last datagram may be equal or smaller.
-#[derive(Clone, PartialEq, Eq)]
 pub struct Batch {
     src: SocketAddr,
     dst: SocketAddr,
     tos: Tos,
     datagram_size: NonZeroUsize,
     d: Vec<u8>,
+    recycled: Option<RecycledBuffer>,
+}
+
+impl Drop for Batch {
+    fn drop(&mut self) {
+        if let Some(recycled) = &self.recycled {
+            recycled.recycle(mem::take(&mut self.d));
+        }
+    }
+}
+
+/// Holds the buffer of the last dropped [`Batch`] for reuse.
+#[derive(Clone, Default)]
+pub struct RecycledBuffer(Rc<Cell<Vec<u8>>>);
+
+impl RecycledBuffer {
+    /// Take the recycled buffer, or a new one if there is none.
+    #[must_use]
+    pub fn take(&self) -> Vec<u8> {
+        self.0.take()
+    }
+
+    /// Clear `buffer` and keep it for reuse.
+    pub fn recycle(&self, mut buffer: Vec<u8>) {
+        buffer.clear();
+        self.0.set(buffer);
+    }
 }
 
 impl Debug for Batch {
@@ -180,14 +209,9 @@ impl Debug for Batch {
 
 impl From<Datagram<Vec<u8>>> for Batch {
     fn from(d: Datagram<Vec<u8>>) -> Self {
-        Self {
-            src: d.src,
-            dst: d.dst,
-            tos: d.tos,
-            datagram_size: NonZeroUsize::new(d.d.len())
-                .expect("Datagram is guaranteed to be non-empty"),
-            d: d.d,
-        }
+        let datagram_size =
+            NonZeroUsize::new(d.d.len()).expect("Datagram is guaranteed to be non-empty");
+        Self::new(d.src, d.dst, d.tos, datagram_size, d.d)
     }
 }
 
@@ -206,7 +230,15 @@ impl Batch {
             tos,
             datagram_size,
             d,
+            recycled: None,
         }
+    }
+
+    /// Return the buffer to `recycled` when the batch is dropped.
+    #[must_use]
+    pub fn with_recycling(mut self, recycled: RecycledBuffer) -> Self {
+        self.recycled = Some(recycled);
+        self
     }
 
     #[must_use]

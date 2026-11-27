@@ -124,7 +124,7 @@ impl TryFrom<OutputBatch> for Output {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum OutputBatch {
     /// Connection requires no action.
     None,
@@ -325,6 +325,7 @@ pub struct Connection {
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: StatsCell,
+    recycled_buffer: datagram::RecycledBuffer,
     qlog: Qlog,
     /// A session ticket was received without `NEW_TOKEN`,
     /// this is when that turns into an event without `NEW_TOKEN`.
@@ -391,7 +392,6 @@ impl Connection {
             &c.conn_params,
             Qlog::default(),
             now,
-            &mut c.stats.borrow_mut(),
         );
         c.setup_handshake_path(&Rc::new(RefCell::new(path)), now);
         Ok(c)
@@ -450,7 +450,7 @@ impl Connection {
             role,
             version: conn_params.get_versions().initial(),
             state: State::Init,
-            paths: Paths::new(conn_params.pmtud_enabled()),
+            paths: Paths::new(&conn_params),
             cid_manager,
             tps: Rc::clone(&tphandler),
             zero_rtt_state: ZeroRttState::Init,
@@ -470,6 +470,7 @@ impl Connection {
             events,
             new_token: NewTokenState::new(role),
             stats,
+            recycled_buffer: datagram::RecycledBuffer::default(),
             qlog: Qlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
@@ -809,7 +810,7 @@ impl Connection {
         trace!("[{self}]   Initial token {}", Hex::new(init_token));
 
         let tok = dec.decode_remainder();
-        trace!("[{self}]   TLS token {}", Hex::new(tok));
+        trace!("[{self}]   TLS token [{}]", tok.len());
 
         match self.crypto.tls_mut() {
             Agent::Client(c) => {
@@ -823,6 +824,7 @@ impl Connection {
         }
 
         self.version = version;
+        self.crypto.set_version(version);
         self.conn_params.get_versions_mut().set_initial(version);
         self.tps.borrow_mut().set_version(version);
         self.tps.borrow_mut().set_remote_0rtt(Some(tp));
@@ -835,7 +837,7 @@ impl Connection {
             .borrow_mut()
             .rtt_mut()
             .set_initial(rtt);
-        self.set_initial_limits();
+        self.set_initial_limits(now);
         // Start up TLS, which has the effect of setting up all the necessary
         // state for 0-RTT.  This only stages the CRYPTO frames.
         let res = self.client_start(now);
@@ -876,9 +878,10 @@ impl Connection {
         // but there are just 0 or 1 in the current implementation.
         match self.paths.primary() {
             Some(path) => {
-                if let Some(token) = self
-                    .address_validation
-                    .generate_new_token(path.borrow().remote_address(), now)
+                if path.borrow().is_valid()
+                    && let Some(token) = self
+                        .address_validation
+                        .generate_new_token(path.borrow().remote_address(), now)
                 {
                     self.new_token.send_new_token(token);
                 }
@@ -1123,12 +1126,11 @@ impl Connection {
             self.create_resumption_token(now);
         }
 
-        if !self
+        let failed_over = self
             .paths
-            .process_timeout(now, pto, &mut self.stats.borrow_mut())
-        {
-            info!("[{self}] last available path failed");
-            self.absorb_error::<Error>(now, Err(Error::NoAvailablePath));
+            .process_timeout(now, pto, &mut self.stats.borrow_mut());
+        if self.absorb_error(now, failed_over) == Some(true) {
+            self.loss_recovery.migrate(); // RFC 9000 §9.4
         }
     }
 
@@ -1179,7 +1181,10 @@ impl Connection {
         }
 
         let mut delays = SmallVec::<[_; 7]>::new();
-        if let Some(ack_time) = self.acks.ack_time(now) {
+        // The anti-amplification limit can hold back an ACK on an unvalidated path.
+        let ack_blocked =
+            |t: &Instant| *t <= now && self.paths.primary().is_some_and(|p| !p.borrow().is_valid());
+        if let Some(ack_time) = self.acks.ack_time(now).filter(|t| !ack_blocked(t)) {
             trace!("[{self}] Delayed ACK timer {ack_time:?}");
             delays.push(ack_time);
         }
@@ -1246,9 +1251,13 @@ impl Connection {
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     #[must_use = "Output of the process_output function must be handled"]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, 1.try_into().expect(">0"))
+        self.process_multiple_output(now, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
+    }
+
+    pub(crate) fn set_recycled_buffer(&mut self, recycled: datagram::RecycledBuffer) {
+        self.recycled_buffer = recycled;
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -1310,7 +1319,7 @@ impl Connection {
         dgram: Option<Datagram<A>>,
         now: Instant,
     ) -> Output {
-        self.process_multiple(dgram, now, 1.try_into().expect(">0"))
+        self.process_multiple(dgram, now, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -1418,13 +1427,13 @@ impl Connection {
     }
 
     fn is_stateless_reset(&self, path: &PathRef, d: &[u8]) -> bool {
-        // If the datagram is too small, don't try.
         // If the connection is connected, then the reset token will be invalid.
-        if d.len() < Srt::LEN || !self.state.connected() {
+        if !self.state.connected() {
             return false;
         }
-        Srt::try_from(&d[d.len() - Srt::LEN..])
-            .is_ok_and(|token| path.borrow().is_stateless_reset(&token))
+        // If the datagram is too small, don't try.
+        d.last_chunk()
+            .is_some_and(|token| path.borrow().is_stateless_reset(&Srt::new(*token)))
     }
 
     fn check_stateless_reset(
@@ -1562,17 +1571,6 @@ impl Connection {
             return Ok(PreprocessResult::Next);
         }
 
-        if (packet.packet_type() == packet::Type::Initial
-            || packet.packet_type() == packet::Type::Handshake)
-            && self.role == Role::Client
-            && !path.borrow().is_primary()
-        {
-            // If we have received a packet from a different address than we have sent to
-            // we should ignore the packet. In such a case a path will be a newly created
-            // temporary path, not the primary path.
-            return Ok(PreprocessResult::Next);
-        }
-
         match (packet.packet_type(), &self.state, &self.role) {
             // RFC 9000, Section 17.2.2: a server MUST set the Token Length field of an
             // Initial to 0, and a client that receives an Initial with a non-zero Token
@@ -1700,7 +1698,13 @@ impl Connection {
                 // > incoming packet that it attributes to the connection.
                 //
                 // <https://www.rfc-editor.org/rfc/rfc9000.html#section-10.2.1-2>
-                self.state_signaling.send_close();
+                if self.cid_manager.is_valid(packet.dcid()) && !self.paths.is_temporary(path) {
+                    self.state_signaling.send_close();
+                } else {
+                    self.stats
+                        .borrow_mut()
+                        .pkt_dropped("Unattributed packet while closing");
+                }
                 PreprocessResult::Next
             }
             State::Draining { .. } | State::Closed(..) => {
@@ -1766,10 +1770,7 @@ impl Connection {
 
         if self.state.connected() {
             self.handle_migration(path, remote, migrate, now);
-        } else if self.role != Role::Client
-            && (packet.packet_type() == packet::Type::Handshake
-                || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
-        {
+        } else if self.validates_path(packet) {
             // We only allow one path during setup, so apply handshake
             // path validation to this path.
             path.borrow_mut().set_valid(now);
@@ -1790,14 +1791,21 @@ impl Connection {
         received: Instant,
         now: Instant,
     ) {
+        if self.state < State::Confirmed
+            && self
+                .paths
+                .primary()
+                .is_some_and(|p| !p.borrow().received_on(d.destination(), d.source()))
+        {
+            self.stats
+                .borrow_mut()
+                .pkt_dropped("Address changed during handshake");
+            return;
+        }
         // First determine the path.
-        let path = self.paths.find_path(
-            d.destination(),
-            d.source(),
-            &self.conn_params,
-            now,
-            &mut self.stats.borrow_mut(),
-        );
+        let path = self
+            .paths
+            .find_path(d.destination(), d.source(), &self.conn_params, now);
         path.borrow_mut().add_received(d.len());
         let res = self.input_path(&path, d, received);
         _ = self.capture_error(Some(path), now, FrameType::Padding, res);
@@ -1844,13 +1852,13 @@ impl Connection {
             trace!("[{self}] Received unverified packet {packet:?}");
 
             let packet_len = packet.len();
-            match packet.decrypt(self.crypto.states_mut(), now + pto) {
+            let decrypted = packet.decrypt(self.crypto.states_mut(), now + pto);
+            match &decrypted {
                 Ok(payload) => {
                     // OK, we have a valid packet.
                     let pn = payload.pn();
-                    self.idle_timeout.on_packet_received(now);
                     self.log_packet(
-                        packet::MetaData::new_in(path, tos, packet_len, &payload, self.version),
+                        packet::MetaData::new_in(path, tos, packet_len, payload, self.version),
                         now,
                     );
 
@@ -1870,14 +1878,15 @@ impl Connection {
                             debug!("Duplicate packet {space}-{pn}");
                             self.stats.borrow_mut().dups_rx += 1;
                         } else {
-                            match self.process_packet(path, &payload, now) {
+                            match self.process_packet(path, tos, payload, now) {
                                 Ok(migrate) => {
+                                    self.idle_timeout.on_packet_received(now);
                                     self.postprocess_packet(
-                                        path, tos, remote, &payload, migrate, now,
+                                        path, tos, remote, payload, migrate, now,
                                     );
                                 }
                                 Err(e) => {
-                                    self.ensure_error_path(path, &payload, now);
+                                    self.ensure_error_path(path, payload, now);
                                     return Err(e);
                                 }
                             }
@@ -1904,7 +1913,7 @@ impl Connection {
                         // authenticated but broke the protocol (e.g. reserved
                         // bits set), which closes the connection.
                         Error::KeysExhausted | Error::ProtocolViolation => {
-                            return Err(e.error);
+                            return Err(e.error.clone());
                         }
                         Error::KeysDiscarded(epoch) => self.handle_keys_discarded(epoch),
                         _ => (),
@@ -1914,8 +1923,8 @@ impl Connection {
                     // the rest of the datagram on the floor, but don't generate an error.
                     self.check_stateless_reset(path, e.data, dcid.is_none(), now)?;
                     self.stats.borrow_mut().pkt_dropped("Decryption failure");
-                    qlog::packet_dropped(&mut self.qlog, &e, now);
-                    dcid = Some(e.dcid);
+                    qlog::packet_dropped(&mut self.qlog, e, now);
+                    dcid = Some(e.dcid.clone());
                 }
             }
             slc = remainder;
@@ -1942,6 +1951,7 @@ impl Connection {
     fn process_packet(
         &mut self,
         path: &PathRef,
+        tos: Tos,
         packet: &packet::Decrypted,
         now: Instant,
     ) -> Res<bool> {
@@ -1990,12 +2000,16 @@ impl Connection {
             .acks
             .get_mut(PacketNumberSpace::from(packet.packet_type()))
         {
-            space.set_received(
+            let largest = space.set_received(
                 now,
                 packet.pn(),
                 ack_eliciting,
                 &mut self.stats.borrow_mut(),
-            )?
+            )?;
+            if ack_eliciting && Ecn::from(tos) == Ecn::Ce {
+                space.immediate_ack(now);
+            }
+            largest
         } else {
             debug!(
                 "[{self}] processed a {:?} packet without tracking it",
@@ -2030,6 +2044,7 @@ impl Connection {
                     .clone(),
             ),
             now,
+            &mut self.stats.borrow_mut(),
         );
         if self.role == Role::Client {
             path.borrow_mut().set_valid(now);
@@ -2044,27 +2059,27 @@ impl Connection {
             // no path probes or PATH_RESPONSE.  But it's not fatal.
             match self.cids.next() {
                 Some(cid) => {
-                    self.paths.make_permanent(path, None, cid, now);
+                    self.paths
+                        .make_permanent(path, None, cid, now, &mut self.stats.borrow_mut());
+                    Ok(())
+                }
+                None if self
+                    .paths
+                    .primary()
+                    .is_some_and(|p| p.borrow().remote_cid().is_none_or(|id| id.is_empty())) =>
+                {
+                    self.paths.make_permanent(
+                        path,
+                        None,
+                        ConnectionIdEntry::empty_remote(),
+                        now,
+                        &mut self.stats.borrow_mut(),
+                    );
                     Ok(())
                 }
                 None => {
-                    if let Some(primary) = self.paths.primary() {
-                        if primary.borrow().remote_cid().is_none_or(|id| id.is_empty()) {
-                            self.paths.make_permanent(
-                                path,
-                                None,
-                                ConnectionIdEntry::empty_remote(),
-                                now,
-                            );
-                            Ok(())
-                        } else {
-                            trace!("[{self}] Unable to make path permanent: {}", path.borrow());
-                            Err(Error::InvalidMigration)
-                        }
-                    } else {
-                        trace!("[{self}] Unable to make path permanent: {}", path.borrow());
-                        Err(Error::InvalidMigration)
-                    }
+                    trace!("[{self}] Unable to make path permanent: {}", path.borrow());
+                    Err(Error::InvalidMigration)
                 }
             }
         } else {
@@ -2072,11 +2087,21 @@ impl Connection {
         }
     }
 
+    /// Whether `packet` validates its path during the handshake (RFC 9000, Section 8.1).
+    fn validates_path(&self, packet: &packet::Decrypted) -> bool {
+        !self.state.connected()
+            && self.role != Role::Client
+            && (packet.packet_type() == packet::Type::Handshake
+                || (packet.dcid().len() >= 8 && packet.dcid() == self.local_initial_source_cid))
+    }
+
     /// After an error, a permanent path is needed to send the `CONNECTION_CLOSE`.
     /// This attempts to ensure that this exists.  As the connection is now
     /// temporary, there is no reason to do anything special here.
     fn ensure_error_path(&mut self, path: &PathRef, packet: &packet::Decrypted, now: Instant) {
-        path.borrow_mut().set_valid(now);
+        if self.validates_path(packet) {
+            path.borrow_mut().set_valid(now);
+        }
         if self.paths.is_temporary(path) {
             // First try to fill in handshake details.
             if packet.packet_type() == packet::Type::Initial {
@@ -2151,23 +2176,18 @@ impl Connection {
             // Can't mix address families.
             return Err(Error::InvalidMigration);
         }
-        if local.port() == 0 || remote.ip().is_unspecified() || remote.port() == 0 {
+        let (local_ip, remote_ip) = (local.ip().to_canonical(), remote.ip().to_canonical());
+        if local.port() == 0 || remote_ip.is_unspecified() || remote.port() == 0 {
             // All but the local address need to be specified.
             return Err(Error::InvalidMigration);
         }
-        if (local.ip().is_loopback() ^ remote.ip().is_loopback()) && !local.ip().is_unspecified() {
+        if (local_ip.is_loopback() ^ remote_ip.is_loopback()) && !local_ip.is_unspecified() {
             // Block attempts to migrate to a path with loopback on only one end, unless the local
             // address is unspecified.
             return Err(Error::InvalidMigration);
         }
 
-        let path = self.paths.find_path(
-            local,
-            remote,
-            &self.conn_params,
-            now,
-            &mut self.stats.borrow_mut(),
-        );
+        let path = self.paths.find_path(local, remote, &self.conn_params, now);
         self.ensure_permanent(&path, now)?;
         info!(
             "[{self}] Migrate to {} probe {}",
@@ -2178,13 +2198,13 @@ impl Connection {
             .paths
             .migrate(&path, force, now, &mut self.stats.borrow_mut())
         {
-            self.loss_recovery.migrate();
             self.path_migrated(&path);
         }
         Ok(())
     }
 
-    fn path_migrated(&self, path: &PathRef) {
+    fn path_migrated(&mut self, path: &PathRef) {
+        self.loss_recovery.migrate();
         let p = path.borrow();
         self.events
             .path_migrated(p.local_address(), p.remote_address());
@@ -2222,7 +2242,9 @@ impl Connection {
             if let Some(remote) = remote {
                 // Ignore preferred address that move to loopback from non-loopback.
                 // `migrate` doesn't enforce this rule.
-                if !prev.ip().is_loopback() && remote.ip().is_loopback() {
+                if !prev.ip().to_canonical().is_loopback()
+                    && remote.ip().to_canonical().is_loopback()
+                {
                     warn!("[{self}] Ignoring a move to a loopback address: {remote}");
                     return Ok(());
                 }
@@ -2280,6 +2302,15 @@ impl Connection {
                 || Ok(SendOptionBatch::default()),
                 |path| {
                     let res = self.output_dgram_batch_on_path(&path, now, None, max_datagrams);
+                    if matches!(res, Ok(SendOptionBatch::No(false)))
+                        && self.state.connected()
+                        && !path.borrow().is_valid()
+                        && path.borrow().has_probe()
+                        && path.borrow_mut().block_probe(now)
+                    {
+                        // The probe does not fit the anti-amplification limit; try another path.
+                        return Ok(self.output(now, max_datagrams));
+                    }
                     self.capture_error(Some(path), now, FrameType::Padding, res)
                 },
             ),
@@ -2353,7 +2384,7 @@ impl Connection {
             }
         }
 
-        let pn = tx.next_pn();
+        let pn = tx.next_pn(); // Deliberately not closed at 2^62-1 (RFC 9000 Section 12.3).
         let unacked_range = largest_acknowledged.map_or_else(|| pn + 1, |la| (pn - la) << 1);
         // Count how many bytes in this range are non-zero.
         // The conversion is safe because the maximum value is 8.
@@ -2398,8 +2429,14 @@ impl Connection {
             frame_stats.handshake_done += 1;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
+        let active = self.streams.send_priorities();
+        self.streams.write_frames(
+            TransmissionPriority::Critical,
+            active,
+            builder,
+            tokens,
+            frame_stats,
+        );
         if builder.is_full() {
             return;
         }
@@ -2412,6 +2449,7 @@ impl Connection {
 
         self.streams.write_frames(
             TransmissionPriority::Important,
+            active,
             builder,
             tokens,
             frame_stats,
@@ -2433,7 +2471,7 @@ impl Connection {
 
         for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
             self.streams
-                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+                .write_frames(prio, active, builder, tokens, &mut stats.frame_tx);
             if builder.is_full() {
                 return;
             }
@@ -2465,8 +2503,13 @@ impl Connection {
             return;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
+        self.streams.write_frames(
+            TransmissionPriority::Low,
+            active,
+            builder,
+            tokens,
+            frame_stats,
+        );
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
@@ -2535,6 +2578,12 @@ impl Connection {
             && path.can_probe_pmtud()
     }
 
+    fn is_small_initial(&self, space: PacketNumberSpace, profile: &SendProfile) -> bool {
+        self.role == Role::Server
+            && space == PacketNumberSpace::Initial
+            && profile.limit() < packet::MIN_INITIAL_PACKET_SIZE
+    }
+
     /// Write frames to the provided builder.  Returns a list of tokens used for
     /// tracking loss or acknowledgment and whether any frame was ACK eliciting.
     fn write_frames(
@@ -2584,8 +2633,8 @@ impl Connection {
             }
         }
 
-        if profile.ack_only() {
-            // If we are CC limited we can only send ACKs!
+        // ACKs only if CC limited or a server Initial is too small (RFC 9000, Section 14.1).
+        if profile.ack_only() || self.is_small_initial(space, profile) {
             return (tokens, false);
         }
 
@@ -2670,7 +2719,7 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = Vec::new();
+        let mut send_buffer = self.recycled_buffer.take();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
@@ -2679,6 +2728,9 @@ impl Connection {
         loop {
             if max_datagrams.get() <= num_datagrams {
                 break;
+            }
+            if num_datagrams != 0 && !path.borrow().is_primary() {
+                break; // A probe or closing datagram on a non-primary path is never batched.
             }
             if path.borrow().can_probe_pmtud() && num_datagrams != 0 {
                 // Next datagram will be larger due to PMTUD probing.  GSO
@@ -2738,6 +2790,7 @@ impl Connection {
                 SendOption::No(paced) => {
                     if num_datagrams == 0 {
                         debug_assert!(send_buffer.is_empty());
+                        self.recycled_buffer.recycle(send_buffer);
                         return Ok(SendOptionBatch::No(paced));
                     }
                     break;
@@ -2746,13 +2799,16 @@ impl Connection {
         }
 
         debug_assert!(!send_buffer.is_empty());
-        let batch = path.borrow_mut().datagram_batch(
-            send_buffer,
-            packet_tos,
-            num_datagrams,
-            max_datagram_size.ok_or(Error::Internal)?,
-            &mut self.stats.borrow_mut(),
-        );
+        let batch = path
+            .borrow_mut()
+            .datagram_batch(
+                send_buffer,
+                packet_tos,
+                num_datagrams,
+                max_datagram_size.ok_or(Error::Internal)?,
+                &mut self.stats.borrow_mut(),
+            )
+            .with_recycling(self.recycled_buffer.clone());
 
         Ok(SendOptionBatch::Yes(batch))
     }
@@ -2774,12 +2830,21 @@ impl Connection {
         let version = self.version();
 
         // Determine how we are sending packets (PTO, etc..).
-        let profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        let mut profile = self.loss_recovery.send_profile(&path.borrow(), now);
+        // Everything counts against the anti-amplification limit (RFC 9000, Section 8.1).
+        profile.cap(path.borrow().amplification_limit());
         debug!("[{self}] output_dgram_on_path send_profile {profile:?}");
 
         // Frames for different epochs must go in different packets, but then these
         // packets can go in a single datagram
         for space in PacketNumberSpace::iter() {
+            // Other than closing frames, only path probes are sent on a non-primary path.
+            if closing_frame.is_none()
+                && !path.borrow().is_primary()
+                && space != PacketNumberSpace::ApplicationData
+            {
+                continue;
+            }
             let coalesced = !encoder.is_empty();
             let pmtud_probe = self.should_probe_pmtud(path, space, &profile, coalesced);
 
@@ -2793,13 +2858,13 @@ impl Connection {
             let header_start = encoder.len();
 
             // Configure the limits and padding for this packet.
-            let limit = if pmtud_probe {
+            let Some(limit) = (if pmtud_probe {
                 needs_padding = true;
                 debug_assert!(path.borrow().pmtud().probe_size() >= profile.limit());
-                path.borrow().pmtud().probe_size()
+                Some(path.borrow().pmtud().probe_size())
             } else {
-                profile.limit()
-                    - if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
+                profile.limit().checked_sub(
+                    if space == PacketNumberSpace::Initial && self.conn_params.scone_enabled() {
                         // Reserve some space for the SCONE indication in an Initial.
                         // This reduces the amount available for building the packet,
                         // but we'll pad to `profile.limit()` when padding.
@@ -2808,8 +2873,13 @@ impl Connection {
                         Self::SCONE_INDICATION.len()
                     } else {
                         0
-                    }
-            } - aead_expansion;
+                    },
+                )
+            })
+            .and_then(|limit| limit.checked_sub(aead_expansion)) else {
+                // Too small for any packet, including those in later spaces.
+                break;
+            };
 
             let (pt, mut builder, pn) = Self::build_packet_header(
                 &path.borrow(),
@@ -3068,7 +3138,7 @@ impl Connection {
         }
     }
 
-    fn set_initial_limits(&mut self) {
+    fn set_initial_limits(&mut self, now: Instant) {
         self.streams.set_initial_limits();
         let peer_timeout = self
             .tps
@@ -3082,6 +3152,13 @@ impl Connection {
 
         self.quic_datagrams
             .set_remote_datagram_size(self.tps.borrow().remote().get_integer(MaxDatagramFrameSize));
+
+        // We cap this transport parameter to usize::MAX on decode, so this is safe.
+        let peer_max_udp_payload =
+            expect_usize(self.tps.borrow().remote().get_integer(MaxUdpPayloadSize));
+        self.paths
+            .set_peer_max_udp_payload(peer_max_udp_payload, now);
+        self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(peer_max_udp_payload);
     }
 
     #[must_use]
@@ -3116,13 +3193,6 @@ impl Connection {
                 path.borrow_mut().set_reset_token(reset_token);
             }
 
-            // We cap this transport parameter to usize::MAX on decode, so this is safe.
-            let max_udp_payload = expect_usize(remote.get_integer(MaxUdpPayloadSize));
-            path.borrow_mut()
-                .pmtud_mut()
-                .set_peer_max_udp_payload(max_udp_payload);
-            self.stats.borrow_mut().pmtud_peer_max_udp_payload = Some(max_udp_payload);
-
             let max_ad = Duration::from_millis(remote.get_integer(MaxAckDelay));
             let min_ad = if remote.has_value(MinAckDelay) {
                 let min_ad = Duration::from_micros(remote.get_integer(MinAckDelay));
@@ -3139,7 +3209,7 @@ impl Connection {
             let max_active_cids = remote.get_integer(ActiveConnectionIdLimit);
             self.cid_manager.set_limit(max_active_cids);
         }
-        self.set_initial_limits();
+        self.set_initial_limits(now);
         qlog::connection_tparams_set(&mut self.qlog, &self.tps.borrow(), now);
         Ok(())
     }
@@ -3302,7 +3372,11 @@ impl Connection {
         let was_authentication_pending =
             *self.crypto.tls().state() == HandshakeState::AuthenticationPending;
         let try_update = data.is_some();
-        match self.crypto.handshake(now, space, data)? {
+        match self
+            .crypto
+            .handshake(now, space, data)
+            .map_err(|e| self.tps.borrow_mut().take_error().unwrap_or(e))?
+        {
             HandshakeState::Authenticated(_) | HandshakeState::InProgress => (),
             HandshakeState::AuthenticationPending => {
                 if !was_authentication_pending {
@@ -3327,8 +3401,8 @@ impl Connection {
         // conditions right is a little tricky, so call whenever CRYPTO data is used.
         if try_update {
             // We have transport parameters, it's go time.
-            if self.tps.borrow().remote_handshake().is_some() {
-                self.set_initial_limits();
+            if self.state < State::Connected && self.tps.borrow().remote_handshake().is_some() {
+                self.set_initial_limits(now);
             } else if self.role == Role::Server && self.crypto.tls().has_secret(Epoch::Handshake) {
                 warn!("[{self}] No transport parameters, closing connection");
                 return Err(Error::CryptoAlert(109)); // missing_extension
@@ -3461,6 +3535,13 @@ impl Connection {
                 retire_prior,
             } => {
                 self.stats.borrow_mut().frame_rx.new_connection_id += 1;
+                if self
+                    .remote_initial_source_cid
+                    .as_ref()
+                    .is_some_and(|cid| cid.is_empty())
+                {
+                    return Err(Error::ProtocolViolation);
+                }
                 self.cids.add_remote(ConnectionIdEntry::new(
                     sequence_number,
                     ConnectionId::from(connection_id),
@@ -3502,12 +3583,11 @@ impl Connection {
             }
             Frame::PathResponse { data } => {
                 self.stats.borrow_mut().frame_rx.path_response += 1;
-                if let Some(primary) =
-                    self.paths
-                        .path_response(data, now, &mut self.stats.borrow_mut())
-                {
+                let primary = self
+                    .paths
+                    .path_response(data, now, &mut self.stats.borrow_mut());
+                if let Some(primary) = primary {
                     self.path_migrated(&primary);
-                    self.loss_recovery.migrate();
                 }
             }
             Frame::ConnectionClose {
@@ -3545,8 +3625,15 @@ impl Connection {
             }
             Frame::HandshakeDone => {
                 self.stats.borrow_mut().frame_rx.handshake_done += 1;
-                if self.role == Role::Server || !self.state.connected() {
+                if self.role == Role::Server
+                    || !self.state.connected()
+                    // The server lacks our Finished until we have sent it.
+                    || !self.crypto.streams().sent_all(PacketNumberSpace::Handshake)
+                {
                     return Err(Error::ProtocolViolation);
+                }
+                if self.confirmed() {
+                    return Ok(());
                 }
                 self.set_confirmed(now)?;
                 self.discard_keys(PacketNumberSpace::Handshake, now);
@@ -3646,8 +3733,7 @@ impl Connection {
         now: Instant,
     ) -> Res<()>
     where
-        R: IntoIterator<Item = RangeInclusive<packet::Number>> + Debug,
-        R::IntoIter: ExactSizeIterator,
+        R: IntoIterator<Item = RangeInclusive<packet::Number>, IntoIter: ExactSizeIterator> + Debug,
     {
         debug!("[{self}] Rx ACK space={space}, ranges={ack_ranges:?}");
 
@@ -3984,9 +4070,7 @@ impl Connection {
         watermark: NonZeroUsize,
     ) -> Res<()> {
         self.streams
-            .get_send_stream_mut(stream_id)?
-            .set_writable_event_low_watermark(watermark);
-        Ok(())
+            .set_writable_event_low_watermark(stream_id, watermark)
     }
 
     /// Close the stream. Enqueued data will be sent.

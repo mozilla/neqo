@@ -12,12 +12,13 @@
 
 use std::{
     cell::RefCell,
+    mem,
     net::{IpAddr, Ipv6Addr, SocketAddr},
     rc::Rc,
     time::{Duration, Instant},
 };
 
-use neqo_common::{Datagram, Decoder, event::Provider as _, hex::Hex, to_u64};
+use neqo_common::{Datagram, Decoder, Role, event::Provider as _, hex::Hex, to_u64};
 use nss::{
     AuthenticationStatus, HandshakeMessage,
     constants::TLS_CHACHA20_POLY1305_SHA256,
@@ -29,7 +30,9 @@ use test_fixture::datagram;
 use test_fixture::{
     DEFAULT_ADDR,
     assertions::{assert_coalesced_0rtt, assert_handshake, assert_initial, assert_version},
-    damage_ech_config, fixture_init, now, split_datagram, strip_padding,
+    damage_ech_config, fixture_init,
+    header_protection::{decode_initial_header, rewrite_initial},
+    now, split_datagram, strip_padding,
 };
 use tracing::debug;
 
@@ -37,12 +40,12 @@ use super::{
     super::{Connection, Output, State, test_internal},
     AT_LEAST_PTO, CountingConnectionIdGenerator, CryptoWriter, DEFAULT_RTT, DEFAULT_STREAM_DATA,
     assert_error, connect, connect_fail, connect_force_idle, connect_with_rtt, default_client,
-    default_server, drop_flight, flush_to, get_tokens, handshake, maybe_authenticate, next_dgram,
-    resumed_server, send_something, zero_len_cid_client,
+    default_server, drain, drop_flight, flush_to, get_tokens, handshake, handshake_with_modifier,
+    maybe_authenticate, next_dgram, resumed_server, send_something, zero_len_cid_client,
 };
 use crate::{
-    CloseReason, ConnectionParameters, EmptyConnectionIdGenerator, Error, Pmtud, StreamId,
-    StreamType, Version,
+    CloseReason, ConnectionParameters, DEFAULT_INITIAL_RTT, EmptyConnectionIdGenerator, Error,
+    Pmtud, StreamId, StreamType, Version,
     connection::{
         AddressValidation,
         tests::{exchange_ticket, new_client, new_server, new_server_with_qlog},
@@ -55,7 +58,10 @@ use crate::{
     server::ValidateAddress,
     stats::FrameStats,
     streams::SendGroupId,
-    tparams::{TransportParameter, TransportParameterId::*},
+    tparams::{
+        TransportParameter,
+        TransportParameterId::{self, *},
+    },
     tracking::DEFAULT_LOCAL_ACK_DELAY,
 };
 
@@ -1277,6 +1283,112 @@ fn bad_min_ack_delay() {
     );
 }
 
+/// The server closes with `TRANSPORT_PARAMETER_ERROR` when the client sends `tp` with `value`.
+fn bad_client_tp(tp: TransportParameterId, value: TransportParameter) {
+    let mut client = default_client();
+    let mut server = default_server();
+    client.set_local_tparam(tp, value).unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::Peer(Error::TransportParameter.code()),
+        Error::TransportParameter,
+    );
+}
+
+/// The client closes with `TRANSPORT_PARAMETER_ERROR` when the server sends `tp` with `value`.
+fn bad_server_tp(tp: TransportParameterId, value: TransportParameter) {
+    let mut client = default_client();
+    // No compatible upgrade, which needs a well-formed local `version_information`.
+    let mut server = new_server(
+        ConnectionParameters::default().versions(Version::default(), vec![Version::default()]),
+    );
+    server.set_local_tparam(tp, value).unwrap();
+    connect_fail(
+        &mut client,
+        &mut server,
+        Error::TransportParameter,
+        Error::Peer(Error::TransportParameter.code()),
+    );
+}
+
+/// Both endpoints close with `TRANSPORT_PARAMETER_ERROR` when the peer sends `tp` with `value`.
+fn bad_tp(tp: TransportParameterId, value: TransportParameter) {
+    bad_client_tp(tp, value.clone());
+    bad_server_tp(tp, value);
+}
+
+#[test]
+fn initial_max_streams_too_large() {
+    bad_tp(
+        InitialMaxStreamsBidi,
+        TransportParameter::Integer((1 << 60) + 1),
+    );
+}
+
+#[test]
+fn active_connection_id_limit_too_small() {
+    bad_tp(ActiveConnectionIdLimit, TransportParameter::Integer(1));
+}
+
+#[test]
+fn truncated_tp() {
+    bad_tp(MaxAckDelay, TransportParameter::Bytes(vec![0x40]));
+}
+
+#[test]
+fn trailing_bytes_tp() {
+    bad_tp(InitialMaxData, TransportParameter::Bytes(vec![0x01, 0x00]));
+}
+
+#[test]
+fn stateless_reset_token_from_client() {
+    bad_client_tp(StatelessResetToken, TransportParameter::Bytes(vec![1; 16]));
+}
+
+#[test]
+fn malformed_version_information() {
+    bad_tp(VersionInformation, TransportParameter::Bytes(vec![0, 0, 0]));
+}
+
+/// RFC 9000, Section 7.4: a duplicate transport parameter is a `TRANSPORT_PARAMETER_ERROR`.
+#[test]
+fn duplicate_tp_from_client() {
+    // `TestTransportParameter` (four-byte varint ID), length 1, value 1.
+    const TEST_TP: &[u8] = &[0x80, 0x00, 0xce, 0x16, 0x01, 0x01];
+    // `InitialMaxData` as a four-byte varint, so the rewrite keeps all lengths.
+    const INITIAL_MAX_DATA: &[u8] = &[0x80, 0x00, 0x00, 0x04];
+
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .versions(Version::Version1, vec![Version::Version1])
+            .mlkem(false)
+            .sni_slicing(false),
+    );
+    let mut server = default_server();
+    client
+        .set_local_tparam(TestTransportParameter, TransportParameter::Bytes(vec![1]))
+        .unwrap();
+
+    let mut first = true;
+    handshake_with_modifier(&mut client, &mut server, now(), Duration::ZERO, |c_init| {
+        if !mem::take(&mut first) {
+            return Some(c_init);
+        }
+        let (_, dcid, _, _) = decode_initial_header(&c_init, Role::Client).unwrap();
+        Some(rewrite_initial(&c_init, dcid, Role::Client, |plaintext| {
+            let pos = plaintext
+                .windows(TEST_TP.len())
+                .position(|w| w == TEST_TP)
+                .unwrap();
+            plaintext[pos..pos + INITIAL_MAX_DATA.len()].copy_from_slice(INITIAL_MAX_DATA);
+        }))
+    });
+    let peer_error = Error::Peer(Error::TransportParameter.code());
+    assert_error(&client, &CloseReason::Transport(peer_error));
+    assert_error(&server, &CloseReason::Transport(Error::TransportParameter));
+}
+
 /// Ensure that the client probes correctly if it only receives Initial packets
 /// from the server.
 #[test]
@@ -1560,6 +1672,146 @@ fn server_initial_retransmits_identical() {
             .checked_sub(total_ptos)
             .expect("doesn't underflow")
     );
+}
+
+/// PTOs count against the anti-amplification limit (RFC 9002, Section 6.2.2.1).
+#[test]
+fn server_pto_respects_amplification_limit() {
+    let mut now = now();
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    let c1 = client.process_output(now).dgram().unwrap();
+    let c2 = client.process_output(now).dgram().unwrap();
+    // Discarded datagrams count too (RFC 9000, Section 8.1); this leaves PTO 3 short of two.
+    let junk = Datagram::new(c1.source(), c1.destination(), c1.tos(), &c1[..400]);
+    let budget = 3 * (c1.len() + c2.len() + junk.len());
+    for d in [c1, c2, junk] {
+        server.process_input(d, now);
+    }
+
+    // The datagram sizes the server sends now, and its timer after them.
+    let send = |server: &mut Connection, mut now| {
+        let mut sizes = Vec::new();
+        let Output::Callback(t) = drain(server, &mut now, |d, _| sizes.push(d.len())) else {
+            panic!("the server should have a timer");
+        };
+        (sizes, t)
+    };
+    let mtu = server.plpmtu();
+    let pto = 3 * DEFAULT_INITIAL_RTT; // RTT plus four times its initial variance, half the RTT.
+
+    let (first, mut timer) = send(&mut server, now);
+    assert_eq!((first.len(), timer), (2, pto));
+    for _ in 0..2 {
+        now += timer;
+        timer *= 2;
+        assert_eq!(send(&mut server, now), (vec![mtu, mtu], timer));
+    }
+    now += timer;
+
+    // A full probe, then the rest of the budget as Handshake only.
+    let mut last = Vec::new();
+    let Output::Callback(timer) = drain(&mut server, &mut now, |d, _| last.push(d)) else {
+        panic!("the server should have a timer");
+    };
+    let rest = budget - first.iter().sum::<usize>() - 5 * mtu;
+    assert_eq!(
+        last.iter().map(Datagram::len).collect::<Vec<_>>(),
+        vec![mtu, rest]
+    );
+    assert_handshake(&last[1]);
+    // Amplification-limited, so only the idle timer is left.
+    assert_eq!(timer + 7 * pto, server.conn_params.get_idle_timeout());
+}
+
+/// An overdue PTO does not fire while amplification-limited (RFC 9002, Section 6.2.2.1).
+#[test]
+fn server_overdue_pto_amplification_limited() {
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    // The server cannot complete its flight within the amplification limit.
+    let very_big =
+        TransportParameter::Bytes(vec![0; 10 * Pmtud::default_plpmtu(DEFAULT_ADDR.ip())]);
+    server
+        .set_local_tparam(TestTransportParameter, very_big)
+        .unwrap();
+    let now = now();
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    server.process_input(client.process_output(now).dgram().unwrap(), now);
+    while server.process_output(now).dgram().is_some() {}
+
+    let idle = server.conn_params.get_idle_timeout();
+    assert_eq!(server.process_output(now).callback(), idle);
+    let half_idle = idle / 2;
+    assert_eq!(
+        server.process_output(now + half_idle).callback(),
+        idle.checked_sub(half_idle).unwrap()
+    );
+}
+
+/// ACK-only packets count against the anti-amplification limit (RFC 9000, Section 8.1).
+#[cfg(not(feature = "disable-encryption"))]
+#[test]
+fn server_ack_only_respects_amplification_limit() {
+    use neqo_common::Encoder;
+
+    use crate::{
+        crypto::{CryptoDxDirection, CryptoDxState},
+        frame::FrameType,
+        packet,
+    };
+
+    // A shortest (8-byte) original Destination CID keeps the forged packets small.
+    let (client, c1) = loop {
+        let mut client = new_client(ConnectionParameters::default().mlkem(false));
+        let c1 = client.process_output(now()).dgram().unwrap();
+        if c1[5] == 8 {
+            break (client, c1);
+        }
+    };
+    let mut server = new_server(ConnectionParameters::default().pacing(false));
+    // Skip the first byte and version; the original Destination CID seeds the Initial keys.
+    let seed = Decoder::from(&c1[5..]).decode_vec(1).unwrap();
+    let version = client.version();
+    let mut received = c1.len();
+    server.process_input(c1.clone(), now());
+    let mut sent = 0;
+
+    for i in 1..=20 {
+        while let Some(d) = server.process_output(now()).dgram() {
+            sent += d.len();
+        }
+        let limit = server
+            .paths
+            .primary()
+            .unwrap()
+            .borrow()
+            .amplification_limit();
+        assert_eq!(3 * received, sent + limit);
+
+        // A small forged client Initial PING; the packet number gap makes each ACK range large.
+        let pn = i * ((1 << 30) + 2);
+        let mut write =
+            CryptoDxState::new_initial(version, CryptoDxDirection::Write, "client in", seed, pn)
+                .unwrap();
+        let mut builder = packet::Builder::long(
+            Encoder::default(),
+            packet::Type::Initial,
+            version,
+            Some(seed),
+            Some([]),
+            packet::LIMIT,
+        );
+        builder.initial_token(&[]);
+        builder.pn(pn, 4);
+        builder.encode_varint(FrameType::Ping);
+        let ping = builder.build(&mut write).unwrap();
+        received += ping.len();
+        server.process_input(
+            Datagram::new(c1.source(), c1.destination(), c1.tos(), ping),
+            now(),
+        );
+    }
 }
 
 #[test]

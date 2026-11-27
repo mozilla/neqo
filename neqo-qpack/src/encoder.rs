@@ -5,7 +5,7 @@
 // except according to those terms.
 
 use std::{
-    cmp::min,
+    cmp::{max, min},
     collections::VecDeque,
     fmt::{self, Display, Formatter},
     time::Instant,
@@ -58,9 +58,9 @@ pub struct Encoder {
     max_tracked_streams: usize,
     // Remember header blocks that are referring to dynamic table.
     // There can be multiple header blocks in one stream, headers, trailer, push stream request,
-    // etc. This HashMap maps a stream ID to a list of header blocks. Each header block is a
-    // list of referenced dynamic table entries.
-    unacked_header_blocks: HashMap<StreamId, VecDeque<HashSet<u64>>>,
+    // etc. This HashMap maps a stream ID to a list of header blocks. Each header block is its
+    // Required Insert Count and a list of referenced dynamic table entries.
+    unacked_header_blocks: HashMap<StreamId, VecDeque<(u64, HashSet<u64>)>>,
     blocked_stream_cnt: u16,
     use_huffman: bool,
     next_capacity: Option<u64>,
@@ -181,7 +181,10 @@ impl Encoder {
         )]
         for hb_list in self.unacked_header_blocks.values_mut() {
             debug_assert!(!hb_list.is_empty());
-            if hb_list.iter().flatten().any(|e| *e >= acked_inserts_cnt) {
+            if hb_list
+                .iter()
+                .any(|(req_insert_cnt, _)| *req_insert_cnt > acked_inserts_cnt)
+            {
                 self.blocked_stream_cnt += 1;
             }
         }
@@ -208,17 +211,15 @@ impl Encoder {
             .get_mut(&stream_id)
             .ok_or(Error::DecoderStream)?;
         let mut new_acked = self.table.get_acked_inserts_cnt();
-        if let Some(ref_list) = hb_list.pop_back() {
+        if let Some((req_insert_cnt, ref_list)) = hb_list.pop_back() {
             #[expect(
                 clippy::iter_over_hash_type,
                 reason = "OK to loop over unACKed blocks in an undefined order."
             )]
             for iter in ref_list {
                 self.table.remove_ref(iter);
-                if iter >= new_acked {
-                    new_acked = iter + 1;
-                }
             }
+            new_acked = max(new_acked, req_insert_cnt);
         } else {
             debug_assert!(false, "We should have at least one header block");
         }
@@ -236,15 +237,15 @@ impl Encoder {
         let mut was_blocker = false;
         if let Some(mut hb_list) = self.unacked_header_blocks.remove(&stream_id) {
             debug_assert!(!hb_list.is_empty());
-            while let Some(ref_list) = hb_list.pop_front() {
+            while let Some((req_insert_cnt, ref_list)) = hb_list.pop_front() {
                 #[expect(
                     clippy::iter_over_hash_type,
                     reason = "OK to loop over unACKed blocks in an undefined order."
                 )]
                 for iter in ref_list {
                     self.table.remove_ref(iter);
-                    was_blocker = was_blocker || (iter >= self.table.get_acked_inserts_cnt());
                 }
+                was_blocker = was_blocker || req_insert_cnt > self.table.get_acked_inserts_cnt();
             }
         }
         if was_blocker {
@@ -394,8 +395,7 @@ impl Encoder {
                 debug_assert!(!hb_list.is_empty());
                 hb_list
                     .iter()
-                    .flatten()
-                    .any(|index| *index >= self.table.get_acked_inserts_cnt())
+                    .any(|(req_insert_cnt, _)| *req_insert_cnt > self.table.get_acked_inserts_cnt())
             })
     }
 
@@ -509,21 +509,18 @@ impl Encoder {
 
         encoded_h.encode_header_block_prefix();
 
-        if !stream_was_blocking {
+        if let Some(max_ref) = ref_entries.iter().max() {
+            let req_insert_cnt = max_ref + 1;
             // The streams was not a blocker, check if the stream is a blocker now.
-            if let Some(max_ref) = ref_entries.iter().max()
-                && *max_ref >= self.table.get_acked_inserts_cnt()
-            {
+            if !stream_was_blocking && req_insert_cnt > self.table.get_acked_inserts_cnt() {
                 debug_assert!(self.blocked_stream_cnt <= self.max_blocked_streams);
                 self.blocked_stream_cnt += 1;
             }
-        }
 
-        if !ref_entries.is_empty() {
             self.unacked_header_blocks
                 .entry(stream_id)
                 .or_default()
-                .push_front(ref_entries);
+                .push_front((req_insert_cnt, ref_entries));
             self.stats.dynamic_table_references += 1;
         }
         #[cfg(feature = "build-fuzzing-corpus")]
@@ -1454,6 +1451,40 @@ mod tests {
         // After that only stream 1 will be blocking.
         recv_instruction(&mut encoder, &[0x01], now());
 
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
+    }
+
+    // Acknowledged inserts unblock a stream before its Section Acknowledgment arrives.
+    #[test]
+    fn max_block_streams_acked_inserts_not_blocking() {
+        let mut encoder = connect(false);
+        assert!(encoder.encoder.set_max_capacity(200).is_ok());
+        encoder.send_instructions(CAP_INSTRUCTION_200);
+        encoder.encoder.set_max_blocked_streams(1).unwrap();
+
+        let buf = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("name1", "value1")],
+            STREAM_1,
+        );
+        assert_is_index_to_dynamic_post(&buf);
+        recv_instruction(&mut encoder, &[0x01], now());
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 0);
+
+        let buf = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("name2", "value2")],
+            STREAM_2,
+        );
+        assert_is_index_to_dynamic_post(&buf);
+        assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
+
+        let buf = encoder.encoder.encode_header_block(
+            &mut encoder.conn,
+            &[Header::new("name3", "value3")],
+            STREAM_1,
+        );
+        assert_is_literal_value_literal_name(&buf);
         assert_eq!(encoder.encoder.blocked_stream_cnt(), 1);
     }
 

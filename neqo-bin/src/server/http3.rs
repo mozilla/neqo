@@ -15,11 +15,11 @@ use std::{
 
 use neqo_common::{Datagram, Header, header::HeadersExt as _};
 use neqo_http3::{
-    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State, StreamId,
+    Http3OrWebTransportStream, Http3Parameters, Http3Server, Http3ServerEvent, Http3State,
 };
 use neqo_transport::{ConnectionIdGenerator, OutputBatch};
 use nss::AntiReplay;
-use rustc_hash::FxHashMap as HashMap;
+use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use tracing::{debug, error};
 
 use super::Args;
@@ -32,11 +32,13 @@ use crate::{
 pub struct HttpServer {
     server: Http3Server,
     /// Progress writing to each stream.
-    remaining_data: HashMap<StreamId, SendData>,
+    remaining_data: HashMap<Http3OrWebTransportStream, SendData>,
     /// Tracks POST requests: (bytes received, optional response size from path)
     posts: HashMap<Http3OrWebTransportStream, (usize, Option<usize>)>,
     is_qns_test: bool,
     stats: StatsReporter,
+    /// Streams that became writable since the last [`super::HttpServer::process_writable`].
+    writable: HashSet<Http3OrWebTransportStream>,
 }
 
 impl HttpServer {
@@ -60,7 +62,7 @@ impl HttpServer {
             return;
         }
         if let Some(remaining) = Self::send_response_body(stream, &mut response, now) {
-            self.remaining_data.insert(stream.stream_id(), remaining);
+            self.remaining_data.insert(stream.clone(), remaining);
         }
     }
 
@@ -83,6 +85,13 @@ impl HttpServer {
             }
             SendResult::MoreData => Some(std::mem::take(response)),
         }
+    }
+
+    fn post_response(received: usize, response_size: Option<usize>) -> SendData {
+        response_size.map_or_else(
+            || SendData::from(received.to_string().into_bytes()),
+            SendData::zeroes,
+        )
     }
 
     pub fn new(
@@ -112,6 +121,7 @@ impl HttpServer {
             posts: HashMap::default(),
             is_qns_test: args.shared.qns_test.is_some(),
             stats: StatsReporter::new(args.shared.stats_enabled(), args.shared.stats_file.clone()),
+            writable: HashSet::default(),
         }
     }
 }
@@ -151,7 +161,11 @@ impl super::HttpServer for HttpServer {
                                 .parse::<usize>()
                                 .ok()
                         });
-                        self.posts.insert(stream, (0, response_size));
+                        if fin {
+                            self.send_response(&stream, Self::post_response(0, response_size), now);
+                        } else {
+                            self.posts.insert(stream, (0, response_size));
+                        }
                         continue;
                     }
 
@@ -192,12 +206,7 @@ impl super::HttpServer for HttpServer {
                     self.send_response(&stream, response, now);
                 }
                 Http3ServerEvent::DataWritable { stream } => {
-                    if self.posts.get_mut(&stream).is_none()
-                        && let Some(mut remaining) = self.remaining_data.remove(&stream.stream_id())
-                        && let Some(data) = Self::send_response_body(&stream, &mut remaining, now)
-                    {
-                        self.remaining_data.insert(stream.stream_id(), data);
-                    }
+                    self.writable.insert(stream);
                 }
 
                 Http3ServerEvent::Data { stream, data, fin } => {
@@ -205,12 +214,18 @@ impl super::HttpServer for HttpServer {
                         *received += data.len();
                     }
                     if fin && let Some((received, response_size)) = self.posts.remove(&stream) {
-                        let response = response_size.map_or_else(
-                            || SendData::from(received.to_string().into_bytes()),
-                            SendData::zeroes,
+                        self.send_response(
+                            &stream,
+                            Self::post_response(received, response_size),
+                            now,
                         );
-                        self.send_response(&stream, response, now);
                     }
+                }
+                Http3ServerEvent::StreamReset { stream, .. } => {
+                    self.posts.remove(&stream);
+                }
+                Http3ServerEvent::StreamStopSending { stream, .. } => {
+                    self.remaining_data.remove(&stream);
                 }
                 // `Closing` fires immediately; `Closed` only after the drain timeout.
                 Http3ServerEvent::StateChange {
@@ -218,6 +233,22 @@ impl super::HttpServer for HttpServer {
                     state: Http3State::Closing(_),
                 } => self.stats.report(&conn.connection()),
                 _ => {}
+            }
+        }
+        self.posts
+            .retain(|stream, _| !stream.conn.borrow().state().closed());
+        self.remaining_data
+            .retain(|stream, _| !stream.conn.borrow().state().closed());
+    }
+
+    fn process_writable(&mut self, now: Instant) {
+        #[expect(clippy::iter_over_hash_type, reason = "Write order does not matter.")]
+        for stream in self.writable.drain() {
+            if !self.posts.contains_key(&stream)
+                && let Some(mut remaining) = self.remaining_data.remove(&stream)
+                && let Some(data) = Self::send_response_body(&stream, &mut remaining, now)
+            {
+                self.remaining_data.insert(stream, data);
             }
         }
     }
@@ -231,11 +262,19 @@ impl super::HttpServer for HttpServer {
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use neqo_transport::RandomConnectionIdGenerator;
-    use test_fixture::{ProcessServer, anti_replay, fixture_init};
+    use neqo_common::event::Provider as _;
+    use neqo_http3::{Error, Http3Client, Http3ClientEvent, Priority, StreamId};
+    use neqo_transport::{INITIAL_LOCAL_MAX_STREAM_DATA, RandomConnectionIdGenerator};
+    use test_fixture::{
+        ProcessServer, anti_replay, connect_peers, default_http3_client, exchange_packets,
+        fixture_init, now,
+    };
 
     use super::{Args, HttpServer};
-    use crate::server::test_support::{StatsServer, reported_on_close};
+    use crate::server::{
+        HttpServer as _,
+        test_support::{StatsServer, blocked_path, reported_on_close},
+    };
 
     fn make_server(args: &Args) -> HttpServer {
         fixture_init();
@@ -252,8 +291,115 @@ mod tests {
         }
     }
 
+    fn connect(server: &mut HttpServer) -> Http3Client {
+        let mut client = default_http3_client();
+        let out = connect_peers(&mut client, &mut server.server);
+        exchange_packets(&mut client, &mut server.server, false, out);
+        client
+    }
+
+    fn setup() -> (HttpServer, Http3Client) {
+        let mut server = make_server(&Args::default());
+        let client = connect(&mut server);
+        (server, client)
+    }
+
+    fn fetch(client: &mut Http3Client, method: &str, path: &str) -> StreamId {
+        let target = ("https", "something.com", path);
+        client
+            .fetch(now(), method, &target, &[], Priority::default())
+            .unwrap()
+    }
+
+    fn deliver(server: &mut HttpServer, client: &mut Http3Client) {
+        exchange_packets(client, &mut server.server, false, None);
+        server.process_events(now());
+    }
+
+    fn entries(server: &HttpServer) -> (usize, usize) {
+        (server.posts.len(), server.remaining_data.len())
+    }
+
     #[test]
     fn reports_stats_once_on_close() {
         assert_eq!(reported_on_close(make_server), 1);
+    }
+
+    #[test]
+    fn response_state_per_connection() {
+        let mut server = make_server(&Args::default());
+        let mut clients = [connect(&mut server), connect(&mut server)];
+        for client in &mut clients {
+            fetch(client, "GET", &blocked_path());
+            deliver(&mut server, client);
+        }
+        assert_eq!(entries(&server), (0, clients.len()));
+    }
+
+    #[test]
+    fn empty_post_gets_response() {
+        let (mut server, mut client) = setup();
+        let stream_id = fetch(&mut client, "POST", "/");
+        client.stream_close_send(stream_id, now()).unwrap();
+        deliver(&mut server, &mut client);
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+        let response =
+            |e| matches!(e, Http3ClientEvent::HeaderReady { stream_id: s, .. } if s == stream_id);
+        assert!(client.events().any(response));
+    }
+
+    #[test]
+    fn reset_post_is_dropped() {
+        let (mut server, mut client) = setup();
+        let stream_id = fetch(&mut client, "POST", "/");
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (1, 0));
+        client
+            .stream_reset_send(stream_id, Error::HttpRequestCancelled.code())
+            .unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn stop_sending_drops_response() {
+        let (mut server, mut client) = setup();
+        let stream_id = fetch(&mut client, "GET", &blocked_path());
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 1));
+        client
+            .stream_stop_sending(stream_id, Error::HttpRequestCancelled.code())
+            .unwrap();
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
+    }
+
+    #[test]
+    fn process_writable_sends_on_writable_streams() {
+        let (mut server, mut client) = setup();
+        let stream_id = fetch(&mut client, "GET", &blocked_path());
+        deliver(&mut server, &mut client);
+        exchange_packets(&mut client, &mut server.server, false, None);
+        let mut buf = vec![0; INITIAL_LOCAL_MAX_STREAM_DATA];
+        while client.read_data(now(), stream_id, &mut buf).unwrap().0 > 0 {}
+        exchange_packets(&mut client, &mut server.server, false, None);
+
+        server.process_events(now());
+        assert_eq!((server.writable.len(), entries(&server)), (1, (0, 1)));
+        server.process_writable(now());
+        assert_eq!((server.writable.len(), entries(&server)), (0, (0, 0)));
+    }
+
+    #[test]
+    fn closed_connection_drops_state() {
+        let (mut server, mut client) = setup();
+        fetch(&mut client, "POST", "/");
+        fetch(&mut client, "GET", &blocked_path());
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (1, 1));
+        client.close(now(), 0, "bye");
+        deliver(&mut server, &mut client);
+        assert_eq!(entries(&server), (0, 0));
     }
 }

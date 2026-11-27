@@ -64,6 +64,9 @@ pub trait CongestionController: Display + Debug {
     #[must_use]
     fn pmtud_mut(&mut self) -> &mut Pmtud;
 
+    /// Limit datagrams to the peer's `max_udp_payload_size`; reset cwnd if that lowers the PLPMTU.
+    fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant);
+
     fn on_packets_acked(
         &mut self,
         acked_pkts: &[sent::Packet],
@@ -182,6 +185,10 @@ impl CongestionController for CongestionControlImplementation {
         dispatch!(self.pmtud_mut())
     }
 
+    fn set_peer_max_udp_payload(&mut self, peer_max_udp_payload: usize, now: Instant) {
+        dispatch!(self.set_peer_max_udp_payload(peer_max_udp_payload, now));
+    }
+
     fn on_packets_acked(
         &mut self,
         acked_pkts: &[sent::Packet],
@@ -239,4 +246,4 @@ impl CongestionController for CongestionControlImplementation {
 
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
-mod tests;
+pub mod tests;

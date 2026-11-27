@@ -22,7 +22,7 @@ use neqo_common::{
 };
 use nss::{random, randomize};
 use smallvec::{SmallVec, smallvec};
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     Error, Res,
@@ -180,7 +180,6 @@ pub trait ConnectionIdGenerator: ConnectionIdDecoder {
     fn generates_empty_cids(&self) -> bool {
         false
     }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder;
 }
 
 /// An `EmptyConnectionIdGenerator` generates empty connection IDs.
@@ -196,9 +195,6 @@ impl ConnectionIdDecoder for EmptyConnectionIdGenerator {
 impl ConnectionIdGenerator for EmptyConnectionIdGenerator {
     fn generate_cid(&mut self) -> Option<ConnectionId> {
         Some(ConnectionId::from(&[]))
-    }
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
     fn generates_empty_cids(&self) -> bool {
         true
@@ -230,10 +226,6 @@ impl ConnectionIdGenerator for RandomConnectionIdGenerator {
         let mut buf = smallvec![0; self.len];
         randomize(&mut buf);
         Some(ConnectionId::from(buf))
-    }
-
-    fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-        self
     }
 
     fn generates_empty_cids(&self) -> bool {
@@ -500,9 +492,13 @@ impl ConnectionIdManager {
         }
     }
 
+    fn generates_empty_cids(&self) -> bool {
+        self.generator.deref().borrow().generates_empty_cids()
+    }
+
     /// Generate a connection ID and stateless reset token for a preferred address.
     pub fn preferred_address_cid(&mut self) -> Res<(ConnectionId, Srt)> {
-        if self.generator.deref().borrow().generates_empty_cids() {
+        if self.generates_empty_cids() {
             return Err(Error::ConnectionIdsExhausted);
         }
         match self.generator.borrow_mut().generate_cid() {
@@ -526,6 +522,9 @@ impl ConnectionIdManager {
     }
 
     pub fn retire(&mut self, seqno: u64) -> Res<()> {
+        if self.generates_empty_cids() {
+            return Err(Error::ProtocolViolation);
+        }
         // RFC 9000, Section 19.16: receipt of a RETIRE_CONNECTION_ID frame whose
         // sequence number is greater than any we have issued (i.e. not below the
         // next sequence number to be used) is a connection error.
@@ -535,18 +534,8 @@ impl ConnectionIdManager {
 
         // TODO(mt) - consider keeping connection IDs around for a short while.
 
-        let empty_cid = seqno == Self::SEQNO_EMPTY
-            || self
-                .connection_ids
-                .cids
-                .iter()
-                .any(|c| c.seqno == seqno && c.cid.is_empty());
-        if empty_cid {
-            debug!("Connection ID {seqno} is zero-length, not retiring");
-        } else {
-            self.connection_ids.retire(seqno);
-            self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
-        }
+        self.connection_ids.retire(seqno);
+        self.lost_new_connection_id.retain(|cid| cid.seqno != seqno);
         Ok(())
     }
 
@@ -576,7 +565,7 @@ impl ConnectionIdManager {
         tokens: &mut recovery::Tokens,
         stats: &mut FrameStats,
     ) {
-        if self.generator.deref().borrow().generates_empty_cids() {
+        if self.generates_empty_cids() {
             debug_assert_eq!(
                 self.generator
                     .borrow_mut()
@@ -666,10 +655,6 @@ mod tests {
                 panic!("unexpected CID generation attempt");
             };
             cid
-        }
-
-        fn as_decoder(&self) -> &dyn ConnectionIdDecoder {
-            self
         }
     }
 

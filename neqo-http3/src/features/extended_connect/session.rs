@@ -9,7 +9,6 @@ use std::{
     fmt::{self, Debug, Display, Formatter},
     num::NonZeroUsize,
     rc::Rc,
-    str::from_utf8,
     time::{Duration, Instant},
 };
 
@@ -116,7 +115,7 @@ impl Session {
                 },
                 qpack_decoder,
                 Box::new(Rc::clone(&stream_event_listener)),
-                PriorityHandler::new(Priority::default()),
+                PriorityHandler::new(Priority::default(), false),
             )),
             control_stream_send: Box::new(SendMessage::new(
                 MessageType::Request,
@@ -270,7 +269,7 @@ impl Session {
         // was refused, tell the sender it can resume.
         if self.datagram_capsule_blocked {
             self.datagram_capsule_blocked = false;
-            self.events.capsule_space_available();
+            self.events.capsule_space_available(self.id);
         }
     }
 
@@ -321,7 +320,7 @@ impl Session {
                     .iter()
                     .find_map(|h| {
                         if h.name() == ":status" {
-                            from_utf8(h.value()).ok()?.parse::<u16>().ok()
+                            str::from_utf8(h.value()).ok()?.parse::<u16>().ok()
                         } else {
                             None
                         }

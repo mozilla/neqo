@@ -10,14 +10,13 @@ use std::{
     iter,
     net::SocketAddr,
     num::NonZeroUsize,
+    ops::Deref,
     rc::Rc,
     time::Instant,
 };
 
 use neqo_common::{
-    Datagram, Decoder, Encoder, Header, Role,
-    event::Provider as EventProvider,
-    hex::{Hex, HexWithLen},
+    Datagram, Decoder, Encoder, Header, Role, event::Provider as EventProvider, hex::HexWithLen,
     qlog::Qlog,
 };
 use neqo_qpack::Stats as QpackStats;
@@ -29,7 +28,8 @@ use nss::{AuthenticationStatus, ResumptionToken, SecretAgentInfo, cert::Certific
 use tracing::{debug, info, trace, warn};
 
 use crate::{
-    Error, Http3Parameters, NewStreamType, Priority, ReceiveOutput, Res, SendGroupId,
+    Error, Http3Parameters, Http3StreamType, NewStreamType, Priority, ReceiveOutput, Res,
+    SendGroupId, Stream,
     client_events::{Http3ClientEvent, Http3ClientEvents, WebTransportEvent},
     connection::{Http3Connection, Http3State, RequestDescription},
     features::ConnectType,
@@ -38,13 +38,21 @@ use crate::{
     settings::HSettings,
 };
 
-// This is used for filtering send_streams and recv_Streams with a stream_ids greater than or equal
-// a given id. Only the same type (bidirectional or unidirectional) streams are filtered.
+// Filters send_streams and recv_streams for request streams (Http or ExtendedConnect) with an ID
+// greater than or equal to a given ID of the same directionality.
 fn id_gte<U>(base: StreamId) -> impl FnMut((&StreamId, &U)) -> Option<StreamId> + 'static
 where
-    U: ?Sized,
+    U: Deref<Target: Stream>,
 {
-    move |(id, _)| (*id >= base && !(id.is_bidi() ^ base.is_bidi())).then_some(*id)
+    move |(id, s)| {
+        (*id >= base
+            && !(id.is_bidi() ^ base.is_bidi())
+            && matches!(
+                s.stream_type(),
+                Http3StreamType::Http | Http3StreamType::ExtendedConnect
+            ))
+        .then_some(*id)
+    }
 }
 
 const fn alpn_from_quic_version(version: Version) -> &'static str {
@@ -275,6 +283,8 @@ pub struct Http3Client {
     conn: Connection,
     base_handler: Http3Connection,
     events: Http3ClientEvents,
+    /// A later GOAWAY with this or a higher stream ID rejects no request, if known.
+    goaway_noop_from: Option<StreamId>,
 }
 
 impl Display for Http3Client {
@@ -328,6 +338,7 @@ impl Http3Client {
             conn: c,
             events,
             base_handler,
+            goaway_noop_from: None,
         }
     }
 
@@ -409,11 +420,7 @@ impl Http3Client {
             let mut enc = Encoder::default();
             settings.encode_frame_contents(&mut enc);
             enc.encode(token.as_ref());
-            ResumptionToken::new_with_early_data(
-                enc.into(),
-                token.expiration_time(),
-                token.max_early_data_size(),
-            )
+            token.clone_with_bytes(enc.into())
         })
     }
 
@@ -446,7 +453,7 @@ impl Http3Client {
             Error::InvalidResumptionToken,
         )?;
         let tok = dec.decode_remainder();
-        trace!("[{self}]   Transport token {}", Hex::new(tok));
+        trace!("[{self}]   Transport token [{}]", tok.len());
         self.conn.enable_resumption(now, tok)?;
         if self.conn.state().closed() {
             let state = self.conn.state().clone();
@@ -507,7 +514,7 @@ impl Http3Client {
         &mut self,
         now: Instant,
         method: &'t str,
-        target: T,
+        target: &T,
         headers: &'t [Header],
         priority: Priority,
     ) -> Res<StreamId>
@@ -518,25 +525,8 @@ impl Http3Client {
             warn!("Invalid method CONNECT in fetch. Use Http3Client::connect instead.");
             return Err(Error::InvalidInput);
         }
-        let output = self.base_handler.request(
-            &mut self.conn,
-            Box::new(self.events.clone()),
-            Box::new(self.events.clone()),
-            &RequestDescription {
-                method,
-                connect_type: None,
-                target,
-                headers,
-                priority,
-            },
-            now,
-        );
-        if let Err(e) = &output
-            && e.connection_error()
-        {
-            self.close(now, e.code(), "");
-        }
-        output
+        let request = RequestDescription::new(method, target, headers, None, priority)?;
+        self.request(&request, now)
     }
 
     /// The function establishes a classic HTTP CONNECT tunnel on top of this
@@ -558,18 +548,22 @@ impl Http3Client {
     where
         A: AsRef<str>,
     {
+        let request = RequestDescription::new(
+            "CONNECT",
+            &("", authority.as_ref(), ""),
+            headers,
+            Some(ConnectType::Classic),
+            priority,
+        )?;
+        self.request(&request, now)
+    }
+
+    fn request(&mut self, request: &RequestDescription, now: Instant) -> Res<StreamId> {
         let output = self.base_handler.request(
             &mut self.conn,
             Box::new(self.events.clone()),
             Box::new(self.events.clone()),
-            &RequestDescription {
-                method: "CONNECT",
-                connect_type: Some(ConnectType::Classic),
-
-                target: ("", authority.as_ref(), ""),
-                headers,
-                priority,
-            },
+            request,
             now,
         );
         if let Err(e) = &output
@@ -770,7 +764,7 @@ impl Http3Client {
     /// output datagram only.
     #[expect(clippy::missing_panics_doc, reason = "see expect()")]
     pub fn process_output(&mut self, now: Instant) -> Output {
-        self.process_multiple_output(now, 1.try_into().expect(">0"))
+        self.process_multiple_output(now, NonZeroUsize::MIN)
             .try_into()
             .expect("max_datagrams is 1")
     }
@@ -824,15 +818,6 @@ impl Http3Client {
     /// An error results in closing the connection.
     fn check_result<ERR>(&mut self, now: Instant, res: &Res<ERR>) -> bool {
         match &res {
-            Err(Error::HttpGoaway) => {
-                info!("[{self}] Connection error: goaway stream_id increased");
-                self.close(
-                    now,
-                    Error::HttpGeneralProtocol.code(),
-                    "Connection error: goaway stream_id increased",
-                );
-                true
-            }
             Err(e) => {
                 info!("[{self}] Connection error: {e}");
                 self.close(now, e.code(), format!("{e}"));
@@ -920,8 +905,8 @@ impl Http3Client {
                 ConnectionEvent::Datagram(dgram) => {
                     self.base_handler.handle_datagram(dgram);
                 }
-                ConnectionEvent::OutgoingDatagramSpaceAvailable => {
-                    self.events.datagram_space_available();
+                ConnectionEvent::OutgoingDatagramSpaceAvailable { stream_id } => {
+                    self.events.datagram_space_available(stream_id);
                 }
                 ConnectionEvent::SendStreamComplete { .. }
                 | ConnectionEvent::OutgoingDatagramOutcome { .. }
@@ -990,6 +975,28 @@ impl Http3Client {
         }
     }
 
+    #[cold]
+    fn goaway_rejects_nothing(&mut self, goaway_stream_id: StreamId) -> bool {
+        let noop_from = *self.goaway_noop_from.get_or_insert_with(|| {
+            let h = &self.base_handler;
+            let all = StreamId::new(0);
+            h.send_streams()
+                .iter()
+                .filter_map(id_gte(all))
+                .chain(h.recv_streams().iter().filter_map(id_gte(all)))
+                .max()
+                .map_or(all, |mut max| {
+                    max.next();
+                    max
+                })
+        });
+        if goaway_stream_id >= noop_from {
+            return true;
+        }
+        self.goaway_noop_from = None;
+        false
+    }
+
     fn handle_goaway(&mut self, goaway_stream_id: StreamId) -> Res<()> {
         info!("[{self}] handle_goaway {goaway_stream_id}");
 
@@ -997,6 +1004,7 @@ impl Http3Client {
             return Err(Error::HttpId);
         }
 
+        let first_goaway = matches!(self.base_handler.state(), Http3State::Connected);
         match self.base_handler.state_mut() {
             Http3State::Connected => {
                 self.base_handler
@@ -1004,7 +1012,7 @@ impl Http3Client {
             }
             Http3State::GoingAway(stream_id) => {
                 if goaway_stream_id > *stream_id {
-                    return Err(Error::HttpGoaway);
+                    return Err(Error::HttpId);
                 }
                 *stream_id = goaway_stream_id;
             }
@@ -1019,17 +1027,18 @@ impl Http3Client {
         // Emit Draining BEFORE resetting streams, because handle_stream_reset below
         // removes sessions with IDs >= goaway_stream_id from the stream tables.
         // Those sessions will also receive a SessionClosed event via the reset path.
-        if !matches!(
-            self.base_handler.state(),
-            Http3State::Closing(..) | Http3State::Closed(..)
-        ) {
-            for session_id in self.base_handler.drain_webtransport_sessions() {
-                self.events.push(Http3ClientEvent::WebTransport(
-                    WebTransportEvent::Draining {
-                        stream_id: session_id,
-                    },
-                ));
-            }
+        if first_goaway {
+            self.base_handler
+                .drain_webtransport_sessions()
+                .for_each(|session_id| {
+                    self.events.push(Http3ClientEvent::WebTransport(
+                        WebTransportEvent::Draining {
+                            stream_id: session_id,
+                        },
+                    ));
+                });
+        } else if self.goaway_rejects_nothing(goaway_stream_id) {
+            return Ok(());
         }
 
         // Issue reset events for streams >= goaway stream id
@@ -1063,7 +1072,9 @@ impl Http3Client {
             ));
         }
 
-        self.events.goaway_received();
+        if first_goaway {
+            self.events.goaway_received();
+        }
 
         Ok(())
     }
@@ -1160,14 +1171,15 @@ impl EventProvider for Http3Client {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::time::Duration;
+    use std::{iter, time::Duration};
 
     use http::Uri;
     use neqo_common::{Datagram, Decoder, Encoder, event::Provider as _, to_u64};
     use neqo_qpack as qpack;
     use neqo_transport::{
-        CloseReason, ConnectionEvent, ConnectionParameters, INITIAL_LOCAL_MAX_STREAM_DATA,
-        MIN_INITIAL_PACKET_SIZE, Output, State, StreamId, StreamType, Version,
+        CloseReason, ConnectionEvent, ConnectionParameters, Error as TransportError,
+        INITIAL_LOCAL_MAX_STREAM_DATA, MIN_INITIAL_PACKET_SIZE, Output, State, StreamDataLimit,
+        StreamId, StreamType, Version,
     };
     use nss::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use test_fixture::{
@@ -1182,7 +1194,7 @@ mod tests {
     };
     use crate::{
         Http3Server, Priority, RecvStream as _,
-        frames::{HFrame, HFrameType},
+        frames::{HFrame, HFrameType, hframe::MAX_HEADER_BYTES},
         qpack_encoder_receiver::EncoderRecvStream,
         settings::{H3_RESERVED_SETTINGS, HSetting, HSettingType},
     };
@@ -1202,6 +1214,10 @@ mod tests {
     }
 
     pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
+        http3_client_with(ConnectionParameters::default(), max_table_size)
+    }
+
+    fn http3_client_with(conn_params: ConnectionParameters, max_table_size: u64) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
@@ -1211,8 +1227,7 @@ mod tests {
             Http3Parameters::default()
                 .connection_parameters(
                     // Disable compatible upgrade, which complicates tests.
-                    ConnectionParameters::default()
-                        .versions(Version::default(), vec![Version::default()]),
+                    conn_params.versions(Version::default(), vec![Version::default()]),
                 )
                 .max_table_size_encoder(max_table_size)
                 .max_table_size_decoder(max_table_size)
@@ -3084,7 +3099,7 @@ mod tests {
             client.fetch(
                 now(),
                 "GET",
-                ("https", "something.com", "/"),
+                &("https", "something.com", "/"),
                 &[],
                 Priority::default()
             ),
@@ -3184,6 +3199,146 @@ mod tests {
     }
 
     #[test]
+    fn multiple_goaways_single_event() {
+        let (mut client, mut server) = connect();
+        let goaways = [8, 4, 0]
+            .into_iter()
+            .flat_map(|id| send_goaway(&mut client, &mut server, StreamId::new(id)))
+            .filter(|e| matches!(e, Http3ClientEvent::GoawayReceived))
+            .count();
+        assert_eq!(goaways, 1);
+        assert_eq!(client.state(), Http3State::GoingAway(StreamId::new(0)));
+    }
+
+    /// Sends a GOAWAY to the client and returns the client events.
+    fn send_goaway(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: StreamId,
+    ) -> Vec<Http3ClientEvent> {
+        let mut enc = Encoder::default();
+        HFrame::Goaway { stream_id }.encode(&mut enc);
+        let control_stream_id = server.control_stream_id.unwrap();
+        _ = server
+            .conn
+            .stream_send(control_stream_id, enc.as_ref())
+            .unwrap();
+        let out = server.conn.process_output(now());
+        client.process(out.dgram(), now());
+        client.events().collect()
+    }
+
+    /// The bidi stream IDs >= `base` in `send_streams` and `recv_streams`, in table order.
+    fn bidi_ids_from(client: &Http3Client, base: StreamId) -> (Vec<StreamId>, Vec<StreamId>) {
+        fn from<'a>(ids: impl Iterator<Item = &'a StreamId>, base: StreamId) -> Vec<StreamId> {
+            ids.filter(|id| id.is_bidi() && **id >= base)
+                .copied()
+                .collect()
+        }
+        let h = &client.base_handler;
+        (
+            from(h.send_streams().keys(), base),
+            from(h.recv_streams().keys(), base),
+        )
+    }
+
+    /// The events a GOAWAY raises for rejected requests, in table order.
+    fn rejected_events(send: Vec<StreamId>, recv: Vec<StreamId>) -> Vec<Http3ClientEvent> {
+        let error = Error::HttpRequestRejected.code();
+        send.into_iter()
+            .map(|stream_id| Http3ClientEvent::StopSending { stream_id, error })
+            .chain(recv.into_iter().map(|stream_id| Http3ClientEvent::Reset {
+                stream_id,
+                error,
+                local: false,
+            }))
+            .collect()
+    }
+
+    fn sorted(mut ids: Vec<StreamId>) -> Vec<StreamId> {
+        ids.sort_unstable();
+        ids
+    }
+
+    #[test]
+    fn lower_goaway_rejects_only_new_requests() {
+        let (mut client, mut server) = connect();
+        let ids: Vec<_> = iter::repeat_with(|| make_request(&mut client, false, &[]))
+            .take(20)
+            .collect();
+        send_goaway(&mut client, &mut server, ids[15]);
+
+        let (send, recv) = bidi_ids_from(&client, ids[5]);
+        assert_eq!(sorted(send.clone()), ids[5..15]);
+        assert_eq!(sorted(recv.clone()), ids[5..15]);
+        let events = send_goaway(&mut client, &mut server, ids[5]);
+        assert_eq!(events, rejected_events(send, recv));
+        let (send, recv) = bidi_ids_from(&client, ids[0]);
+        assert_eq!(sorted(send), ids[..5]);
+        assert_eq!(sorted(recv), ids[..5]);
+        assert_eq!(client.state(), Http3State::GoingAway(ids[5]));
+    }
+
+    #[test]
+    fn lower_goaway_skips_ended_requests() {
+        let (mut client, mut server) = connect();
+        let ids: Vec<_> = iter::repeat_with(|| make_request(&mut client, true, &[]))
+            .take(5)
+            .collect();
+        let out = client.process_output(now());
+        drop(server.conn.process(out.dgram(), now()));
+        send_goaway(&mut client, &mut server, ids[4]);
+        send_goaway(&mut client, &mut server, ids[4]);
+
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            ids[3],
+            HTTP_RESPONSE_1,
+            true,
+        );
+        let mut buf = [0_u8; 100];
+        let read = client.read_data(now(), ids[3], &mut buf).unwrap();
+        assert_eq!(read, (EXPECTED_RESPONSE_DATA_1.len(), true));
+        client.events().for_each(drop);
+        assert_eq!(bidi_ids_from(&client, ids[3]), (vec![], vec![]));
+
+        assert_eq!(send_goaway(&mut client, &mut server, ids[3]), []);
+
+        let (send, recv) = bidi_ids_from(&client, ids[1]);
+        assert_eq!(sorted(recv.clone()), ids[1..3]);
+        let events = send_goaway(&mut client, &mut server, ids[1]);
+        assert_eq!(events, rejected_events(send, recv));
+        assert_eq!(bidi_ids_from(&client, ids[0]), (vec![], vec![ids[0]]));
+    }
+
+    #[test]
+    fn lower_goaway_rejects_request_still_sending() {
+        let (mut client, mut server) = connect();
+        let ids: Vec<_> = iter::repeat_with(|| make_request(&mut client, false, &[]))
+            .take(3)
+            .collect();
+        let out = client.process_output(now());
+        drop(server.conn.process(out.dgram(), now()));
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            ids[2],
+            HTTP_RESPONSE_1,
+            true,
+        );
+        let mut buf = [0_u8; 100];
+        let read = client.read_data(now(), ids[2], &mut buf).unwrap();
+        assert_eq!(read, (EXPECTED_RESPONSE_DATA_1.len(), true));
+        send_goaway(&mut client, &mut server, StreamId::new(ids[2].as_u64() + 4));
+
+        let (send, recv) = bidi_ids_from(&client, ids[2]);
+        assert_eq!((send.clone(), recv.clone()), (vec![ids[2]], vec![]));
+        let events = send_goaway(&mut client, &mut server, ids[2]);
+        assert_eq!(events, rejected_events(send, recv));
+    }
+
+    #[test]
     fn multiple_goaways_stream_id_increased() {
         let (mut client, mut server) = connect();
         let request_stream_id_1 = make_request(&mut client, false, &[]);
@@ -3211,9 +3366,13 @@ mod tests {
             .unwrap();
 
         let out = server.conn.process_output(now());
-        client.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
 
-        assert_closed(&client, &Error::HttpGeneralProtocol);
+        assert_closed(&client, &Error::HttpId);
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let expected =
+            CloseReason::Transport(TransportError::PeerApplication(Error::HttpId.code()));
+        assert_eq!(server.conn.state().error(), Some(&expected));
     }
 
     #[test]
@@ -3789,8 +3948,14 @@ mod tests {
     }
 
     fn start_with_0rtt() -> (Http3Client, TestServer) {
-        let (mut client, mut server) = connect();
-        let token = exchange_token(&mut client, &mut server.conn);
+        let (client, server, _) = start_with_0rtt_token(default_http3_client());
+        (client, server)
+    }
+
+    fn start_with_0rtt_token(mut first: Http3Client) -> (Http3Client, TestServer, ResumptionToken) {
+        let mut first_server = TestServer::new();
+        connect_with(&mut first, &mut first_server);
+        let token = exchange_token(&mut first, &mut first_server.conn);
 
         let mut client = default_http3_client();
 
@@ -3805,7 +3970,28 @@ mod tests {
         let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
         assert!(client.events().any(zerortt_event));
 
-        (client, server)
+        (client, server, token)
+    }
+
+    #[test]
+    fn resume_plaintext_token() {
+        let (mut client, mut server, token) = start_with_0rtt_token(http3_client_with(
+            ConnectionParameters::default().plaintext_resumption_export(true),
+            100,
+        ));
+        assert!(token.is_plaintext());
+
+        let out = client.process_output(now());
+        let out2 = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+        drop(server.conn.process(out.dgram(), now()));
+        assert!(client.tls_info().unwrap().resumed());
+        assert!(server.conn.tls_info().unwrap().resumed());
     }
 
     #[test]
@@ -3898,7 +4084,7 @@ mod tests {
                 .fetch(
                     now(),
                     "GET",
-                    ("https", "something.com", "/"),
+                    &("https", "something.com", "/"),
                     &[],
                     Priority::default()
                 )
@@ -5146,7 +5332,7 @@ mod tests {
     }
 
     #[test]
-    fn qpack_stream_reset_dynamic_table_zero() {
+    fn qpack_stream_reset_before_dynamic_table_capacity() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
         // Cancel request.
         client
@@ -5161,7 +5347,7 @@ mod tests {
                 .receive(&mut server.conn, now())
                 .unwrap(),
         );
-        assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 0);
+        assert_eq!(server.encoder.borrow_mut().stats().stream_cancelled_recv, 1);
     }
 
     #[test]
@@ -5323,6 +5509,109 @@ mod tests {
     }
 
     #[test]
+    fn response_w_too_many_1xx() {
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+
+        let status = Header::new(":status", "103");
+        let max_1xx = MAX_HEADER_BYTES / status.field_size();
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &[status], &mut d);
+        let response = d.as_ref().repeat(max_1xx);
+        send_response_in_packets(&mut client, &mut server, request_stream_id, &response);
+        assert_eq!(interim_count(&mut client), max_1xx);
+        assert_eq!(client.state(), Http3State::Connected);
+
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+        assert_closed(&client, &Error::HttpExcessiveLoad);
+    }
+
+    fn interim_count(client: &mut Http3Client) -> usize {
+        client
+            .events()
+            .filter(|e| matches!(e, Http3ClientEvent::HeaderReady { interim: true, .. }))
+            .count()
+    }
+
+    fn send_response_in_packets(
+        client: &mut Http3Client,
+        server: &mut TestServer,
+        stream_id: StreamId,
+        response: &[u8],
+    ) {
+        for chunk in response.chunks(1000) {
+            server_send_response_and_exchange_packet(client, server, stream_id, chunk, false);
+        }
+    }
+
+    fn send_max_size_1xx_from_dynamic_table(
+        field: Header,
+    ) -> (Http3Client, TestServer, StreamId, Encoder) {
+        let status = Header::new(":status", "103");
+        let refs = (MAX_HEADER_BYTES - status.field_size()) / field.field_size();
+        let headers = [vec![status], vec![field; refs]].concat();
+        assert_eq!(
+            headers.iter().map(Header::field_size).sum::<usize>(),
+            MAX_HEADER_BYTES
+        );
+
+        let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
+        setup_server_side_encoder(&mut client, &mut server);
+
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &headers, &mut d);
+        assert_eq!(server.encoder.borrow().stats().dynamic_table_references, 1);
+        let encoder_insts = server.conn.process_output(now());
+        drop(client.process(encoder_insts.dgram(), now()));
+        send_response_in_packets(&mut client, &mut server, request_stream_id, d.as_ref());
+        assert_eq!(interim_count(&mut client), 1);
+        assert_eq!(client.state(), Http3State::Connected);
+        (client, server, request_stream_id, d)
+    }
+
+    #[test]
+    fn response_w_1xx_from_dynamic_table() {
+        let field = Header::new("x", "x".repeat(48)); // 4854 references fill MAX_HEADER_BYTES.
+        let (mut client, mut server, request_stream_id, d) =
+            send_max_size_1xx_from_dynamic_table(field);
+        send_response_in_packets(&mut client, &mut server, request_stream_id, d.as_ref());
+        assert_closed(&client, &Error::HttpExcessiveLoad);
+    }
+
+    #[test]
+    fn response_w_1xx_stripped_fields_from_dynamic_table() {
+        let field = Header::new("host", "x".repeat(45));
+        let (mut client, mut server, request_stream_id, d) =
+            send_max_size_1xx_from_dynamic_table(field);
+        send_response_in_packets(&mut client, &mut server, request_stream_id, d.as_ref());
+        assert_closed(&client, &Error::HttpExcessiveLoad);
+    }
+
+    #[test]
+    fn response_after_max_size_1xx() {
+        let field = Header::new("x", "x".repeat(48));
+        let (mut client, mut server, request_stream_id, _) =
+            send_max_size_1xx_from_dynamic_table(field);
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &[Header::new(":status", "200")], &mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+        let is_final = |e| matches!(e, Http3ClientEvent::HeaderReady { interim: false, .. });
+        assert!(client.events().any(is_final));
+        assert_eq!(client.state(), Http3State::Connected);
+    }
+
+    #[test]
     fn response_wo_status() {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(true);
 
@@ -5350,7 +5639,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: Error::HttpMessage.code(),
                 local: true,
             }
         );
@@ -5363,7 +5652,7 @@ mod tests {
             matches!(e, ConnectionEvent::SendStreamStopSending {
             stream_id,
             app_error
-        } if stream_id == request_stream_id && app_error == Error::InvalidHeader.code())
+        } if stream_id == request_stream_id && app_error == Error::HttpMessage.code())
         };
         assert!(server.conn.events().any(stop_sending_event));
 
@@ -5373,6 +5662,44 @@ mod tests {
             client.read_data(now(), StreamId::new(0), &mut buf),
             Err(Error::InvalidStreamId)
         );
+    }
+
+    // Client: a malformed response also resets a request that flow control keeps unsent.
+    #[test]
+    fn malformed_response_resets_blocked_request() {
+        let (mut client, mut server) = connect_with_connection_parameters(
+            ConnectionParameters::default().max_stream_data(StreamDataLimit::BiDiRemote, 1),
+        );
+        let request_stream_id = make_request(&mut client, true, &[]);
+        let has_send_stream =
+            |c: &Http3Client| c.handler().send_streams().contains_key(&request_stream_id);
+        let out = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        assert!(has_send_stream(&client));
+
+        let mut d = Encoder::default();
+        server.encode_headers(request_stream_id, &[Header::new("a", "b")], &mut d);
+        server_send_response_and_exchange_packet(
+            &mut client,
+            &mut server,
+            request_stream_id,
+            &d,
+            false,
+        );
+
+        let error = Error::HttpMessage.code();
+        let reset = Http3ClientEvent::Reset {
+            stream_id: request_stream_id,
+            error,
+            local: true,
+        };
+        assert_eq!(client.events().collect::<Vec<_>>(), [reset]);
+        assert!(!has_send_stream(&client));
+        let reset_stream = ConnectionEvent::RecvStreamReset {
+            stream_id: request_stream_id,
+            app_error: error,
+        };
+        assert!(server.conn.events().any(|e| e == reset_stream));
     }
 
     fn handshake_client_error(client: &mut Http3Client, server: &mut TestServer, error: &Error) {
@@ -5428,7 +5755,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: Error::HttpMessage.code(),
                 local: true,
             }
         );
@@ -5745,7 +6072,7 @@ mod tests {
             e,
             Http3ClientEvent::Reset {
                 stream_id: request_stream_id,
-                error: Error::InvalidHeader.code(),
+                error: Error::HttpGeneralProtocolStream.code(),
                 local: true,
             }
         );
