@@ -9,7 +9,7 @@ env:
   CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 1
   RUSTUP_TOOLCHAIN: stable
   # See bench.yml for the event choices; `cycles:u` has to stay first.
-  PERF_OPT: record -N -F20000 --call-graph fp -e cycles:u,cycles/freq=999/k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
+  PERF_OPT: record -N -F20000 --call-graph fp -e cycles:u,cycles:k,instructions/freq=999/u,page-faults,major-faults,cpu-migrations,kmem:rss_stat,sched:sched_switch -m 4096
   MTU: 1500
   SIZE: 33554432 # Both the measuring jobs and the table header need these.
   RUNS: 100
