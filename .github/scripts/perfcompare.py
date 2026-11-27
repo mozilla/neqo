@@ -190,7 +190,7 @@ def _sudo_env() -> list[str]:
     return ["sudo", *(["env", *env] if env else [])]
 
 
-def _read_proc(path: str) -> str:
+def _read_proc(path: str | Path) -> str:
     """Contents of a `/proc` file, empty if absent, e.g. IPv6 off. Says so, as empty
     counters otherwise read as "nothing moved"."""
     try:
@@ -200,15 +200,16 @@ def _read_proc(path: str) -> str:
         return ""
 
 
-def _udp_counters() -> dict[str, int]:
-    """UDP counters keyed by name, both families, as `--host` picks one."""
+COUNTER_FILES = ("/proc/net/snmp", "/proc/net/snmp6", "/proc/net/softnet_stat")
+
+
+def _counters(*paths: str | Path) -> dict[str, int]:
+    """UDP counters keyed by name, both families, as `--host` picks one, the softirq backlog
+    drops per CPU, and the server's CPU time, from `COUNTER_FILES` or a copy of them."""
+    text = "".join(map(_read_proc, paths))
     counters: dict[str, int] = {}
     # IPv4 spells these as a `Udp:` line naming the fields, then a `Udp:` line of values.
-    udp = [
-        line.split()[1:]
-        for line in _read_proc("/proc/net/snmp").splitlines()
-        if line.startswith("Udp: ")
-    ]
+    udp = [line.split()[1:] for line in text.splitlines() if line.startswith("Udp: ")]
     for names, values in zip(udp[::2], udp[1::2], strict=False):
         counters.update(
             (f"Udp{n}", int(v)) for n, v in zip(names, values, strict=False)
@@ -216,10 +217,37 @@ def _udp_counters() -> dict[str, int]:
     # IPv6 spells them one `Udp6<name> <value>` per line.
     counters.update(
         (fields[0], int(fields[1]))
-        for line in _read_proc("/proc/net/snmp6").splitlines()
+        for line in text.splitlines()
         if len(fields := line.split()) == 2 and fields[0].startswith("Udp6")
     )
+    # `softnet_stat` has a line of hex fields per online CPU: the 2nd is drops, the 13th the CPU.
+    cpus = filter(re.compile(r"[0-9a-f]{8}( [0-9a-f]{8}){12,}").fullmatch, text.splitlines())
+    counters.update(
+        (f"SoftnetDropped{int(f[12], 16)}", int(f[1], 16)) for f in map(str.split, cpus)
+    )
+    # `/proc/<pid>/task/*/schedstat` has a line per thread: ns on CPU, ns runnable, timeslices.
+    tasks = filter(re.compile(r"\d+ \d+ \d+").fullmatch, text.splitlines())
+    totals = map(sum, zip(*(map(int, line.split()) for line in tasks), strict=True))
+    names = ("ServerCpuNs", "ServerRunqueueNs", "ServerTimeslices")
+    counters.update(zip(names, totals, strict=False))
     return counters
+
+
+def _deltas(before: dict[str, int], after: dict[str, int]) -> Counter:
+    """The counters that moved, by how much."""
+    return Counter({k: d for k, v in before.items() if (d := after.get(k, v) - v)})
+
+
+def _jsonl(path: Path) -> list:
+    """The records of a JSON Lines file, none if it is absent."""
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def _measurements(path: Path) -> list[dict]:
+    """The per-run measurements of a hyperfine --export-json result."""
+    return json.loads(path.read_text(encoding="utf-8"))["results"][0]["measurements"]
 
 
 def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
@@ -235,11 +263,15 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
         f"{ws}/{ccmd.replace(f'/{cfg.size}', f'/{cfg.size // 32}')}"
         f" >/dev/null 2>{shlex.quote(str(log))} && "
     )
+    scratch = out_dir / f"{name}.{part}.runs"
+    scratch.mkdir(exist_ok=True)
     # Both hooks run outside the timed region, so this is a before/after pair per run.
-    rcvbuf = (
-        "awk '/^Udp:/{if(!h){for(i=2;i<=NF;i++)if($i==\"RcvbufErrors\")c=i;h=1}else print $c}'"
-        f" /proc/net/snmp >> {shlex.quote(str(out_dir / f'{name}.rcvbuferrors'))}"
-    )
+    run = f'{shlex.quote(str(scratch))}/"$HYPERFINE_ITERATION"'
+    snapshot = f"cat /proc/net/snmp* /proc/net/softnet_stat > {run}"
+    sched = f"cat /proc/$(cat {run}.pid)/task/*/schedstat > {run}.sched"  # Before `pkill`.
+    if "neqo-server" in scmd:  # Unlike the client's, its stats I/O is outside the timed region.
+        scmd += f" --stats-file {run}.server.jsonl"
+    server = f"taskset -c {cfg.server_cpu} {ws}/{scmd} & echo $! > {run}.pid;"
     # Affinity survives fork and exec: pinning hyperfine pins the client it times.
     cmd = [
         *_pin(cfg.client_cpu),
@@ -257,12 +289,12 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
         "--runs",
         str(runs),
         "--prepare",
-        f"taskset -c {cfg.server_cpu} {ws}/{scmd} & sleep 0.2; {warmup} {rcvbuf}",
+        f"{server} sleep 0.2; {warmup} {sched}.before && {snapshot}.before",
         "--conclude",
-        f"pkill -9 {tag}; {rcvbuf}",
+        f"{sched}.after; pkill -9 {tag}; {snapshot}.after",
         f"{ws}/{ccmd}",
     ]
-    before = _udp_counters()
+    before = _counters(*COUNTER_FILES)
     result = sh(cmd, stderr=subprocess.PIPE, text=True)
     if result.returncode:
         print(result.stderr, end="")
@@ -271,8 +303,21 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
             print(log.read_text(encoding="utf-8"), end="")
         result.check_returncode()
     # `*RcvbufErrors` tells whether loss was a receive-queue overrun. Only what moved.
-    after = _udp_counters()
-    deltas = Counter({key: after.get(key, value) - value for key, value in before.items()})
+    deltas = _deltas(before, _counters(*COUNTER_FILES))
+    # A record per timed run, in measurement order. A server reports the warm-up's connection,
+    # then the timed one.
+    with (out_dir / f"{name}.runs.jsonl").open("a" if part else "w", encoding="utf-8") as f:
+        for i, m in enumerate(_measurements(out_dir / f"{name}.{part}.json")):
+            snaps = (_counters(*scratch.glob(f"{i}.*{p}")) for p in ("before", "after"))
+            record = {
+                "part": part,
+                "run": i,
+                "time_wall_clock": m["time_wall_clock"]["value"],
+                "counters": _deltas(*snaps),
+                "server": _jsonl(scratch / f"{i}.server.jsonl"),
+            }
+            f.write(f"{json.dumps(record)}\n")
+    shutil.rmtree(scratch)
     udp = out_dir / f"{name}.udp"
     if part:  # Add up the earlier parts.
         lines = udp.read_text(encoding="utf-8").splitlines()
@@ -312,7 +357,7 @@ def _load_result(out_dir, name):
     times = [
         m["time_wall_clock"]["value"]
         for path in sorted(out_dir.glob(f"{name}.*.json"))
-        for m in json.loads(path.read_text(encoding="utf-8"))["results"][0]["measurements"]
+        for m in _measurements(path)
     ]
     if not times:
         return None
