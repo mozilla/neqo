@@ -51,6 +51,7 @@ use crate::{SharedArgs, contained_path, now, report_stats};
 
 mod http09;
 mod http3;
+mod token_store;
 
 const BUFWRITER_BUFFER_SIZE: usize = 64 * 1024;
 
@@ -62,6 +63,8 @@ pub enum Error {
     Http3(#[from] neqo_http3::Error),
     #[error(transparent)]
     Io(#[from] io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
     #[error(transparent)]
     Qlog(#[from] qlog::Error),
     #[error(transparent)]
