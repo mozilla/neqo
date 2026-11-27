@@ -47,7 +47,7 @@ use nss::{
 use rustc_hash::FxHashMap as HashMap;
 use thiserror::Error;
 use tokio::time::Sleep;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{SharedArgs, contained_path, now, report_stats};
 
@@ -77,6 +77,8 @@ pub enum Error {
     Application(AppError),
     #[error(transparent)]
     Crypto(#[from] nss::Error),
+    #[error("token store {}: {}", .0.display(), .1)]
+    TokenStore(PathBuf, Box<Self>),
 }
 
 impl From<CloseReason> for Error {
@@ -132,7 +134,8 @@ pub struct Args {
 
     #[arg(long)]
     /// Load resumption tokens from this file on start; on exit, save the unused and newly received
-    /// ones. Enables plaintext resumption tokens.
+    /// ones. Enables plaintext resumption tokens, so the file holds resumption secrets
+    /// unencrypted.
     token_store: Option<PathBuf>,
 
     #[arg(name = "key-update", long, hide = true)]
@@ -601,9 +604,25 @@ fn urls_by_origin(urls: &[Url]) -> impl Iterator<Item = ((String, u16), VecDeque
         .into_iter()
 }
 
+/// Creates a client with `new` and applies `token` with `resume`; if that fails, creates a fresh
+/// client without it.
+fn with_resumption<C>(
+    token: Option<ResumptionToken>,
+    new: impl Fn() -> Res<C>,
+    resume: impl FnOnce(&mut C, ResumptionToken) -> Res<()>,
+) -> Res<C> {
+    let mut client = new()?;
+    if let Some(token) = token
+        && let Err(e) = resume(&mut client, token)
+    {
+        warn!("Resumption token not usable, connecting without it: {e}");
+        client = new()?;
+    }
+    Ok(client)
+}
+
 #[expect(
     clippy::future_not_send,
-    clippy::missing_panics_doc,
     clippy::missing_errors_doc,
     reason = "This is example code."
 )]
@@ -615,6 +634,14 @@ pub async fn client(mut args: Args) -> Res<()> {
 
     init()?;
 
+    let origins: Vec<_> = urls_by_origin(&args.urls).collect();
+    if args.resume
+        && let Some(((host, _), _)) = origins.iter().find(|(_, urls)| urls.len() < 2)
+    {
+        error!("Resumption to {host} cannot work without at least 2 URLs");
+        exit(127);
+    }
+
     let mut store = args
         .token_store
         .as_deref()
@@ -622,83 +649,92 @@ pub async fn client(mut args: Args) -> Res<()> {
         .transpose()?
         .unwrap_or_default();
 
-    for ((host, port), mut urls) in urls_by_origin(&args.urls) {
-        if args.resume && urls.len() < 2 {
-            error!("Resumption to {host} cannot work without at least 2 URLs");
-            exit(127);
-        }
-
-        let origin = format!("{host}:{port}");
-        let remote_addr = origin.to_socket_addrs()?.find(|addr| {
-            !matches!(
-                (addr, args.ipv4_only, args.ipv6_only),
-                (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
-            )
-        });
-        let Some(remote_addr) = remote_addr else {
-            error!("No compatible address found for: {host}");
-            exit(1);
-        };
-        let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
-        if socket.may_fragment() {
-            info!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
-            args.shared.quic_parameters.no_pmtud = true;
-        }
-        let real_local = socket.local_addr();
-        info!(
-            "{} Client connecting: {real_local:?} -> {remote_addr:?}",
-            args.shared.alpn
-        );
-
-        let mut first = true;
-        while !urls.is_empty() {
-            let to_request = if (args.resume && first) || args.download_in_series {
-                urls.pop_front().into_iter().collect()
-            } else {
-                std::mem::take(&mut urls)
+    let res: Res<()> = async {
+        for ((host, port), mut urls) in origins {
+            let origin = format!("{host}:{port}");
+            let remote_addr = origin.to_socket_addrs()?.find(|addr| {
+                !matches!(
+                    (addr, args.ipv4_only, args.ipv6_only),
+                    (SocketAddr::V4(..), false, true) | (SocketAddr::V6(..), true, false)
+                )
+            });
+            let Some(remote_addr) = remote_addr else {
+                error!("No compatible address found for: {host}");
+                save_tokens(&args, &store);
+                exit(1);
             };
+            let mut socket = crate::udp::Socket::bind(local_addr_for(&remote_addr, 0))?;
+            if socket.may_fragment() {
+                info!("Datagrams may be fragmented by the IP layer. Disabling PMTUD.");
+                args.shared.quic_parameters.no_pmtud = true;
+            }
+            let real_local = socket.local_addr();
+            info!(
+                "{} Client connecting: {real_local:?} -> {remote_addr:?}",
+                args.shared.alpn
+            );
 
-            first = false;
+            let mut first = true;
+            while !urls.is_empty() {
+                let to_request = if (args.resume && first) || args.download_in_series {
+                    urls.pop_front().into_iter().collect()
+                } else {
+                    std::mem::take(&mut urls)
+                };
 
-            let token = store.take(&origin);
-            let tokens = if args.shared.alpn == "h3" {
-                let client = http3::create_client(&args, real_local, remote_addr, &host, token)
-                    .expect("failed to create client");
+                first = false;
 
-                let handler = http3::Handler::new(to_request, args.clone());
+                let token = store.take(&origin);
+                let tokens = if args.shared.alpn == "h3" {
+                    let client =
+                        http3::create_client(&args, real_local, remote_addr, &host, token)?;
 
-                Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
-            } else {
-                let client = http09::create_client(&args, real_local, remote_addr, &host, token)
-                    .expect("failed to create client");
+                    let handler = http3::Handler::new(to_request, args.clone());
 
-                let handler = http09::Handler::new(to_request, &args);
+                    Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
+                } else {
+                    let client =
+                        http09::create_client(&args, real_local, remote_addr, &host, token)?;
 
-                Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
-            };
-            store.extend(&origin, tokens);
+                    let handler = http09::Handler::new(to_request, &args);
+
+                    Box::pin(Runner::new(&mut socket, client, handler, &args).run()).await?
+                };
+                store.extend(&origin, tokens);
+            }
         }
+        Ok(())
     }
+    .await;
 
+    save_tokens(&args, &store);
+    res
+}
+
+fn save_tokens(args: &Args, store: &TokenStore) {
     if let Some(path) = &args.token_store {
         if let Err(e) = store.save(path) {
-            error!(
-                "Failed to save resumption tokens to {}: {e}",
-                path.display()
-            );
+            error!("Failed to save resumption tokens: {e}");
         } else {
             info!("Resumption tokens saved to {}", path.display());
         }
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{
+        net::{Ipv6Addr, SocketAddr},
+        path::PathBuf,
+    };
 
-    use super::Args;
+    use neqo_common::Encoder;
+    use neqo_http3::Http3State;
+    use neqo_transport::{State, Version};
+    use nss::ResumptionToken;
+
+    use super::{Args, http3, http09};
+    use crate::now;
 
     fn export_enabled(token_store: Option<PathBuf>) -> bool {
         let mut args = Args::new(None, 1, 0, 1);
@@ -711,5 +747,28 @@ mod tests {
     fn connection_parameters_plaintext_export() {
         assert!(export_enabled(Some(PathBuf::from("tokens.json"))));
         assert!(!export_enabled(None));
+    }
+
+    #[test]
+    fn unusable_token_not_fatal() {
+        test_fixture::fixture_init();
+        let args = Args::new(None, 1, 0, 1);
+        let addr = SocketAddr::from((Ipv6Addr::LOCALHOST, 443));
+        let mut transport_token = Encoder::default();
+        transport_token
+            .encode_uint(4, Version::Version1.wire_version())
+            .encode_varint(0u64)
+            .encode_vvec(&[])
+            .encode_vvec(&[])
+            .encode(b"not a TLS token");
+        let mut h3_token = Encoder::default();
+        h3_token.encode_vvec(&[]).encode(transport_token.as_ref());
+        let token = |enc: &Encoder| Some(ResumptionToken::new(enc.as_ref().to_vec(), now()));
+
+        let client = http3::create_client(&args, addr, addr, "a", token(&h3_token)).unwrap();
+        assert_eq!(client.state(), Http3State::Initializing);
+        let client =
+            http09::create_client(&args, addr, addr, "a", token(&transport_token)).unwrap();
+        assert_eq!(*client.state(), State::Init);
     }
 }

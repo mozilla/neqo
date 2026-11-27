@@ -19,6 +19,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Wire format: ID=0, QR=0, RD=1, QDCOUNT=1, QNAME=example.com, QTYPE=A, QCLASS=IN
 DOH_URL="https://cloudflare-dns.com/dns-query?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
 
+if ! command -v jq > /dev/null; then
+    echo "ERROR: jq not found; it is needed to read the token store."
+    exit 1
+fi
+
 if [[ $# -ge 1 ]]; then
     CLIENT="$1"
 else

@@ -6,7 +6,8 @@
 
 use std::{
     collections::BTreeMap,
-    fs, io,
+    fs::{self, File},
+    io::{self, Write as _},
     path::Path,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -15,7 +16,7 @@ use nss::{ResumptionToken, TokenKind};
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
 
-use super::Res;
+use super::{Error, Res};
 use crate::now;
 
 #[derive(Deserialize, Serialize)]
@@ -80,6 +81,10 @@ impl Clock {
     }
 }
 
+fn in_file(path: &Path) -> impl FnOnce(Error) -> Error {
+    move |e| Error::TokenStore(path.to_owned(), Box::new(e))
+}
+
 /// Resumption tokens per origin (`host:port`).
 #[derive(Default)]
 pub struct TokenStore {
@@ -88,6 +93,10 @@ pub struct TokenStore {
 
 impl TokenStore {
     pub fn load(path: &Path) -> Res<Self> {
+        Self::read(path).map_err(in_file(path))
+    }
+
+    fn read(path: &Path) -> Res<Self> {
         let json = match fs::read_to_string(path) {
             Ok(json) => json,
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -104,6 +113,7 @@ impl TokenStore {
                 let list = list
                     .into_iter()
                     .map(|t| t.into_resumption_token(&clock))
+                    .filter(|t| t.expiration_time() > clock.instant)
                     .collect();
                 (origin, list)
             })
@@ -112,7 +122,10 @@ impl TokenStore {
     }
 
     pub fn save(&self, path: &Path) -> Res<()> {
-        let clock = Clock::new();
+        self.save_at(path, &Clock::new()).map_err(in_file(path))
+    }
+
+    fn save_at(&self, path: &Path, clock: &Clock) -> Res<()> {
         let stored: BTreeMap<_, Vec<_>> = self
             .tokens
             .iter()
@@ -126,17 +139,23 @@ impl TokenStore {
                         }
                         plaintext && t.expiration_time() > clock.instant
                     })
-                    .map(|t| StoredToken::new(t, &clock))
+                    .map(|t| StoredToken::new(t, clock))
                     .collect();
                 (!list.is_empty()).then_some((origin, list))
             })
             .collect();
-        Ok(fs::write(path, serde_json::to_vec(&stored)?)?)
+        let tmp = path.with_added_extension("tmp");
+        let mut file = File::create(&tmp)?;
+        file.write_all(&serde_json::to_vec(&stored)?)?;
+        file.sync_all()?;
+        Ok(fs::rename(tmp, path)?)
     }
 
-    /// Removes and returns the token for `origin` that expires last.
+    /// Removes and returns the unexpired token for `origin` that expires last.
     pub fn take(&mut self, origin: &str) -> Option<ResumptionToken> {
         let tokens = self.tokens.get_mut(origin)?;
+        let now = now();
+        tokens.retain(|t| t.expiration_time() > now);
         let (last, _) = tokens
             .iter()
             .enumerate()
@@ -162,7 +181,7 @@ mod tests {
 
     use nss::{ResumptionToken, TokenKind};
 
-    use super::TokenStore;
+    use super::{Clock, Error, TokenStore};
     use crate::{now, temp_dir::TempDir};
 
     const ORIGIN: &str = "a:443";
@@ -196,6 +215,27 @@ mod tests {
     }
 
     #[test]
+    fn saved_json() {
+        let dir = TempDir::new();
+        let path = path(&dir);
+        let clock = Clock::new();
+        let expiration = clock.instant + LIFETIME;
+        let mut store = TokenStore::default();
+        store.extend(
+            ORIGIN,
+            [token(TokenKind::Plaintext(vec![1, 2, 3]), expiration)],
+        );
+        store.save_at(&path, &clock).unwrap();
+        let n = clock.unix_secs(expiration);
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            format!(
+                r#"{{"a:443":[{{"expiration_time":{n},"max_early_data_size":7,"token":"010203"}}]}}"#
+            )
+        );
+    }
+
+    #[test]
     fn load_missing_is_empty() {
         let dir = TempDir::new();
         let mut store = TokenStore::load(&dir.path().join("missing.json")).unwrap();
@@ -207,7 +247,21 @@ mod tests {
         let dir = TempDir::new();
         let path = path(&dir);
         fs::write(&path, "not json").unwrap();
-        assert!(TokenStore::load(&path).is_err());
+        assert_eq!(
+            TokenStore::load(&path).err().unwrap().to_string(),
+            format!(
+                "token store {}: expected ident at line 1 column 2",
+                path.display()
+            )
+        );
+    }
+
+    #[test]
+    fn save_error_has_path() {
+        let dir = TempDir::new();
+        let path = dir.path().join("missing").join("tokens.json");
+        let err = TokenStore::default().save(&path).unwrap_err();
+        assert!(matches!(err, Error::TokenStore(p, e) if p == path && matches!(*e, Error::Io(_))));
     }
 
     #[test]
@@ -240,6 +294,31 @@ mod tests {
     }
 
     #[test]
+    fn load_expired_dropped() {
+        let dir = TempDir::new();
+        let path = path(&dir);
+        fs::write(
+            &path,
+            r#"{"a:443":[{"expiration_time":1,"max_early_data_size":7,"token":"01"}]}"#,
+        )
+        .unwrap();
+        let mut store = TokenStore::load(&path).unwrap();
+        assert!(store.tokens[ORIGIN].is_empty());
+        assert!(store.take(ORIGIN).is_none());
+    }
+
+    #[test]
+    fn expired_not_taken() {
+        let mut store = TokenStore::default();
+        store.extend(
+            ORIGIN,
+            [valid(&[1]), token(TokenKind::Plaintext(vec![2]), now())],
+        );
+        assert_eq!(store.take(ORIGIN).unwrap().as_ref(), [1]);
+        assert!(store.take(ORIGIN).is_none());
+    }
+
+    #[test]
     fn encrypted_skipped() {
         let mut store = TokenStore::default();
         store.extend(
@@ -259,6 +338,11 @@ mod tests {
         assert_eq!(t.as_ref(), [1, 2, 3]);
         assert!(t.is_plaintext());
         assert_eq!(t.max_early_data_size(), 7);
+        let files: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(files, ["tokens.json"]);
     }
 
     #[test]

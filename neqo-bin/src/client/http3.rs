@@ -31,7 +31,7 @@ use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
 use tracing::{debug, error, info, warn};
 
-use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use super::{Args, CloseState, Res, get_output_file, qlog_new, with_resumption};
 use crate::{
     STREAM_IO_BUFFER_SIZE, now,
     send_data::{SendData, SendResult},
@@ -69,6 +69,19 @@ pub fn create_client(
     hostname: &str,
     resumption_token: Option<ResumptionToken>,
 ) -> Res<Http3Client> {
+    with_resumption(
+        resumption_token,
+        || new_client(args, local_addr, remote_addr, hostname),
+        |client, token| Ok(client.enable_resumption(now(), token)?),
+    )
+}
+
+fn new_client(
+    args: &Args,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    hostname: &str,
+) -> Res<Http3Client> {
     let cid_generator: Rc<RefCell<dyn neqo_transport::ConnectionIdGenerator>> = if args.cid_len == 0
     {
         Rc::new(RefCell::new(EmptyConnectionIdGenerator::default()))
@@ -102,9 +115,6 @@ pub fn create_client(
     client.set_qlog(qlog);
     if let Some(ech) = &args.ech {
         client.enable_ech(&ech.0)?;
-    }
-    if let Some(token) = resumption_token {
-        client.enable_resumption(now(), token)?;
     }
 
     Ok(client)
