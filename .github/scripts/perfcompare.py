@@ -204,8 +204,8 @@ COUNTER_FILES = ("/proc/net/snmp", "/proc/net/snmp6", "/proc/net/softnet_stat")
 
 
 def _counters(*paths: str | Path) -> dict[str, int]:
-    """UDP counters keyed by name, both families, as `--host` picks one, and the softirq backlog
-    drops per CPU, from `COUNTER_FILES` or a copy of them."""
+    """UDP counters keyed by name, both families, as `--host` picks one, the softirq backlog
+    drops per CPU, and the server's CPU time, from `COUNTER_FILES` or a copy of them."""
     text = "".join(map(_read_proc, paths))
     counters: dict[str, int] = {}
     # IPv4 spells these as a `Udp:` line naming the fields, then a `Udp:` line of values.
@@ -221,10 +221,15 @@ def _counters(*paths: str | Path) -> dict[str, int]:
         if len(fields := line.split()) == 2 and fields[0].startswith("Udp6")
     )
     # `softnet_stat` has a line of hex fields per online CPU: the 2nd is drops, the 13th the CPU.
-    cpus = filter(re.compile(r"[0-9a-f]{8}( [0-9a-f]{8})+").fullmatch, text.splitlines())
+    cpus = filter(re.compile(r"[0-9a-f]{8}( [0-9a-f]{8}){12,}").fullmatch, text.splitlines())
     counters.update(
         (f"SoftnetDropped{int(f[12], 16)}", int(f[1], 16)) for f in map(str.split, cpus)
     )
+    # `/proc/<pid>/task/*/schedstat` has a line per thread: ns on CPU, ns runnable, timeslices.
+    tasks = filter(re.compile(r"\d+ \d+ \d+").fullmatch, text.splitlines())
+    totals = map(sum, zip(*(map(int, line.split()) for line in tasks), strict=True))
+    names = ("ServerCpuNs", "ServerRunqueueNs", "ServerTimeslices")
+    counters.update(zip(names, totals, strict=False))
     return counters
 
 
@@ -263,8 +268,10 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
     # Both hooks run outside the timed region, so this is a before/after pair per run.
     run = f'{shlex.quote(str(scratch))}/"$HYPERFINE_ITERATION"'
     snapshot = f"cat /proc/net/snmp* /proc/net/softnet_stat > {run}"
+    sched = f"cat /proc/$(cat {run}.pid)/task/*/schedstat > {run}.sched"  # Before `pkill`.
     if "neqo-server" in scmd:  # Unlike the client's, its stats I/O is outside the timed region.
         scmd += f" --stats-file {run}.server.jsonl"
+    server = f"taskset -c {cfg.server_cpu} {ws}/{scmd} & echo $! > {run}.pid;"
     # Affinity survives fork and exec: pinning hyperfine pins the client it times.
     cmd = [
         *_pin(cfg.client_cpu),
@@ -282,9 +289,9 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
         "--runs",
         str(runs),
         "--prepare",
-        f"taskset -c {cfg.server_cpu} {ws}/{scmd} & sleep 0.2; {warmup} {snapshot}.before",
+        f"{server} sleep 0.2; {warmup} {sched}.before && {snapshot}.before",
         "--conclude",
-        f"pkill -9 {tag}; {snapshot}.after",
+        f"{sched}.after; pkill -9 {tag}; {snapshot}.after",
         f"{ws}/{ccmd}",
     ]
     before = _counters(*COUNTER_FILES)
@@ -301,7 +308,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
     # then the timed one.
     with (out_dir / f"{name}.runs.jsonl").open("a" if part else "w", encoding="utf-8") as f:
         for i, m in enumerate(_measurements(out_dir / f"{name}.{part}.json")):
-            snaps = (_counters(scratch / f"{i}.{p}") for p in ("before", "after"))
+            snaps = (_counters(*scratch.glob(f"{i}.*{p}")) for p in ("before", "after"))
             record = {
                 "part": part,
                 "run": i,
@@ -418,35 +425,6 @@ def process(cfg, unit, root):
     return row
 
 
-# Per record of `runs.jsonl`, where `server[1]` is the timed connection's.
-RUN_METRICS = {
-    "Lost": lambda r: r["server"][1]["lost"],
-    "Client ACKs": lambda r: r["server"][1]["frame_rx"]["ack"],
-    "Softnet drops": lambda r: sum(d for k, d in r["counters"].items() if k.startswith("Softnet")),
-}
-
-
-def slow_fast(unit, root) -> list[str]:
-    """Table rows comparing the slower half of the runs a neqo server reported to the faster."""
-    if unit.server != "neqo":
-        return []
-    rows = []
-    for side, d in (("PR", "hyperfine"), ("base", "hyperfine-baseline")):
-        records = _jsonl(root / d / f"{unit.name}.runs.jsonl")
-        runs = sorted(
-            (r for r in records if len(r["server"]) == 2), key=lambda r: r["time_wall_clock"]
-        )
-        half = len(runs) // 2
-        slow, fast = runs[-half:], runs[:half]
-        cells = [
-            f"{fmean(map(f, slow)):.1f} / {fmean(map(f, fast)):.1f}" if half else "n/a"
-            for f in RUN_METRICS.values()
-        ]
-        counts = f"{len(runs)}/{len(records)}"
-        rows.append(f"| {unit.name} | {side} | {counts} | {' | '.join(cells)} |\n")
-    return rows
-
-
 class Unit(NamedTuple):
     """One client/server pair in one congestion control configuration."""
 
@@ -547,30 +525,23 @@ def run_unit(cfg, tmp, unit):
 
 
 def merge(cfg, artifacts):
-    """Assemble the tables from the per-unit artifacts, off the measuring runners."""
+    """Assemble one table from the per-unit artifacts, off the measuring runners."""
     header = (
         f"Transfer of {cfg.size} bytes over loopback, min. {cfg.runs} runs. "
         "All unit-less numbers are in milliseconds.\n\n"
         "| Client vs. server | Mean±σ | Min–Max | Median±MAD | MiB/s±σ | ΔMedian |\n"
         "|:---|---:|---:|---:|---:|---:|\n"
     )
-    runs_header = (
-        "\nMean count per run, slower / faster half of the runs with neqo server stats.\n\n"
-        f"| Client vs. server | Side | Runs | {' | '.join(RUN_METRICS)} |\n"
-        f"|:---|:---|---:{'|---:' * len(RUN_METRICS)}|\n"
-    )
     (cfg.workspace / "results.txt").write_text("", encoding="utf-8")
-    rows, runs_rows = [], []
+    rows = []
     for unit in units():
         res = next(artifacts.glob(f"*/hyperfine/{unit.name}.*.json"), None)
         row = process(cfg, unit, res.parents[1]) if res else None
         if row:
             rows.append(row)
-            runs_rows += slow_fast(unit, res.parents[1])
     # Sort rows as if unbolded, so the emphasized ones stay next to their own kind.
     rows.sort(key=lambda r: re.sub(r"^\| \*\*", "| ", r))
-    tables = header + "".join(rows) + (runs_header + "".join(runs_rows) if runs_rows else "")
-    (cfg.workspace / "comparison.md").write_text(tables, encoding="utf-8")
+    (cfg.workspace / "comparison.md").write_text(header + "".join(rows), encoding="utf-8")
 
 
 def main():
