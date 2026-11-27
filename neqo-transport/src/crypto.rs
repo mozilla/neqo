@@ -442,12 +442,13 @@ impl Crypto {
     }
 
     /// RFC 9001, Section 4.6.1: `max_early_data_size` must be 0xffffffff (NSS: 0 if absent).
-    pub fn check_resumption_tokens(&self) -> Res<()> {
-        if let Agent::Client(c) = &self.tls
+    pub fn check_resumption_tokens(&mut self) -> Res<()> {
+        if let Agent::Client(c) = &mut self.tls
             && c.resumption_tokens()
                 .iter()
                 .any(|t| !matches!(t.max_early_data_size(), 0 | 0xffff_ffff))
         {
+            while c.resumption_token().is_some() {}
             return Err(Error::ProtocolViolation);
         }
         Ok(())

@@ -583,6 +583,7 @@ fn zero_rtt_bad_max_early_data_size() {
     let ticket = server.process_output(now()).dgram();
     client.process_input(ticket.unwrap(), now());
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
+    assert!(client.take_resumption_token(now()).is_none());
 }
 
 #[test]
