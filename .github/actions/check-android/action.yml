@@ -46,6 +46,7 @@ runs:
       with:
         version: stable
         target: ${{ inputs.target }}
+        android-api: ${{ inputs.api-level }}
         tools: cargo-ndk@^4
         nss: ${{ inputs.nss }}
         working-directory: ${{ inputs.working-directory }}
