@@ -14,7 +14,7 @@ use std::{
 };
 
 use enumset::EnumSet;
-use neqo_common::{Buffer, Role};
+use neqo_common::{Buffer, Role, datagram::RecycledBuffer};
 use tracing::{debug, trace};
 
 use crate::{
@@ -101,6 +101,7 @@ pub struct Streams {
     local_stream_limits: LocalStreamLimits,
     send: SendStreams,
     recv: RecvStreams,
+    recycled_buffer: RecycledBuffer,
 }
 
 impl Streams {
@@ -122,6 +123,7 @@ impl Streams {
             local_stream_limits: LocalStreamLimits::new(role),
             send: SendStreams::default(),
             recv: RecvStreams::new(role),
+            recycled_buffer: RecycledBuffer::default(),
         }
     }
 
@@ -470,7 +472,8 @@ impl Streams {
                     recv_initial_max_stream_data,
                     Rc::clone(&self.receiver_fc),
                     self.events.clone(),
-                ),
+                )
+                .with_recycling(self.recycled_buffer.clone()),
             );
 
             if next_stream_id.is_bidi() {
@@ -581,7 +584,8 @@ impl Streams {
                             recv_initial_max_stream_data,
                             Rc::clone(&self.receiver_fc),
                             self.events.clone(),
-                        ),
+                        )
+                        .with_recycling(self.recycled_buffer.clone()),
                     );
                 }
                 Ok(new_id)

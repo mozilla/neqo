@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use neqo_common::{Buffer, Role, expect_usize, to_u64};
+use neqo_common::{Buffer, Role, datagram::RecycledBuffer, expect_usize, to_u64};
 use smallvec::SmallVec;
 use strum::Display;
 use tracing::{trace, warn};
@@ -34,7 +34,6 @@ use crate::{
     stream_id::StreamId,
 };
 
-#[derive(Debug)]
 pub struct RecvStreams {
     streams: BTreeMap<StreamId, RecvStream>,
     keep_alive: Weak<()>,
@@ -193,7 +192,7 @@ impl RecvStreams {
 
 /// Holds data not yet read by application. Orders and dedupes data ranges
 /// from incoming STREAM frames.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct RxStreamOrderer {
     data_ranges: BTreeMap<u64, Vec<u8>>, // (start_offset, data)
     retired: u64,                        // Number of bytes the application has read
@@ -201,6 +200,7 @@ pub struct RxStreamOrderer {
     /// Exclusive end offset of the rightmost received range (the end of the
     /// last entry in `data_ranges`, or `retired` if the map is empty).
     end: u64,
+    recycled: Option<RecycledBuffer>,
 }
 
 impl RxStreamOrderer {
@@ -246,6 +246,27 @@ impl RxStreamOrderer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn take_recycled(&self, capacity: usize) -> Option<Vec<u8>> {
+        let recycled = self.recycled.as_ref()?;
+        let buf = recycled.take();
+        if buf.capacity() >= capacity {
+            return Some(buf);
+        }
+        recycled.recycle(buf);
+        None
+    }
+
+    fn recycle(&self, drained: BTreeMap<u64, Vec<u8>>) {
+        if let Some(recycled) = &self.recycled
+            && let Some(buf) = drained.into_values().find(|buf| {
+                (Self::MIN_RESERVE_LEN + Self::RANGE_TARGET..=2 * Self::RANGE_TARGET)
+                    .contains(&buf.capacity())
+            })
+        {
+            recycled.recycle(buf);
+        }
     }
 
     /// Whether every byte of `[offset, offset + len)` has already been received or read.
@@ -341,7 +362,14 @@ impl RxStreamOrderer {
                 } else {
                     0
                 };
-                let mut data = Vec::with_capacity(new_data.len() + spare);
+                let capacity = new_data.len() + spare;
+                let mut data = if spare > 0
+                    && let Some(buf) = self.take_recycled(capacity)
+                {
+                    buf
+                } else {
+                    Vec::with_capacity(capacity)
+                };
                 data.extend_from_slice(new_data);
                 self.insert_range(new_start, data)
             };
@@ -597,11 +625,13 @@ impl RxStreamOrderer {
             if keep {
                 let mut keep = self.data_ranges.split_off(&range_start);
                 mem::swap(&mut self.data_ranges, &mut keep);
+                self.recycle(keep);
                 return copied;
             }
         }
 
-        self.data_ranges.clear();
+        let drained = mem::take(&mut self.data_ranges);
+        self.recycle(drained);
         self.end = self.retired; // All entries were consumed.
         copied
     }
@@ -615,7 +645,7 @@ impl RxStreamOrderer {
 }
 
 /// QUIC receiving states, based on -transport 3.2.
-#[derive(Debug, Display)]
+#[derive(Display)]
 // Because a dead_code warning is easier than clippy::unused_self, see https://github.com/rust-lang/rust/issues/68408
 enum RecvStreamState {
     Recv {
@@ -775,7 +805,6 @@ impl Stats {
 }
 
 /// Implement a QUIC receive stream.
-#[derive(Debug)]
 pub struct RecvStream {
     stream_id: StreamId,
     state: RecvStreamState,
@@ -796,6 +825,15 @@ impl RecvStream {
             conn_events,
             keep_alive: None,
         }
+    }
+
+    /// Return drained range buffers to `recycled`, and start in-order ranges with them.
+    #[must_use]
+    pub(crate) fn with_recycling(mut self, recycled: RecycledBuffer) -> Self {
+        if let RecvStreamState::Recv { recv_buf, .. } = &mut self.state {
+            recv_buf.recycled = Some(recycled);
+        }
+        self
     }
 
     fn set_state(&mut self, new_state: RecvStreamState) {
