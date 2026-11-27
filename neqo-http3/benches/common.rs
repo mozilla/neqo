@@ -87,6 +87,13 @@ const CONFIGS: [Config; 2] = [
     ),
 ];
 
+/// Returns the criterion configuration for stream benchmarks.
+#[must_use]
+pub fn criterion_config() -> Criterion {
+    // A longer warm-up builds large `SmallInput` batches, which slow and destabilize the run.
+    Criterion::default().warm_up_time(Duration::from_secs(1))
+}
+
 /// Runs all stream benchmarks using `iter_batched`, grouping results under
 /// `name_prefix` (e.g. `"walltime"` or `"simulated"`).
 pub fn bench(c: &mut Criterion, name_prefix: &str) {
