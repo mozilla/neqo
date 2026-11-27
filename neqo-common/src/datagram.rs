@@ -175,7 +175,7 @@ impl Drop for Batch {
     }
 }
 
-/// Holds the buffer of the last dropped [`Batch`] for reuse.
+/// Holds the last recycled buffer, such as that of a dropped [`Batch`], for reuse.
 #[derive(Clone, Default)]
 pub struct RecycledBuffer(Rc<Cell<Vec<u8>>>);
 

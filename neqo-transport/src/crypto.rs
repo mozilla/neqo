@@ -69,7 +69,6 @@ pub const UPDATE_WRITE_KEYS_AT: packet::Number = 100;
 #[cfg(test)]
 thread_local!(pub static OVERWRITE_INVOCATIONS: RefCell<Option<packet::Number>> = RefCell::default());
 
-#[derive(Debug)]
 pub struct Crypto {
     version: Version,
     protocols: Vec<String>,
@@ -1513,7 +1512,7 @@ impl Display for CryptoStates {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct CryptoStream {
     tx: TxBuffer,
     rx: RxStreamOrderer,
@@ -1521,7 +1520,6 @@ pub struct CryptoStream {
     sent: u64,
 }
 
-#[derive(Debug)]
 pub enum CryptoStreams {
     Initial {
         initial: CryptoStream,
