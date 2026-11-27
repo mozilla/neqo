@@ -1214,6 +1214,10 @@ mod tests {
     }
 
     pub fn default_http3_client_param(max_table_size: u64) -> Http3Client {
+        http3_client_with(ConnectionParameters::default(), max_table_size)
+    }
+
+    fn http3_client_with(conn_params: ConnectionParameters, max_table_size: u64) -> Http3Client {
         fixture_init();
         Http3Client::new(
             DEFAULT_SERVER_NAME,
@@ -1223,8 +1227,7 @@ mod tests {
             Http3Parameters::default()
                 .connection_parameters(
                     // Disable compatible upgrade, which complicates tests.
-                    ConnectionParameters::default()
-                        .versions(Version::default(), vec![Version::default()]),
+                    conn_params.versions(Version::default(), vec![Version::default()]),
                 )
                 .max_table_size_encoder(max_table_size)
                 .max_table_size_decoder(max_table_size)
@@ -3945,8 +3948,14 @@ mod tests {
     }
 
     fn start_with_0rtt() -> (Http3Client, TestServer) {
-        let (mut client, mut server) = connect();
-        let token = exchange_token(&mut client, &mut server.conn);
+        let (client, server, _) = start_with_0rtt_token(default_http3_client());
+        (client, server)
+    }
+
+    fn start_with_0rtt_token(mut first: Http3Client) -> (Http3Client, TestServer, ResumptionToken) {
+        let mut first_server = TestServer::new();
+        connect_with(&mut first, &mut first_server);
+        let token = exchange_token(&mut first, &mut first_server.conn);
 
         let mut client = default_http3_client();
 
@@ -3961,7 +3970,28 @@ mod tests {
         let zerortt_event = |e| matches!(e, Http3ClientEvent::StateChange(Http3State::ZeroRtt));
         assert!(client.events().any(zerortt_event));
 
-        (client, server)
+        (client, server, token)
+    }
+
+    #[test]
+    fn resume_plaintext_token() {
+        let (mut client, mut server, token) = start_with_0rtt_token(http3_client_with(
+            ConnectionParameters::default().plaintext_resumption_export(true),
+            100,
+        ));
+        assert!(token.is_plaintext());
+
+        let out = client.process_output(now());
+        let out2 = client.process_output(now());
+        server.conn.process_input(out.dgram().unwrap(), now());
+        let out = server.conn.process(out2.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        let out = server.conn.process(out.dgram(), now());
+        let out = client.process(out.dgram(), now());
+        assert_eq!(client.state(), Http3State::Connected);
+        drop(server.conn.process(out.dgram(), now()));
+        assert!(client.tls_info().unwrap().resumed());
+        assert!(server.conn.tls_info().unwrap().resumed());
     }
 
     #[test]
