@@ -17,6 +17,7 @@ use std::{
     rc::Rc,
 };
 
+use enumset::{EnumSet, EnumSetType};
 use indexmap::IndexMap;
 use neqo_common::{Buffer, Encoder, Role, expect_usize, to_u64};
 use rustc_hash::FxBuildHasher;
@@ -40,7 +41,7 @@ use crate::{
 };
 
 /// The priority that is assigned to sending data for the stream.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord)]
+#[derive(Debug, Default, PartialOrd, Ord, EnumSetType)]
 pub enum TransmissionPriority {
     /// This stream is more important than the functioning of the connection.
     /// Don't use this priority unless the stream really is that important.
@@ -805,6 +806,21 @@ impl SendStream {
             return false;
         };
         self.has_next_bytes(retransmission)
+    }
+
+    /// Priorities at which [`Self::write_frames`] can write a frame.
+    fn priorities(&self) -> EnumSet<TransmissionPriority> {
+        let mut priorities = self.priority | self.effective_priority;
+        if let State::ResetSent {
+            priority: Some(p), ..
+        }
+        | State::ResetSentReliable {
+            priority: Some(p), ..
+        } = self.state
+        {
+            priorities |= p;
+        }
+        priorities
     }
 
     /// Return `false` if the builder is full and the caller should stop iterating.
@@ -2195,6 +2211,15 @@ impl SendStreams {
             self.fair_rr_next = 0;
         }
         removed
+    }
+
+    /// Priorities at which [`Self::write_frames`] can write a frame or change state.
+    pub(crate) fn priorities(&self) -> EnumSet<TransmissionPriority> {
+        if self.per_group.len() > 1 {
+            // Every call advances `per_group_next`.
+            return EnumSet::all();
+        }
+        self.map.values().map(SendStream::priorities).collect()
     }
 
     pub fn write_frames<B: Buffer>(

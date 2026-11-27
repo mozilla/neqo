@@ -2424,8 +2424,14 @@ impl Connection {
             frame_stats.handshake_done += 1;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Critical, builder, tokens, frame_stats);
+        let active = self.streams.send_priorities();
+        self.streams.write_frames(
+            TransmissionPriority::Critical,
+            active,
+            builder,
+            tokens,
+            frame_stats,
+        );
         if builder.is_full() {
             return;
         }
@@ -2438,6 +2444,7 @@ impl Connection {
 
         self.streams.write_frames(
             TransmissionPriority::Important,
+            active,
             builder,
             tokens,
             frame_stats,
@@ -2459,7 +2466,7 @@ impl Connection {
 
         for prio in [TransmissionPriority::High, TransmissionPriority::Normal] {
             self.streams
-                .write_frames(prio, builder, tokens, &mut stats.frame_tx);
+                .write_frames(prio, active, builder, tokens, &mut stats.frame_tx);
             if builder.is_full() {
                 return;
             }
@@ -2491,8 +2498,13 @@ impl Connection {
             return;
         }
 
-        self.streams
-            .write_frames(TransmissionPriority::Low, builder, tokens, frame_stats);
+        self.streams.write_frames(
+            TransmissionPriority::Low,
+            active,
+            builder,
+            tokens,
+            frame_stats,
+        );
     }
 
     // Maybe send a probe.  Return true if the packet was ack-eliciting.
