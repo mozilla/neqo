@@ -181,7 +181,7 @@ pub struct ConnectionParameters {
     /// Whether to use Alternative Backoff with ECN (RFC 8511), i.e. a smaller multiplicative
     /// decrease on ECN-CE congestion events than on loss. Only affects CUBIC.
     abe: bool,
-    /// Whether to ask NSS for resumption tokens that carry the secret in cleartext.
+    /// Whether to ask NSS for resumption tokens that carry the resumption secret in plaintext.
     plaintext_resumption_export: bool,
 }
 

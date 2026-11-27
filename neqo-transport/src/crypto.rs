@@ -116,10 +116,9 @@ impl Crypto {
             // Always enable 0-RTT on the client, but the server needs
             // more configuration passed to server_enable_0rtt.
             c.enable_0rtt()?;
-
-            if conn_params.plaintext_resumption_export_enabled() {
-                c.enable_plaintext_resumption_export(true)?;
-            }
+            c.enable_plaintext_resumption_export(
+                conn_params.plaintext_resumption_export_enabled(),
+            )?;
         }
         agent.set_alpn(&protocols)?;
         agent.disable_end_of_early_data()?;
