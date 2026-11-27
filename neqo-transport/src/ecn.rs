@@ -163,6 +163,7 @@ pub enum ValidationError {
     BlackHole,
     Bleaching,
     ReceivedUnsentECT1,
+    AlwaysCe,
 }
 
 #[derive(Debug, Clone, Copy, Enum, PartialEq, Eq)]
@@ -181,6 +182,9 @@ pub(crate) struct Info {
 
     /// The ECN counts from the last ACK frame that increased `largest_acked`.
     baseline: Count,
+
+    /// The number of consecutive CE-marked packets acknowledged without an ECT(0) mark.
+    consecutive_ce: u64,
 }
 
 impl Info {
@@ -339,9 +343,23 @@ impl Info {
         } else if ecn_diff[Ecn::Ect1] > 0 {
             info!("ECN validation failed, ACK counted ECT(1) marks that were never sent");
             self.disable_ecn(stats, ValidationError::ReceivedUnsentECT1);
-        } else if self.state != ValidationState::Capable && newly_acked_sent_with_ect0 > 0 {
-            info!("ECN validation succeeded, path is capable");
-            self.state.set(ValidationState::Capable, stats);
+        } else {
+            if ecn_diff[Ecn::Ect0] > 0 {
+                self.consecutive_ce = 0;
+            } else {
+                self.consecutive_ce = self.consecutive_ce.saturating_add(ecn_diff[Ecn::Ce]);
+            }
+
+            if self.consecutive_ce >= to_u64(TEST_COUNT) {
+                info!(
+                    "ECN validation failed, last {} ECN-marked packets were all CE",
+                    self.consecutive_ce
+                );
+                self.disable_ecn(stats, ValidationError::AlwaysCe);
+            } else if self.state != ValidationState::Capable && newly_acked_sent_with_ect0 > 0 {
+                info!("ECN validation succeeded, path is capable");
+                self.state.set(ValidationState::Capable, stats);
+            }
         }
         self.baseline = ack_ecn;
     }
@@ -368,6 +386,7 @@ impl Info {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
+    use neqo_common::{Ecn, to_u64};
     use test_fixture::now;
 
     use super::{Count, Info, TEST_COUNT, ValidationError, ValidationOutcome, ValidationState};
@@ -475,5 +494,162 @@ mod tests {
         let marked = [make_marked_packet(1)];
         info.on_packets_acked(&marked, Some(&Count::default()), &mut stats);
         assert_eq!(info.state, ValidationState::Unknown);
+    }
+
+    #[test]
+    fn all_ce_during_validation_fails() {
+        let (mut info, mut stats) = make_unknown_info();
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(10)],
+            Some(&Count::new(0, 0, 0, to_u64(TEST_COUNT))),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(
+            info.state,
+            ValidationState::Failed(ValidationError::AlwaysCe)
+        );
+        assert!(!info.is_marking());
+        assert_eq!(info.ecn_mark(), Ecn::NotEct);
+        assert_eq!(stats.ecn_path_validation[ValidationOutcome::Capable], 0);
+        assert_eq!(
+            stats.ecn_path_validation[ValidationOutcome::NotCapable(ValidationError::AlwaysCe)],
+            1
+        );
+    }
+
+    #[test]
+    fn ce_streak_resets_on_ect0() {
+        let (mut info, mut stats) = make_unknown_info();
+        let nine = to_u64(TEST_COUNT - 1);
+
+        // 9 CE marks keep the path Capable.
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(1)],
+            Some(&Count::new(0, 0, 0, nine)),
+            &mut stats,
+        );
+        assert!(ce_received);
+        assert_eq!(info.state, ValidationState::Capable);
+
+        // An ACK with an ECT(0) mark resets consecutive_ce.
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(2)],
+            Some(&Count::new(0, 1, 0, nine)),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(info.state, ValidationState::Capable);
+
+        // Another burst of 9 CE marks still keeps the path Capable.
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(3)],
+            Some(&Count::new(0, 1, 0, nine * 2)),
+            &mut stats,
+        );
+        assert!(ce_received);
+        assert_eq!(info.state, ValidationState::Capable);
+        assert!(info.is_marking());
+    }
+
+    #[test]
+    fn capable_transitions_to_always_ce_across_acks() {
+        let (mut info, mut stats) = make_unknown_info();
+
+        // First validate as Capable with ECT(0).
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(1)],
+            Some(&Count::new(0, 1, 0, 0)),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(info.state, ValidationState::Capable);
+        assert_eq!(stats.ecn_path_validation[ValidationOutcome::Capable], 1);
+
+        // Receive TEST_COUNT - 1 CE marks across ACKs: still Capable and reports CE.
+        for i in 1..TEST_COUNT {
+            let ce_received = info.on_packets_acked(
+                &[make_marked_packet(to_u64(i + 1))],
+                Some(&Count::new(0, 1, 0, to_u64(i))),
+                &mut stats,
+            );
+            assert!(ce_received);
+            assert_eq!(info.state, ValidationState::Capable);
+        }
+
+        // The TEST_COUNT-th consecutive CE mark disables ECN without reporting CE.
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(to_u64(TEST_COUNT + 1))],
+            Some(&Count::new(0, 1, 0, to_u64(TEST_COUNT))),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(
+            info.state,
+            ValidationState::Failed(ValidationError::AlwaysCe)
+        );
+        assert!(!info.is_marking());
+        assert_eq!(stats.ecn_path_validation[ValidationOutcome::Capable], 0);
+        assert_eq!(
+            stats.ecn_path_validation[ValidationOutcome::NotCapable(ValidationError::AlwaysCe)],
+            1
+        );
+    }
+
+    #[test]
+    fn unmarked_ack_preserves_consecutive_ce() {
+        let (mut info, mut stats) = make_unknown_info();
+        let nine = to_u64(TEST_COUNT - 1);
+
+        info.on_packets_acked(
+            &[make_marked_packet(1)],
+            Some(&Count::new(0, 0, 0, nine)),
+            &mut stats,
+        );
+        assert_eq!(info.state, ValidationState::Capable);
+
+        // Unmarked ACK with unchanged ECN counts must not reset consecutive_ce.
+        let ce_received = info.on_packets_acked(
+            &[make_packet(2, now(), 100)],
+            Some(&Count::new(0, 0, 0, nine)),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(info.state, ValidationState::Capable);
+
+        // One more CE mark reaches TEST_COUNT and fails ECN.
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(3)],
+            Some(&Count::new(0, 0, 0, to_u64(TEST_COUNT))),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(
+            info.state,
+            ValidationState::Failed(ValidationError::AlwaysCe)
+        );
+    }
+
+    #[test]
+    fn reordered_ack_does_not_double_count_ce() {
+        let (mut info, mut stats) = make_unknown_info();
+        let half = to_u64(TEST_COUNT / 2);
+
+        info.on_packets_acked(
+            &[make_marked_packet(10)],
+            Some(&Count::new(0, 0, 0, half)),
+            &mut stats,
+        );
+        assert_eq!(info.state, ValidationState::Capable);
+
+        // Reordered ACK with smaller pn must be ignored and not double-count CE.
+        let ce_received = info.on_packets_acked(
+            &[make_marked_packet(9)],
+            Some(&Count::new(0, 0, 0, half * 2)),
+            &mut stats,
+        );
+        assert!(!ce_received);
+        assert_eq!(info.state, ValidationState::Capable);
+        assert_eq!(info.consecutive_ce, half);
     }
 }

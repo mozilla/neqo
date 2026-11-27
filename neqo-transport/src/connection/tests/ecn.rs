@@ -291,6 +291,34 @@ fn disables_on_remark() {
     assert_ecn_disabled(client_pkt.tos());
 }
 
+#[test]
+fn disables_on_all_ce() {
+    let now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle_with_modifier(&mut client, &mut server, ce);
+
+    for _ in 0..ecn::TEST_COUNT {
+        if let Some(ack) = send_with_modifier_and_receive(&mut client, &mut server, now, ce) {
+            client.process_input(ack, now);
+        }
+    }
+
+    assert_eq!(
+        client.stats().ecn_path_validation[ecn::ValidationOutcome::Capable],
+        0
+    );
+    assert_eq!(
+        client.stats().ecn_path_validation
+            [ecn::ValidationOutcome::NotCapable(ecn::ValidationError::AlwaysCe)],
+        1
+    );
+
+    // ECN should now be disabled.
+    let client_pkt = send_something(&mut client, now);
+    assert_ecn_disabled(client_pkt.tos());
+}
+
 /// This function performs a handshake over a path that modifies packets via `orig_path_modifier`.
 /// It then sends `burst` packets on that path, and then migrates to a new path that
 /// modifies packets via `new_path_modifier`.  It sends `burst` packets on the new path.
@@ -472,7 +500,9 @@ fn ecn_migration_noop_remark_data() {
 fn ecn_migration_noop_ce_data() {
     let (before, after, migrated) = migration_with_modifiers(identity, ce, false, ecn::TEST_COUNT);
     assert_ecn_enabled(before); // ECN validation concludes before migration.
-    assert_ecn_enabled(after); // ECN validation concludes after migration, despite all CE marks.
+    // Fewer than TEST_COUNT CE-marked probes reach the server on the new path (and old-path
+    // ECT(0) marks are still acknowledged), so ECN remains enabled.
+    assert_ecn_enabled(after);
     assert!(migrated);
 }
 
@@ -516,7 +546,9 @@ fn ecn_migration_bleach_remark_data() {
 fn ecn_migration_bleach_ce_data() {
     let (before, after, migrated) = migration_with_modifiers(bleach, ce, false, ecn::TEST_COUNT);
     assert_ecn_disabled(before); // ECN validation fails before migration due to bleaching.
-    assert_ecn_enabled(after); // ECN validation concludes after migration, despite all CE marks.
+    // Only 9 of TEST_COUNT CE-marked probes reach the server after migration, so ECN stays
+    // enabled.
+    assert_ecn_enabled(after);
     assert!(migrated);
 }
 
@@ -561,7 +593,9 @@ fn ecn_migration_remark_remark_data() {
 fn ecn_migration_remark_ce_data() {
     let (before, after, migrated) = migration_with_modifiers(remark, ce, false, ecn::TEST_COUNT);
     assert_ecn_disabled(before); // ECN validation fails before migration due to remarking.
-    assert_ecn_enabled(after); // ECN validation concludes after migration, despite all CE marks.
+    // Only 9 of TEST_COUNT CE-marked probes reach the server after migration, so ECN stays
+    // enabled.
+    assert_ecn_enabled(after);
     assert!(migrated);
 }
 
@@ -577,7 +611,7 @@ fn ecn_migration_remark_drop_data() {
 #[test]
 fn ecn_migration_ce_noop_data() {
     let (before, after, migrated) = migration_with_modifiers(ce, identity, false, ecn::TEST_COUNT);
-    assert_ecn_enabled(before); // ECN validation concludes before migration, despite all CE marks.
+    assert_ecn_disabled(before); // ECN validation fails before migration due to all CE marks.
     assert_ecn_enabled(after); // ECN validation concludes after migration.
     assert!(migrated);
 }
@@ -585,15 +619,15 @@ fn ecn_migration_ce_noop_data() {
 #[test]
 fn ecn_migration_ce_bleach_data() {
     let (before, after, migrated) = migration_with_modifiers(ce, bleach, false, ecn::TEST_COUNT);
-    assert_ecn_enabled(before); // ECN validation concludes before migration, despite all CE marks.
-    assert_ecn_disabled(after); // ECN validation fails after migration due to bleaching
+    assert_ecn_disabled(before); // ECN validation fails before migration due to all CE marks.
+    assert_ecn_disabled(after); // ECN validation fails after migration due to bleaching.
     assert!(migrated);
 }
 
 #[test]
 fn ecn_migration_ce_remark_data() {
     let (before, after, migrated) = migration_with_modifiers(ce, remark, false, ecn::TEST_COUNT);
-    assert_ecn_enabled(before); // ECN validation concludes before migration, despite all CE marks.
+    assert_ecn_disabled(before); // ECN validation fails before migration due to all CE marks.
     assert_ecn_disabled(after); // ECN validation fails after migration due to remarking.
     assert!(migrated);
 }
@@ -601,17 +635,19 @@ fn ecn_migration_ce_remark_data() {
 #[test]
 fn ecn_migration_ce_ce_data() {
     let (before, after, migrated) = migration_with_modifiers(ce, ce, false, ecn::TEST_COUNT);
-    assert_ecn_enabled(before); // ECN validation concludes before migration, despite all CE marks.
-    assert_ecn_enabled(after); // ECN validation concludes after migration, despite all CE marks.
+    assert_ecn_disabled(before); // ECN validation fails before migration due to all CE marks.
+    // Only 9 of TEST_COUNT CE-marked probes reach the server after migration, so ECN stays
+    // enabled.
+    assert_ecn_enabled(after);
     assert!(migrated);
 }
 
 #[test]
 fn ecn_migration_ce_drop_data() {
     let (before, after, migrated) = migration_with_modifiers(ce, identity, true, ecn::TEST_COUNT);
-    assert_ecn_enabled(before); // ECN validation concludes before migration, despite all CE marks.
-    // Migration failed, ECN on original path is still enabled.
-    assert_ecn_enabled(after);
+    assert_ecn_disabled(before); // ECN validation fails before migration due to all CE marks.
+    // Migration failed, ECN on original path is still disabled.
+    assert_ecn_disabled(after);
     assert!(!migrated);
 }
 
