@@ -8,7 +8,7 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use neqo_common::{event::Provider as _, to_u64};
 use nss::{Agent, AllowZeroRtt, AntiReplay};
-use test_fixture::{anti_replay, assertions, now};
+use test_fixture::{DEFAULT_ALPN, DEFAULT_KEYS, anti_replay, assertions, now};
 use tracing::debug;
 
 use super::{
@@ -16,7 +16,7 @@ use super::{
     CountingConnectionIdGenerator, Output, assert_error, connect, default_client, default_server,
     exchange_ticket,
     migration::NewConnectionIds,
-    new_server, resumed_server,
+    new_server, resumed_server, ticket_with_new_token,
 };
 use crate::{
     ConnectionParameters, Error, MIN_INITIAL_PACKET_SIZE, State, StreamDataLimit, StreamType,
@@ -153,8 +153,8 @@ fn resumed_pair_that_rejects_0rtt(max_data: usize) -> (Connection, Connection) {
         .enable_resumption(now(), token)
         .expect("should set token");
     let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
+        DEFAULT_KEYS,
+        DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default()
             .max_data(to_u64(max_data))
@@ -567,7 +567,7 @@ fn zero_rtt_retire_handshake_cid() {
     );
 }
 
-/// RFC 9001, Section 4.6.1: a ticket's `max_early_data_size` must be 0xffffffff.
+/// RFC 9001, Section 4.6.1: a `NewSessionTicket`'s `max_early_data_size` must be 0xffffffff.
 #[test]
 fn zero_rtt_bad_max_early_data_size() {
     let mut client = default_client();
@@ -579,9 +579,7 @@ fn zero_rtt_bad_max_early_data_size() {
     tls.enable_0rtt(&anti_replay(), 1234, checker).unwrap();
     connect(&mut client, &mut server);
 
-    server.send_ticket(now(), &[]).unwrap();
-    let ticket = server.process_output(now()).dgram();
-    client.process_input(ticket.unwrap(), now());
+    client.process_input(ticket_with_new_token(&mut server, now()), now());
     assert_error(&client, &CloseReason::Transport(Error::ProtocolViolation));
     assert!(client.take_resumption_token(now()).is_none());
 }
@@ -590,8 +588,8 @@ fn zero_rtt_bad_max_early_data_size() {
 fn zero_rtt_disabled_max_early_data_size() {
     let mut client = default_client();
     let mut server = Connection::new_server(
-        test_fixture::DEFAULT_KEYS,
-        test_fixture::DEFAULT_ALPN,
+        DEFAULT_KEYS,
+        DEFAULT_ALPN,
         Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
         ConnectionParameters::default(),
     )
