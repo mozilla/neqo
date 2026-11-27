@@ -325,7 +325,7 @@ pub struct Connection {
     events: ConnectionEvents,
     new_token: NewTokenState,
     stats: StatsCell,
-    spare_buffer: datagram::SpareBuffer,
+    recycled_buffer: datagram::RecycledBuffer,
     qlog: Qlog,
     /// A session ticket was received without `NEW_TOKEN`,
     /// this is when that turns into an event without `NEW_TOKEN`.
@@ -470,7 +470,7 @@ impl Connection {
             events,
             new_token: NewTokenState::new(role),
             stats,
-            spare_buffer: datagram::SpareBuffer::default(),
+            recycled_buffer: datagram::RecycledBuffer::default(),
             qlog: Qlog::disabled(),
             release_resumption_token_timer: None,
             conn_params,
@@ -1257,8 +1257,8 @@ impl Connection {
             .expect("max_datagrams is 1")
     }
 
-    pub(crate) fn set_spare_buffer(&mut self, spare: datagram::SpareBuffer) {
-        self.spare_buffer = spare;
+    pub(crate) fn set_recycled_buffer(&mut self, recycled: datagram::RecycledBuffer) {
+        self.recycled_buffer = recycled;
     }
 
     /// Get output packets, as a result of receiving packets, or actions taken
@@ -2707,7 +2707,7 @@ impl Connection {
         max_datagrams: NonZeroUsize,
     ) -> Res<SendOptionBatch> {
         let packet_tos = path.borrow().tos();
-        let mut send_buffer = self.spare_buffer.take();
+        let mut send_buffer = self.recycled_buffer.take();
         let mut max_datagram_size = None;
         let mut num_datagrams = 0;
         let mtu = path.borrow().plpmtu();
@@ -2778,7 +2778,7 @@ impl Connection {
                 SendOption::No(paced) => {
                     if num_datagrams == 0 {
                         debug_assert!(send_buffer.is_empty());
-                        self.spare_buffer.put(send_buffer);
+                        self.recycled_buffer.recycle(send_buffer);
                         return Ok(SendOptionBatch::No(paced));
                     }
                     break;
@@ -2796,7 +2796,7 @@ impl Connection {
                 max_datagram_size.ok_or(Error::Internal)?,
                 &mut self.stats.borrow_mut(),
             )
-            .with_spare_buffer(self.spare_buffer.clone());
+            .with_recycling(self.recycled_buffer.clone());
 
         Ok(SendOptionBatch::Yes(batch))
     }

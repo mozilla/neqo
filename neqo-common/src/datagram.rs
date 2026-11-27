@@ -30,7 +30,7 @@ pub struct Datagram<D = Vec<u8>> {
 impl TryFrom<Batch> for Datagram {
     type Error = ();
 
-    fn try_from(mut d: Batch) -> Result<Self, Self::Error> {
+    fn try_from(d: Batch) -> Result<Self, Self::Error> {
         if d.num_datagrams() != 1 {
             return Err(());
         }
@@ -38,7 +38,7 @@ impl TryFrom<Batch> for Datagram {
             src: d.src,
             dst: d.dst,
             tos: d.tos,
-            d: mem::take(&mut d.d),
+            d: d.d.clone(), // Dropping `d` returns its buffer for recycling.
         })
     }
 }
@@ -164,30 +164,30 @@ pub struct Batch {
     tos: Tos,
     datagram_size: NonZeroUsize,
     d: Vec<u8>,
-    spare: Option<SpareBuffer>,
+    recycled: Option<RecycledBuffer>,
 }
 
 impl Drop for Batch {
     fn drop(&mut self) {
-        if let Some(spare) = &self.spare {
-            spare.put(mem::take(&mut self.d));
+        if let Some(recycled) = &self.recycled {
+            recycled.recycle(mem::take(&mut self.d));
         }
     }
 }
 
-/// A spare buffer, which a dropped [`Batch`] leaves its buffer in for reuse.
+/// Holds the buffer of the last dropped [`Batch`] for reuse.
 #[derive(Clone, Default)]
-pub struct SpareBuffer(Rc<Cell<Vec<u8>>>);
+pub struct RecycledBuffer(Rc<Cell<Vec<u8>>>);
 
-impl SpareBuffer {
-    /// Take the spare buffer, or a new one if there is none.
+impl RecycledBuffer {
+    /// Take the recycled buffer, or a new one if there is none.
     #[must_use]
     pub fn take(&self) -> Vec<u8> {
         self.0.take()
     }
 
-    /// Clear `buffer` and keep it as the spare buffer.
-    pub fn put(&self, mut buffer: Vec<u8>) {
+    /// Clear `buffer` and keep it for reuse.
+    pub fn recycle(&self, mut buffer: Vec<u8>) {
         buffer.clear();
         self.0.set(buffer);
     }
@@ -230,14 +230,14 @@ impl Batch {
             tos,
             datagram_size,
             d,
-            spare: None,
+            recycled: None,
         }
     }
 
-    /// Leave the buffer of the batch in `spare` when the batch is dropped.
+    /// Return the buffer to `recycled` when the batch is dropped.
     #[must_use]
-    pub fn with_spare_buffer(mut self, spare: SpareBuffer) -> Self {
-        self.spare = Some(spare);
+    pub fn with_recycling(mut self, recycled: RecycledBuffer) -> Self {
+        self.recycled = Some(recycled);
         self
     }
 

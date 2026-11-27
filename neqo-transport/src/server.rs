@@ -19,7 +19,7 @@ use std::{
 };
 
 use neqo_common::{
-    Datagram, Role, Tos, datagram::SpareBuffer, event::Provider as _, hex::Hex, qlog::Qlog,
+    Datagram, Role, Tos, datagram::RecycledBuffer, event::Provider as _, hex::Hex, qlog::Qlog,
 };
 use nss::{
     AntiReplay, Cipher, PrivateKey, PublicKey, ZeroRttCheckResult, ZeroRttChecker,
@@ -129,8 +129,8 @@ pub struct Server {
     /// datagrams. To be processed on consecutive calls to
     /// [`Server::process_multiple`].
     saved_datagrams: VecDeque<SavedDatagram>,
-    /// Shared by all connections.
-    spare_buffer: SpareBuffer,
+    /// Send buffer for recycling, shared by all connections.
+    recycled_buffer: RecycledBuffer,
 }
 
 impl Server {
@@ -169,7 +169,7 @@ impl Server {
             qlog_dir: None,
             ech_config: None,
             saved_datagrams: VecDeque::new(),
-            spare_buffer: SpareBuffer::default(),
+            recycled_buffer: RecycledBuffer::default(),
         })
     }
 
@@ -382,7 +382,7 @@ impl Server {
 
         match sconn {
             Ok(mut c) => {
-                c.set_spare_buffer(self.spare_buffer.clone());
+                c.set_recycled_buffer(self.recycled_buffer.clone());
                 if let Err(e) = self.setup_connection(&mut c, initial, orig_dcid, now) {
                     warn!("[{self}] Unable to set up connection: {e}");
                     return Output::None;
