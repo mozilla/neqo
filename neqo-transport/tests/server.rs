@@ -991,34 +991,42 @@ fn server_ciphers_unknown() {
 }
 
 #[test]
-fn spare_buffer_shared_across_connections() {
+fn recycled_buffer_shared_across_connections() {
     let mut server = default_server();
-    let conns: Vec<_> = std::iter::repeat_with(|| {
-        let conn = connect(&mut default_client(), &mut server);
-        // Only one connection may have events when connecting the next.
-        conn.borrow_mut().events().for_each(drop);
-        conn
-    })
-    .take(2)
-    .collect();
+    let first = connect(&mut default_client(), &mut server);
+    // Only one connection may have events when connecting the next.
+    first.borrow_mut().events().for_each(drop);
+    let second = connect(&mut default_client(), &mut server);
+    second.borrow_mut().events().for_each(drop);
     while server
         .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
         .dgram()
         .is_some()
     {}
 
-    // The second batch is smaller than the first, so it fits the spare buffer.
-    let mut ptr = None;
-    for (conn, len) in conns.iter().zip([1000, 100]) {
-        let stream_id = conn.borrow_mut().stream_create(StreamType::UniDi).unwrap();
-        conn.borrow_mut()
-            .stream_send(stream_id, &vec![0; len])
-            .unwrap();
-        let batch = server
-            .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
-            .dgram()
-            .unwrap();
-        let first = *ptr.get_or_insert_with(|| batch.data().as_ptr());
-        assert_eq!(batch.data().as_ptr(), first);
-    }
+    // The second batch is smaller than the first, so it fits the recycled buffer.
+    let stream_id = first.borrow_mut().stream_create(StreamType::UniDi).unwrap();
+    first
+        .borrow_mut()
+        .stream_send(stream_id, &[0; 1000])
+        .unwrap();
+    let batch = server
+        .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    let ptr = batch.data().as_ptr();
+    drop(batch);
+    let stream_id = second
+        .borrow_mut()
+        .stream_create(StreamType::UniDi)
+        .unwrap();
+    second
+        .borrow_mut()
+        .stream_send(stream_id, &[0; 100])
+        .unwrap();
+    let batch = server
+        .process_multiple(None::<Datagram>, now(), NonZeroUsize::MIN)
+        .dgram()
+        .unwrap();
+    assert_eq!(batch.data().as_ptr(), ptr);
 }

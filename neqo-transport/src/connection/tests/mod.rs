@@ -907,18 +907,13 @@ fn server_receives_new_token() {
 }
 
 #[test]
-fn dropped_batch_leaves_spare_buffer() {
+fn dropped_batch_recycles_buffer() {
     let mut client = default_client();
     let mut server = default_server();
     connect_force_idle(&mut client, &mut server);
     let stream_id = client.stream_create(StreamType::UniDi).unwrap();
-    while client
-        .process_multiple_output(now(), NonZeroUsize::MIN)
-        .dgram()
-        .is_some()
-    {}
 
-    // The second batch is smaller than the first, so it fits the spare buffer.
+    // The second batch is smaller than the first, so it fits the recycled buffer.
     client.stream_send(stream_id, &[0; 1000]).unwrap();
     let batch = client
         .process_multiple_output(now(), NonZeroUsize::MIN)
@@ -926,7 +921,7 @@ fn dropped_batch_leaves_spare_buffer() {
         .unwrap();
     let ptr = batch.data().as_ptr();
     drop(batch);
-    client.stream_send(stream_id, DEFAULT_STREAM_DATA).unwrap();
+    client.stream_send(stream_id, &[0; 100]).unwrap();
     let batch = client
         .process_multiple_output(now(), NonZeroUsize::MIN)
         .dgram()
