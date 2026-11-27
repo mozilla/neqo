@@ -318,6 +318,16 @@ impl Args {
     pub fn set_qlog_dir(&mut self, dir: PathBuf) {
         self.shared.qlog_dir = Some(dir);
     }
+
+    #[cfg(test)]
+    pub fn set_token_store(&mut self, path: PathBuf) {
+        self.token_store = Some(path);
+    }
+
+    #[cfg(test)]
+    pub fn set_stats_file(&mut self, path: PathBuf) {
+        self.shared.stats_file = Some(path);
+    }
 }
 
 fn get_output_file(

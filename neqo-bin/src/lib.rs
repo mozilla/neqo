@@ -416,9 +416,20 @@ pub(crate) mod temp_dir {
 #[cfg(test)]
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{
+        fs, iter,
+        net::{Ipv6Addr, SocketAddr},
+        path::Path,
+    };
 
-    use crate::{Stats, client, contained_path, report_stats, server, temp_dir::TempDir};
+    use serde_json::Value;
+
+    use crate::{
+        Stats,
+        client::{self, TokenStore},
+        contained_path, report_stats, server,
+        temp_dir::TempDir,
+    };
 
     #[tokio::test]
     #[cfg_attr(target_os = "netbsd", ignore = "FIXME: Test fails on NetBSD.")]
@@ -453,6 +464,54 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn token_store_resumes_across_runs() {
+        test_fixture::fixture_init();
+
+        let dir = TempDir::new();
+        let token_store = dir.path().join("tokens.json");
+        let stats_file = dir.path().join("stats.json");
+
+        let mut server_args = server::Args::default();
+        server_args.set_hosts(vec![
+            SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 0).to_string(),
+        ]);
+        let (mut server, local_addrs) = server::run(server_args).unwrap();
+        let addr = local_addrs.into_iter().find(SocketAddr::is_ipv6).unwrap();
+        let origin = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), addr.port()).to_string();
+
+        let run_client = || {
+            let mut client_args = client::Args::new(Some(addr), 1, 0, 1);
+            client_args.set_token_store(token_store.clone());
+            client_args.set_stats_file(stats_file.clone());
+            client::client(client_args)
+        };
+        let saved_tokens = || -> Vec<Vec<u8>> {
+            let mut store = TokenStore::load(&token_store).unwrap();
+            iter::from_fn(|| store.take(&origin))
+                .map(|t| t.as_ref().to_vec())
+                .collect()
+        };
+
+        let mut saved = Vec::new();
+        for _ in 0..2 {
+            tokio::select! {
+                res = run_client() => res.unwrap(),
+                res = &mut server => panic!("expect server not to terminate: {res:?}"),
+            };
+            saved.push(saved_tokens());
+        }
+        assert!(!saved[0].is_empty(), "expect a saved token for {origin}");
+        assert!(!saved[1].contains(&saved[0][0]));
+
+        let resumed: Vec<_> = fs::read_to_string(&stats_file)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap()["resumed"].as_bool())
+            .collect();
+        assert_eq!(resumed, [Some(false), Some(true)]);
+    }
+
     #[test]
     fn report_stats_appends_json_lines() {
         let dir = TempDir::new();
@@ -467,7 +526,7 @@ mod tests {
         let lines: Vec<_> = second.lines().collect();
         assert_eq!(lines.len(), 2, "one record per call");
         for line in lines {
-            serde_json::from_str::<serde_json::Value>(line).expect("each line is a JSON record");
+            serde_json::from_str::<Value>(line).expect("each line is a JSON record");
         }
     }
 
