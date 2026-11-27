@@ -428,18 +428,22 @@ RUN_METRICS = {
 
 def slow_fast(unit, root) -> list[str]:
     """Table rows comparing the slower half of the runs a neqo server reported to the faster."""
+    if unit.server != "neqo":
+        return []
     rows = []
     for side, d in (("PR", "hyperfine"), ("base", "hyperfine-baseline")):
+        records = _jsonl(root / d / f"{unit.name}.runs.jsonl")
         runs = sorted(
-            (r for r in _jsonl(root / d / f"{unit.name}.runs.jsonl") if len(r["server"]) == 2),
-            key=lambda r: r["time_wall_clock"],
+            (r for r in records if len(r["server"]) == 2), key=lambda r: r["time_wall_clock"]
         )
-        if half := len(runs) // 2:
-            cells = (
-                f"{fmean(map(f, runs[-half:])):.1f} / {fmean(map(f, runs[:half])):.1f}"
-                for f in RUN_METRICS.values()
-            )
-            rows.append(f"| {unit.name} | {side} | {len(runs)} | {' | '.join(cells)} |\n")
+        half = len(runs) // 2
+        slow, fast = runs[-half:], runs[:half]
+        cells = [
+            f"{fmean(map(f, slow)):.1f} / {fmean(map(f, fast)):.1f}" if half else "n/a"
+            for f in RUN_METRICS.values()
+        ]
+        counts = f"{len(runs)}/{len(records)}"
+        rows.append(f"| {unit.name} | {side} | {counts} | {' | '.join(cells)} |\n")
     return rows
 
 
