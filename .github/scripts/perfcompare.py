@@ -279,7 +279,7 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
         "--command-name",
         name,
         "--metrics",
-        "time_wall_clock:ms",
+        "time_wall_clock:ms,time_user:ms,time_system:ms",
         "--export-json",
         str(out_dir / f"{name}.{part}.json"),
         "--output",
@@ -313,6 +313,8 @@ def hyperfine(cfg, scmd, ccmd, name, out_dir, runs, part):
                 "part": part,
                 "run": i,
                 "time_wall_clock": m["time_wall_clock"]["value"],
+                "time_user": m["time_user"]["value"],  # The client's, like the wall clock.
+                "time_system": m["time_system"]["value"],
                 "counters": _deltas(*snaps),
                 "server": _jsonl(scratch / f"{i}.server.jsonl"),
             }
