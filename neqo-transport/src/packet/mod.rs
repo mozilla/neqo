@@ -35,7 +35,7 @@ use crate::{
 /// a new connection across all QUIC versions this server supports.
 pub const MIN_INITIAL_PACKET_SIZE: usize = 1200;
 
-/// The longest token a client uses. Arbitrary; leaves Initial packets room for frames.
+/// The longest token a client includes in Initial packets. Arbitrary; leaves room for frames.
 pub const MAX_INITIAL_TOKEN_LEN: usize = MIN_INITIAL_PACKET_SIZE / 2;
 
 pub const BIT_LONG: u8 = 0x80;

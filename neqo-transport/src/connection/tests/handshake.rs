@@ -2057,12 +2057,12 @@ fn initial_cids(initial: &[u8]) -> (Vec<u8>, Vec<u8>) {
 
 /// Build a Retry that the client which sent `initial` will accept.
 #[cfg(not(feature = "disable-encryption"))]
-fn retry_for(initial: &[u8]) -> Datagram {
+fn retry_for(initial: &[u8], token: &[u8]) -> Datagram {
     let (dcid, scid) = initial_cids(initial);
     let mut server_scid = dcid.clone();
     server_scid[0] ^= 0xff;
     datagram(
-        packet::Builder::retry(Version::default(), &scid, &server_scid, &[0x01], &dcid)
+        packet::Builder::retry(Version::default(), &scid, &server_scid, token, &dcid)
             .expect("build retry"),
     )
 }
@@ -2093,11 +2093,11 @@ fn retry_scid_matching_initial_dcid() {
     // The same Retry with a distinct Source Connection ID is accepted.
     let mut client = default_client();
     let initial = client_initial(&mut client);
-    drop(client.process(Some(retry_for(&initial)), now()));
+    drop(client.process(Some(retry_for(&initial, &[0x01])), now()));
     assert_eq!(client.stats().dropped_rx, 0);
 }
 
-/// A Retry with a token that doesn't fit in an Initial packet is dropped.
+/// A Retry with a Retry Token longer than `MAX_INITIAL_TOKEN_LEN` is dropped.
 #[cfg(not(feature = "disable-encryption"))]
 #[test]
 fn retry_token_too_long() {
@@ -2107,18 +2107,7 @@ fn retry_token_too_long() {
     ] {
         let mut client = default_client();
         let initial = client_initial(&mut client);
-        let (dcid, scid) = initial_cids(&initial);
-        let mut server_scid = dcid.clone();
-        server_scid[0] ^= 0xff;
-        let retry = packet::Builder::retry(
-            Version::default(),
-            &scid,
-            &server_scid,
-            &vec![1; len],
-            &dcid,
-        )
-        .expect("build retry");
-        drop(client.process(Some(datagram(retry)), now()));
+        drop(client.process(Some(retry_for(&initial, &vec![1; len])), now()));
         assert_eq!(client.stats().dropped_rx, dropped);
     }
 }
@@ -2254,7 +2243,7 @@ fn crypto_resent_only_for_initial() {
 fn retry_restores_resend_allowance() {
     let mut client = default_client();
     let initial = client_initial(&mut client);
-    let retry = retry_for(&initial);
+    let retry = retry_for(&initial, &[0x01]);
 
     client.crypto.resend_unacked_early();
     assert!(client.crypto.early_resend_used(), "allowance spent");

@@ -308,7 +308,7 @@ impl FrameWriter for NewTokenWriter {
     }
 }
 
-fn token_with_new_token(writer: NewTokenWriter) -> ResumptionToken {
+fn resumption_token(writer: NewTokenWriter) -> ResumptionToken {
     let mut client = default_client();
     let mut server = default_server();
     connect(&mut client, &mut server);
@@ -319,13 +319,13 @@ fn token_with_new_token(writer: NewTokenWriter) -> ResumptionToken {
     get_tokens(&mut client).pop().unwrap()
 }
 
-/// A `NEW_TOKEN` token that doesn't fit in an Initial packet is not used.
+/// A `NEW_TOKEN` token longer than `MAX_INITIAL_TOKEN_LEN` is not used.
 #[test]
 fn new_token_too_long() {
     let max = packet::MAX_INITIAL_TOKEN_LEN;
-    can_resume(token_with_new_token(NewTokenWriter(Some(max))), true);
-    can_resume(token_with_new_token(NewTokenWriter(Some(max + 1))), false);
-    can_resume(token_with_new_token(NewTokenWriter(None)), false);
+    can_resume(resumption_token(NewTokenWriter(Some(max))), true);
+    can_resume(resumption_token(NewTokenWriter(Some(max + 1))), false);
+    can_resume(resumption_token(NewTokenWriter(None)), false);
 }
 
 /// By disabling address validation, the server won't send `NEW_TOKEN`, but
