@@ -1275,3 +1275,27 @@ fn split_api_loss_timer_type() {
         "Expected loss_timer_expired with timer_type ack in qlog: {log}"
     );
 }
+
+/// The ACK Delay of an ACK is scaled by the sender's `ack_delay_exponent` (RFC 9000, Section 18.2).
+#[test]
+fn ack_delay_uses_local_exponent() {
+    const ACK_DELAY: Duration = Duration::from_millis(10);
+    let mut client = default_client();
+    let mut server = default_server();
+    client
+        .set_local_tparam(AckDelayExponent, TransportParameter::Integer(0))
+        .unwrap();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+    let rtt = |c: &Connection| c.paths.primary().unwrap().borrow().rtt().estimate();
+    let before = rtt(&server);
+
+    // The client sends its ACK `ACK_DELAY` late, which the server's estimate excludes.
+    let d = send_something(&mut server, now);
+    now += DEFAULT_RTT / 2;
+    client.process_input(d, now);
+    now += ACK_DELAY;
+    let ack = client.process_output(now).dgram().unwrap();
+    now += DEFAULT_RTT / 2;
+    server.process_input(ack, now);
+    assert_eq!(rtt(&server), (before * 7 + DEFAULT_RTT) / 8);
+}

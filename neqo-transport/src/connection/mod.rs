@@ -2609,15 +2609,7 @@ impl Connection {
         let mut ack_eliciting = false;
 
         if primary {
-            let stats = &mut self.stats.borrow_mut().frame_tx;
-            self.acks.write_frame(
-                space,
-                now,
-                path.borrow().rtt().estimate(),
-                builder,
-                &mut tokens,
-                stats,
-            );
+            self.write_ack_frame(space, path, builder, &mut tokens, now);
         }
         let ack_end = builder.len();
 
@@ -2699,14 +2691,7 @@ impl Connection {
             let limit = builder.limit();
             builder.set_limit(limit - ClosingFrame::MIN_LENGTH);
             self.acks.immediate_ack(space, now);
-            self.acks.write_frame(
-                space,
-                now,
-                path.borrow().rtt().estimate(),
-                builder,
-                tokens,
-                &mut self.stats.borrow_mut().frame_tx,
-            );
+            self.write_ack_frame(space, path, builder, tokens, now);
             builder.set_limit(limit);
         }
         // CloseReason::Application is only allowed at 1RTT.
@@ -3710,6 +3695,28 @@ impl Connection {
                     recovery::Token::PmtudProbe(_) => (),
                 }
             }
+        }
+    }
+
+    /// Write an ACK frame for `space`, its ACK Delay scaled by our `ack_delay_exponent`.
+    fn write_ack_frame<B: Buffer>(
+        &mut self,
+        space: PacketNumberSpace,
+        path: &PathRef,
+        builder: &mut packet::Builder<B>,
+        tokens: &mut recovery::Tokens,
+        now: Instant,
+    ) {
+        let ack_delay_exponent = self.tps.borrow().local().get_integer(AckDelayExponent);
+        if let Some(acks) = self.acks.get_mut(space) {
+            acks.write_frame(
+                now,
+                path.borrow().rtt().estimate(),
+                ack_delay_exponent,
+                builder,
+                tokens,
+                &mut self.stats.borrow_mut().frame_tx,
+            );
         }
     }
 
