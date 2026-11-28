@@ -43,6 +43,8 @@ const BIT_KEY_PHASE: u8 = 0x04;
 
 const HP_MASK_LONG: u8 = 0x0f;
 const HP_MASK_SHORT: u8 = 0x1f;
+const RESERVED_BITS_LONG: u8 = 0x0c;
+const RESERVED_BITS_SHORT: u8 = 0x18;
 
 const SAMPLE_SIZE: usize = 16;
 const SAMPLE_OFFSET: usize = 4;
@@ -581,6 +583,16 @@ impl<B> From<Builder<B>> for Encoder<B> {
     }
 }
 
+/// Header fields recovered by removing header protection.
+struct UnprotectedHeader {
+    key_phase: bool,
+    pn: Number,
+    header: Range<usize>,
+    first_byte: u8,
+    pn_bytes: [u8; MAX_PACKET_NUMBER_LEN],
+    reserved_bits_set: bool,
+}
+
 /// `Public` holds information from packets that is public only.  This allows for
 /// processing of packets prior to decryption.
 pub struct Public<'a> {
@@ -886,8 +898,13 @@ impl<'a> Public<'a> {
         }
     }
 
+    /// The largest possible Packet Number field.
+    const fn pn_field(&self) -> Range<usize> {
+        self.header_len..self.header_len + MAX_PACKET_NUMBER_LEN
+    }
+
     /// Decrypt the header of the packet.
-    fn decrypt_header(&mut self, crypto: &CryptoDxState) -> Res<(bool, Number, Range<usize>)> {
+    fn decrypt_header(&self, crypto: &CryptoDxState) -> Res<UnprotectedHeader> {
         debug_assert_ne!(self.packet_type, Type::Retry);
         debug_assert_ne!(self.packet_type, Type::VersionNegotiation);
 
@@ -905,45 +922,44 @@ impl<'a> Public<'a> {
         let mask = crypto.compute_mask(sample)?;
 
         // Un-mask the leading byte.
-        let bits = if self.packet_type == Type::Short {
-            HP_MASK_SHORT
+        let (bits, reserved, key_phase_bit) = if self.packet_type == Type::Short {
+            (HP_MASK_SHORT, RESERVED_BITS_SHORT, BIT_KEY_PHASE)
         } else {
-            HP_MASK_LONG
+            (HP_MASK_LONG, RESERVED_BITS_LONG, 0)
         };
         assert!(!self.data.is_empty());
         let first_byte = self.data[0] ^ (mask[0] & bits);
 
-        let mut hdrbytes = 0..self.header_len + 4;
-        self.data[0] = first_byte;
-
         // Unmask the PN.
-        let mut pn_encoded: u64 = 0;
-        let mut pn_bytes =
-            self.data[self.header_len..self.header_len + MAX_PACKET_NUMBER_LEN].to_vec();
-        for i in 0..MAX_PACKET_NUMBER_LEN {
-            pn_bytes[i] ^= mask[1 + i];
-            pn_encoded <<= 8;
-            pn_encoded += u64::from(pn_bytes[i]);
-        }
+        let protected_pn = self
+            .data
+            .get(self.pn_field())
+            .and_then(<[u8]>::as_array)
+            .ok_or(Error::NoMoreData)?;
         // Now decode the packet number length and apply it, hopefully in constant time.
         let pn_len = usize::from((first_byte & 0x3) + 1);
-        self.data[self.header_len..self.header_len + pn_len].copy_from_slice(&pn_bytes[..pn_len]);
-        hdrbytes.end = self.header_len + pn_len;
-        pn_encoded >>= 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
+        let pn_shift = 8 * (MAX_PACKET_NUMBER_LEN - pn_len);
+        let pn_mask =
+            u32::from_be_bytes([mask[1], mask[2], mask[3], mask[4]]) & (u32::MAX << pn_shift);
+        let unprotected_pn = u32::from_be_bytes(*protected_pn) ^ pn_mask;
+        let pn_encoded = u64::from(unprotected_pn >> pn_shift);
 
-        trace!("unmasked hdr={}", Hex::new(&self.data[hdrbytes.clone()]));
-
-        let key_phase =
-            self.packet_type == Type::Short && (first_byte & BIT_KEY_PHASE) == BIT_KEY_PHASE;
         let pn = Self::decode_pn(crypto.next_pn(), pn_encoded, pn_len);
-        Ok((key_phase, pn, hdrbytes))
+        Ok(UnprotectedHeader {
+            key_phase: first_byte & key_phase_bit != 0,
+            pn,
+            header: 0..self.header_len + pn_len,
+            first_byte,
+            pn_bytes: unprotected_pn.to_be_bytes(),
+            reserved_bits_set: first_byte & reserved != 0,
+        })
     }
 
     /// # Errors
     ///
     /// This will return an error if the packet cannot be decrypted.
     pub fn decrypt(
-        mut self,
+        self,
         crypto: &mut CryptoStates,
         release_at: Instant,
     ) -> Result<Decrypted<'a>, DecryptionError<'a>> {
@@ -967,10 +983,21 @@ impl<'a> Public<'a> {
         // This is OK in this case because we the only reason this can
         // fail is if the cryptographic module is bad or the packet is
         // too small (which is public information).
-        let (key_phase, pn, header) = match self.decrypt_header(rx) {
+        let UnprotectedHeader {
+            key_phase,
+            pn,
+            header,
+            first_byte,
+            pn_bytes,
+            reserved_bits_set,
+        } = match self.decrypt_header(rx) {
             Ok(v) => v,
             Err(e) => return Err((self, e).into()),
         };
+        // The AEAD associated data is the unprotected header.
+        let pn_field = self.pn_field();
+        self.data[0] = first_byte;
+        self.data[pn_field].copy_from_slice(&pn_bytes);
         let Some(rx) = crypto.rx(version, epoch, key_phase) else {
             return Err((self, Error::Decrypt).into());
         };
@@ -987,12 +1014,7 @@ impl<'a> Public<'a> {
         //
         // <https://www.rfc-editor.org/rfc/rfc9000.html#section-17.2>
         // <https://www.rfc-editor.org/rfc/rfc9000.html#section-17.3.1>
-        let reserved = if self.packet_type.is_long() {
-            0x0c
-        } else {
-            0x18
-        };
-        if self.data[0] & reserved != 0 {
+        if reserved_bits_set {
             return Err((self, Error::ProtocolViolation).into());
         }
         let data = &self.data[header_end..header_end + payload_len];
