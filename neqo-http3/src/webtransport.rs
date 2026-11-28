@@ -15,7 +15,7 @@ use std::{
 
 use neqo_common::{Bytes, Encoder, Header, to_u64};
 use neqo_transport::{
-    Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
+    AppError, Connection, DatagramQueueCapacity, DatagramQueueOutcome, DatagramTracking, StreamId,
     StreamType, recv_stream, send_stream, server::ConnectionRef, streams::SendOrder,
 };
 use tracing::{debug, info, trace};
@@ -29,6 +29,54 @@ use crate::{
     request_target::RequestTarget,
     server_events::{Http3ServerEvents, StreamHandler},
 };
+
+/// Start of the `WT_APPLICATION_ERROR` range (draft-ietf-webtrans-http3 Section 4.4).
+const WT_APPLICATION_ERROR_FIRST: AppError = 0x52e4_a40f_a8db;
+
+/// A WebTransport application error code for resetting or stopping a data stream.
+///
+/// A newtype around `u32` rather than a bare alias, so a raw HTTP/3 error code cannot be
+/// passed where a WebTransport application error code is expected. Converts to and from the
+/// `WT_APPLICATION_ERROR` range of HTTP/3 error codes per draft-ietf-webtrans-http3 Section 4.4.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct WebTransportError(u32);
+
+impl WebTransportError {
+    #[must_use]
+    pub const fn new(code: u32) -> Self {
+        Self(code)
+    }
+
+    #[must_use]
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<WebTransportError> for AppError {
+    fn from(error: WebTransportError) -> Self {
+        let n = Self::from(error.0);
+        WT_APPLICATION_ERROR_FIRST + n + n / 0x1e
+    }
+}
+
+impl TryFrom<AppError> for WebTransportError {
+    type Error = Error;
+
+    /// Fails with [`Error::InvalidInput`] for codes outside the `WT_APPLICATION_ERROR` range and
+    /// for the reserved codepoints inside it, which map to no application error code.
+    fn try_from(code: AppError) -> Res<Self> {
+        let shifted = code
+            .checked_sub(WT_APPLICATION_ERROR_FIRST)
+            .ok_or(Error::InvalidInput)?;
+        if (code - 0x21).is_multiple_of(0x1f) {
+            return Err(Error::InvalidInput);
+        }
+        u32::try_from(shifted - shifted / 0x1f)
+            .map(Self)
+            .map_err(|_| Error::InvalidInput)
+    }
+}
 
 pub trait ClientSession {
     /// Whether WebTransport has been enabled at the connection level.
@@ -190,6 +238,28 @@ pub trait ClientSession {
     ///
     /// `InvalidStreamId` if the stream does not exist.
     fn webtransport_recv_stream_stats(&mut self, stream_id: StreamId) -> Res<recv_stream::Stats>;
+
+    /// Reset the sending side of a WebTransport data stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream is not a WebTransport send stream.
+    fn webtransport_stream_reset_send(
+        &mut self,
+        stream_id: StreamId,
+        error: WebTransportError,
+    ) -> Res<()>;
+
+    /// Ask the peer to stop sending on a WebTransport data stream.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidStreamId` if the stream is not a WebTransport receive stream.
+    fn webtransport_stream_stop_sending(
+        &mut self,
+        stream_id: StreamId,
+        error: WebTransportError,
+    ) -> Res<()>;
 
     /// Export WebTransport keying material per
     /// [draft-ietf-webtrans-http3 §4.8](https://www.ietf.org/archive/id/draft-ietf-webtrans-http3-15.html#section-4.8).
@@ -413,6 +483,24 @@ impl ClientSession for Http3Client {
             .get_mut(&stream_id)
             .ok_or(Error::InvalidStreamId)?
             .stats(conn)
+    }
+
+    fn webtransport_stream_reset_send(
+        &mut self,
+        stream_id: StreamId,
+        error: WebTransportError,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_stream_reset_send(conn, stream_id, error)
+    }
+
+    fn webtransport_stream_stop_sending(
+        &mut self,
+        stream_id: StreamId,
+        error: WebTransportError,
+    ) -> Res<()> {
+        let (conn, handler) = self.connection_and_handler();
+        handler.webtransport_stream_stop_sending(conn, stream_id, error)
     }
 
     fn webtransport_export_keying_material(
@@ -1120,6 +1208,16 @@ pub enum ServerEvent {
         session: ServerSession,
         datagram: Bytes,
     },
+    /// The peer reset a data stream; `None` if its error code has no WebTransport mapping.
+    StreamReset {
+        stream: Http3OrWebTransportStream,
+        error: Option<WebTransportError>,
+    },
+    /// The peer sent `STOP_SENDING`; `None` if its error code has no WebTransport mapping.
+    StreamStopSending {
+        stream: Http3OrWebTransportStream,
+        error: Option<WebTransportError>,
+    },
 }
 
 pub(crate) trait ServerEvents {
@@ -1132,6 +1230,16 @@ pub(crate) trait ServerEvents {
     );
     fn webtransport_new_stream(&self, stream: Http3OrWebTransportStream);
     fn webtransport_datagram(&self, session: ServerSession, datagram: Bytes);
+    fn webtransport_stream_reset(
+        &self,
+        stream: Http3OrWebTransportStream,
+        error: Option<WebTransportError>,
+    );
+    fn webtransport_stream_stop_sending(
+        &self,
+        stream: Http3OrWebTransportStream,
+        error: Option<WebTransportError>,
+    );
 }
 
 impl ServerEvents for Http3ServerEvents {
@@ -1167,14 +1275,61 @@ impl ServerEvents for Http3ServerEvents {
             datagram,
         }));
     }
+
+    fn webtransport_stream_reset(
+        &self,
+        stream: Http3OrWebTransportStream,
+        error: Option<WebTransportError>,
+    ) {
+        self.push(Http3ServerEvent::WebTransport(ServerEvent::StreamReset {
+            stream,
+            error,
+        }));
+    }
+
+    fn webtransport_stream_stop_sending(
+        &self,
+        stream: Http3OrWebTransportStream,
+        error: Option<WebTransportError>,
+    ) {
+        self.push(Http3ServerEvent::WebTransport(
+            ServerEvent::StreamStopSending { stream, error },
+        ));
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use neqo_transport::StreamId;
+    use neqo_transport::{AppError, StreamId};
     use test_fixture::connect;
 
-    use super::ExportKeyingMaterial as _;
+    use super::{ExportKeyingMaterial as _, WebTransportError};
+    use crate::Error;
+
+    /// draft-ietf-webtrans-http3 §4.4, Figure 4; 0x52e4a40fa8f9 is a reserved codepoint.
+    #[test]
+    fn webtransport_error_mapping() {
+        for (wt, h3) in [
+            (0, 0x52e4_a40f_a8db),
+            (29, 0x52e4_a40f_a8f8),
+            (30, 0x52e4_a40f_a8fa),
+            (u32::MAX, 0x52e5_ac98_3162),
+        ] {
+            assert_eq!(AppError::from(WebTransportError::new(wt)), h3);
+            assert_eq!(
+                WebTransportError::try_from(h3).map(WebTransportError::as_u32),
+                Ok(wt)
+            );
+        }
+        for h3 in [
+            0x52e4_a40f_a8da,
+            0x52e4_a40f_a8f9,
+            0x52e5_ac98_3163,
+            Error::HttpNone.code(),
+        ] {
+            assert_eq!(WebTransportError::try_from(h3), Err(Error::InvalidInput));
+        }
+    }
 
     /// The exporter context must encode the session ID as a fixed 64-bit
     /// field, per draft-ietf-webtrans-http3 §4.8, Figure 6.

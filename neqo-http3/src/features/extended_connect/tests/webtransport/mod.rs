@@ -24,10 +24,13 @@ use test_fixture::{
 
 use crate::{
     Error, Header, Http3Client, Http3ClientEvent, Http3OrWebTransportStream, Http3Parameters,
-    Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportEvent,
+    Http3Server, Http3ServerEvent, Http3State, SessionAcceptAction, WebTransportError,
+    WebTransportEvent,
     features::extended_connect::CloseReason,
     webtransport::{ClientSession as _, ServerEvent, ServerSession},
 };
+
+const WT_ERROR: WebTransportError = WebTransportError::new(30);
 
 // Leave space for large QUIC header.
 const DATAGRAM_SIZE: u64 = to_u64(Pmtud::default_plpmtu(DEFAULT_ADDR.ip())) - 40;
@@ -381,7 +384,7 @@ impl WtTest {
 
     fn reset_stream_client(&mut self, wt_stream_id: StreamId) {
         self.client
-            .stream_reset_send(wt_stream_id, Error::HttpNone.code())
+            .webtransport_stream_reset_send(wt_stream_id, WT_ERROR)
             .unwrap();
         self.exchange_packets();
     }
@@ -392,34 +395,27 @@ impl WtTest {
 
     fn receive_reset_client(&mut self, expected_stream_id: StreamId) {
         let wt_reset_event = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::Reset {
-                    stream_id,
-                    error,
-                    local
-                } if stream_id == expected_stream_id && error == Error::HttpNone.code() && !local
-            )
+            e == Http3ClientEvent::WebTransport(WebTransportEvent::StreamReset {
+                stream_id: expected_stream_id,
+                error: Some(WT_ERROR),
+            })
         };
         assert!(self.client.events().any(wt_reset_event));
     }
 
     fn stream_stop_sending_client(&mut self, stream_id: StreamId) {
         self.client
-            .stream_stop_sending(stream_id, Error::HttpNone.code())
+            .webtransport_stream_stop_sending(stream_id, WT_ERROR)
             .unwrap();
         self.exchange_packets();
     }
 
     fn receive_stop_sending_client(&mut self, expected_stream_id: StreamId) {
         let wt_stop_sending_event = |e| {
-            matches!(
-                e,
-                Http3ClientEvent::StopSending {
-                    stream_id,
-                    error
-                } if stream_id == expected_stream_id && error == Error::HttpNone.code()
-            )
+            e == Http3ClientEvent::WebTransport(WebTransportEvent::StreamStopSending {
+                stream_id: expected_stream_id,
+                error: Some(WT_ERROR),
+            })
         };
         assert!(self.client.events().any(wt_stop_sending_event));
     }
@@ -427,10 +423,9 @@ impl WtTest {
     fn check_events_after_closing_session_client(
         &mut self,
         expected_reset_ids: &[StreamId],
-        expected_error_stream_reset: Option<u64>,
+        expected_error_stream_reset: Option<WebTransportError>,
         expected_stop_sending_ids: &[StreamId],
-        expected_error_stream_stop_sending: Option<u64>,
-        expected_local: bool,
+        expected_error_stream_stop_sending: Option<WebTransportError>,
         expected_session_close: Option<&(StreamId, CloseReason)>,
     ) {
         let mut reset_ids_count = 0;
@@ -438,19 +433,20 @@ impl WtTest {
         let mut close_event = false;
         while let Some(event) = self.client.next_event() {
             match event {
-                Http3ClientEvent::Reset {
+                Http3ClientEvent::WebTransport(WebTransportEvent::StreamReset {
                     stream_id,
                     error,
-                    local,
-                } => {
+                }) => {
                     assert!(expected_reset_ids.contains(&stream_id));
-                    assert_eq!(expected_error_stream_reset.unwrap(), error);
-                    assert_eq!(expected_local, local);
+                    assert_eq!(expected_error_stream_reset, error);
                     reset_ids_count += 1;
                 }
-                Http3ClientEvent::StopSending { stream_id, error } => {
+                Http3ClientEvent::WebTransport(WebTransportEvent::StreamStopSending {
+                    stream_id,
+                    error,
+                }) => {
                     assert!(expected_stop_sending_ids.contains(&stream_id));
-                    assert_eq!(expected_error_stream_stop_sending.unwrap(), error);
+                    assert_eq!(expected_error_stream_stop_sending, error);
                     stop_sending_ids_count += 1;
                 }
                 Http3ClientEvent::WebTransport(WebTransportEvent::SessionClosed {
@@ -528,38 +524,46 @@ impl WtTest {
     }
 
     fn reset_stream_server(&mut self, wt_stream: &Http3OrWebTransportStream) {
-        wt_stream.stream_reset_send(Error::HttpNone.code()).unwrap();
+        wt_stream.webtransport_stream_reset_send(WT_ERROR).unwrap();
         self.exchange_packets();
     }
 
     fn stream_stop_sending_server(&mut self, wt_stream: &Http3OrWebTransportStream) {
         wt_stream
-            .stream_stop_sending(Error::HttpNone.code())
+            .webtransport_stream_stop_sending(WT_ERROR)
             .unwrap();
         self.exchange_packets();
     }
 
-    fn receive_reset_server(&self, expected_stream_id: StreamId, expected_error: u64) {
+    fn receive_reset_server(
+        &self,
+        expected_stream_id: StreamId,
+        expected_error: Option<WebTransportError>,
+    ) {
         let stream_reset = |e| {
             matches!(
                 e,
-                Http3ServerEvent::StreamReset {
+                Http3ServerEvent::WebTransport(ServerEvent::StreamReset {
                     stream,
                     error
-                } if stream.stream_id() == expected_stream_id && error == expected_error
+                }) if stream.stream_id() == expected_stream_id && error == expected_error
             )
         };
         assert!(self.server.events().any(stream_reset));
     }
 
-    fn receive_stop_sending_server(&self, expected_stream_id: StreamId, expected_error: u64) {
+    fn receive_stop_sending_server(
+        &self,
+        expected_stream_id: StreamId,
+        expected_error: Option<WebTransportError>,
+    ) {
         let stop_sending = |e| {
             matches!(
                 e,
-                Http3ServerEvent::StreamStopSending {
+                Http3ServerEvent::WebTransport(ServerEvent::StreamStopSending {
                     stream,
                     error
-                } if stream.stream_id() == expected_stream_id && error == expected_error
+                }) if stream.stream_id() == expected_stream_id && error == expected_error
             )
         };
         assert!(self.server.events().any(stop_sending));
@@ -568,9 +572,9 @@ impl WtTest {
     fn check_events_after_closing_session_server(
         &self,
         expected_reset_ids: &[StreamId],
-        expected_error_stream_reset: Option<u64>,
+        expected_error_stream_reset: Option<WebTransportError>,
         expected_stop_sending_ids: &[StreamId],
-        expected_error_stream_stop_sending: Option<u64>,
+        expected_error_stream_stop_sending: Option<WebTransportError>,
         expected_session_close: Option<&(StreamId, CloseReason)>,
     ) {
         let mut reset_ids_count = 0;
@@ -578,14 +582,17 @@ impl WtTest {
         let mut close_event = false;
         while let Some(event) = self.server.next_event() {
             match event {
-                Http3ServerEvent::StreamReset { stream, error } => {
+                Http3ServerEvent::WebTransport(ServerEvent::StreamReset { stream, error }) => {
                     assert!(expected_reset_ids.contains(&stream.stream_id()));
-                    assert_eq!(expected_error_stream_reset.unwrap(), error);
+                    assert_eq!(expected_error_stream_reset, error);
                     reset_ids_count += 1;
                 }
-                Http3ServerEvent::StreamStopSending { stream, error } => {
+                Http3ServerEvent::WebTransport(ServerEvent::StreamStopSending {
+                    stream,
+                    error,
+                }) => {
                     assert!(expected_stop_sending_ids.contains(&stream.stream_id()));
-                    assert_eq!(expected_error_stream_stop_sending.unwrap(), error);
+                    assert_eq!(expected_error_stream_stop_sending, error);
                     stop_sending_ids_count += 1;
                 }
                 Http3ServerEvent::WebTransport(ServerEvent::SessionClosed {

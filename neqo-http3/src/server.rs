@@ -338,6 +338,28 @@ impl Http3Server {
                             datagram,
                         );
                     }
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::StreamReset {
+                        stream_info,
+                        error,
+                    }) => self.events.webtransport_stream_reset(
+                        Http3OrWebTransportStream::new(
+                            conn.clone(),
+                            Rc::clone(handler),
+                            stream_info,
+                        ),
+                        error,
+                    ),
+                    Http3ServerConnEvent::WebTransport(WebTransportEvent::StreamStopSending {
+                        stream_info,
+                        error,
+                    }) => self.events.webtransport_stream_stop_sending(
+                        Http3OrWebTransportStream::new(
+                            conn.clone(),
+                            Rc::clone(handler),
+                            stream_info,
+                        ),
+                        error,
+                    ),
                     Http3ServerConnEvent::ConnectUdp(ConnectUdpEvent::Datagram {
                         session_id,
                         datagram,
