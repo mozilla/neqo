@@ -210,6 +210,10 @@ impl RxStreamOrderer {
     /// extended chunk can end up slightly larger than `RANGE_TARGET` (by up to one frame's worth).
     const RANGE_TARGET: usize = 4096;
 
+    /// Shortest frame that starts an in-order range with `RANGE_TARGET` spare capacity, so that
+    /// small frames can't pin many times their size. Must stay below a full packet's STREAM data.
+    const MIN_RESERVE_LEN: usize = Self::RANGE_TARGET / 4;
+
     /// Maximum number of gaps allowed in the data a stream holds.
     pub(crate) const MAX_GAPS: usize = 4096;
 
@@ -329,7 +333,17 @@ impl RxStreamOrderer {
                 e.get_mut().extend_from_slice(new_data);
                 Ok(())
             } else {
-                self.insert_range(new_start, new_data.to_vec())
+                // Leave room for adjacent frames that may extend this range.
+                let spare = if adjacent
+                    && (Self::MIN_RESERVE_LEN..Self::RANGE_TARGET).contains(&new_data.len())
+                {
+                    Self::RANGE_TARGET
+                } else {
+                    0
+                };
+                let mut data = Vec::with_capacity(new_data.len() + spare);
+                data.extend_from_slice(new_data);
+                self.insert_range(new_start, data)
             };
         }
 
