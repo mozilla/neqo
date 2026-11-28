@@ -131,7 +131,11 @@ impl Node {
                     .mlkem(false)
                     .pmtud_iface_mtu(false),
             ),
-            boxed![ReachState::new(Http3State::Connected)],
+            // Also wait for the session ticket, so handling it is part of setup.
+            boxed![
+                ReachState::new(Http3State::Connected),
+                ReceiveResumptionToken
+            ],
             goals,
         )
     }
@@ -267,6 +271,20 @@ impl Goal for ReachState {
                 GoalStatus::Done
             }
             _ => GoalStatus::Waiting,
+        }
+    }
+}
+
+/// A target for a client that is reached once it has processed the server's session ticket.
+#[derive(Debug, Clone, Copy)]
+pub struct ReceiveResumptionToken;
+
+impl Goal for ReceiveResumptionToken {
+    fn handle_event(&mut self, _c: &mut Endpoint, e: &Event, _now: Instant) -> GoalStatus {
+        if matches!(e, Event::Client(Http3ClientEvent::ResumptionToken(_))) {
+            GoalStatus::Done
+        } else {
+            GoalStatus::Waiting
         }
     }
 }
