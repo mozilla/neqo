@@ -71,9 +71,10 @@ fn build_ack_packet(crypto: &mut CryptoDxState) -> Vec<u8> {
 
 fn bench_encode(c: &mut Criterion, name: &str, build: fn(&mut CryptoDxState) -> Vec<u8>) {
     c.bench_function(name, |b| {
-        b.iter_batched(
+        // `_ref`, so dropping the crypto state is not timed.
+        b.iter_batched_ref(
             CryptoDxState::test_default_write,
-            |mut crypto| black_box(build(&mut crypto)),
+            |crypto| black_box(build(crypto)),
             BatchSize::SmallInput,
         );
     });
@@ -83,16 +84,16 @@ fn bench_decode(c: &mut Criterion, name: &str, pkt: &[u8]) {
     let cid_decoder = RandomConnectionIdGenerator::new(DCID.len());
     let now = test_fixture::now();
     c.bench_function(name, |b| {
-        b.iter_batched(
+        // `_ref`, so dropping the crypto states is not timed.
+        b.iter_batched_ref(
             || (pkt.to_vec(), CryptoStates::test_default()),
-            |(mut buf, mut crypto): (Vec<u8>, CryptoStates)| {
-                let (public, _) = Public::decode(&mut buf, &cid_decoder).expect("decode");
-                let decrypted = public.decrypt(&mut crypto, now).expect("decrypt");
+            |(buf, crypto)| {
+                let (public, _) = Public::decode(buf, &cid_decoder).expect("decode");
+                let decrypted = public.decrypt(crypto, now).expect("decrypt");
                 let mut dec = Decoder::new(&decrypted);
                 while dec.remaining() > 0 {
                     black_box(Frame::decode(&mut dec).expect("decode frame"));
                 }
-                black_box(buf)
             },
             BatchSize::SmallInput,
         );
