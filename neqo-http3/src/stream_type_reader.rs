@@ -145,8 +145,24 @@ impl NewStreamHeadReader {
             let (output, fin) = self.read(conn)?;
             let Some(output) = output else {
                 if fin {
+                    let res = match self {
+                        Self::ReadType {
+                            role: Role::Server,
+                            reader,
+                            stream_id,
+                        } if stream_id.is_bidi() => {
+                            if reader.decoding_in_progress() {
+                                Err(Error::HttpFrame)
+                            } else {
+                                let err = Error::HttpRequestIncomplete.code();
+                                conn.stream_reset_send(*stream_id, err)?;
+                                Ok(None)
+                            }
+                        }
+                        _ => Err(Error::HttpStreamCreation),
+                    };
                     *self = Self::Done;
-                    return Err(Error::HttpStreamCreation);
+                    return res;
                 }
                 return Ok(None);
             };
@@ -679,5 +695,34 @@ mod tests {
         // For this test the stream type is truncated.
         // This should cause an error.
         t.decode_buffer(&[0xff; 7], true, &Err(Error::HttpStreamCreation), true);
+    }
+
+    #[test]
+    fn stream_fin_before_type() {
+        for (stream_type, role, buf, expected) in [
+            (
+                StreamType::BiDi,
+                Role::Client,
+                &[][..],
+                Err(Error::HttpStreamCreation),
+            ),
+            (
+                StreamType::BiDi,
+                Role::Client,
+                &[0x40],
+                Err(Error::HttpStreamCreation),
+            ),
+        ] {
+            let mut t = Test::new(stream_type, role);
+            if !buf.is_empty() {
+                t.conn_s.stream_send(t.stream_id, buf).unwrap();
+            }
+            t.conn_s.stream_close_send(t.stream_id).unwrap();
+            let out = t.conn_s.process_output(now());
+            drop(t.conn_c.process(out.dgram(), now()));
+            let res = t.decoder.receive(&mut t.conn_c, now());
+            assert_eq!(res, expected);
+            assert!(t.decoder.done());
+        }
     }
 }
