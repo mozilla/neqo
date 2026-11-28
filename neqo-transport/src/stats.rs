@@ -14,9 +14,12 @@ use std::{
     time::Duration,
 };
 
-use enum_map::EnumMap;
+use enum_map::{Enum, EnumMap};
 use neqo_common::{Dscp, Ecn};
-use serde::{Serialize, Serializer, ser::SerializeMap as _};
+use serde::{
+    Serialize, Serializer,
+    ser::{SerializeMap as _, SerializeSeq as _},
+};
 use serde_with::skip_serializing_none;
 use tracing::debug;
 
@@ -215,6 +218,28 @@ fn opt_ms<S: Serializer>(d: &Option<Duration>, serializer: S) -> Result<S::Ok, S
     }
 }
 
+/// Serialize each PTO streak length using [`serialize_counts`].
+fn pto_stops<S: Serializer>(
+    stops: &[EnumMap<PtoStopReason, usize>; Stats::MAX_PTO_COUNTS],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let mut seq = serializer.serialize_seq(Some(stops.len()))?;
+
+    for map in stops {
+        seq.serialize_element(&PtoStopCounts(map))?;
+    }
+
+    seq.end()
+}
+
+struct PtoStopCounts<'a>(&'a EnumMap<PtoStopReason, usize>);
+
+impl Serialize for PtoStopCounts<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_counts(*self.0, serializer)
+    }
+}
+
 /// A map key rendered with [`Debug`]: JSON keys have to be strings.
 struct Key<K>(K);
 
@@ -312,6 +337,21 @@ impl DerefMut for DscpCount {
     }
 }
 
+/// Why a PTO streak ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Enum)]
+pub enum PtoStopReason {
+    /// An ACK acknowledged a new packet.
+    Ack,
+    /// Sent packets were discarded, on Retry or when dropping keys.
+    Discarded,
+    /// The connection closed after too many PTOs.
+    TooManyPtos,
+    /// The connection closed on idle timeout.
+    IdleTimeout,
+    /// The connection closed for any other reason.
+    CloseOther,
+}
+
 /// Connection statistics
 #[skip_serializing_none]
 #[derive(Debug, Default, Clone, PartialEq, Serialize)]
@@ -373,9 +413,9 @@ pub struct Stats {
     /// Whether the first RTT sample was guessed from a discarded packet.
     pub rtt_init_guess: bool,
 
-    /// Count PTOs. Single PTOs, 2 PTOs in a row, 3 PTOs in row, etc. are counted
-    /// separately.
-    pub pto_counts: [usize; Self::MAX_PTO_COUNTS],
+    /// PTO streak stop reasons, grouped by streak length.
+    #[serde(serialize_with = "pto_stops")]
+    pub pto_stops: [EnumMap<PtoStopReason, usize>; Self::MAX_PTO_COUNTS],
 
     /// Count frames received.
     pub frame_rx: FrameStats,
@@ -441,20 +481,10 @@ impl Stats {
         );
     }
 
-    /// # Panics
-    ///
-    /// When preconditions are violated.
-    pub fn add_pto_count(&mut self, count: usize) {
-        debug_assert!(count > 0);
-        if count >= Self::MAX_PTO_COUNTS {
-            // We can't move this count any further, so stop.
-            return;
-        }
-        self.pto_counts[count - 1] += 1;
-        if count > 1 {
-            debug_assert!(self.pto_counts[count - 2] > 0);
-            self.pto_counts[count - 2] -= 1;
-        }
+    /// Records a streak of `count` PTOs that ended for `reason`.
+    pub fn add_pto_stop(&mut self, reason: PtoStopReason, count: usize) {
+        let count = count.clamp(1, Self::MAX_PTO_COUNTS);
+        self.pto_stops[count - 1][reason] += 1;
     }
 }
 
@@ -479,7 +509,7 @@ mod tests {
     use serde::Serialize;
     use serde_json::{Value, json};
 
-    use super::{EcnCount, EcnTransitions, Stats, StatsCell, opt_ms};
+    use super::{EcnCount, EcnTransitions, PtoStopReason, Stats, StatsCell, opt_ms};
     use crate::{
         ecn::{ValidationCount, ValidationError, ValidationOutcome},
         packet,
@@ -542,6 +572,49 @@ mod tests {
         let json = to_json(&Stats::default());
         serde_json::from_str::<Value>(&json)
             .unwrap_or_else(|e| panic!("invalid JSON: {e}: {json}"));
+    }
+
+    #[test]
+    fn pto_stops_record_completed_streak_lengths() {
+        let mut stats = Stats::default();
+
+        assert!(
+            stats
+                .pto_stops
+                .iter()
+                .all(|stops| stops[PtoStopReason::Ack] == 0)
+        );
+
+        stats.add_pto_stop(PtoStopReason::Ack, 2);
+        assert_eq!(stats.pto_stops[1][PtoStopReason::Ack], 1);
+        assert!(
+            stats.pto_stops[..1]
+                .iter()
+                .chain(stats.pto_stops[2..].iter())
+                .all(|stops| stops[PtoStopReason::Ack] == 0)
+        );
+
+        stats.add_pto_stop(PtoStopReason::Ack, Stats::MAX_PTO_COUNTS);
+        assert_eq!(
+            stats.pto_stops[Stats::MAX_PTO_COUNTS - 1][PtoStopReason::Ack],
+            1
+        );
+        stats.add_pto_stop(PtoStopReason::Ack, Stats::MAX_PTO_COUNTS + 1);
+        assert_eq!(
+            stats.pto_stops[Stats::MAX_PTO_COUNTS - 1][PtoStopReason::Ack],
+            2
+        );
+
+        let json = serde_json::to_value(&stats).expect("serializes");
+        assert_eq!(
+            json["pto_stops"].as_array().unwrap().len(),
+            Stats::MAX_PTO_COUNTS
+        );
+        assert_eq!(json["pto_stops"][1]["Ack"], json!(1));
+        assert_eq!(
+            json["pto_stops"][Stats::MAX_PTO_COUNTS - 1]["Ack"],
+            json!(2)
+        );
     }
 
     #[test]

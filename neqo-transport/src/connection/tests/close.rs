@@ -16,7 +16,8 @@ use super::{
     send_something, ticket_with_new_token,
 };
 use crate::{
-    AppError, CloseReason, ConnectionEvent, ERROR_APPLICATION_CLOSE, Error, StreamType,
+    AppError, CloseReason, ConnectionEvent, ERROR_APPLICATION_CLOSE, Error, PtoStopReason,
+    StreamType,
     stateless_reset::Token as Srt,
     tparams::{TransportParameter, TransportParameterId::StatelessResetToken},
 };
@@ -348,4 +349,37 @@ fn stateless_reset_client() {
 
     client.process_input(datagram(vec![77; 21]), now());
     assert_draining(&client, &Error::StatelessReset);
+}
+
+#[test]
+fn pto_stop_reason_close() {
+    let mut client = default_client();
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+
+    let mut now = now();
+    // Drop the original packet so that the PTO probe is sent.
+    drop(send_something(&mut client, now));
+
+    now += client.process_output(now).callback();
+    client.process_output(now).dgram().expect("PTO probe");
+    assert!(
+        client
+            .stats()
+            .pto_stops
+            .iter()
+            .all(|s| s[PtoStopReason::CloseOther] == 0)
+    );
+
+    client.close(now, 42, "");
+    drop(client.process_output(now));
+
+    let State::Closing { timeout, .. } = *client.state() else {
+        panic!("not closing: {:?}", client.state());
+    };
+
+    drop(client.process_output(timeout));
+    assert_eq!(*client.state(), State::Closed(CloseReason::Application(42)));
+
+    assert_eq!(client.stats().pto_stops[0][PtoStopReason::CloseOther], 1);
 }

@@ -20,7 +20,7 @@ use super::{
     send_and_receive, send_something,
 };
 use crate::{
-    CloseReason, Error, packet, recovery,
+    CloseReason, Error, PtoStopReason, packet, recovery,
     stats::FrameStats,
     stream_id::{StreamId, StreamType},
     tparams::{TransportParameter, TransportParameterId},
@@ -84,6 +84,34 @@ fn idle_timeout_custom_both() {
     let mut client = new_client(ConnectionParameters::default().idle_timeout(HIGHER_TIMEOUT));
     let mut server = new_server(ConnectionParameters::default().idle_timeout(LOWER_TIMEOUT));
     test_idle_timeout(&mut client, &mut server, LOWER_TIMEOUT);
+}
+
+#[test]
+fn pto_stop_reason_idle_timeout() {
+    let mut client = default_client();
+    let mut server = default_server();
+    let mut now = connect_rtt_idle(&mut client, &mut server, DEFAULT_RTT);
+
+    // Drop the original packet, then send and drop the PTO probe.
+    drop(send_something(&mut client, now));
+    assert!(
+        client
+            .stats()
+            .pto_stops
+            .iter()
+            .all(|s| s[PtoStopReason::IdleTimeout] == 0)
+    );
+
+    now += client.process_output(now).callback();
+    drop(client.process_output(now).dgram().expect("PTO probe"));
+
+    now += default_timeout();
+    drop(client.process_output(now));
+    assert_eq!(
+        *client.state(),
+        State::Closed(CloseReason::Transport(Error::IdleTimeout))
+    );
+    assert_eq!(client.stats().pto_stops[0][PtoStopReason::IdleTimeout], 1);
 }
 
 #[test]
@@ -847,6 +875,8 @@ fn declare_broken_after_max_pto() {
     // The client sends data that never reaches the server: a black hole.
     let mut now = start;
     drop(send_something(&mut client, now));
+    let stops = client.stats().pto_stops;
+    assert!(stops.iter().all(|s| s[PtoStopReason::TooManyPtos] == 0));
 
     // Advance through PTOs, dropping every probe the client emits.
     for _ in 0..=MAX_PTO {
@@ -870,6 +900,10 @@ fn declare_broken_after_max_pto() {
         client.state()
     );
     assert_eq!(client.loss_recovery.pto_count(), MAX_PTO);
+    let stops = client.stats().pto_stops;
+    assert_eq!(stops[MAX_PTO - 1][PtoStopReason::TooManyPtos], 1);
+    assert!(stops.iter().all(|s| s[PtoStopReason::IdleTimeout] == 0));
+    assert!(stops.iter().all(|s| s[PtoStopReason::CloseOther] == 0));
     // The whole point: we gave up well before the idle timeout would have fired.
     assert!(
         now - start < default_timeout(),

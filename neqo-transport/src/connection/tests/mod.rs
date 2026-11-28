@@ -639,16 +639,14 @@ fn induce_persistent_congestion(
     trace!("[{client}] induce_persistent_congestion");
     now += AT_LEAST_PTO;
 
-    let mut pto_counts = [0; Stats::MAX_PTO_COUNTS];
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 0);
 
     trace!("[{client}] first PTO");
     let (c_tx_dgrams, next_now) = fill_cwnd(client, stream, now);
     now = next_now;
     assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
-    pto_counts[0] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 1);
 
     trace!("[{client}] second PTO");
     now += AT_LEAST_PTO * 2;
@@ -656,9 +654,7 @@ fn induce_persistent_congestion(
     now = next_now;
     assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
-    pto_counts[0] = 0;
-    pto_counts[1] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 2);
 
     trace!("[{client}] third PTO");
     now += AT_LEAST_PTO * 4;
@@ -666,9 +662,7 @@ fn induce_persistent_congestion(
     now = next_now;
     assert_eq!(c_tx_dgrams.len(), 2); // Two PTO packets
 
-    pto_counts[1] = 0;
-    pto_counts[2] = 1;
-    assert_eq!(client.stats.borrow().pto_counts, pto_counts);
+    assert_eq!(client.loss_recovery.pto_count(), 3);
 
     // An ACK for the third PTO causes persistent congestion.
     let s_ack = ack_bytes(server, stream, c_tx_dgrams, now);
