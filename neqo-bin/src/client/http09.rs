@@ -12,6 +12,7 @@ use std::{
     fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
+    iter, mem,
     net::SocketAddr,
     num::NonZeroUsize,
     path::PathBuf,
@@ -30,7 +31,7 @@ use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
 use tracing::{debug, info, warn};
 
-use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use super::{Args, CloseState, Res, get_output_file, qlog_new, with_resumption};
 use crate::{STREAM_IO_BUFFER_SIZE, now};
 
 pub struct Handler<'a> {
@@ -39,7 +40,7 @@ pub struct Handler<'a> {
     handled_urls: Vec<Url>,
     all_paths: Vec<PathBuf>,
     args: &'a Args,
-    token: Option<ResumptionToken>,
+    tokens: Vec<ResumptionToken>,
     needs_key_update: bool,
     read_buffer: Vec<u8>,
 }
@@ -103,7 +104,7 @@ impl super::Handler for Handler<'_> {
                     self.download_urls(client);
                 }
                 ConnectionEvent::ResumptionToken(token) => {
-                    self.token = Some(token);
+                    self.tokens.push(token);
                 }
                 _ => {
                     warn!("Unhandled event {event:?}");
@@ -115,15 +116,16 @@ impl super::Handler for Handler<'_> {
             return Ok(false);
         }
 
-        if (self.args.resume || self.args.save_token.is_some()) && self.token.is_none() {
-            self.token = client.take_resumption_token(now());
+        if self.args.needs_resumption_tokens() {
+            self.tokens
+                .extend(iter::from_fn(|| client.take_resumption_token(now())));
         }
 
         Ok(true)
     }
 
-    fn take_token(&mut self) -> Option<ResumptionToken> {
-        self.token.take()
+    fn take_tokens(&mut self) -> Vec<ResumptionToken> {
+        mem::take(&mut self.tokens)
     }
 }
 
@@ -138,26 +140,31 @@ pub fn create_client(
         "hq-29" | "hq-30" | "hq-31" | "hq-32" => args.shared.alpn.as_str(),
         _ => "hq-interop",
     };
-    let cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>> = if args.cid_len == 0 {
-        Rc::new(RefCell::new(EmptyConnectionIdGenerator::default()))
-    } else {
-        Rc::new(RefCell::new(RandomConnectionIdGenerator::new(
-            args.cid_len.into(),
-        )))
+    let new = || {
+        let cid_generator: Rc<RefCell<dyn ConnectionIdGenerator>> = if args.cid_len == 0 {
+            Rc::new(RefCell::new(EmptyConnectionIdGenerator::default()))
+        } else {
+            Rc::new(RefCell::new(RandomConnectionIdGenerator::new(
+                args.cid_len.into(),
+            )))
+        };
+        Ok(Connection::new_client(
+            hostname,
+            &[alpn],
+            cid_generator,
+            local_addr,
+            remote_addr,
+            args.connection_parameters(alpn),
+            now(),
+        )?)
     };
-    let mut client = Connection::new_client(
-        hostname,
-        &[alpn],
-        cid_generator,
-        local_addr,
-        remote_addr,
-        args.shared.quic_parameters.get(alpn),
-        now(),
-    )?;
-
-    if let Some(tok) = resumption_token {
-        client.enable_resumption(now(), tok)?;
-    }
+    let mut client = with_resumption(resumption_token, new, |client, token| {
+        client.enable_resumption(now(), token)?;
+        client
+            .state()
+            .error()
+            .map_or(Ok(()), |e| Err(e.clone().into()))
+    })?;
 
     let ciphers = args.get_ciphers();
     if !ciphers.is_empty() {
@@ -240,7 +247,7 @@ impl<'b> Handler<'b> {
             handled_urls: Vec::new(),
             all_paths: Vec::new(),
             args,
-            token: None,
+            tokens: Vec::new(),
             needs_key_update: args.key_update,
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }

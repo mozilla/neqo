@@ -12,6 +12,7 @@ use std::{
     fmt::Display,
     fs::File,
     io::{BufWriter, Write as _},
+    iter, mem,
     net::SocketAddr,
     num::NonZeroUsize,
     path::PathBuf,
@@ -30,7 +31,7 @@ use nss::{AuthenticationStatus, ResumptionToken};
 use rustc_hash::FxHashMap as HashMap;
 use tracing::{debug, error, info, warn};
 
-use super::{Args, CloseState, Res, get_output_file, qlog_new};
+use super::{Args, CloseState, Res, get_output_file, qlog_new, with_resumption};
 use crate::{
     STREAM_IO_BUFFER_SIZE, now,
     send_data::{SendData, SendResult},
@@ -39,7 +40,7 @@ use crate::{
 pub struct Handler {
     #[expect(clippy::struct_field_names, reason = "This name is more descriptive.")]
     url_handler: UrlHandler,
-    token: Option<ResumptionToken>,
+    tokens: Vec<ResumptionToken>,
     read_buffer: Vec<u8>,
 }
 
@@ -55,7 +56,7 @@ impl Handler {
 
         Self {
             url_handler,
-            token: None,
+            tokens: Vec::new(),
             read_buffer: vec![0; STREAM_IO_BUFFER_SIZE],
         }
     }
@@ -67,6 +68,19 @@ pub fn create_client(
     remote_addr: SocketAddr,
     hostname: &str,
     resumption_token: Option<ResumptionToken>,
+) -> Res<Http3Client> {
+    with_resumption(
+        resumption_token,
+        || new_client(args, local_addr, remote_addr, hostname),
+        |client, token| Ok(client.enable_resumption(now(), token)?),
+    )
+}
+
+fn new_client(
+    args: &Args,
+    local_addr: SocketAddr,
+    remote_addr: SocketAddr,
+    hostname: &str,
 ) -> Res<Http3Client> {
     let cid_generator: Rc<RefCell<dyn neqo_transport::ConnectionIdGenerator>> = if args.cid_len == 0
     {
@@ -82,7 +96,7 @@ pub fn create_client(
         cid_generator,
         local_addr,
         remote_addr,
-        args.shared.quic_parameters.get(args.shared.alpn.as_str()),
+        args.connection_parameters(args.shared.alpn.as_str()),
         now(),
     )?;
     let ciphers = args.get_ciphers();
@@ -101,9 +115,6 @@ pub fn create_client(
     client.set_qlog(qlog);
     if let Some(ech) = &args.ech {
         client.enable_ech(&ech.0)?;
-    }
-    if let Some(token) = resumption_token {
-        client.enable_resumption(now(), token)?;
     }
 
     Ok(client)
@@ -242,7 +253,7 @@ impl super::Handler for Handler {
                     self.url_handler.reinit();
                     self.url_handler.process_urls(client);
                 }
-                Http3ClientEvent::ResumptionToken(t) => self.token = Some(t),
+                Http3ClientEvent::ResumptionToken(t) => self.tokens.push(t),
                 _ => {
                     warn!("Unhandled event {event:?}");
                 }
@@ -250,16 +261,17 @@ impl super::Handler for Handler {
         }
 
         // Fallback in case the connection closes before NEW_TOKEN arrives.
-        let args = &self.url_handler.args;
-        if (args.resume || args.save_token.is_some()) && self.token.is_none() {
-            self.token = client.take_resumption_token(now());
+        let done = self.url_handler.done();
+        if done && self.url_handler.args.needs_resumption_tokens() {
+            self.tokens
+                .extend(iter::from_fn(|| client.take_resumption_token(now())));
         }
 
-        Ok(self.url_handler.done())
+        Ok(done)
     }
 
-    fn take_token(&mut self) -> Option<ResumptionToken> {
-        self.token.take()
+    fn take_tokens(&mut self) -> Vec<ResumptionToken> {
+        mem::take(&mut self.tokens)
     }
 }
 

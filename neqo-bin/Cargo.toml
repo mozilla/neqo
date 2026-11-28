@@ -36,7 +36,7 @@ clap = { version = "4", default-features = false, features = [
 ] }
 clap-verbosity-flag = { version = "3", default-features = false }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-hex = { workspace = true, features = ["std"] }
+hex = { workspace = true, features = ["serde", "std"] }
 http = { workspace = true }
 libc = { workspace = true }
 neqo-common = { path = "./../neqo-common" }
@@ -48,6 +48,7 @@ nss-test-fixture = { workspace = true }
 qlog = { workspace = true }
 quinn-udp = { workspace = true }
 rustc-hash = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 strum = { workspace = true }
 thiserror = { workspace = true }

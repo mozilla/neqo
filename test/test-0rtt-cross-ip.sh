@@ -19,6 +19,11 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Wire format: ID=0, QR=0, RD=1, QDCOUNT=1, QNAME=example.com, QTYPE=A, QCLASS=IN
 DOH_URL="https://cloudflare-dns.com/dns-query?dns=AAABAAABAAAAAAAAB2V4YW1wbGUDY29tAAABAAE"
 
+if ! command -v jq > /dev/null; then
+    echo "ERROR: jq not found; it is needed to read the token store."
+    exit 1
+fi
+
 if [[ $# -ge 1 ]]; then
     CLIENT="$1"
 else
@@ -32,8 +37,9 @@ if [[ ! -x "$CLIENT" ]]; then
     exit 1
 fi
 
-TOKEN_FILE="$(mktemp /tmp/neqo-resumption-token.XXXXXX)"
-trap 'rm -f "$TOKEN_FILE"' EXIT
+TOKEN_STORE="$(mktemp /tmp/neqo-token-store.XXXXXX)"
+echo '{}' > "$TOKEN_STORE" # An empty token store; a zero-byte file is not valid JSON.
+trap 'rm -f "$TOKEN_STORE"' EXIT
 
 # Flags common to both connections.
 COMMON_ARGS=(-vv -H "accept: application/dns-message" --output-read-data "$DOH_URL")
@@ -43,25 +49,26 @@ echo "==> Step 1: Connect via IPv4, fetch DoH response, save resumption token"
 echo "    URL: $DOH_URL"
 echo
 
-IPV4_OUTPUT=$("$CLIENT" -4 --save-token "$TOKEN_FILE" "${COMMON_ARGS[@]}" 2>&1) || true
+IPV4_OUTPUT=$("$CLIENT" -4 --token-store "$TOKEN_STORE" "${COMMON_ARGS[@]}" 2>&1) || true
 echo "$IPV4_OUTPUT"
 
-if [[ ! -s "$TOKEN_FILE" ]]; then
+TOKENS=$(jq '[.[] | length] | add // 0' "$TOKEN_STORE")
+if [[ "$TOKENS" -eq 0 ]]; then
     echo
-    echo "FAIL: No resumption token was saved (token file is empty)."
+    echo "FAIL: No resumption token was saved (token store is empty)."
     echo "      The server may not have issued a session ticket, or the IPv4 connection failed."
     exit 1
 fi
 
 echo
-echo "    Resumption token saved ($(wc -c < "$TOKEN_FILE") bytes)."
+echo "    Resumption tokens saved: $TOKENS."
 
 echo
 echo "==> Step 2: Connect via IPv6, load token, attempt 0-RTT"
 echo "    URL: $DOH_URL"
 echo
 
-IPV6_OUTPUT=$("$CLIENT" -6 --load-token "$TOKEN_FILE" "${COMMON_ARGS[@]}" 2>&1) || true
+IPV6_OUTPUT=$("$CLIENT" -6 --token-store "$TOKEN_STORE" "${COMMON_ARGS[@]}" 2>&1) || true
 echo "$IPV6_OUTPUT"
 
 echo
