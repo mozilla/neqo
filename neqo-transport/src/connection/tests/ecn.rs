@@ -15,7 +15,7 @@ use test_fixture::{
 };
 
 use crate::{
-    ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
+    Connection, ConnectionEvent, ConnectionId, ConnectionParameters, Output, StreamType,
     connection::tests::{
         DEFAULT_RTT, assert_path_challenge_min_len, connect_force_idle,
         connect_force_idle_with_modifier, connect_rtt_idle, default_client, default_server,
@@ -289,6 +289,38 @@ fn disables_on_remark() {
     // ECN should now be disabled.
     let client_pkt = send_something(&mut client, now);
     assert_ecn_disabled(client_pkt.tos());
+}
+
+/// A server validates the ECN counts on a path its peer migrated to against those from the old
+/// path.
+#[test]
+fn server_detects_bleaching_after_peer_migration() {
+    let now = now();
+    let mut client = default_client();
+    let mut server = default_server();
+    connect_force_idle(&mut client, &mut server);
+    let capable = |c: &Connection| c.stats().ecn_path_validation[ecn::ValidationOutcome::Capable];
+
+    for _ in 0..ecn::TEST_COUNT {
+        let ack = send_and_receive(&mut server, &mut client, now);
+        server.process_input(ack.unwrap(), now);
+    }
+    assert_eq!(capable(&server), 1);
+
+    client
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), true, now)
+        .unwrap();
+    server.process_input(send_something(&mut client, now), now);
+
+    for _ in 0..=ecn::TEST_COUNT {
+        if let Some(ack) = send_with_modifier_and_receive(&mut server, &mut client, now, bleach) {
+            server.process_input(ack, now);
+        }
+        assert_eq!(capable(&server), 1);
+    }
+    let bleaching = server.stats().ecn_path_validation
+        [ecn::ValidationOutcome::NotCapable(ecn::ValidationError::Bleaching)];
+    assert_eq!(bleaching, 1);
 }
 
 /// This function performs a handshake over a path that modifies packets via `orig_path_modifier`.

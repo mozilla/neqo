@@ -240,12 +240,7 @@ impl Paths {
         stats: &mut Stats,
     ) -> bool {
         debug_assert!(!self.is_temporary(path));
-        let baseline = self.primary().map_or_else(
-            || ecn::Info::default().baseline(),
-            |p| p.borrow().ecn_info.baseline(),
-        );
-        path.borrow_mut().set_ecn_baseline(baseline);
-        path.borrow_mut().start_ecn(stats);
+        self.start_ecn_on_new_path(path, stats);
         if force || path.borrow().is_valid() {
             path.borrow_mut().set_valid(now);
             drop(self.select_primary(path, now));
@@ -336,6 +331,7 @@ impl Paths {
             return;
         }
 
+        self.start_ecn_on_new_path(path, stats);
         if let Some(old_path) = self.select_primary(path, now) {
             // Need to probe the old path if the peer migrates.
             old_path.borrow_mut().probe(stats);
@@ -500,6 +496,17 @@ impl Paths {
         if let Some(path) = self.primary() {
             path.borrow_mut().start_ecn(stats);
         }
+    }
+
+    /// Start ECN validation on `path`, using the ECN counts of the primary path as baseline.
+    fn start_ecn_on_new_path(&self, path: &PathRef, stats: &mut Stats) {
+        let baseline = self
+            .primary()
+            .map(|p| p.borrow().ecn_info.baseline())
+            .unwrap_or_default();
+        let mut path = path.borrow_mut();
+        path.set_ecn_baseline(baseline);
+        path.start_ecn(stats);
     }
 
     /// Get an estimate of the RTT on the primary path.
