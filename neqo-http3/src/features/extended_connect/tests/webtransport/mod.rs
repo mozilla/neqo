@@ -116,7 +116,7 @@ fn connect_with(client: &mut Http3Client, server: &mut Http3Server) {
     drop(client.process(out.dgram(), now()));
 }
 
-fn connect(
+pub fn connect(
     client_params: Http3Parameters,
     server_params: Http3Parameters,
 ) -> (Http3Client, Http3Server) {
