@@ -1803,7 +1803,7 @@ fn server_ack_only_respects_amplification_limit() {
             packet::LIMIT,
         );
         builder.initial_token(&[]);
-        builder.pn(pn, 4);
+        builder.set_pn(pn, 4);
         builder.encode_varint(FrameType::Ping);
         let ping = builder.build(&mut write).unwrap();
         received += ping.len();
