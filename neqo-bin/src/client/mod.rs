@@ -196,7 +196,7 @@ impl Args {
             download_in_series: false,
             concurrency: 100,
             output_read_data: false,
-            output_dir: Some("/dev/null".into()),
+            output_dir: None,
             resume: false,
             save_token: None,
             load_token: None,
