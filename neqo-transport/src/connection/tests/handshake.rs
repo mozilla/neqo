@@ -2688,3 +2688,99 @@ fn client_omits_transport_parameters_0rtt() {
     assert_eq!(server.stats().frame_rx.stream, 0);
     assert_error(&server, &CloseReason::Transport(Error::CryptoAlert(109)));
 }
+
+/// With `single_handshake_flight`, a client whose first flight goes unanswered closes at
+/// the first PTO without sending any probe.
+#[test]
+fn single_handshake_flight_no_response() {
+    let mut client = new_client(ConnectionParameters::default().single_handshake_flight(true));
+    let mut now = now();
+
+    assert!(client.process_output(now).dgram().is_some());
+    assert!(client.process_output(now).dgram().is_some());
+
+    // The pacing timer, then the PTO.
+    now += client.process_output(now).callback();
+    now += client.process_output(now).callback();
+    assert!(!client.state().closed());
+
+    assert_eq!(client.process_output(now), Output::None);
+    assert!(matches!(
+        client.state(),
+        State::Closed(CloseReason::Transport(Error::NoHandshakeResponse))
+    ));
+}
+
+/// With `single_handshake_flight`, a server response disables the early close, so the
+/// client retransmits as usual when later packets are lost.
+#[test]
+fn single_handshake_flight_server_responds() {
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .single_handshake_flight(true)
+            .mlkem(false),
+    );
+    let mut server = default_server();
+    let mut now = now();
+
+    let c1 = client.process_output(now).dgram();
+    let s1 = server.process(c1, now).dgram();
+    assert!(s1.is_some());
+    client.process_input(s1.unwrap(), now);
+    assert!(!matches!(
+        client.state(),
+        State::WaitInitial | State::Closed(_)
+    ));
+
+    // Drop whatever the client sends next and let the PTO fire.
+    let sent = loop {
+        match client.process_output(now) {
+            Output::Datagram(_) => {}
+            Output::Callback(t) => {
+                now += t;
+                break client.stats().packets_tx;
+            }
+            Output::None => panic!("expected a PTO timer"),
+        }
+    };
+    assert!(client.process_output(now).dgram().is_some());
+    assert!(client.stats().packets_tx > sent);
+    assert!(!matches!(client.state(), State::Closed(_)));
+}
+
+/// With `single_handshake_flight`, a server Handshake packet that arrives before
+/// the server's Initial, e.g. because that Initial was lost, counts as a response:
+/// the client keeps the connection open and retransmits as usual.
+#[test]
+fn single_handshake_flight_initial_lost() {
+    let mut client = new_client(
+        ConnectionParameters::default()
+            .single_handshake_flight(true)
+            .mlkem(false),
+    );
+    let mut server = default_server();
+    let mut now = now();
+
+    let c1 = client.process_output(now).dgram();
+    let s1 = server.process(c1, now).dgram().unwrap();
+    let (_s_initial, s_hs) = split_datagram(&s1);
+    client.process_input(s_hs.unwrap(), now);
+    assert_eq!(*client.state(), State::WaitInitial);
+
+    // The client resends its Initial right away.
+    assert!(client.process_output(now).dgram().is_some());
+
+    // The pacing timer, then the PTO, which sends a probe.
+    now += client.process_output(now).callback();
+    now += client.process_output(now).callback();
+    assert!(client.process_output(now).dgram().is_some());
+    assert!(!client.state().closed());
+}
+
+/// `single_handshake_flight` does not prevent a normal handshake.
+#[test]
+fn single_handshake_flight_connects() {
+    let mut client = new_client(ConnectionParameters::default().single_handshake_flight(true));
+    let mut server = default_server();
+    connect(&mut client, &mut server);
+}
