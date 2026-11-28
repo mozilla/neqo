@@ -10,7 +10,10 @@
 )]
 
 use std::{
+    cell::RefCell,
     hint::black_box,
+    ops::{Deref, DerefMut},
+    rc::Rc,
     time::{Duration, Instant},
 };
 
@@ -40,10 +43,44 @@ fn make_lost_packet(i: u64, now: Instant) -> sent::Packet {
     p
 }
 
-fn collect_packets(iter: impl IntoIterator<Item = sent::Packet>) -> sent::Packets {
-    let mut pkts = sent::Packets::default();
+type Pool = Rc<RefCell<Vec<sent::Packets>>>;
+
+/// A `sent::Packets` that returns to its pool when dropped, keeping its buffer, as a long-lived
+/// connection does. Freeing the buffer after each timed call lets glibc trim the heap, and the
+/// next timed call then measures page faults.
+struct Reused {
+    pkts: sent::Packets,
+    pool: Pool,
+}
+
+impl Drop for Reused {
+    fn drop(&mut self) {
+        self.pool.borrow_mut().push(std::mem::take(&mut self.pkts));
+    }
+}
+
+impl Deref for Reused {
+    type Target = sent::Packets;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pkts
+    }
+}
+
+impl DerefMut for Reused {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.pkts
+    }
+}
+
+fn collect_packets(pool: &Pool, iter: impl IntoIterator<Item = sent::Packet>) -> Reused {
+    let mut pkts = pool.borrow_mut().pop().unwrap_or_default();
+    drop(pkts.take_ranges(std::iter::once(0..=PACKETS - 1))); // Empties it; the buffer stays.
     iter.into_iter().for_each(|p| pkts.track(p));
-    pkts
+    Reused {
+        pkts,
+        pool: Rc::clone(pool),
+    }
 }
 
 /// Confirm that taking a small number of ranges from the front of
@@ -54,9 +91,10 @@ fn collect_packets(iter: impl IntoIterator<Item = sent::Packet>) -> sent::Packet
 /// outstanding packets remain in flight.
 fn take_ranges(c: &mut Criterion) {
     let now = test_fixture::now();
+    let pool = Pool::default();
     c.bench_function("sent::Packets::take_ranges", |b| {
         b.iter_batched_ref(
-            || collect_packets((0..PACKETS).map(|i| make_packet(i, now))),
+            || collect_packets(&pool, (0..PACKETS).map(|i| make_packet(i, now))),
             // Take the first 90 packets, minus some gaps.
             |pkts| black_box(pkts.take_ranges([70..=89, 40..=59, 10..=29])),
             // One fresh input per timed call, so the routine does not start on a cold cache.
@@ -70,14 +108,15 @@ fn take_ranges(c: &mut Criterion) {
 /// (the sender assigns packet numbers and they always increase).
 fn track(c: &mut Criterion) {
     let now = test_fixture::now();
+    let pool = Pool::default();
     c.bench_function("sent::Packets::track", |b| {
-        b.iter_batched(
-            sent::Packets::default,
-            |mut pkts| {
+        b.iter_batched_ref(
+            || collect_packets(&pool, std::iter::empty()),
+            |pkts| {
                 for i in 0..PACKETS {
                     pkts.track(make_packet(i, now));
                 }
-                black_box(pkts)
+                black_box(&**pkts);
             },
             BatchSize::PerIteration,
         );
@@ -91,11 +130,13 @@ fn remove_expired(c: &mut Criterion) {
     // First half lost at `old` (expired by `now`); second half lost at `now` (not yet).
     let old = test_fixture::now();
     let now = old + cd * 2;
+    let pool = Pool::default();
 
     c.bench_function("sent::Packets::remove_expired half-expired", |b| {
         b.iter_batched_ref(
             || {
                 collect_packets(
+                    &pool,
                     (0..PACKETS / 2)
                         .map(|i| make_lost_packet(i, old))
                         .chain((PACKETS / 2..PACKETS).map(|i| make_lost_packet(i, now))),
