@@ -1116,7 +1116,7 @@ impl Path {
     /// Record a packet as having been sent on this path.
     pub fn packet_sent(&mut self, sent: &mut sent::Packet, now: Instant) {
         if !self.is_primary() {
-            sent.clear_primary_path();
+            sent.detach_from_primary_path();
         }
         self.sender.on_packet_sent(sent, self.rtt.estimate(), now);
     }

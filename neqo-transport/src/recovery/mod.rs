@@ -318,7 +318,7 @@ impl LossRecoverySpace {
     /// Remove the primary path marking on any packets this is tracking.
     fn migrate(&mut self) {
         for pkt in self.sent_packets.iter_mut() {
-            pkt.clear_primary_path();
+            pkt.detach_from_primary_path();
         }
     }
 
