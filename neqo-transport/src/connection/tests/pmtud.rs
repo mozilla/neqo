@@ -255,6 +255,8 @@ fn vpn_migration_triggers_pmtud() {
     let c2 = client.process(Some(s1_to_client), now).dgram();
     assert!(c2.is_some(), "Client should respond with PATH_RESPONSE");
     assert_eq!(client.stats().frame_tx.path_response, before_response + 1);
+    // Not in a PMTUD probe, which the path might not carry: PATH_RESPONSE is not retransmitted.
+    assert_eq!(client.stats().pmtud_tx, client_pmtud_tx_before_challenge);
 
     // Server receives PATH_RESPONSE via VPN.
     let c2 = c2.unwrap();
@@ -277,6 +279,48 @@ fn vpn_migration_triggers_pmtud() {
     let expected_vpn_mtu = 1380 - header_size;
     assert_eq!(server.plpmtu(), expected_vpn_mtu);
     assert_eq!(client.plpmtu(), expected_vpn_mtu);
+}
+
+/// For each datagram `c` sends at `now`: whether it carries a path validation frame, and whether
+/// it is a PMTUD probe.
+fn path_frames_and_probes(c: &mut Connection, now: std::time::Instant) -> Vec<(bool, bool)> {
+    let path_frames = |s: &Stats| s.frame_tx.path_challenge + s.frame_tx.path_response;
+    let mut sent = Vec::new();
+    loop {
+        let before = c.stats();
+        if c.process_output(now).dgram().is_none() {
+            return sent;
+        }
+        let after = c.stats();
+        sent.push((
+            path_frames(&after) > path_frames(&before),
+            after.pmtud_tx > before.pmtud_tx,
+        ));
+    }
+}
+
+/// A `PATH_CHALLENGE` on a new path does not go in a PMTUD probe, which the path might not carry
+/// (RFC 9000, Section 14.4), although PMTUD starts with path validation.
+#[test]
+fn path_challenge_not_in_pmtud_probe() {
+    fixture_init();
+    let now = now();
+    let mut client = default_client();
+    let mut server = new_server(ConnectionParameters::default().pmtud(true));
+    connect(&mut client, &mut server);
+
+    // A full-size datagram from a new address leaves room for a probe in the anti-amplification
+    // limit.
+    let stream_id = client.stream_create(StreamType::UniDi).unwrap();
+    fill_stream(&mut client, stream_id);
+    let c1 = client.process_output(now).dgram().unwrap();
+    server.process_input(via_vpn(&c1), now);
+
+    // The `PATH_CHALLENGE`s on the new and the old path, then the probe.
+    assert_eq!(
+        path_frames_and_probes(&mut server, now),
+        [(true, false), (true, false), (false, true)]
+    );
 }
 
 /// Delivers all datagrams `from` has ready at `now` to `to`.

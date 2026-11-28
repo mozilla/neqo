@@ -2584,6 +2584,7 @@ impl Connection {
             && !coalesced // Only send PMTUD probes using non-coalesced packets.
             && path.is_primary()
             && !profile.ack_only() // We could only send ACKs.
+            && !path.has_probe() // Path validation frames are not retransmitted.
             && path.can_probe_pmtud()
     }
 
