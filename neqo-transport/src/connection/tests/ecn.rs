@@ -158,6 +158,16 @@ fn request_response_delay_after_handshake_with_ecn_blackhole() {
 
 #[test]
 fn migration_delay_to_ecn_blackhole() {
+    migration_to_ecn_blackhole(false);
+}
+
+/// Also when ECN validation on the new path ends before its last ECN-marked attempt times out.
+#[test]
+fn forced_migration_to_ecn_blackhole() {
+    migration_to_ecn_blackhole(true);
+}
+
+fn migration_to_ecn_blackhole(force: bool) {
     let mut now = now();
     let mut client = default_client();
     let mut server = default_server();
@@ -167,8 +177,9 @@ fn migration_delay_to_ecn_blackhole() {
 
     // Migrate the client.
     client
-        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), false, now)
+        .migrate(Some(DEFAULT_ADDR_V4), Some(DEFAULT_ADDR_V4), force, now)
         .unwrap();
+    let stream = client.stream_create(StreamType::UniDi).unwrap();
 
     // The client should send Path::MAX_PROBES path challenges with ECN enabled, and then another
     // Path::MAX_PROBES without ECN.
@@ -180,7 +191,7 @@ fn migration_delay_to_ecn_blackhole() {
             }
             Output::Datagram(d) => {
                 // The new path is IPv4.
-                if d.source().is_ipv4() {
+                if d.source().is_ipv4() && client.stats().frame_tx.path_challenge > probes {
                     // This should be a PATH_CHALLENGE.
                     probes += 1;
                     assert_eq!(client.stats().frame_tx.path_challenge, probes);
@@ -191,6 +202,13 @@ fn migration_delay_to_ecn_blackhole() {
                     } else {
                         // The next probes should be sent without ECN.
                         assert_ecn_disabled(d.tos());
+                    }
+                    if probes == Path::MAX_PROBES {
+                        // Ends ECN validation before this attempt times out.
+                        for _ in 0..ecn::TEST_COUNT {
+                            client.stream_send(stream, &[0]).unwrap();
+                            drop(client.process_output(now));
+                        }
                     }
                 }
             }

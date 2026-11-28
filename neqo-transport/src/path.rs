@@ -599,6 +599,8 @@ pub struct Path {
     probe_blocked_since: Option<Instant>,
     /// The ECN-related state for this path (see RFC9000, Section 13.4 and Appendix A.4)
     ecn_info: ecn::Info,
+    /// Whether every `PATH_CHALLENGE` sent since ECN validation started was ECN-marked.
+    challenges_ecn_marked: bool,
     /// SCONE info for this path.
     scone: Option<Scone>,
     /// For logging of events.
@@ -653,6 +655,7 @@ impl Path {
             sent_bytes: 0,
             probe_blocked_since: None,
             ecn_info: ecn::Info::default(),
+            challenges_ecn_marked: false,
             scone: None,
             qlog,
         }
@@ -871,7 +874,7 @@ impl Path {
             _ => 0,
         };
         self.state = if probe_count >= Self::MAX_PROBES {
-            if self.ecn_info.is_marking() {
+            if self.challenges_ecn_marked {
                 // The path validation failure may be due to ECN blackholing, try again without ECN.
                 info!("[{self}] Possible ECN blackhole, disabling ECN and re-probing path");
                 self.ecn_info
@@ -949,6 +952,7 @@ impl Path {
 
             // As above, no recovery token.
             stats.path_challenge += 1;
+            self.challenges_ecn_marked &= self.ecn_info.is_marking();
 
             self.state = ProbeState::Probing {
                 probe_count,
@@ -986,6 +990,7 @@ impl Path {
 
     pub fn start_ecn(&mut self, stats: &mut Stats) {
         self.ecn_info.start(stats);
+        self.challenges_ecn_marked = true;
     }
 
     pub const fn acked_ack_frequency(&mut self, acked: AckRate) {
